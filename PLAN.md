@@ -6,7 +6,7 @@ underneath: kernel-enforced filesystem/network/process policy per session,
 credentials injected at runtime instead of sitting on disk, and an audit trail
 of every allow/deny decision.
 
-Working binary name: `sbx` (changeable).
+Working binary name: `hura` (changeable).
 
 ## Locked decisions
 
@@ -22,7 +22,7 @@ Working binary name: `sbx` (changeable).
 
 ```
                 +-------------------------+
-                |        sbx (TUI)        |   ratatui + crossterm
+                |        hura (TUI)        |   ratatui + crossterm
                 | list | preview | diff   |
                 |      | policy  | events |
                 +-----------+-------------+
@@ -30,7 +30,7 @@ Working binary name: `sbx` (changeable).
         +-------------------+--------------------+
         |                   |                    |
    SessionStore        OpenShell client      TmuxManager
-   (~/.config/sbx/     (CLI subprocess,      (host tmux sessions,
+   (~/.config/hura/     (CLI subprocess,      (host tmux sessions,
     sessions.json)      one trait)            capture-pane, attach)
                             |
                     openshell gateway (docker driver)
@@ -43,10 +43,10 @@ Working binary name: `sbx` (changeable).
 
 ### Session lifecycle
 
-1. **Create** — user gives a repo + a task prompt. `sbx` creates a sandbox
-   (`--label sbx.session=<id>`, policy from a named template, providers for
+1. **Create** — user gives a repo + a task prompt. `hura` creates a sandbox
+   (`--label hura.session=<id>`, policy from a named template, providers for
    git + model API), waits ready.
-2. **Seed** — inside the sandbox: clone the repo, `git switch -c sbx/<slug>`,
+2. **Seed** — inside the sandbox: clone the repo, `git switch -c hura/<slug>`,
    start `tmux` + the agent with the initial prompt.
 3. **Attach** — host tmux session whose pane runs `openshell sandbox connect`;
    Enter attaches fullscreen, detach returns to the TUI.
@@ -77,23 +77,23 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   up in `docs/manual-loop.md`. Agent auth resolved via a subscription OAuth
   token in a custom provider profile, verified end to end. Outstanding: a real
   `git push` (needs a token + a scratch repo).
-- **1. Skeleton + client** — DONE. Cargo workspace (`openshell-client`, `sbx`),
+- **1. Skeleton + client** — DONE. Cargo workspace (`openshell-client`, `hura`),
   `OpenShell` trait over the CLI with typed errors, unit tests over captured
   0.0.110 JSON, `#[ignore]`d live integration tests (create/exec/delete
-  roundtrip, 1.8s), and `sbx doctor`. Clippy and rustfmt clean.
-- **2. Session store** — DONE. `sbx new` / `ls` / `rm`, seeding (clone, work
+  roundtrip, 1.8s), and `hura doctor`. Clippy and rustfmt clean.
+- **2. Session store** — DONE. `hura new` / `ls` / `rm`, seeding (clone, work
   branch, host git identity), pure reconciliation against the gateway, and
   adoption of live sandboxes after total cache loss. The sandbox rather than
   the cache is the source of truth: labels cannot hold a URL or a branch, so
-  the record lives in `/sandbox/.sbx/meta.json`.
+  the record lives in `/sandbox/.hura/meta.json`.
 - **3. TUI shell** — DONE. ratatui list + preview panes, vim keys, 3s
   background refresh, colour-coded states. All gateway I/O runs on a worker
-  thread; the render thread never blocks on a subprocess. Bare `sbx` launches
+  thread; the render thread never blocks on a subprocess. Bare `hura` launches
   it. Verified by driving it inside tmux and capturing the rendered panes.
-- **4. Attach** — DONE. Custom image (`sbx-base`, community base plus tmux,
+- **4. Attach** — DONE. Custom image (`hura-base`, community base plus tmux,
   Dockerfile embedded in the binary), the agent started under an in-sandbox
   tmux session with the task as its opening prompt, Enter attaches from the
-  TUI, `Ctrl-b d` returns. Also `sbx attach` and `sbx image build`.
+  TUI, `Ctrl-b d` returns. Also `hura attach` and `hura image build`.
 - **5. Diff pane** — DONE. `Tab` cycles the right pane between preview and
   diff, remembered per session; `h`/`l` move focus and the movement keys follow
   it, so `j`/`k` walk the list on the left and scroll on the right. One exec
@@ -104,7 +104,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   Diff-only colouring, capped at 2000 lines per section with a visible notice.
   A `+12/-3 ?` column in the list, round-robined across sessions. Both panes
   refetch on a timer, so a diff stays current while the agent edits underneath
-  it. Also `sbx diff <name>`. Verified against a live sandbox under tmux,
+  it. Also `hura diff <name>`. Verified against a live sandbox under tmux,
   including the live-update, truncation, no-changes and hostile-branch-name
   paths.
 
@@ -116,15 +116,15 @@ Increments 0-21 are done. What is left is the unscheduled list below.
 
 - **6. Status detection** — DONE. The state column now says what the *agent* is
   doing, not just that the sandbox is up. Two sources, combined in
-  `crates/sbx/src/status.rs`: Claude Code hooks baked into the image write
-  `/sandbox/.sbx/status.json` via a `sbx-status` script on PATH, and
+  `crates/hura/src/status.rs`: Claude Code hooks baked into the image write
+  `/sandbox/.hura/status.json` via a `hura-status` script on PATH, and
   `tmux capture-pane` is matched against markers taken from real specimens
-  committed under `crates/sbx/tests/panes/`. A waiting session is a filled
+  committed under `crates/hura/tests/panes/`. A waiting session is a filled
   magenta badge plus a count in the list title, so it is legible even scrolled
   out of view; the preview pane names the tool in play and which source decided.
   Shares increment 5's exec budget rather than opening a second one -- the stat
-  and the status come back from one `ops::poll`. Also reported by `sbx ls`, and
-  `sbx doctor` warns when the image predates the hooks, since an old image looks
+  and the status come back from one `ops::poll`. Also reported by `hura ls`, and
+  `hura doctor` warns when the image predates the hooks, since an old image looks
   entirely healthy while silently never reporting.
 
   **The plan had this backwards, and only running it showed why.** The hooks
@@ -154,7 +154,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
 - **7. Policy layer** — DONE. The capability claude-squad structurally cannot
   have, made visible rather than buried in a YAML file.
 
-  Three templates embedded in the binary (`crates/sbx/src/policy.rs`, written
+  Three templates embedded in the binary (`crates/hura/src/policy.rs`, written
   out to a temp file when the CLI needs a path, the trick `image.rs` already
   used): `readonly-explore`, `feature-work`, `net-open`. `--policy` takes a name
   or a path, and a spec containing `/` or ending `.yaml` is always a path, so
@@ -166,8 +166,8 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   A policy pane and an events pane, so `Tab` now cycles four views
   (`Shift-Tab` goes back) and each keeps its own scroll offset. In the policy
   pane `w` widens to the package registries and `t` tightens back, guarded so a
-  blind or overlapping change cannot be issued. `sbx policy`, `sbx events` and
-  `sbx policies` expose the same three things to the shell. `tls: terminate` is
+  blind or overlapping change cannot be issued. `hura policy`, `hura events` and
+  `hura policies` expose the same three things to the shell. `tls: terminate` is
   gone from every template; verified that termination still happens, `engine:l7`
   still decides, and the per-create deprecation warnings stop.
 
@@ -201,7 +201,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
     applied?" is answered by matching endpoints, never names.
 
   Also learned, and the reason the events pane is usable at all: **the feed is
-  mostly the observer.** `sbx` polls once a second, every poll opens an exec,
+  mostly the observer.** `hura` polls once a second, every poll opens an exec,
   and every exec logs an ssh relay open, an `SSH:OPEN ALLOWED`, a relay close
   and a `CONFIG:APPLYING`/`CONFIG:BUILT` pair as Landlock is applied to the new
   process. Five events a second, all of them ours, and a real denial scrolled
@@ -212,7 +212,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
 
   Deferred, deliberately: the events pane does not wrap. A wrapped continuation
   starts at column zero, which puts a URL fragment where a verdict should be and
-  destroys the columns the feed is scanned by; `sbx events` prints the full text.
+  destroys the columns the feed is scanned by; `hura events` prints the full text.
   `--tail` is unused too -- streaming needs a thread and a way to stop it, and
   refetching a bounded window on a timer is what every other pane already does.
   `net-open` covers npm and PyPI but not crates.io as sketched above: the image
@@ -225,12 +225,12 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   increment 8.
 
 - **8. Publish** — DONE, and Azure DevOps rather than GitHub first, because
-  that is the forge actually in use. `sbx publish` pushes the work branch and
+  that is the forge actually in use. `hura publish` pushes the work branch and
   opens a pull request from inside the sandbox; `P` in the TUI does the same
   behind a y/n confirmation, since a push is outward-facing and not undone by
   pressing something else. The session is marked `Published` in one place
   (`ops::publish`) so the CLI and the TUI cannot disagree. Forge is derived
-  from the repo URL (`crates/sbx/src/forge.rs`), never configured.
+  from the repo URL (`crates/hura/src/forge.rs`), never configured.
 
   Verified end to end against a real private Azure DevOps repository: clone,
   commit, push, pull request created, a second publish recognising the already
@@ -252,7 +252,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
     `http.extraHeader`, so a later push needs no special casing, and the value
     is meaningless outside that sandbox.
   * **This was never a publish-only problem.** Cloning a *private* repository
-    needs the header too, so `sbx new` previously only worked against public
+    needs the header too, so `hura new` previously only worked against public
     repos -- for GitHub as much as Azure DevOps. Seeding is now forge-aware,
     and degrades to a plain `git` when no credential is present so a public
     repo still clones with no provider attached.
@@ -292,14 +292,14 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   the TUI needed input handling that did not exist -- increment 9 built it, so
   this is now only unwritten, not blocked.
 
-- **9. `sbx new` from the TUI** — DONE. `n` opens a repository picker over the
-  host's git checkouts, then a form for everything `sbx new` takes, and the
+- **9. `hura new` from the TUI** — DONE. `n` opens a repository picker over the
+  host's git checkouts, then a form for everything `hura new` takes, and the
   create runs on its own thread so the rest of the TUI keeps working while a
   sandbox is provisioned.
 
   The design decision worth recording: **a local repository names a remote, it
   is not a source of code.** The sandbox still clones `origin` over the gateway,
-  exactly as `sbx new --repo <url>` does. `openshell sandbox upload` exists and
+  exactly as `hura new --repo <url>` does. `openshell sandbox upload` exists and
   would allow the alternative -- bundle the checkout, upload it, clone from the
   bundle, rewire `origin` afterwards -- and that would carry unpushed commits
   and uncommitted edits into the sandbox. It was not taken: it needs the origin
@@ -313,15 +313,15 @@ Increments 0-21 are done. What is left is the unscheduled list below.
 
   * `repos.rs` is the only module that touches the host filesystem. Discovery
     walks a handful of roots (working directory, its parent, the conventional
-    `~/dev`-style directories, `$HOME` at depth 1; `SBX_REPO_ROOTS` replaces the
+    `~/dev`-style directories, `$HOME` at depth 1; `HURA_REPO_ROOTS` replaces the
     lot), skipping hidden and dependency directories and never descending into a
     repository it has found. Metadata is read *out of `.git`* rather than by
     running git -- `HEAD` for the branch, `config` for the origin, `commondir`
     for worktrees -- because three subprocesses per repository would turn a scan
     of a home directory into seconds. 15 repositories in 23ms on the dev box.
   * The fuzzy filter is a subsequence scorer with bonuses for consecutive runs,
-    word boundaries and prefixes, so `sbx` finds `~/dev/sbx` before
-    `~/work/toolbox-sbx`. No new dependency for forty lines.
+    word boundaries and prefixes, so `hura` finds `~/dev/hura` before
+    `~/work/toolbox-hura`. No new dependency for forty lines.
   * `tui/create.rs` is a pure state machine: `Input` (a single-line field with a
     *character* cursor, so pasted non-ASCII cannot panic it), `Picker`, `Form`.
     No I/O at all -- the scan, the git inspection, the provider list and the
@@ -332,7 +332,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
     TUI turns them into `creating` / `seeding` / `ready` on the row. It does
     **not** build the image, because `image::build` streams docker's output and
     would tear the TUI apart; the CLI calls `image::ensure` first and the create
-    thread refuses with "run `sbx image build`".
+    thread refuses with "run `hura image build`".
   * Creating runs on a thread of its own, unlike every other worker request.
     Requests are served one at a time, so a create served inline would freeze
     the state column and every pane for the half-minute it takes. It is detached
@@ -358,7 +358,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   and run a current Claude Code.
 
   **`D` destroys the selected session.** `ops::destroy` is the one description of
-  what that means -- delete the sandbox, drop the record -- and `sbx rm` was
+  what that means -- delete the sandbox, drop the record -- and `hura rm` was
   rewritten on top of it, so the CLI and the TUI cannot disagree about what is
   left behind. Three decisions worth recording:
 
@@ -397,9 +397,9 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   **The trap: `latest` inside a Dockerfile is not latest.** Docker answers a
   rebuild from the cached layer, so a `latest` resolved inside the build means
   "whatever was newest the first time that layer was built" -- the exact
-  staleness the step exists to fix. `sbx image build` therefore resolves the
+  staleness the step exists to fix. `hura image build` therefore resolves the
   version on the host and passes it in, because changing the ARG is what
-  invalidates the layer. `sbx doctor` compares the built image against the newest
+  invalidates the layer. `hura doctor` compares the built image against the newest
   release and says when it has fallen behind, so this cannot rot silently again.
 
   **And the upgrade broke idle detection, which is why it was worth verifying by
@@ -449,7 +449,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   How it is put together:
 
   * `tui/term.rs` owns one `Terminal` per open session: a `portable-pty` child
-    running the same attach script as `sbx attach`, a thread doing nothing but
+    running the same attach script as `hura attach`, a thread doing nothing but
     feeding a `vt100::Parser`, and `tui-term` drawing that parser's screen into
     the pane. Three dependencies, which for a terminal emulator is the right
     call -- this is exactly the code not to write by hand.
@@ -601,14 +601,14 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   the agent's tmux window to 200x50 on the way out; without it, attaching from an
   80-column terminal leaves the window 80 columns wide for the rest of the
   session, narrow enough to truncate the footer the running marker lives in. The
-  attach script -- one definition now, shared by `sbx attach` and the TUI, which
+  attach script -- one definition now, shared by `hura attach` and the TUI, which
   had drifted into two copies -- resizes the window and restores
   `window-size latest` afterwards, so the next client still resizes it. Verified
   by attaching from a 120x32 terminal and reading `#{window_width}` back out of
   the sandbox: 120x32 attached, 200x50 after detaching, no client left behind.
 
-  Also fixed, found by using it: `sbx rm` followed by `sbx ls` printed
-  "could not adopt sbx-x: sandbox not found". Deletion is asynchronous, so the
+  Also fixed, found by using it: `hura rm` followed by `hura ls` printed
+  "could not adopt hura-x: sandbox not found". Deletion is asynchronous, so the
   sandbox is still listed while its record is already gone -- which looks exactly
   like an orphan worth adopting. `store::reconcile` now skips anything in
   `Deleting`.
@@ -799,7 +799,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   * Every exec writes three events to the gateway's log, and the events pane reads
     a window on the end of that log. Polling five times harder shrinks how much
     *time* that window covers, so `LOG_LINES` went from 400 to 1500 -- the filter
-    already drops sbx's own noise, and the read is 14ms.
+    already drops hura's own noise, and the read is 14ms.
   * A test asserts the budget is coherent, because the parts have to add up: the
     selected session sooner than the rest, the floor below the interval it is
     bounding, a full round inside `POLL_TTL` for a list of ten, and the redraw
@@ -828,7 +828,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   **The bug, found by looking at why a session said `seeding` when its sandbox was
   perfectly healthy.** `sessions.json` has more than one writer and that is the
   normal case, not an edge: a TUI reconciles the whole list on a timer while a
-  `sbx new` in another terminal walks a session through `creating`, `seeding`,
+  `hura new` in another terminal walks a session through `creating`, `seeding`,
   `ready`. Both did load-modify-save with no lock, so the second write won and the
   first was lost -- and with increment 17 taking the refresh from three seconds to
   one, the window went from occasional to reliable. Worse, `ops::create` held a
@@ -885,7 +885,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
 
   Verified against a live gateway, all three paths: a normal create (all four
   steps, `done`, agent running); `SIGKILL` to the host two seconds into a clone,
-  after which the sandbox finished on its own and `sbx ls` reported
+  after which the sandbox finished on its own and `hura ls` reported
   `seed-kill: seeding -> ready (seeding finished)`; and a clone that cannot
   authenticate, which now says
   `seeding failed: fatal: could not read Username for 'https://github.com'` and
@@ -905,10 +905,10 @@ Increments 0-21 are done. What is left is the unscheduled list below.
 
   **"The events log gets cleared when closing the app and opening it again."** It
   was, and by us. The pane asks the gateway for the last 1500 log lines, and every
-  exec sbx makes to read a sandbox writes three lines of its own; at increment
+  exec hura makes to read a sandbox writes three lines of its own; at increment
   17's intervals a measurement said it plainly -- that window covered **125
   seconds** and contained **one** event worth showing, out of 1500 lines of which
-  376 were sbx's own execs. Nothing was cleared; everything older than two minutes
+  376 were hura's own execs. Nothing was cleared; everything older than two minutes
   had simply rolled out, and reopening the tool made it obvious.
 
   So the feed is ours to keep: one JSONL file per session beside the session
@@ -921,19 +921,19 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   Proved end to end rather than argued: 14 events recorded from a session's clone
   and first turn, then 550 execs fired at the same sandbox until the gateway's
   window no longer contained a single one of them -- `grep -c` on the oldest
-  timestamp went to zero -- after which `sbx events` still listed all 14, clone
+  timestamp went to zero -- after which `hura events` still listed all 14, clone
   included.
 
   Worth knowing for anything else that reads that log: raising `LOG_LINES` (which
   increment 17 did, 400 to 1500) buys time linearly and loses to the poll rate
   immediately. Keeping what has been seen is the only thing that scales.
 
-- **21. A config file** — DONE. `~/.config/sbx/config.toml`, beside the session
+- **21. A config file** — DONE. `~/.config/hura/config.toml`, beside the session
   cache and the events history, holding the seven things that were flags on every
   command: `gateway`, `repo`, `base`, `policy`, `providers`, `repo_roots` and
   `refresh`. Everything optional, everything a *default* -- a flag wins, and so
-  does an explicit choice in the create form. `sbx config` shows what is in force
-  and marks each line `*` (from the file) or `-` (built in); `sbx config --init`
+  does an explicit choice in the create form. `hura config` shows what is in force
+  and marks each line `*` (from the file) or `-` (built in); `hura config --init`
   writes a commented starter file with every key commented out, so creating it
   changes nothing.
 
@@ -942,7 +942,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   a template nor a path is rejected against the template list, an empty
   `providers = []` is rejected rather than read as "no credentials", and a blank
   string is unset rather than a value. Every command refuses to run until it is
-  fixed -- except `sbx doctor`, which is the command you reach for when something
+  fixed -- except `hura doctor`, which is the command you reach for when something
   is wrong, so it reports the error as a failed check and carries on with the
   built-in defaults. Silently ignoring a config someone wrote is the same failure
   as the gateway reporting a policy it is not enforcing.
@@ -963,7 +963,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   replaces the create form's guesswork outright, because an explicit list is a
   better answer than any heuristic and merging the two would attach a credential
   nobody asked for -- and a name the gateway does not have is a `warn` in
-  `sbx doctor`, which is the only command that both reads the file and can ask.
+  `hura doctor`, which is the only command that both reads the file and can ask.
   `base` goes the other way: the branch a checkout is sitting on is evidence about
   *that* repository and a config entry is a guess about all of them, so it only
   fills a detached HEAD. `repo` moves the picker's *cursor* rather than its
@@ -971,19 +971,19 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   the preference for good -- the background rescan calls `scanned` again, and
   reapplying it then would pull the cursor off whatever was just filtered for.
   `repo_roots` replaces the conventional places rather than adding to them, and
-  `SBX_REPO_ROOTS` still wins over it.
+  `HURA_REPO_ROOTS` still wins over it.
 
   **A policy that is a path had to be offered in the TUI too.** The form's policy
   field cycled `policy::TEMPLATES`, which cannot represent
   `policy = "./strict.yaml"` -- and a form that quietly fell back to
   `feature-work` would have created sessions under a different policy from
-  `sbx new`. The chooser now holds `PolicyOption`s, with a configured path
+  `hura new`. The chooser now holds `PolicyOption`s, with a configured path
   prepended and labelled `from your config file`.
 
   Verified under tmux against a live gateway: the picker opening with the cursor
-  on `~/dev/sbx` out of fifteen repositories, the form showing
+  on `~/dev/hura` out of fifteen repositories, the form showing
   `< readonly-explore >` with only the configured provider ticked, a configured
-  path showing as its own chooser entry, `sbx doctor` warning about
+  path showing as its own chooser entry, `hura doctor` warning about
   `ghost-token`, and every error path above from the command line.
 
 - **22. Acting on a denial from the events feed** — DONE. The feed showed what
@@ -993,7 +993,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   four-way question about the endpoint it names: `a` allow here, `b` block here,
   `A` allow always, `B` block always. Lowercase goes through the same live
   `policy update` as `w`; uppercase does that *and* records the endpoint in
-  `~/.config/sbx/endpoints.json`, which `ops::create` imposes on every new
+  `~/.config/hura/endpoints.json`, which `ops::create` imposes on every new
   sandbox in one call before the clone starts.
 
   **A block is a removal, not a veto, and the pane says so.** OpenShell denies by
@@ -1038,7 +1038,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   `would grant binary '/usr/bin/curl' undeclared authorization for github.com`,
   which is why the pane re-reads the policy afterwards rather than reporting what
   it asked for; a binary-less `--add-endpoint` produces a rule with no `binaries:`
-  key at all. Verified live: `sbx policy does-the` rendering the three list states
+  key at all. Verified live: `hura policy does-the` rendering the three list states
   against a real `feature-work` sandbox.
 
 - **23. MCP servers, run on the host and reached through the policy** — DONE.
@@ -1064,12 +1064,12 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   Claude Code 2.x is a native binary, so `/usr/local/bin/claude` is a rule only
   the agent satisfies -- unlike npm, whose kernel-resolved exe is `/usr/bin/node`
   and covers everything JavaScript in the sandbox. Demonstrated live in
-  `sbx-adoe2e`: `claude -> POST http://mcp-azure-devops:9001/mcp ALLOWED
+  `hura-adoe2e`: `claude -> POST http://mcp-azure-devops:9001/mcp ALLOWED
   [policy:allow_mcp_azure_devops_9001]` beside
   `curl -> ... DENIED [binary '/usr/bin/curl' not allowed in policy]`. This cost
   a round trip to find: with `node` and `curl` on the rule and not `claude`, the
   agent reports the proxy's 403 as **`! Needs authentication`**, which sends you
-  looking at credentials for a policy problem. `sbx doctor` exists partly to
+  looking at credentials for a policy problem. `hura doctor` exists partly to
   shorten that path -- it says which container is missing or off the network.
 
   **Registration happens inside the sandbox, before the agent starts.** The
@@ -1104,7 +1104,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   buy nothing: the agent gains whatever the server can do, with the host's
   credentials. Fine for Jira and Azure DevOps, whose blast radius is a work item;
   a filesystem or Docker MCP server on the host would be a straight sandbox
-  escape, and sbx cannot tell the difference for you.
+  escape, and hura cannot tell the difference for you.
 
 - **24. Skills carried in, and no attribution stamp** — DONE. Two things a
   sandbox got wrong about being someone's environment rather than a clean room.
@@ -1130,7 +1130,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
 
   **Failures cost the skill, not the session.** A skill that is missing at create
   time is a warning -- computed by re-running the pack in `ops::create`, since
-  the seeder runs detached and has nowhere to say it -- and `sbx doctor` reports
+  the seeder runs detached and has nowhere to say it -- and `hura doctor` reports
   the same three problems (not there, not a directory, no `SKILL.md`) before you
   ever get that far. The 256KiB cap on a packed skill is there because the
   payload rides in an exec argument: over it, the failure would be
@@ -1147,16 +1147,16 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   co-author trailer would credit the tool for work attributed to the person
   running it.
 
-  Verified live in `sbx-skilltest`: `step skills` in the state file, the
+  Verified live in `hura-skilltest`: `step skills` in the state file, the
   `ship-pr` manifest at `/sandbox/.claude/skills/ship-pr/SKILL.md`, and both MCP
   servers `✔ Connected` in the same session -- the first run with real
   credentials rather than placeholders.
 
   **A window that used to be microseconds became seconds.** Creating a session
-  reported `could not adopt sbx-x: cat: /sandbox/.sbx/meta.json: No such file or
+  reported `could not adopt hura-x: cat: /sandbox/.hura/meta.json: No such file or
   directory` while the session itself came up perfectly. Between
   `sandbox create` returning and the record being saved, the sandbox is an
-  orphan: labelled `sbx.managed`, no record, no `meta.json`. Any refresh landing
+  orphan: labelled `hura.managed`, no record, no `meta.json`. Any refresh landing
   there -- the TUI runs one a second -- tries to adopt it and fails on a file the
   seeder has not written yet. `impose_lists` had the same shape, and was
   invisible because an empty list makes no call; `impose_mcp` is a
@@ -1183,7 +1183,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   catches Ctrl-C locally, and Ctrl-B never reaches tmux, so detaching is not
   possible either.
 
-  `sbx attach` and the TUI's attach now share `ops::attach_interactively`, which
+  `hura attach` and the TUI's attach now share `ops::attach_interactively`, which
   holds a raw-mode guard for the life of the child and restores on every path
   out, panic included. Two copies would have been one fixed and one not. A
   terminal that cannot go raw attaches anyway: reading is still worth something.
@@ -1205,14 +1205,14 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   falls back to the text as written, since a name is better than no name.
 
   **The 15-character cap was the gateway's, not ours.** Sandbox names are capped
-  at 19 and `sbx-` takes four. So the session name is now ours (40 characters,
+  at 19 and `hura-` takes four. So the session name is now ours (40 characters,
   bounded by being a branch and a list column) and the *sandbox* name is derived
   from it: unchanged for short names, and for long ones the first ten characters
   plus four hex digits of FNV-1a over the whole name. Deterministic, because
-  `sbx rm` and adoption have to name a sandbox with no record to read it from;
+  `hura rm` and adoption have to name a sandbox with no record to read it from;
   distinct, because `maxgaming-scala-customer-id` and `maxgaming-scala-tax` would
-  otherwise share one sandbox. The full name lives in the `sbx.session` label,
-  which has 63 characters. Branches stay `sbx/<name>` and simply get longer.
+  otherwise share one sandbox. The full name lives in the `hura.session` label,
+  which has 63 characters. Branches stay `hura/<name>` and simply get longer.
 
   **The task field was one row.** A task is a prompt -- a sentence or three --
   and `with_cursor` drew it on a single unbounded line, so past the modal's width
@@ -1243,12 +1243,12 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   Rust), then verifies what it installed with `--version`, exactly like the Claude
   Code step.
 
-  **One image per set, layered onto the base.** `sbx-base:dotnet`,
-  `sbx-base:dotnet-rust`, `FROM sbx-base:latest`. Docker shares the base's 5.17GB,
-  so `sbx-base:dotnet` costs 0.8GB and a Rust session never carries the .NET SDK.
+  **One image per set, layered onto the base.** `hura-base:dotnet`,
+  `hura-base:dotnet-rust`, `FROM hura-base:latest`. Docker shares the base's 5.17GB,
+  so `hura-base:dotnet` costs 0.8GB and a Rust session never carries the .NET SDK.
   The tag is a pure function of the *set* -- `TOOLCHAINS` order is imposed on the
   input -- so `--toolchain rust,dotnet` and `--toolchain dotnet,rust` are one
-  image rather than two identical ones. Built on first use by `sbx new`, never by
+  image rather than two identical ones. Built on first use by `hura new`, never by
   the TUI, for the reason the base image is not: the build streams docker's output.
 
   **A toolchain is also a policy change**, which is the half that makes this a
@@ -1298,7 +1298,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   or not making the request: `NUGET_CERT_REVOCATION_MODE=offline` is the second,
   and the same restore now leaves ten allows and no denials at all.
 
-  **`sbx doctor` says what each variant carries**, read from a manifest the
+  **`hura doctor` says what each variant carries**, read from a manifest the
   layers write inside the image rather than inferred from the tag, and warns when
   a variant is older than the base it sits on -- rebuilding the base for a newer
   agent leaves the variants on the old one, and nothing about that looks wrong
@@ -1312,7 +1312,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
 - **Port forwarding** — `openshell forward` and `openshell service` for dev
   servers an agent starts.
 - **Recovering a wedged sandbox** — after an abruptly killed attach, exec hangs
-  forever for that sandbox. `sbx doctor <session>` could detect it (exec with a
+  forever for that sandbox. `hura doctor <session>` could detect it (exec with a
   short timeout) and offer `sandbox stop && sandbox start` as a repair before
   falling back to recreating.
 - **More toolchains** — go, a JDK, and the build tool each one implies (`go` is
@@ -1333,7 +1333,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
 - **Claude Code's TUI is not an API.** Status detection matches on rendered
   strings (`Esc to cancel`, `esc to interrupt`, `? for shortcuts`), which a
   redesign would break. Mitigation: the markers live in one module, the
-  specimens under `crates/sbx/tests/panes/` are real captures, and the tests
+  specimens under `crates/hura/tests/panes/` are real captures, and the tests
   fail loudly rather than degrading quietly.
 - **Sandbox boot latency** vs an instant tmux session. Mitigation: prebaked
   image with the agent CLI + toolchain, warm pool of idle sandboxes.
@@ -1357,7 +1357,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   here would be a policy change nobody asked for, which is worse than a feed that
   has stopped being actionable.
 - **Overlap with `openshell term`** — that is a k9s-style resource browser.
-  Stay out of its lane: `sbx` orchestrates tasks, not resources.
+  Stay out of its lane: `hura` orchestrates tasks, not resources.
 
 ## Open decisions
 
@@ -1376,22 +1376,22 @@ Claude Code will not all support a setup-token equivalent.
 ## Picking this up again
 
 Current state: increments 0-22 done, `main` at a clean tree, 338 tests, clippy
-and rustfmt clean. `sbx doctor` should be all green; if the gateway is down,
+and rustfmt clean. `hura doctor` should be all green; if the gateway is down,
 `systemctl --user status openshell-gateway`.
 
 The loop that works today, end to end:
 
 ```sh
-sbx config --init   # optional: put the flags below in a file and stop typing them
-sbx new --repo <url> --task "..." --policy feature-work \
+hura config --init   # optional: put the flags below in a file and stop typing them
+hura new --repo <url> --task "..." --policy feature-work \
         --provider claude-oauth --provider azure-pat
-sbx            # or start one here: n, pick a repo, fill the form, enter
+hura            # or start one here: n, pick a repo, fill the form, enter
                # Enter to attach, Ctrl-b d to detach, q to quit
                # Tab cycles preview/diff/policy/events; w/t widen/tighten egress
                # in the feed, j/k pick an event and e allows or blocks its endpoint
                # P publishes (asks first)
-sbx publish <name>
-sbx rm <name>
+hura publish <name>
+hura rm <name>
 ```
 
 Providers are per organisation, not per forge: an Azure DevOps PAT only covers
@@ -1410,13 +1410,13 @@ Things a future session should know that are not obvious from the code:
 * Never kill an attach; wait for the user to detach. Killing it wedges exec for
   that sandbox permanently.
 * The local cache is disposable by design. To test that, delete
-  `~/.config/sbx/sessions.json` and run `sbx ls`.
-* **`XDG_CONFIG_HOME` cannot be used to isolate `sbx` in a test.** `openshell`
+  `~/.config/hura/sessions.json` and run `hura ls`.
+* **`XDG_CONFIG_HOME` cannot be used to isolate `hura` in a test.** `openshell`
   reads it too, so pointing it at a temp directory hides the registered gateway
-  and `sbx doctor` fails with `could not parse ... missing field 'gateway'` --
+  and `hura doctor` fails with `could not parse ... missing field 'gateway'` --
   which looks like the gateway being down and is not. Fine for exercising
-  `sbx config` and its error paths, which need no gateway; for anything else,
-  write the real `~/.config/sbx/config.toml` and delete it afterwards.
+  `hura config` and its error paths, which need no gateway; for anything else,
+  write the real `~/.config/hura/config.toml` and delete it afterwards.
 * Live tests need a gateway and are behind `#[ignore]`:
   `cargo test -p openshell-client -- --ignored`.
 * The TUI is testable without a human: run it under tmux and use
@@ -1464,7 +1464,7 @@ Things a future session should know that are not obvious from the code:
   anything else.
 * Anything that reads the sandbox costs an exec, and an exec is itself five
   OCSF log events. That is fine until something *reads the log* -- see the
-  filter in `crates/sbx/src/events.rs`, and expect the same problem in any
+  filter in `crates/hura/src/events.rs`, and expect the same problem in any
   future feature that watches the gateway's own output.
 * **A held `exec --tty` does not block ordinary execs, and killing one does not
   wedge the sandbox.** (Measured for increment 11's embedded terminal, which
@@ -1550,7 +1550,7 @@ values that a terminal and a web view can each draw their own way.
 | Decision | Choice | Why |
 | --- | --- | --- |
 | Desktop stack | Tauri v2 | Reuses the Rust core and its serde types; the Windows binary is WebView2, so it is ~10MB and Chromium-backed, which is what a WebGL terminal wants. Linux desktop gets WebKitGTK and a rougher terminal -- accepted, because the Linux user already has the TUI |
-| Transport | A listening `sbxd`, TLS + bearer tokens | Chosen over stdio-over-SSH. Costs a certificate and pairing story, buys multi-client, a mobile client later, and a server that does not need an SSH account per user |
+| Transport | A listening `hurad`, TLS + bearer tokens | Chosen over stdio-over-SSH. Costs a certificate and pairing story, buys multi-client, a mobile client later, and a server that does not need an SSH account per user |
 | Backends | Sandboxed *and* unsandboxed worktrees | The sandbox stays the default and the point. A worktree session runs on the server with the server's rights, and is labelled as such everywhere it appears |
 | The TUI | Frozen | Bug fixes only. It stays building against the core, which is the cheapest possible test that the core has not grown a UI dependency |
 | UI data | Structured, never markup | The core returns `PolicyView` and `Vec<Event>`; the TUI makes lines out of them and the web view makes elements. Shipping pane markup over the wire would make the desktop app a screen-scraper of the terminal one |
@@ -1560,15 +1560,15 @@ values that a terminal and a web view can each draw their own way.
 ```
 crates/
   openshell-client/   unchanged -- the trait
-  sbx-core/           ops, session, store, policy, events, seed, skills, mcp,
+  hura-core/           ops, session, store, policy, events, seed, skills, mcp,
                       publish, repos, image, toolchain, config, doctor, status
-  sbx-proto/          the wire types, one serde definition, TS generated from it
-  sbxd/               the server: axum, TLS, /rpc + one multiplexed websocket
-  sbx/                the clap CLI and the frozen TUI, in-process on the core
+  hura-proto/          the wire types, one serde definition, TS generated from it
+  hurad/               the server: axum, TLS, /rpc + one multiplexed websocket
+  hura/                the clap CLI and the frozen TUI, in-process on the core
 apps/desktop/         Tauri v2 -- the only thing that ships to Windows
 ```
 
-`sbx-proto` is the single definition of the protocol and `ts-rs` emits the
+`hura-proto` is the single definition of the protocol and `ts-rs` emits the
 TypeScript from it into `apps/desktop/src/gen/`, checked current in CI. Two
 hand-maintained copies of a message type is the failure mode that makes a
 self-hosted client-server product miserable, and it is avoidable for the cost of
@@ -1585,25 +1585,25 @@ thing to notice has dropped.
 and a self-hosted server *will* drift, and a client that can say so beats a
 client that fails strangely.
 
-**Binding to anything but `127.0.0.1` is explicit.** An authenticated `sbxd` can
+**Binding to anything but `127.0.0.1` is explicit.** An authenticated `hurad` can
 create containers on its host, which makes it equivalent to root there; that
 belongs in the docs and in the warning the flag prints, not in a footnote.
 
 ### Pairing
 
-`sbxd` generates a self-signed certificate on first run, with the hostname, the
-local addresses and `localhost` in its SANs. `sbxd pair` prints one connection
-string -- `sbx://host:port/<token>#<cert-fingerprint>` -- and the QR code that
+`hurad` generates a self-signed certificate on first run, with the hostname, the
+local addresses and `localhost` in its SANs. `hurad pair` prints one connection
+string -- `hura://host:port/<token>#<cert-fingerprint>` -- and the QR code that
 the same string becomes useful as when there is a mobile client. The desktop app
 takes one paste. The client pins the fingerprint on first connect and refuses a
 changed one afterwards; tokens are stored hashed, named, and revocable with
-`sbxd token rm`.
+`hurad token rm`.
 
 ### The WSL case, which is the sharp one
 
 The whole point of the Windows story is a server inside WSL and a UI outside it,
 and whether `localhost` reaches across depends on whether WSL2 is in mirrored or
-NAT networking mode. `sbx doctor` on the WSL side should detect which, and print
+NAT networking mode. `hura doctor` on the WSL side should detect which, and print
 the address Windows should actually use -- including the `netsh portproxy` line
 when it is NAT. Getting this wrong looks exactly like a firewall problem and is
 not one.
@@ -1648,7 +1648,7 @@ against that directory.
 "The host" used to mean one machine. It now means the server, while the skills
 and the muscle memory live on the machine with the UI.
 
-**Skills** get a server-side library at `$XDG_DATA_HOME/sbx/skills/`, filled
+**Skills** get a server-side library at `$XDG_DATA_HOME/hura/skills/`, filled
 from two sources: server-local paths, exactly as the config file does today, and
 uploads pushed by the desktop client from its own `~/.claude/skills`. The
 pointer-not-copy property survives -- the client re-uploads on create, so editing
@@ -1656,9 +1656,9 @@ the original still means the next session gets the edit -- and a session still
 records precisely what it was given.
 
 **MCP servers** stop being a documented `docker run` incantation and become
-something `sbxd` owns: a catalog of name, image, args, environment and transport;
+something `hurad` owns: a catalog of name, image, args, environment and transport;
 containers started on `openshell-docker` and health-checked; secrets in a
-server-side store that never travels to a client. `sbx doctor`'s MCP check turns
+server-side store that never travels to a client. `hura doctor`'s MCP check turns
 into live status in an Integrations screen, and the per-binary grant is unchanged.
 
 The warning in `docs/mcp.md` moves into the UI, at the moment a server is ticked
@@ -1701,10 +1701,10 @@ for free, with nothing persisted client-side.
 
 ## Increments
 
-- **23. Headless core** — DONE. `sbx-core` holds the twenty modules that do not
-  draw; `crates/sbx` keeps the clap CLI and the frozen TUI. No behaviour changed:
+- **23. Headless core** — DONE. `hura-core` holds the twenty modules that do not
+  draw; `crates/hura` keeps the clap CLI and the frozen TUI. No behaviour changed:
   the same 408 tests pass, now 259 in the core and 149 in the binary, and
-  `sbx doctor`, `policies`, `toolchains` and `config` were run against the live
+  `hura doctor`, `policies`, `toolchains` and `config` were run against the live
   gateway afterwards to check that the embedded policy YAML, Dockerfiles and
   `config.example.toml` all survived moving a directory.
 
@@ -1722,18 +1722,18 @@ for free, with nothing persisted client-side.
   **The plan said `pane.rs` moves to the TUI, and the code says otherwise.**
   `pane.rs` is markup in a `String` with no UI dependency at all, and it has
   three consumers, not one: `policy.rs` builds a body with it, `ops.rs` shares
-  its sigils for the diff, and `sbx policy` prints `to_plain` to a pipe. Moving
+  its sigils for the diff, and `hura policy` prints `to_plain` to a pipe. Moving
   it into the TUI would have dragged two core modules and a CLI command along
   behind it. It stays in the core.
 
   What that markup *is* -- a serialised pane, parsed back by whoever draws it --
   is still wrong for a wire protocol, and the `PolicyView` this deferred is real
-  work. It belongs in increment 24, where `sbx-proto` will say what shape the
+  work. It belongs in increment 24, where `hura-proto` will say what shape the
   structured version actually needs to be. Designing it now, against no consumer,
   would have been guessing.
-- **24. `sbx-proto` and `sbxd`** — DONE, apart from the two halves that turned
+- **24. `hura-proto` and `hurad`** — DONE, apart from the two halves that turned
   out to want a UI first; see below. The wire types, the server, TLS, tokens,
-  pairing, `/rpc`, and `sbx` itself as a client of it. `sbx doctor` learns the
+  pairing, `/rpc`, and `hura` itself as a client of it. `hura doctor` learns the
   paired servers and the WSL networking modes. 485 tests.
 
   The types on the wire are the core's own rather than a second set of DTOs.
@@ -1748,19 +1748,19 @@ for free, with nothing persisted client-side.
   an `op` an older server has never heard of, which comes back as `unsupported`,
   because a client can explain that and cannot explain a 400.
 
-  Pairing is `sbx://host:port/<token>#<fingerprint>`, and the fingerprint is the
+  Pairing is `hura://host:port/<token>#<fingerprint>`, and the fingerprint is the
   part that matters: it means the *first* connection is verified too, which is
   the hole in ordinary trust-on-first-use. The client checks it and nothing
   else -- deliberately not the hostname, since the fingerprint answers a stronger
   question and a name check would only break a server reached at an address that
   is not in its certificate, which is the WSL case exactly.
 
-  **Building `sbx --server` before any UI paid for itself three times**, in ways
+  **Building `hura --server` before any UI paid for itself three times**, in ways
   the type checker could not have found. `--server ls` parsed as a server called
   `ls` and fell through to the TUI. `TcpStream::connect` has no timeout, so the
   read and write timeouts set immediately after it -- and the comment claiming
   they covered a port with nothing on it -- were both wrong. And the token set
-  was read once at startup, so `sbxd revoke` did nothing until someone restarted
+  was read once at startup, so `hurad revoke` did nothing until someone restarted
   the server, which is the opposite of what revoking is for.
 
   **Two parts moved out, because they wanted a consumer first.** The multiplexed
@@ -1772,10 +1772,10 @@ for free, with nothing persisted client-side.
   which the CLI renders with the same code the TUI uses, and the structured
   version should be designed against the thing that will draw it.
 - **25. The shell** — DONE. Tauri v2 and React, the session list, and
-  facts/policy/events read-only, against a live `sbxd`. Carried what increment
+  facts/policy/events read-only, against a live `hurad`. Carried what increment
   24 left with it: `policy::View` and the generated TypeScript.
 
-  `sbx-client` is its own crate now, because the desktop application needs the
+  `hura-client` is its own crate now, because the desktop application needs the
   same connection the CLI makes and a webview cannot make it -- `fetch` has no
   say in which certificate it will accept, so pinning has to happen on the Rust
   side of Tauri. The webview never speaks to the server at all.
@@ -1813,8 +1813,8 @@ for free, with nothing persisted client-side.
   the screen returns solid black for a redirected window, which is what made the
   first captures lie about what was on screen.
 - **26. Terminal** — DONE, drawing included. The multiplexed websocket, the
-  events, status and terminal channels, `sbx-client`'s streaming half,
-  `sbx watch`, and the pane. 501 tests plus three `#[ignore]`d live ones.
+  events, status and terminal channels, `hura-client`'s streaming half,
+  `hura watch`, and the pane. 501 tests plus three `#[ignore]`d live ones.
 
   One socket, several channels, JSON frames so a connection stays readable in a
   log -- terminal bytes base64 inside them, because a pty read lands wherever it
@@ -1879,7 +1879,7 @@ for free, with nothing persisted client-side.
   say what the list was about to say anyway; what it does do before returning is
   everything that can be judged from the request, so an unknown toolchain or a
   name that is not a name fails against the request that caused it. The image
-  build moved onto that thread, since the reason it sits in `sbx new` rather
+  build moved onto that thread, since the reason it sits in `hura new` rather
   than in `ops::create` is that it streams docker's output to a terminal, and a
   server has none.
 
@@ -1902,7 +1902,7 @@ for free, with nothing persisted client-side.
 - **28. Diff** — DONE. The three sections as a pane, and a review that goes to
   the agent rather than to a pull request. 520 tests.
 
-  The body is the same marked-up text `sbx new`'s TUI draws, so this is the
+  The body is the same marked-up text `hura new`'s TUI draws, so this is the
   second renderer of the `pane::SECTION`/`NOTICE` contract rather than a second
   format. Line numbers come from the hunk headers, counted forward as git wrote
   them, which is what lets a comment name a line at all.
@@ -1938,7 +1938,7 @@ for free, with nothing persisted client-side.
   made and no amount of grouping sessions by clone URL can represent it. A
   worktree records its project rather than being matched back by URL: two
   checkouts of one repository is a normal thing to have, and it would otherwise
-  belong to both. `sbx new` has no projects, so what it creates is grouped by
+  belong to both. `hura new` has no projects, so what it creates is grouped by
   clone URL at the bottom of the tree rather than hidden.
 
   The picker moved out of the create flow and into project creation, which is
@@ -1999,7 +1999,7 @@ for free, with nothing persisted client-side.
   hundred extensions is two hundred chances to be subtly wrong, and an unknown
   one gets the same page outline rather than nothing.
 
-- **31a. Git, and the diff in the editor** — DONE. `sbx_core::git`, the dock's
+- **31a. Git, and the diff in the editor** — DONE. `hura_core::git`, the dock's
   git view, and Monaco's side-by-side diff replacing the unified text pane. 539
   tests.
 
@@ -2050,18 +2050,18 @@ for free, with nothing persisted client-side.
   any of this keeps working -- there is a test for exactly that, because it is
   the kind of compatibility that breaks silently.
 - **31c. A window that pairs itself, and the Windows half** — DONE. Pairing from
-  the header and from the empty screen, `sbx-core` building for Windows, and the
+  the header and from the empty screen, `hura-core` building for Windows, and the
   `.msi`/NSIS bundles in the release. Pulled forward out of increment 35,
   because the alternative was a Windows user who cannot reach a server at all.
 
-  The instruction the empty screen used to give -- run `sbxd pair` over there,
-  `sbx connect` here, then reopen this window -- is fine on Linux and impossible
-  on Windows, where there is no `sbx`: the CLI drives Docker, tmux and a
+  The instruction the empty screen used to give -- run `hurad pair` over there,
+  `hura connect` here, then reopen this window -- is fine on Linux and impossible
+  on Windows, where there is no `hura`: the CLI drives Docker, tmux and a
   gateway, none of which are on that side.
 
-  The pairing is not a second implementation. `sbx_client::pair` is the parsing,
-  the dial, the fingerprint check, the "is this an `sbxd` speaking this protocol"
-  check and the save; `sbx connect` is that plus a `println!` and the dialog is
+  The pairing is not a second implementation. `hura_client::pair` is the parsing,
+  the dial, the fingerprint check, the "is this an `hurad` speaking this protocol"
+  check and the save; `hura connect` is that plus a `println!` and the dialog is
   that plus a form. Nothing is written until the server has answered, and what
   comes back is the server's own version -- the one thing a paste cannot fake.
   No error echoes the string back, since it carries a token.
@@ -2069,9 +2069,9 @@ for free, with nothing persisted client-side.
   **The client half did not compile for Windows, and nothing said so.**
   `state.rs` reached for `std::os::unix::fs` to set 0600 on a key and 0700 on
   its directory, and `update.rs` for the executable bit, with no `cfg`
-  anywhere -- so `sbx-core` failed to build for the one platform the desktop
+  anywhere -- so `hura-core` failed to build for the one platform the desktop
   application was supposed to be a client from. Windows gets
-  `%LOCALAPPDATA%\sbx`, chosen the way `$XDG_STATE_HOME` was: roaming is the
+  `%LOCALAPPDATA%\hura`, chosen the way `$XDG_STATE_HOME` was: roaming is the
   half of a profile that follows a user to another machine, and a pairing token
   is a login to one host. There is no mode to set there and the module says so
   rather than pretending to enforce one. CI checks the target on every change,
@@ -2119,7 +2119,7 @@ for free, with nothing persisted client-side.
   server's, once, so the terminal and the window cannot drift; the protocol
   grew a `no-isolation` failure kind and the desktop's Tauri bridge grew from a
   `String` error into `{kind, message}`, which the comment on that type had
-  predicted would happen the first time something needed to branch. `sbx ls`
+  predicted would happen the first time something needed to branch. `hura ls`
   grew a `KIND` column, the tree grew a badge, and the facts pane trades
   `sandbox`/`policy` for `isolation`/`workdir`.
 
@@ -2132,7 +2132,7 @@ for free, with nothing persisted client-side.
 
   **The record cannot live in the working copy.** The invariant everything else
   rests on -- the sandbox is the source of truth about itself -- has no worktree
-  equivalent. `.sbx/` in the working copy would be in every `git status` the
+  equivalent. `.hura/` in the working copy would be in every `git status` the
   agent runs, in every diff under review, and one `git clean -fdx` from gone. So
   it lives under the server's state directory, and adoption after a lost cache
   is that directory reconciled against the worktrees still on disk. Removing a
@@ -2143,8 +2143,8 @@ for free, with nothing persisted client-side.
   **tmux is the server's, and that is a naming problem, not a plumbing one.**
   Every sandbox has a tmux server to itself and can call the agent's session
   `agent`. Here they share one -- with each other, and with whatever the person
-  at that machine is running -- so the agent is `sbx-<name>` and its shells are
-  `sbx-<name>-shell-N`, and `shells` filters on the backend's prefix instead of
+  at that machine is running -- so the agent is `hura-<name>` and its shells are
+  `hura-<name>-shell-N`, and `shells` filters on the backend's prefix instead of
   "everything except the agent's". Without that, two sessions attach to one
   agent and your own tmux sessions are offered as a session's shells. There is
   an `#[ignore]`d test for exactly that, because it needs a tmux server.
@@ -2170,7 +2170,7 @@ for free, with nothing persisted client-side.
   started. A worktree session records the checkout's current branch as its base
   for the same reason.
 
-  What is not here: hook-driven status, since `sbx-status` is baked into the
+  What is not here: hook-driven status, since `hura-status` is baked into the
   image and a worktree session's state comes from reading the screen; skills and
   MCP, since the agent is the server's own and packing them into the worktree
   would put them in `git status`; and a project made from a checkout with no
@@ -2194,7 +2194,7 @@ for free, with nothing persisted client-side.
 
   **A catalog entry has a url or an image, never both.** A url is a server
   somebody else operates, exactly as before. An image makes it managed, and its
-  url is *derived* -- `http://sbx-mcp-<name>:<port>/mcp` -- because the thing
+  url is *derived* -- `http://hura-mcp-<name>:<port>/mcp` -- because the thing
   that names the container is the thing that joins it to the gateway's network.
   That deletes both ways a hand-written url goes wrong: a name no sandbox can
   resolve, and a `localhost` that means the sandbox itself. The keys that belong
@@ -2208,10 +2208,10 @@ for free, with nothing persisted client-side.
   the server's business and stay out of every session record.
 
   **Secrets go in and never come back out.** The store is
-  `$XDG_STATE_HOME/sbx/secrets.json`, 0600, beside the pairing tokens and the
+  `$XDG_STATE_HOME/hura/secrets.json`, 0600, beside the pairing tokens and the
   TLS key; `secrets::get` is `pub(crate)`, so there is no path from a request
   handler to a value and the compiler is what says so rather than everyone
-  remembering. The protocol carries names and whether each is set. `sbxd secret`
+  remembering. The protocol carries names and whether each is set. `hurad secret`
   reads the value from stdin because an argument lands in a shell history and in
   `ps`, and `start` passes it through the child's *environment* rather than as
   `--env NAME=value` for the same reason -- verified by inspecting the running
@@ -2230,7 +2230,7 @@ for free, with nothing persisted client-side.
   capital reported every never-started container as "docker could not be asked",
   which sends someone to look at their daemon.
 
-  **Skills got a library, at `$XDG_DATA_HOME/sbx/skills`.** The client reads and
+  **Skills got a library, at `$XDG_DATA_HOME/hura/skills`.** The client reads and
   packs its own `~/.claude/skills` on the Rust side of the bridge -- a webview
   cannot see a home directory -- with the same `payload` the seeder uses, and
   pushes them before every create as well as from the screen. That is what keeps
@@ -2249,9 +2249,9 @@ for free, with nothing persisted client-side.
   One screen, and **every action on it answers with the whole view**, re-read.
   The same decision the git view made and for the same reason: these three
   explain each other, since a container that will not start is usually a secret
-  that is not there. `sbx doctor`'s MCP check asks the same
+  that is not there. `hura doctor`'s MCP check asks the same
   `mcp::statuses` the screen does, so a check that passes cannot disagree with a
-  screen that says something is wrong, and `sbxd mcp`/`secrets`/`skills` give a
+  screen that says something is wrong, and `hurad mcp`/`secrets`/`skills` give a
   headless server the same answers.
 
   **The generated bindings collided again, and silently this time.**
@@ -2265,11 +2265,11 @@ for free, with nothing persisted client-side.
   disagree, which was proved by re-introducing a collision and watching it fail.
 
   Verified against real Docker and a real window: two managed entries brought up
-  by `sbxd` at startup, one reachable by container name from another container
+  by `hurad` at startup, one reachable by container name from another container
   on the gateway's network with its secret in its environment, one crash-looping
   with its stack trace in the screen; `stop` taking the container away and the
   row going to `absent`; and this machine's own `ship-pr` pushed into the
-  server's library from the window, listed by `sbxd skills` with the path it
+  server's library from the window, listed by `hurad skills` with the path it
   came from.
 - **34. Task inbox** — DONE. GitHub, Azure DevOps and Jira read server-side,
   open-from-ticket, and the publish round trip. 580 tests.
@@ -2304,7 +2304,7 @@ for free, with nothing persisted client-side.
   branch, because a tracker's commit hooks and a reviewer both look for
   `PROJ-123`, and loses it in the session name, which has to satisfy
   `validate_name`. That needed `branch_prefix` in the config file and a
-  `branch` on the request -- the first work branch that is not `sbx/<name>`
+  `branch` on the request -- the first work branch that is not `hura/<name>`
   since increment 1 -- so `session::validate_branch` refuses what git would
   before it reaches a shell in a sandbox and a remote.
 
@@ -2333,9 +2333,9 @@ for free, with nothing persisted client-side.
   covers the Atlassian Document Format a Jira comment has to be and the
   transition lookup.
 
-  `sbx doctor` grew a check, because a tracker whose credential is not in the
+  `hura doctor` grew a check, because a tracker whose credential is not in the
   store produces an inbox **silently missing its rows**, which looks exactly
-  like having nothing assigned to you. `sbx tasks` prints the same inbox the
+  like having nothing assigned to you. `hura tasks` prints the same inbox the
   window shows, locally or through a server.
 
   Verified end to end against a tracker on loopback: three tickets read over the
@@ -2350,7 +2350,7 @@ for free, with nothing persisted client-side.
   **Claude Code hands out cost and rate limits in exactly one place: the status
   line.** No file, no endpoint -- a `statusLine` command it invokes on every
   render with a JSON payload on stdin. So the image bakes one in whose real job
-  is to keep the payload where a poll can read it, exactly as `sbx-status` does
+  is to keep the payload where a poll can read it, exactly as `hura-status` does
   for the hooks, and it prints the line the agent shows:
   `Opus 5 (1M context)  $0.07  5h 32%  ctx 2%`. The whole payload is kept and
   the reader takes what it recognises, because the shape belongs to Claude Code
@@ -2423,7 +2423,7 @@ for free, with nothing persisted client-side.
   Windows. Accepted: the Linux user has the TUI, and the fallback if it does
   bite is serving the same web UI to a browser, which the transport already
   allows.
-- **Version skew** between a shipped desktop app and a self-hosted `sbxd`.
+- **Version skew** between a shipped desktop app and a self-hosted `hurad`.
   Mitigation: the unauthenticated `/version` and a client that refuses politely.
 - **Scope.** This is several times the size of the TUI, and the TUI is the
   hedge: it keeps working the whole way through, so a stalled desktop app costs

@@ -8,7 +8,7 @@ name: Tag a release
 # It exists because doing it by hand does not survive contact with a busy
 # afternoon. `v0.3.0` was tagged at 4e37ca1 with every version file in the tree
 # still reading `0.2.0`, and the numbers are the whole contract: that release's
-# binary answers `sbx 0.2.0` to `--version`, so `sbx update` downloads it, asks
+# binary answers `hura 0.2.0` to `--version`, so `hura update` downloads it, asks
 # it what it is, sees it disagree with the release, and refuses the swap. The
 # published `latest` release is one no installed copy can update to.
 on:
@@ -89,7 +89,7 @@ jobs:
           fi
 
           # A tag is the one thing here that is meant to be immutable: it is
-          # what `sbx update` resolves and what an installed binary was built
+          # what `hura update` resolves and what an installed binary was built
           # from, so moving one silently changes what a version *means*.
           if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
             echo "::error::v${next} already exists; pick another version"
@@ -115,7 +115,7 @@ jobs:
           set -eu
 
           # The workspace package version, which every crate inherits with
-          # `version.workspace = true` -- so this one line moves `sbx`, `sbxd`
+          # `version.workspace = true` -- so this one line moves `hura`, `hurad`
           # and the four libraries at once.
           sed -i '/^\[workspace\.package\]/,/^\[/s/^version = ".*"/version = "'"$NEXT"'"/' Cargo.toml
 

@@ -41,6 +41,6 @@ policy: string | null,
  */
 providers: Array<string> | null, 
 /**
- * Whether `sbxd serve` may fetch a newer release in the background.
+ * Whether `hurad serve` may fetch a newer release in the background.
  */
 auto_update: boolean | null, };

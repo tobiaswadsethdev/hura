@@ -70,8 +70,8 @@ jobs:
         run: cargo build --workspace --release
 
   # The client half has to compile for Windows, because the desktop application
-  # runs there and `sbx-core` is underneath it. Only the client half: there is no
-  # gateway, no Docker daemon and no tmux on that side, so `sbxd` remains a
+  # runs there and `hura-core` is underneath it. Only the client half: there is no
+  # gateway, no Docker daemon and no tmux on that side, so `hurad` remains a
   # Linux program and is not built here.
   #
   # A check rather than a build, and only these three crates, because what it is
@@ -98,7 +98,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Check
-        run: cargo check -p sbx-client -p sbx-proto -p sbx-core --all-targets
+        run: cargo check -p hura-client -p hura-proto -p hura-core --all-targets
 
       # Its own workspace, so it needs its own invocation. `check` and not
       # `build`: what this is for is the build script and the Windows-only

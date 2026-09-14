@@ -7,7 +7,7 @@ back onto it.
 ```
    PROJ-123   jira    In Progress   Add the changelog        [ tools ▾ ] start
    AB#1234    ado     Active        Order backfill throws…   [ tools ▾ ] start
-   #45        github  open          Readme says the wrong…   [ sbx  ▾ ] start
+   #45        github  open          Readme says the wrong…   [ hura  ▾ ] start
 ```
 
 GitHub, Azure DevOps and Jira, read **on the server, over REST, with the
@@ -61,12 +61,12 @@ secret = "GITHUB_TOKEN"
 Then store the credentials:
 
 ```sh
-printf %s "$JIRA_API_TOKEN" | sbxd secret JIRA_API_TOKEN
-sbxd tasks                                 # the inbox, from a terminal
-sbx --server=<name> tasks                 # ... or from a client
+printf %s "$JIRA_API_TOKEN" | hurad secret JIRA_API_TOKEN
+hurad tasks                                 # the inbox, from a terminal
+hura --server=<name> tasks                 # ... or from a client
 ```
 
-`sbxd doctor` says when a tracker names a secret the store does not have, because
+`hurad doctor` says when a tracker names a secret the store does not have, because
 that produces an inbox **silently missing its rows** — which looks exactly like
 having nothing assigned to you.
 
@@ -90,7 +90,7 @@ from a name would be wrong in exactly the cases where it matters. So the row
 carries a project chooser: the tracker says what to do and you say where.
 
 `branch_prefix` applies to every session, not only the ones from a ticket — it
-is `sbx` unless the config file says otherwise, which is what every session's
+is `hura` unless the config file says otherwise, which is what every session's
 branch has been until now.
 
 ## The round trip

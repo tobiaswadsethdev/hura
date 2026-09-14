@@ -36,7 +36,7 @@ import type { View as PolicyView } from "./gen/View";
 export type ServerSummary = { name: string; address: string };
 
 /// What `connect` answers with: the server just paired, the list it is now in,
-/// and the version of the `sbxd` that answered -- see `Paired` in main.rs.
+/// and the version of the `hurad` that answered -- see `Paired` in main.rs.
 export type Paired = { server: ServerSummary; servers: ServerSummary[]; version: string };
 
 /// Hand-written because it is the bridge's own shape rather than a message: see
@@ -45,8 +45,8 @@ export type GitAnswer = { said: string; status: GitStatus };
 
 export const api = {
   servers: () => invoke<ServerSummary[]>("servers"),
-  // Pairing, which the CLI spells `sbx connect` and `sbx remotes --forget`.
-  // Same checks either way: both call `sbx_client::pair`.
+  // Pairing, which the CLI spells `hura connect` and `hura remotes --forget`.
+  // Same checks either way: both call `hura_client::pair`.
   connect: (pairing: string, name: string | null) =>
     invoke<Paired>("connect", { pairing, name }),
   forget: (name: string) => invoke<ServerSummary[]>("forget", { name }),
@@ -85,7 +85,7 @@ export const api = {
     invoke<string[]>("kill_shell", { server, name, tmux }),
 
   // The review. Kept on the server, per session, so an unsent one survives the
-  // window closing -- see `sbx_core::comments`.
+  // window closing -- see `hura_core::comments`.
   comments: (server: string, name: string) => invoke<Comment[]>("comments", { server, name }),
   comment: (server: string, name: string, comment: NewComment) =>
     invoke<Comment[]>("comment", { server, name, comment }),

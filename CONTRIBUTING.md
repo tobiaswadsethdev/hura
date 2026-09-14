@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for looking. `sbx` is early and small, which makes it a good size to
+Thanks for looking. `hura` is early and small, which makes it a good size to
 contribute to: the whole thing is two crates, the test suite runs in under a
 second, and almost all of it can be worked on without an OpenShell gateway
 anywhere near your machine.
@@ -27,15 +27,15 @@ cargo build
 cargo test --workspace                                    # 539 tests
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
-cargo run -p sbxd -- doctor                               # the CLI, from the tree
-cargo run -p sbxd -- serve                                # the server, from the tree
+cargo run -p hurad -- doctor                               # the CLI, from the tree
+cargo run -p hurad -- serve                                # the server, from the tree
 ```
 
 CI runs exactly those last three checks on the **newest stable**, so
 `rustup update stable` before pushing is what makes a green local run a green
 pull request: clippy gains lints with each release, and one of them can turn CI
 red on code nobody touched. The gateway contract lives in ignored tests that need a live gateway
-and Docker, and creates and deletes real sandboxes labelled `sbx.test`:
+and Docker, and creates and deletes real sandboxes labelled `hura.test`:
 
 ```sh
 cargo test -p openshell-client -- --ignored --test-threads=1
@@ -54,12 +54,12 @@ The code has a voice, and matching it is most of what review here is about.
   without losing information, delete it.
 * **Tests stay hermetic.** A test that needs a gateway, Docker or a network goes
   behind `#[ignore]`. Pane classification is tested against captured specimens
-  in `crates/sbx-core/tests/panes/`; add a specimen rather than a mock when you are
+  in `crates/hura-core/tests/panes/`; add a specimen rather than a mock when you are
   teaching it a new agent state.
 * **No I/O on a render path.** Gateway calls are subprocess round trips costing
-  hundreds of milliseconds. They belong behind `sbx-core`, reached over `/rpc`;
+  hundreds of milliseconds. They belong behind `hura-core`, reached over `/rpc`;
   nothing that paints may make one.
-* **Failures name their fix.** `sbxd doctor` checks and error messages both say
+* **Failures name their fix.** `hurad doctor` checks and error messages both say
   what to do about the problem, not just that there is one. A misspelled config
   key is named back at the user; a stale provider is reported before it becomes
   a clone failure three steps later.
@@ -89,7 +89,7 @@ increments.
 
 ## Releasing
 
-Releases are what `install.sh` and `sbxd update` install, and both find them by
+Releases are what `install.sh` and `hurad update` install, and both find them by
 name. Cutting one is a dispatch of **Tag a release**
 (`.github/workflows/tag.yml`) from the Actions tab, with `patch`, `minor` or
 `major` -- or an exact version if the increment is not the point. It works out
@@ -109,7 +109,7 @@ cargo workspaces:
 | `apps/desktop/src-tauri/tauri.conf.json` | what Windows shows in Add or Remove Programs |
 
 Bumping them by hand is the reason this is a workflow. `v0.3.0` was tagged with
-all seven still reading `0.2.0`, and `sbxd update` refuses a release whose binary
+all seven still reading `0.2.0`, and `hurad update` refuses a release whose binary
 reports a different version than the tag claims -- so the current `latest` is
 one no installed copy can update to. The workflow writes all seven from one
 number and refuses to tag if the diff touches anything else.
@@ -129,24 +129,24 @@ to do it.
 
 `.github/workflows/release.yml` builds a static musl binary for
 `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, packs each as
-`sbxd-<tag>-<target>.tar.gz` with `sbxd` flat at the root, and publishes them
+`hurad-<tag>-<target>.tar.gz` with `hurad` flat at the root, and publishes them
 with one `SHA256SUMS` covering both. Three files have to agree about that name
 and about what is inside the archive -- the workflow, `install.sh` and
-`crates/sbx-core/src/update.rs` -- and a test in `update.rs` fails if they ever
+`crates/hura-core/src/update.rs` -- and a test in `update.rs` fails if they ever
 stop agreeing, so a rename in one of them is caught locally rather than by
 someone's broken install.
 
-The asset was `sbx-<tag>-<target>.tar.gz` until v0.4.0, and carried `sbx`.
-Nothing installed before then can update across that rename: `sbx update`
-replaces the binary it is running, and there is no longer an `sbx` to replace
+The asset was `hura-<tag>-<target>.tar.gz` until v0.4.0, and carried `hura`.
+Nothing installed before then can update across that rename: `hura update`
+replaces the binary it is running, and there is no longer an `hura` to replace
 it with. It fails saying the release has no asset by the name it wants, which
 is true.
 
 **The way across is one `install.sh`, from any release before v0.4.0.** There
-is no update path that crosses it. The `sbxd` that v0.3.1 installs is the
+is no update path that crosses it. The `hurad` that v0.3.1 installs is the
 server alone -- `update` did not move into it until v0.4.0 -- so it cannot
 fetch its own successor either. What v0.3.1 is for is narrower and still worth
-having: it is the last release `sbx update` can reach at all, so nobody is left
+having: it is the last release `hura update` can reach at all, so nobody is left
 sitting on the v0.3.0 that no installed copy could update to.
 
 Until the first tag exists there is nothing to download, and both installers
@@ -182,7 +182,7 @@ without the other as no key at all.
 
 ## Reporting bugs
 
-The single most useful thing to include is `sbxd doctor` output -- it captures
+The single most useful thing to include is `hurad doctor` output -- it captures
 the versions and half the environment problems at once. The issue templates ask
 for that, plus what you expected and what happened instead.
 

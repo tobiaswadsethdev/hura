@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use openshell_client::{CliClient, CreateOpts, Error, OpenShell, Phase};
 
-const TEST_LABEL: &str = "sbx.test";
+const TEST_LABEL: &str = "hura.test";
 
 fn client() -> CliClient {
     CliClient::new()
@@ -28,7 +28,7 @@ fn gateway_is_connected() {
 #[test]
 #[ignore = "needs a live gateway"]
 fn missing_sandbox_is_not_found() {
-    match client().get("sbx-definitely-does-not-exist") {
+    match client().get("hura-definitely-does-not-exist") {
         Err(Error::NotFound(_)) => {}
         other => panic!("expected NotFound, got {other:?}"),
     }
@@ -38,7 +38,7 @@ fn missing_sandbox_is_not_found() {
 #[ignore = "needs a live gateway"]
 fn create_exec_delete_roundtrip() {
     let c = client();
-    let name = "sbx-livetest";
+    let name = "hura-livetest";
 
     // Leftover from an interrupted run would make create fail.
     let _ = c.delete(name);

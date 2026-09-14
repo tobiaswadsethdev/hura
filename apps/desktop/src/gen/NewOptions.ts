@@ -24,7 +24,7 @@ toolchains: Array<ToolchainChoice>, providers: Array<ProviderChoice>,
  */
 providers_error: string | null, 
 /**
- * The policy `sbx new` would use here, so a client can preselect what the
+ * The policy `hura new` would use here, so a client can preselect what the
  * command line would have chosen.
  */
 default_policy: string, 

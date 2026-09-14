@@ -1,6 +1,6 @@
 //! A typed client for the `openshell` CLI.
 //!
-//! Everything the rest of `sbx` knows about OpenShell goes through the
+//! Everything the rest of `hura` knows about OpenShell goes through the
 //! [`OpenShell`] trait. OpenShell is a fast-moving v0.0.x project, so keeping
 //! the CLI's surface behind one trait means version churn lands in exactly one
 //! file, and lets the gRPC API replace the subprocess later without touching
@@ -463,7 +463,7 @@ impl CliClient {
     /// `subject` is the sandbox the call is about, and `None` for the calls that
     /// are about the gateway itself. It is passed rather than recovered from
     /// `display` because the name is not reliably the last word of one:
-    /// `policy get sbx-a --full` and `logs sbx-a -n 50` end in a flag and a
+    /// `policy get hura-a --full` and `logs hura-a -n 50` end in a flag and a
     /// count, and both used to produce ``sandbox `--full` not found``.
     fn run_checked<I, S>(&self, args: I, display: &str, subject: Option<&str>) -> Result<ExecOutput>
     where
@@ -522,7 +522,7 @@ impl CliClient {
     ///
     /// For callers that cannot use a [`Command`] -- spawning under a pty needs
     /// the program and its arguments separately. Kept as the one definition of
-    /// what an interactive exec *is*, so the embedded terminal and `sbx attach`
+    /// what an interactive exec *is*, so the embedded terminal and `hura attach`
     /// cannot end up talking to the gateway differently.
     ///
     /// Inherent as well as on the trait, because [`Self::interactive_exec`]
@@ -702,8 +702,8 @@ mod tests {
         "created_at": "2026-08-21 14:15:56",
         "current_policy_version": 1,
         "id": "edfedc2d-9184-42ae-b969-846f9dea410a",
-        "labels": { "sbx.repo": "demo", "sbx.session": "probe" },
-        "name": "sbx-probe",
+        "labels": { "hura.repo": "demo", "hura.session": "probe" },
+        "name": "hura-probe",
         "phase": "Ready",
         "resource_version": 7,
         "workspace": "default"
@@ -746,11 +746,11 @@ mod tests {
         let boxes: Vec<Sandbox> = raw.into_iter().map(Sandbox::from).collect();
         assert_eq!(boxes.len(), 1);
         let s = &boxes[0];
-        assert_eq!(s.name, "sbx-probe");
+        assert_eq!(s.name, "hura-probe");
         assert_eq!(s.phase, Phase::Ready);
         assert_eq!(s.workspace, "default");
         assert_eq!(
-            s.labels.get("sbx.session").map(String::as_str),
+            s.labels.get("hura.session").map(String::as_str),
             Some("probe")
         );
     }
@@ -823,7 +823,7 @@ mod tests {
         "version": 1
       },
       "policy_source": "sandbox",
-      "sandbox": "sbx-probe",
+      "sandbox": "hura-probe",
       "scope": "sandbox",
       "status": "effective",
       "version": 1

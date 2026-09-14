@@ -39,8 +39,8 @@ running sandbox) dies when the last shell exits.
 
 ```sh
 openshell sandbox create \
-  --name sbx-demo \
-  --label sbx.session=demo \
+  --name hura-demo \
+  --label hura.session=demo \
   --policy policies/feature-work.yaml \
   --no-auto-providers --no-tty \
   -- sh -c 'echo sandbox-ready'
@@ -91,9 +91,9 @@ policy pane.
 The v0 attach model, verified working:
 
 ```sh
-tmux new-session -d -s sbx-demo -x 200 -y 50 "openshell sandbox connect sbx-demo"
-tmux capture-pane -p -t sbx-demo      # -> preview pane content + status scraping
-tmux send-keys    -t sbx-demo 'id' Enter   # -> inject the initial task prompt
+tmux new-session -d -s hura-demo -x 200 -y 50 "openshell sandbox connect hura-demo"
+tmux capture-pane -p -t hura-demo      # -> preview pane content + status scraping
+tmux send-keys    -t hura-demo 'id' Enter   # -> inject the initial task prompt
 ```
 
 Takes ~10s for the SSH session to come up. `openshell sandbox ssh-config <name>`
@@ -183,7 +183,7 @@ None of these are in the docs; each was found by hitting it.
 | Sandbox phases | `Provisioning`, `Starting`, `Ready`, `Stopping`, `Stopped`, `Deleting`, `Error`, `Unknown` |
 
 The 19-character sandbox-name cap is the tightest constraint in the system. With
-an `sbx-` prefix it leaves 15 characters for a session name, which is why names
+an `hura-` prefix it leaves 15 characters for a session name, which is why names
 are slugified by dropping whole trailing words rather than truncating.
 
 The phase list came from `SANDBOX_PHASE_*` strings in the gateway binary. It
@@ -195,13 +195,13 @@ deleted session keep reporting whatever state it last had.
 
 The **sandbox is the source of truth**, not the local cache:
 
-* `/sandbox/.sbx/meta.json` inside each sandbox holds the full session record,
+* `/sandbox/.hura/meta.json` inside each sandbox holds the full session record,
   rewritten on every state change
-* labels (`sbx.managed=true`, `sbx.session=<name>`) carry identity only, since
+* labels (`hura.managed=true`, `hura.session=<name>`) carry identity only, since
   label values cannot hold a URL or a branch
-* `~/.config/sbx/sessions.json` is a cache and can be deleted at any time
+* `~/.config/hura/sessions.json` is a cache and can be deleted at any time
 
-Verified: deleting the cache and running `sbxd ls` re-adopts every live session
+Verified: deleting the cache and running `hurad ls` re-adopts every live session
 by reading the record back out of each sandbox.
 
 ## Running the agent inside the sandbox
@@ -242,7 +242,7 @@ an orphaned `tmux: client` is left behind. Other sandboxes are unaffected, so
 the blast radius is one session.
 
 A clean detach (`Ctrl-b d`) never triggers it: the exec exits 0 and the next
-exec works immediately. So `sbxd` never kills the attach child -- it waits for
+exec works immediately. So `hurad` never kills the attach child -- it waits for
 the user to detach -- and attaches with `-d` so a client stranded by an earlier
 crash is evicted rather than shared.
 

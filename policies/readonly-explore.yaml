@@ -2,7 +2,7 @@
 #
 # For pointing an agent at a repository you do not want it changing anything
 # outside of, and do not want it talking to the internet from. The clone still
-# happens -- `sbx new` seeds the repository before the agent starts -- so git
+# happens -- `hura new` seeds the repository before the agent starts -- so git
 # keeps its egress; everything else, including the agent, has none.
 #
 # That makes this the one template where the agent cannot reach its own model

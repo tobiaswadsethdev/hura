@@ -1,6 +1,6 @@
 # The desktop application
 
-A window onto an `sbxd`: the sessions it is running, and what is true about each
+A window onto an `hurad`: the sessions it is running, and what is true about each
 one. It talks to the server the CLI talks to, over the same protocol, and it is
 built out of the same types.
 
@@ -10,19 +10,19 @@ built out of the same types.
    +-------------+-------------+
                  |  tauri commands
    +-------------+-------------+
-   |  sbx-desktop (Rust)       |   sbx-client: one pinned TLS connection
+   |  hura-desktop (Rust)       |   hura-client: one pinned TLS connection
    +-------------+-------------+
                  |  https, one token
    +-------------+-------------+
-   |  sbxd                     |
+   |  hurad                     |
    +---------------------------+
 ```
 
-**The webview never speaks to `sbxd`.** It cannot: the certificate is pinned by
+**The webview never speaks to `hurad`.** It cannot: the certificate is pinned by
 fingerprint, and `fetch` has no say in which certificate it will accept. Asking
 someone to click through a warning is how a self-signed server quietly becomes
 an unauthenticated one. So the connection is made on the Rust side, by
-`sbx-client` -- the same client `sbx --server` uses -- and the webview calls
+`hura-client` -- the same client `hura --server` uses -- and the webview calls
 commands.
 
 ## Connecting it to a server
@@ -31,8 +31,8 @@ commands.
 window asks. On the machine with the sandboxes:
 
 ```sh
-sbxd serve                              # or under systemd; see server.md
-sbxd pair desktop --host 127.0.0.1      # ... or the address the window will dial
+hurad serve                              # or under systemd; see server.md
+hurad pair desktop --host 127.0.0.1      # ... or the address the window will dial
 ```
 
 `pair` prints one line -- an address, a token, and the fingerprint of the
@@ -44,7 +44,7 @@ something is paired. The name is optional and defaults to the host.
    +---------------------------------------------------------------+
    |  [=] servers                                              x   |
    |                                                               |
-   |  pairing   sbx://box.lan:17671/8f3c…#d8fa…                    |
+   |  pairing   hura://box.lan:17671/8f3c…#d8fa…                    |
    |  name      work                                               |
    |                                                    [connect]  |
    |                                                               |
@@ -53,21 +53,21 @@ something is paired. The name is optional and defaults to the host.
    +---------------------------------------------------------------+
 ```
 
-`sbxd connect 'sbx://…'` in a terminal does the same thing, and a server paired
-either way appears in both -- they are one saved list (`~/.local/state/sbx/remotes.json`,
-or `%LOCALAPPDATA%\sbx\remotes.json` on Windows) and one implementation:
-`sbx_client::pair`, called by the command and by the screen. Two implementations of "is this a
+`hurad connect 'hura://…'` in a terminal does the same thing, and a server paired
+either way appears in both -- they are one saved list (`~/.local/state/hura/remotes.json`,
+or `%LOCALAPPDATA%\hura\remotes.json` on Windows) and one implementation:
+`hura_client::pair`, called by the command and by the screen. Two implementations of "is this a
 server I can talk to" would be one implementation and one place a mistake is
 silent.
 
-**The screen is there because the machine holding the window may have no `sbxd`
+**The screen is there because the machine holding the window may have no `hurad`
 on it.** On Windows there is none to install: the CLI drives Docker, tmux and a
 gateway, which are on the Linux side. Requiring a terminal to pair would have
 made the Windows client depend on a program that cannot run there.
 
 What it does with the string is what `connect` does. It parses it, dials the
 address, accepts the certificate only if it matches the fingerprint the string
-carries, checks that what answered is an `sbxd` speaking this protocol version
+carries, checks that what answered is an `hurad` speaking this protocol version
 -- and saves nothing until all of that has happened. A pairing string that names
 nothing fails there, in front of you, rather than on every request afterwards.
 What comes back on success is the server's own version, which is the one thing
@@ -79,13 +79,13 @@ was pasted.
 
 **`--host` is the one to get right.** Without it the string carries the server's
 own hostname, which is often not what the client should dial and on a
-Debian-family box resolves to `127.0.1.1` while `sbxd` is bound to `127.0.0.1`
+Debian-family box resolves to `127.0.1.1` while `hurad` is bound to `127.0.0.1`
 -- `Connection refused` from a server that is running perfectly well.
 [server.md](server.md) has the two-machine case in full, and the WSL case, where
 the address depends on how WSL is networked.
 
 **forget** drops the token this machine holds and nothing on the server. The
-server stops accepting one when `sbxd revoke` says so, which is the half that
+server stops accepting one when `hurad revoke` says so, which is the half that
 matters if a pairing string has been somewhere it should not.
 
 ## Running it
@@ -106,7 +106,7 @@ npm run tauri dev
 **Run it that way rather than running the binary.** A development build loads
 the frontend from Vite's dev server rather than from the bundle, and `npm run
 tauri dev` is what starts that server. Launching `src-tauri/target/debug/
-sbx-desktop` on its own gives you a window that says `Operation was cancelled`,
+hura-desktop` on its own gives you a window that says `Operation was cancelled`,
 or nothing at all -- which reads exactly like a broken frontend and is not one.
 That mistake cost an afternoon; it is written here so it costs nobody else one.
 
@@ -180,11 +180,11 @@ never represent it.
 A worktree records the project it was started in rather than being matched back
 to one by URL, because two projects may share a URL: two checkouts of one
 repository is a normal thing to have, and the worktree would otherwise belong to
-both. Anything with no project -- everything `sbxd new` creates, since the
+both. Anything with no project -- everything `hurad new` creates, since the
 terminal has none -- is grouped by clone URL at the bottom of the tree rather
 than hidden. Forgetting a project leaves its worktrees alive and moves them
 there; a sandbox is a real thing with an agent in it, and removing one is
-`sbxd rm`'s job, said out loud.
+`hurad rm`'s job, said out loud.
 
 **A worktree with no sandbox around it says so on its row.** The `worktree`
 badge beside the name means the session runs on the server with the server's own
@@ -387,7 +387,7 @@ it, runs the installer and relaunches; *later* dismisses the bar for this run.
 **It asks rather than acting.** What arrives is verified against a signature
 made when the release was built, so the risk was never what gets installed --
 it is *when*. A window watching four agents is a window somebody is using, and
-replacing it mid-session is the same mistake [`sbxd` refuses to make with its
+replacing it mid-session is the same mistake [`hurad` refuses to make with its
 own binary](install.md#updating-without-being-asked). The difference between
 the two is only that a window has somebody in front of it to ask, and a server
 does not.
@@ -471,9 +471,9 @@ the only structure the screen has -- because it is the only one that matters: **
 the answer.**
 
 The top half writes the *server's* config file: the branch prefix, the base
-branch, the policy and providers a new session starts with, and whether `sbxd`
+branch, the policy and providers a new session starts with, and whether `hurad`
 fetches releases in the background. Those belong to the server because they hold
-for every session on it, including the ones `sbxd new` starts from a terminal --
+for every session on it, including the ones `hurad new` starts from a terminal --
 a window keeping its own branch prefix would be a second convention that
 disagrees with the first, and the disagreement would show up as a branch name
 nobody's commit hooks recognise. The screen says which file it writes, because
@@ -523,7 +523,7 @@ it. Over the card it would cover the age and the diff stat on exactly the rows
 worth acting on; taking width only on hover would reflow the row as the pointer
 arrived, which is how a destroy button gets pressed by accident.
 
-`sbxd rm <name>` is the same operation from the command line, and it is the same
+`hurad rm <name>` is the same operation from the command line, and it is the same
 function underneath -- so a record cannot be left behind by one that the other
 would then report as a session whose sandbox has died.
 
@@ -551,7 +551,7 @@ chooser suggests a choice that has been taken away when the truth is there is
 nothing to apply one to. The command line refuses those flags outright for the
 same reason.
 
-Nothing in the form decides anything `sbxd new` decides differently, and that is
+Nothing in the form decides anything `hurad new` decides differently, and that is
 enforced by where the decisions live rather than by care:
 
 * **The name is derived by the server** when the field is left blank, by the
@@ -675,7 +675,7 @@ any line of a file's diff to write one; it is marked in the margin, and the
 review waits until it is sent.
 
 They live in the diff editor now rather than in a unified text pane, and nothing
-about the review had to change to move them: `sbx_core::comments` has always
+about the review had to change to move them: `hura_core::comments` has always
 stored `{file, line, excerpt}`, which is already per file. That is the reward
 for having stored the excerpt rather than a line identity -- the anchor did not
 depend on which rendering of the diff it was written against.
@@ -791,7 +791,7 @@ fine. Every row simply had no height. And ruling out WebKit's sandbox,
 nothing, because the failure was never in any of them.
 
 Verified in the running application, not only in a harness: against a live
-`sbxd` and a real sandbox, the pane draws the sandbox's shell, renders colour
+`hurad` and a real sandbox, the pane draws the sandbox's shell, renders colour
 from `git log`, paints bytes as they arrive, sends what is typed into it, and
 draws `README HEAD 7fd1a60 EIT013 pqy|{[()]}` with every glyph whole. `tput
 cols` inside the sandbox reads **113**, matching `tmux list-clients` -- so the
@@ -811,7 +811,7 @@ XWayland surface and cannot see a Wayland one.
 If you do capture it that way, capture the *window*, not a region of the screen:
 
 ```sh
-WID=$(xdotool search --name '^sbx$' | head -1)
+WID=$(xdotool search --name '^hura$' | head -1)
 ffmpeg -f x11grab -window_id $WID -i $DISPLAY -frames:v 1 -y shot.png
 ```
 

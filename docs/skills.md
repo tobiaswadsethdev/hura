@@ -27,7 +27,7 @@ fail on an over-long command line -- at that size something has a virtualenv in
 it by accident.
 
 A skill that is missing at create time costs the skill, not the session: it is a
-warning, and `sbxd doctor` says so beforehand, since a session that quietly comes
+warning, and `hurad doctor` says so beforehand, since a session that quietly comes
 up without one looks like the agent forgetting how to do something it used to
 know.
 
@@ -38,10 +38,10 @@ know.
 ## When the sessions are on another machine
 
 "The host" means one machine until there is a server, and then it means two: the
-sessions run where `sbxd` is, and your skills are on the machine with the window
+sessions run where `hurad` is, and your skills are on the machine with the window
 on it. A path in the server's config file cannot reach them.
 
-So the server keeps a **library** at `$XDG_DATA_HOME/sbx/skills`, and the window
+So the server keeps a **library** at `$XDG_DATA_HOME/hura/skills`, and the window
 pushes this machine's own `~/.claude/skills` into it. A session is given both --
 the paths in the server's config file, and everything in the library those do not
 already name.
@@ -62,7 +62,7 @@ refused and nothing is left behind.
 From the server, to see what has arrived:
 
 ```sh
-sbxd skills          # what the library holds, and where each came from
+hurad skills          # what the library holds, and where each came from
 ```
 
 The library is a cache of a directory on another machine, so removing an entry

@@ -20,11 +20,11 @@ cannot tell an agent from anything else JavaScript in the sandbox.
 
 Name them in the config file, one table each. A table has either a `url` -- a
 server somebody else operates -- or an `image`, which makes it **managed**:
-`sbxd` starts the container, restarts it, holds its secrets and can say what it
+`hurad` starts the container, restarts it, holds its secrets and can say what it
 is doing.
 
 ```toml
-# Managed: described here, run by sbxd.
+# Managed: described here, run by hurad.
 [[mcp]]
 name    = "jira"
 image   = "ghcr.io/sooperset/mcp-atlassian:latest"
@@ -41,7 +41,7 @@ transport = "http"                        # or "sse"; http is the default
 ```
 
 **A managed entry has no url, and that is the point.** It is reachable at
-`http://sbx-mcp-<name>:<port>/mcp` because the thing that named the container is
+`http://hura-mcp-<name>:<port>/mcp` because the thing that named the container is
 the thing that joined it to the gateway's network -- so the two mistakes a
 hand-written url invites, a name no sandbox can resolve and a `localhost` that
 means the sandbox itself, are not reachable from there. Nothing is published on
@@ -54,7 +54,7 @@ until an agent reports a dead tool.
 
 ### Secrets
 
-The values live on the server, in `$XDG_STATE_HOME/sbx/secrets.json`, 0600 --
+The values live on the server, in `$XDG_STATE_HOME/hura/secrets.json`, 0600 --
 beside the pairing tokens and the TLS key, and protected exactly as well. The
 config file holds only the *names*.
 
@@ -63,14 +63,14 @@ one, and the protocol carries names and whether each is set; there is no request
 that returns a value and there will not be one. From the server itself:
 
 ```sh
-printf %s "$JIRA_API_TOKEN" | sbxd secret JIRA_API_TOKEN   # stdin, not an argument
-sbxd secrets                                               # the names, never the values
-sbxd secret JIRA_API_TOKEN --forget
+printf %s "$JIRA_API_TOKEN" | hurad secret JIRA_API_TOKEN   # stdin, not an argument
+hurad secrets                                               # the names, never the values
+hurad secret JIRA_API_TOKEN --forget
 ```
 
 Stdin rather than an argument on purpose: an argument lands in the shell history
 and in `ps` output, and this is a credential a container will hold for months.
-The same care applies when `sbxd` starts the container -- the value is put in the
+The same care applies when `hurad` starts the container -- the value is put in the
 child's environment and the argument list carries only the name.
 
 This is not encryption at rest, and calling a file `secrets.json` invites the
@@ -80,16 +80,16 @@ would be theatre.
 
 ### Starting and stopping
 
-`sbxd` brings every managed container up when it starts, and before seeding a
+`hurad` brings every managed container up when it starts, and before seeding a
 session. Anything already running is left alone -- restarting it would drop the
 agent connections of every live session using it. The **integrations** screen in
 the window has the buttons; a headless server has the same thing:
 
 ```sh
-sbxd mcp                                # the catalog, and what each one is doing
-sbxd mcp --action start   jira          # bring one up
-sbxd mcp --action restart jira          # recreate it from the catalog entry
-sbxd mcp --action stop    jira
+hurad mcp                                # the catalog, and what each one is doing
+hurad mcp --action start   jira          # bring one up
+hurad mcp --action restart jira          # recreate it from the catalog entry
+hurad mcp --action stop    jira
 ```
 
 `restart` recreates the container from the config file rather than restarting the
@@ -167,7 +167,7 @@ them. A session records the servers it was created with, and the facts pane
 lists them by name; changing the file changes the next session, not a running
 one.
 
-`sbxd doctor` checks each of them, because a container that is not running -- or
+`hurad doctor` checks each of them, because a container that is not running -- or
 one running but not attached to the gateway's network -- produces a session whose
 agent reports its tools as **needing authentication**, which sends you looking in
 entirely the wrong direction:
@@ -190,7 +190,7 @@ sharp buy nothing here -- a server that can transition Jira issues means a
 sandboxed agent can transition Jira issues. That is a fine trade for Jira and
 Azure DevOps, whose blast radius is a work item. It is a terrible one for a
 filesystem or Docker MCP server on the host, which would be a straight sandbox
-escape, and sbx cannot tell the difference for you.
+escape, and hura cannot tell the difference for you.
 
 The transport is not a problem the way it might look: streaming responses are
 not buffered by the inspecting proxy. An SSE stream emitting an event a second

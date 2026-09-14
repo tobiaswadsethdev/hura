@@ -1,25 +1,25 @@
 # Deliberately its own workspace, not a member of the one at the repository
 # root. `cargo build --workspace` there would otherwise need webkit2gtk, gtk3
-# and libsoup present on every machine that builds `sbx` -- including CI, which
+# and libsoup present on every machine that builds `hura` -- including CI, which
 # has no business installing a GUI toolkit to check that a session store
 # reconciles.
 [workspace]
 
 [package]
-name = "sbx-desktop"
+name = "hura-desktop"
 version = "0.9.2"
 edition = "2024"
 rust-version = "1.89"
 license = "Apache-2.0"
-description = "The sbx desktop application"
+description = "The hura desktop application"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-sbx-core = { path = "../../../crates/sbx-core" }
-sbx-proto = { path = "../../../crates/sbx-proto" }
-sbx-client = { path = "../../../crates/sbx-client" }
+hura-core = { path = "../../../crates/hura-core" }
+hura-proto = { path = "../../../crates/hura-proto" }
+hura-client = { path = "../../../crates/hura-client" }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -30,3 +30,10 @@ tauri-plugin-notification = "2.4.0"
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# The same trade the root workspace makes, stated a second time because this is
+# deliberately its own workspace -- see the comment at the top -- and a
+# `[profile.dev]` at the root does not reach a crate outside it. Easy to fix one
+# half and wonder why the other keeps growing.
+[profile.dev]
+debug = "line-tables-only"

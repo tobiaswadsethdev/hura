@@ -20,7 +20,7 @@ to ask:
 executes what it considers safe, rather than stopping for every edit
 (`acceptEdits` stops for everything that is not one) or not asking at all
 (`bypassPermissions`). Claude Code's own advice is to use it "only in isolated
-environments", which is the one thing sbx can actually promise -- and it is the
+environments", which is the one thing hura can actually promise -- and it is the
 whole reason to run several agents at once, since an agent that stops on the
 first edit is an agent you are still babysitting. `Shift+Tab` inside a session
 changes it, and `/model` changes the model, for that session.
@@ -30,21 +30,21 @@ traffic behind them, and a denial with nothing worth investigating behind it is
 noise in the events pane. With them set, a session that clones, edits and answers
 produces a feed with no denials in it at all.
 
-`sbxd image build` installs the newest Claude Code release rather than whatever
+`hurad image build` installs the newest Claude Code release rather than whatever
 the community base image happens to have frozen -- it shipped 2.1.143 while
 2.1.246 was current, and an agent cannot upgrade itself from inside a sandbox
 with no writable install path and no route to the download service. The version
 is resolved on the host and passed in as a build arg, so a rebuild really does
 fetch what is newest instead of being answered from a cached layer, and the
 download is checked against the release manifest's SHA-256.
-`--build-arg CLAUDE_VERSION=2.1.246` pins a specific one. `sbxd doctor` reports
+`--build-arg CLAUDE_VERSION=2.1.246` pins a specific one. `hurad doctor` reports
 what the built image carries and warns when a newer release is out.
 
 ## Toolchains
 
 The image above is the *base*, and what a session with no toolchain runs. A
-session that has to compile something runs a variant of it -- `sbx-base:dotnet`,
-`sbx-base:dotnet-rust` -- built by layering the toolchain onto this image, so
+session that has to compile something runs a variant of it -- `hura-base:dotnet`,
+`hura-base:dotnet-rust` -- built by layering the toolchain onto this image, so
 docker shares the several gigabytes underneath and a Rust session does not carry
 the .NET SDK.
 
@@ -60,8 +60,8 @@ Claude Code hands out what it knows about cost and rate limits in exactly one
 place: the `statusLine` command it invokes on every render, with a JSON payload
 on stdin. There is no file it keeps them in and no endpoint to ask.
 
-So the image bakes in `sbx-usage` and points `statusLine` at it. It writes the
-payload to `/sandbox/.sbx/usage.json`, where the same poll that reads the hook
+So the image bakes in `hura-usage` and points `statusLine` at it. It writes the
+payload to `/sandbox/.hura/usage.json`, where the same poll that reads the hook
 file picks it up, and prints the line the agent shows:
 
 ```

@@ -262,7 +262,7 @@ function Section({
 /// One MCP server: what it is, what it is doing, and what to press.
 ///
 /// The state and the words come from the server -- `mcp::Status` -- so this and
-/// `sbxd mcp` and `sbx doctor` cannot disagree about whether something is
+/// `hurad mcp` and `hura doctor` cannot disagree about whether something is
 /// running.
 function McpRow({
   status,

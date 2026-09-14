@@ -24,7 +24,7 @@ backend: Kind,
  */
 project: string | null, 
 /**
- * `None` to have one derived from the task, which is what `sbx new`
+ * `None` to have one derived from the task, which is what `hura new`
  * without `--name` does. Derived here rather than in a client, because a
  * second implementation of the slug rule is a second answer to what a
  * session is called.

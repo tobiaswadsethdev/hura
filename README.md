@@ -1,6 +1,6 @@
-# sbx
+# hura
 
-[![CI](https://github.com/tobiaswadsethdev/sbx/actions/workflows/ci.yml/badge.svg)](https://github.com/tobiaswadsethdev/sbx/actions/workflows/ci.yml)
+[![CI](https://github.com/tobiaswadsethdev/hura/actions/workflows/ci.yml/badge.svg)](https://github.com/tobiaswadsethdev/hura/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -24,7 +24,7 @@ The window is a workspace: projects containing worktrees, the agent's terminal
 and extra shells beside it, the working copy in a file tree, diffs in an editor
 with comments that go back to the agent, and git on the right.
 
-![The sbx workspace: projects and their worktrees on the left, the agent's terminal in the middle, the working copy on the right](docs/images/workspace.png)
+![The hura workspace: projects and their worktrees on the left, the agent's terminal in the middle, the working copy on the right](docs/images/workspace.png)
 
 **The isolation is not a claim, it is a pane.** Every allow and deny the gateway
 made, newest first, each tagged with the rule that decided it. At the top, what
@@ -40,11 +40,11 @@ endpoint, the binaries it is granted to, and how much of it they get:
 ## What it does
 
 - **One sandbox per session.** The agent clones the repository inside it and
-  works on `sbx/<name>`; your worktree is never handed over.
+  works on `hura/<name>`; your worktree is never handed over.
 - **Credentials the sandbox never sees.** OpenShell providers hold the tokens
   and the gateway substitutes them into outgoing requests.
 - **Isolation you can look at.** The two panes above are one click away in the
-  window, and `sbxd policy` / `sbxd events` on the command line. A rule can be
+  window, and `hurad policy` / `hurad events` on the command line. A rule can be
   widened for a running session from either. This is the part an ADE built on
   git worktrees has no equivalent for.
 - **Several agents at once, without babysitting.** A session blocked on a
@@ -59,9 +59,9 @@ endpoint, the binaries it is granted to, and how much of it they get:
   each sandbox -- pushed from the machine you are sitting at, so editing one
   reaches the next session even when the sessions are somewhere else. MCP
   servers run on the host, holding their own credentials, and are granted
-  per-binary like everything else; `sbxd` can own their containers and their
+  per-binary like everything else; `hurad` can own their containers and their
   secrets, with a screen that says what each one is doing.
-- **Publish from inside.** `sbxd publish` pushes the branch and opens a pull
+- **Publish from inside.** `hurad publish` pushes the branch and opens a pull
   request on GitHub or Azure DevOps without the token ever reaching your host.
 - **An inbox, and the loop back to it.** What GitHub, Azure DevOps and Jira say
   is assigned to you, read by the server; one button turns a ticket into a
@@ -71,10 +71,10 @@ endpoint, the binaries it is granted to, and how much of it they get:
   under, and the base branch, policy and credentials a new session starts with,
   are edited on the settings screen and written into the server's own config
   file -- so `tobias/PROJ-123-add-the-changelog` is what a session is called
-  whether it was started here or from `sbxd new`. The comments that file was
+  whether it was started here or from `hurad new`. The comments that file was
   created with survive the edit, because they are most of what it is for. See
   [docs/configuration.md](docs/configuration.md).
-- **The window can be somewhere else.** `sbxd` serves its sessions over one
+- **The window can be somewhere else.** `hurad` serves its sessions over one
   authenticated TLS port, so the machine you sit at needs no gateway, no Docker
   and no tmux of its own -- a Linux server inside WSL with the window out on
   Windows is the case it was built for. See [docs/server.md](docs/server.md).
@@ -93,23 +93,23 @@ newer, but only to build it yourself. [docs/install.md](docs/install.md) walks
 through all of it, including the providers that hold your credentials.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/sbx/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/install.sh | sh
 
-sbxd doctor                           # every prerequisite, and what to do about the missing ones
-sbxd image build                      # the sandbox image (also happens on first `sbxd new`)
-sbxd new --repo <url> --task "fix the readme typo"
+hurad doctor                           # every prerequisite, and what to do about the missing ones
+hurad image build                      # the sandbox image (also happens on first `hurad new`)
+hurad new --repo <url> --task "fix the readme typo"
 ```
 
 The script needs no checkout and no Rust toolchain: it fetches the newest
 release for your machine, checks it against the published `SHA256SUMS`, and
-puts the binary in `~/.local/bin` -- then runs `sbxd doctor` to say what is still
+puts the binary in `~/.local/bin` -- then runs `hurad doctor` to say what is still
 missing. It falls back to building with `cargo` when no release matches your
 machine, and `--bin-dir`, `--version` and `--from-source` are there when you
 want to decide those yourself. From a checkout, `cargo install --path
-crates/sbxd` does the same job.
+crates/hurad` does the same job.
 
-`sbxd update` fetches, verifies and replaces the binary the same way, on
-demand. It also keeps itself current without being asked: `sbxd serve`
+`hurad update` fetches, verifies and replaces the binary the same way, on
+demand. It also keeps itself current without being asked: `hurad serve`
 *downloads* a newer release in the background and leaves it beside the running
 binary, and the swap happens at the next start rather than under a live session
 -- `auto_update = false` turns that off. The window checks at launch and offers
@@ -117,55 +117,55 @@ to install; it never installs unasked.
 
 **The window is installed separately, and can be on another machine.** On Linux
 it is built from the tree; on Windows it is an installer from the [releases
-page](https://github.com/tobiaswadsethdev/sbx/releases) and is all that side
-needs -- it pairs with a server from its own screen, so there is no `sbxd` to
+page](https://github.com/tobiaswadsethdev/hura/releases) and is all that side
+needs -- it pairs with a server from its own screen, so there is no `hurad` to
 install there. Both are [docs/install.md](docs/install.md#the-desktop-application).
 
-`sbxd doctor` is the one to run when something looks wrong -- it checks the
+`hurad doctor` is the one to run when something looks wrong -- it checks the
 gateway, Docker, tmux, lingering, the image and the Claude Code version in it,
 plus the providers, skills and MCP servers your config names and the toolchain
 variants you have built:
 
 ```
-[  ok  ] version      sbxd 0.5.0, newest
+[  ok  ] version      hurad 0.5.0, newest
 [  ok  ] openshell    openshell 0.0.110
 [  ok  ] gateway      https://127.0.0.1:17670 0.0.110 (authenticated)
 [  ok  ] docker       server 29.6.0
 [  ok  ] tmux         tmux 3.6b
 [  ok  ] linger       enabled
-[  ok  ] image        sbx-base:latest built, claude 2.1.246
+[  ok  ] image        hura-base:latest built, claude 2.1.246
 ```
 
 ## Commands
 
 ```sh
-sbxd doctor                                    # check gateway, docker, tmux, image
-sbxd image build                               # build the sandbox image (automatic on first use)
-sbxd image build --toolchain dotnet,rust       # ... plus toolchains, as their own image variant
-sbxd new --repo <url> --task "what to do"      # sandbox + clone + branch + agent
-sbxd new --worktree --repo <path> --task "..."  # ... or a git worktree here, with no isolation
-sbxd ls                                        # sessions, reconciled with the gateway
-sbxd attach <name>                             # attach to the agent; Ctrl-b d to detach
-sbxd diff <name>                               # what the agent has changed so far
-sbxd policy <name>                             # the policy the gateway is enforcing
-sbxd events <name>                             # recent allow/deny decisions
-sbxd tasks                                     # the task inbox: what is assigned to you
-sbxd policies                                  # the policy templates shipped in the binary
-sbxd toolchains                                # the toolchains a sandbox image can be built with
-sbxd config                                    # the defaults in force, and where they came from
-sbxd config --init                             # write a commented ~/.config/sbx/config.toml
-sbxd publish <name>                            # push the branch and open a pull request
-sbxd update                                    # fetch and verify the newest release
-sbxd rm <name>                                 # delete session and sandbox
+hurad doctor                                    # check gateway, docker, tmux, image
+hurad image build                               # build the sandbox image (automatic on first use)
+hurad image build --toolchain dotnet,rust       # ... plus toolchains, as their own image variant
+hurad new --repo <url> --task "what to do"      # sandbox + clone + branch + agent
+hurad new --worktree --repo <path> --task "..."  # ... or a git worktree here, with no isolation
+hurad ls                                        # sessions, reconciled with the gateway
+hurad attach <name>                             # attach to the agent; Ctrl-b d to detach
+hurad diff <name>                               # what the agent has changed so far
+hurad policy <name>                             # the policy the gateway is enforcing
+hurad events <name>                             # recent allow/deny decisions
+hurad tasks                                     # the task inbox: what is assigned to you
+hurad policies                                  # the policy templates shipped in the binary
+hurad toolchains                                # the toolchains a sandbox image can be built with
+hurad config                                    # the defaults in force, and where they came from
+hurad config --init                             # write a commented ~/.config/hura/config.toml
+hurad publish <name>                            # push the branch and open a pull request
+hurad update                                    # fetch and verify the newest release
+hurad rm <name>                                 # delete session and sandbox
 
-sbxd serve                                    # serve this machine's sessions over one TLS port
-sbxd pair <client>                            # a string that pairs a client with this machine
-sbxd mcp                                      # the MCP catalog, and what each managed one is doing
-printf %s "$TOKEN" | sbxd secret <NAME>       # store a secret a managed MCP server needs
-sbxd skills                                   # the skills a client has uploaded here
-sbxd connect <string>                          # pair with a server
-sbxd --server=<name> ls                        # ... and ask it instead of the local gateway
-sbxd watch <name> --server=<name>              # follow a session's events and state as they happen
+hurad serve                                    # serve this machine's sessions over one TLS port
+hurad pair <client>                            # a string that pairs a client with this machine
+hurad mcp                                      # the MCP catalog, and what each managed one is doing
+printf %s "$TOKEN" | hurad secret <NAME>       # store a secret a managed MCP server needs
+hurad skills                                   # the skills a client has uploaded here
+hurad connect <string>                          # pair with a server
+hurad --server=<name> ls                        # ... and ask it instead of the local gateway
+hurad watch <name> --server=<name>              # follow a session's events and state as they happen
 ```
 
 `--policy` takes a template name or a path to a YAML file. Three templates ship
@@ -185,17 +185,17 @@ else. See [docs/toolchains.md](docs/toolchains.md).
 
 |                                            |                                                                       |
 | ------------------------------------------ | --------------------------------------------------------------------- |
-| [Install](docs/install.md)                 | prerequisites, the gateway, providers, `sbxd`, and the window on Linux and Windows |
+| [Install](docs/install.md)                 | prerequisites, the gateway, providers, `hurad`, and the window on Linux and Windows |
 | [The desktop app](docs/desktop.md)         | projects and worktrees, files, git, the editor, and the review        |
-| [The server](docs/server.md)               | `sbxd`, pairing a client on another machine, WSL, what a token is worth |
-| [Configuration](docs/configuration.md)     | `~/.config/sbx/config.toml`, and which default wins                   |
+| [The server](docs/server.md)               | `hurad`, pairing a client on another machine, WSL, what a token is worth |
+| [Configuration](docs/configuration.md)     | `~/.config/hura/config.toml`, and which default wins                   |
 | [Policy and events](docs/policy.md)        | what is enforced, the audit feed, and acting on a denial              |
 | [Worktree sessions](docs/worktrees.md)     | sessions with no sandbox: what they buy, and everything they give up  |
 | [The task inbox](docs/inbox.md)            | tickets in, sessions out, and the publish that writes back            |
 | [Git hosts](docs/git-hosts.md)             | GitHub and Azure DevOps, and how publishing keeps the token away      |
 | [Toolchains](docs/toolchains.md)           | node, .NET and Rust in a sandbox, and the registry each one may reach |
 | [Skills](docs/skills.md)                   | carrying your own skills into a sandbox                               |
-| [MCP servers](docs/mcp.md)                 | servers sbxd runs or you do, their secrets, and what one costs you    |
+| [MCP servers](docs/mcp.md)                 | servers hurad runs or you do, their secrets, and what one costs you    |
 | [The sandbox image](docs/sandbox-image.md) | what the image bakes in, and why the agent runs in auto mode          |
 | [Architecture](docs/architecture.md)       | how the pieces fit, for anyone reading the code                       |
 | [The manual loop](docs/manual-loop.md)     | the verified setup, run by hand                                       |
@@ -223,7 +223,7 @@ reports have their own route: [SECURITY.md](SECURITY.md).
 Early, and honest about it. [PLAN.md](PLAN.md) is the record of what has been
 built increment by increment and what is still on the list. Interfaces are still
 moving, and `0.5.0` is not a promise that anything has settled: 0.4.0 folded the
-`sbx` binary into `sbxd` and took the terminal interface out with it, which is
+`hura` binary into `hurad` and took the terminal interface out with it, which is
 the size of change this still makes.
 
 ## License

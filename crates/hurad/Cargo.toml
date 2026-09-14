@@ -1,0 +1,34 @@
+[package]
+name = "hurad"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The hura server: sessions and their sandboxes, over one authenticated TLS port"
+
+[[bin]]
+name = "hurad"
+path = "src/main.rs"
+
+[dependencies]
+hura-core = { path = "../hura-core" }
+hura-client = { path = "../hura-client" }
+hura-proto = { path = "../hura-proto" }
+openshell-client = { path = "../openshell-client" }
+clap = { version = "4", features = ["derive"] }
+# Raw mode for `attach`, and nothing else. It arrived through `ratatui` until
+# the terminal interface went; this is the same crate, named directly.
+crossterm = "0.29"
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "process", "io-util", "sync", "time"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+axum = { version = "0.8", features = ["ws"] }
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rcgen = "0.14"
+portable-pty = "0.9"
+rand = "0.9"
+sha2 = "0.10"
+subtle = "2"

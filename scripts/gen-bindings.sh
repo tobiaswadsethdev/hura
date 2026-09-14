@@ -18,7 +18,7 @@ mkdir -p "$out"
 rm -f "$out"/*.ts
 
 TS_RS_EXPORT_DIR="$out" cargo test --features ts \
-    -p sbx-core -p sbx-proto export_bindings -- --quiet
+    -p hura-core -p hura-proto export_bindings -- --quiet
 
 files=$(find "$out" -name '*.ts' | wc -l)
 

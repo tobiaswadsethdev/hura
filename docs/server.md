@@ -1,9 +1,9 @@
 # The server
 
-`sbxd` drives the sandboxes on the machine it runs on, and serving is what lets
+`hurad` drives the sandboxes on the machine it runs on, and serving is what lets
 something else drive them: another machine on the network, a cloud box, or --
 the case this was built for -- a Linux server inside WSL with the window out on
-Windows. One binary does both, which is why `sbxd` with no subcommand listens.
+Windows. One binary does both, which is why `hurad` with no subcommand listens.
 
 The sessions are the same sessions. One gateway, one cache, one set of
 sandboxes, whether the thing asking is a terminal on that machine or a client
@@ -12,7 +12,7 @@ somewhere else.
 ```
    Windows                          WSL / a VM / a box on the LAN
    +-----------+                    +-----------------------------+
-   |  sbx      |  TLS, one token    |  sbxd  ->  openshell gateway|
+   |  hura      |  TLS, one token    |  hurad  ->  openshell gateway|
    |  (client) | -----------------> |            -> sandboxes     |
    +-----------+                    +-----------------------------+
 ```
@@ -22,33 +22,33 @@ somewhere else.
 On the server:
 
 ```sh
-sbxd pair desktop            # one string, shown once
-sbxd serve                   # or run it under systemd; see below
+hurad pair desktop            # one string, shown once
+hurad serve                   # or run it under systemd; see below
 ```
 
 `pair` prints a single line:
 
 ```
-sbx://box.lan:17671/8f3c...e21a#d8faa48b...e140
+hura://box.lan:17671/8f3c...e21a#d8faa48b...e140
 ```
 
 That is the address, a token, and the fingerprint of the certificate the server
 will present. On the client:
 
 ```sh
-sbxd connect 'sbx://box.lan:17671/8f3c...e21a#d8faa48b...e140' --name work
-sbx --server=work ls
+hurad connect 'hura://box.lan:17671/8f3c...e21a#d8faa48b...e140' --name work
+hura --server=work ls
 ```
 
 `--server` alone is enough when only one server is paired. The name has to be
-attached with `=`, because `sbx --server work ls` cannot be told apart from a
+attached with `=`, because `hura --server work ls` cannot be told apart from a
 server called `work`.
 
 ```sh
-sbxd remotes                  # what this machine is paired with
-sbxd remotes --forget work    # stop being
-sbxd tokens                  # what the server accepts
-sbxd revoke desktop          # stop accepting one, immediately
+hurad remotes                  # what this machine is paired with
+hurad remotes --forget work    # stop being
+hurad tokens                  # what the server accepts
+hurad revoke desktop          # stop accepting one, immediately
 ```
 
 Both directions take effect at once: a token minted while the server is running
@@ -62,11 +62,11 @@ policy and the event feed; the working copy's files; git, including staging,
 commit, push, pull and fetch; the diff and the review comments that go back to
 the agent; and the agent's terminal and any shells beside it, streamed.
 
-Two things are still the local machine's. **Attaching** with `sbxd attach` hands
+Two things are still the local machine's. **Attaching** with `hurad attach` hands
 *this* terminal to the agent, which is a thing about the process you are
 sitting in rather than a request; the desktop application's terminal is the
 remote equivalent and it works over the connection. **Publishing** with
-`sbxd publish` has no remote half yet.
+`hurad publish` has no remote half yet.
 
 Reading is `/rpc`, one request and one answer. The three things a client wants
 *told* -- the agent's screen, the gateway's decisions as it makes them, and the
@@ -84,31 +84,31 @@ On the server:
 ```sh
 # Listen on the network rather than on loopback. `--bind 0.0.0.0` is every
 # interface; a single address is better where there is a choice.
-sbxd serve --bind 0.0.0.0
+hurad serve --bind 0.0.0.0
 
 # In another shell: mint a token, and name the address the *client* should dial.
-sbxd pair laptop --host box.lan
+hurad pair laptop --host box.lan
 ```
 
 On the client, paste the string it printed:
 
 ```sh
-sbxd connect 'sbx://box.lan:17671/8f3c...#d8fa...' --name work
-sbx --server=work ls
+hurad connect 'hura://box.lan:17671/8f3c...#d8fa...' --name work
+hura --server=work ls
 ```
 
 **`--host` is the flag that matters, and leaving it out is the usual failure.**
 The pairing string carries an address, and without `--host` that address is the
 machine's own `/etc/hostname` -- which is frequently not a name the client can
 resolve, and on a Debian-family box resolves *on the server itself* to
-`127.0.1.1` while `sbxd serve` is bound to `127.0.0.1`. The result is
+`127.0.1.1` while `hurad serve` is bound to `127.0.0.1`. The result is
 `Connection refused` from a server that is running perfectly well, on the same
 machine. Pass the address you want the client to dial:
 
 ```sh
-sbxd pair laptop --host 127.0.0.1     # same machine
-sbxd pair laptop --host box.lan       # over the network by name
-sbxd pair laptop --host 10.0.0.7      # ... or by address
+hurad pair laptop --host 127.0.0.1     # same machine
+hurad pair laptop --host box.lan       # over the network by name
+hurad pair laptop --host 10.0.0.7      # ... or by address
 ```
 
 **The certificate's names do not matter to the client.** The client judges a server
@@ -122,30 +122,30 @@ against one proves nothing anyway.
 check names against a certificate. It is repeatable:
 
 ```sh
-sbxd serve --bind 0.0.0.0 --san sbx.internal
+hurad serve --bind 0.0.0.0 --san hura.internal
 ```
 
 Two things to know if you do use it. The certificate is generated once and then
 reused whatever the SANs say, so a `--san` added after the first start does not
-appear in it. And `sbxd pair` generates the certificate too, with the defaults
+appear in it. And `hurad pair` generates the certificate too, with the defaults
 only -- so pairing before the first `serve --san` locks the extra name out.
-Delete `~/.local/state/sbx/cert.pem` and `key.pem` and start again, which means
+Delete `~/.local/state/hura/cert.pem` and `key.pem` and start again, which means
 pairing again: the fingerprint every client holds has changed.
 
-Two more things that are not sbx's to fix but look exactly like it:
+Two more things that are not hura's to fix but look exactly like it:
 
 * **The port has to be open.** 17671/tcp on the server's firewall.
 * **Both ends need the same protocol version.** `GET /version` answers without a
   token, so a client says "this server speaks 2, I speak 1" rather than failing
-  in the middle of a request. `sbxd doctor` on the client checks every paired
+  in the middle of a request. `hurad doctor` on the client checks every paired
   server, which is where a moved address, a revoked token or a version skew
   shows up.
 
 The desktop application reads the same paired servers as the CLI: pair once with
-`sbxd connect` and the window lists that server without being told again. It can
+`hurad connect` and the window lists that server without being told again. It can
 also *be* the thing that pairs -- paste the string into its servers screen,
 which runs the same checks and writes the same file. That is what a Windows
-client does, having no `sbxd` to run:
+client does, having no `hurad` to run:
 [desktop.md](desktop.md#connecting-it-to-a-server).
 
 ## The WSL case
@@ -159,11 +159,11 @@ firewall problem:
 * **NAT**, the default -- the client uses the address of the WSL VM, *which
   changes every time WSL restarts*. Every restart then needs pairing again.
 
-Only the window goes on the Windows side -- there is no `sbxd` there, and the
+Only the window goes on the Windows side -- there is no `hurad` there, and the
 pairing is done from the window itself. [install.md](install.md#windows) is the
 installer.
 
-`sbxd doctor`, on the Linux side, says which one is in force and what to dial:
+`hurad doctor`, on the Linux side, says which one is in force and what to dial:
 
 ```
 [  ok  ] wsl          mirrored networking: a client on Windows uses localhost:17671
@@ -176,13 +176,13 @@ Mirrored is worth turning on for this, in `%USERPROFILE%\.wslconfig`:
 networkingMode=mirrored
 ```
 
-`sbxd doctor` also checks every paired server, which is where an address that has
+`hurad doctor` also checks every paired server, which is where an address that has
 moved or a token that was revoked shows up:
 
 ```
 [ FAIL ] servers      work: could not reach the server: box.lan:17671: Connection refused
          fix: check it is running, and that `box.lan:17671` is the address this
-              machine should dial. `sbxd remotes --forget work` drops it
+              machine should dial. `hurad remotes --forget work` drops it
 ```
 
 ## What this costs
@@ -204,7 +204,7 @@ server holds a credential that can read your tickets and comment on them; see
 [inbox.md](inbox.md). None of the three is a hole in the token: all of them are
 things the token authorises, which is why a pairing string is a login.
 
-`sbxd` therefore listens on `127.0.0.1` unless told otherwise, and says so when
+`hurad` therefore listens on `127.0.0.1` unless told otherwise, and says so when
 told otherwise:
 
 ```
@@ -226,8 +226,8 @@ Two things follow from that being the deal:
   If the server is rebuilt and generates a new certificate, the client refuses
   and says both fingerprints; pair again.
 
-Keys, tokens and saved connections live in `$XDG_STATE_HOME/sbx` (usually
-`~/.local/state/sbx`), owner-readable only -- not in `~/.config/sbx` beside the
+Keys, tokens and saved connections live in `$XDG_STATE_HOME/hura` (usually
+`~/.local/state/hura`), owner-readable only -- not in `~/.config/hura` beside the
 session cache, because config directories are the ones people sync between
 machines.
 
@@ -236,14 +236,14 @@ machines.
 Same shape as the gateway's own unit, as a user service:
 
 ```ini
-# ~/.config/systemd/user/sbxd.service
+# ~/.config/systemd/user/hurad.service
 [Unit]
-Description=sbx server
+Description=hura server
 After=openshell-gateway.service
 Wants=openshell-gateway.service
 
 [Service]
-ExecStart=%h/.local/bin/sbxd serve
+ExecStart=%h/.local/bin/hurad serve
 Restart=on-failure
 
 [Install]
@@ -251,11 +251,11 @@ WantedBy=default.target
 ```
 
 ```sh
-systemctl --user enable --now sbxd
+systemctl --user enable --now hurad
 loginctl enable-linger "$USER"    # so it survives logging out
 ```
 
-`sbxd` does not fail to start when the gateway is down: a server you cannot
+`hurad` does not fail to start when the gateway is down: a server you cannot
 reach is a server that cannot tell you why. It says so and carries on.
 
 ---

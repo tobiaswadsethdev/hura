@@ -1,24 +1,24 @@
 #!/bin/sh
-# Install sbxd, without a checkout and without a Rust toolchain.
+# Install hurad, without a checkout and without a Rust toolchain.
 #
-#   curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/sbx/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/install.sh | sh
 #
 # It fetches the newest release for this machine, checks it against the
-# published SHA256SUMS, and puts `sbxd` somewhere on PATH. Nothing else: the
+# published SHA256SUMS, and puts `hurad` somewhere on PATH. Nothing else: the
 # prerequisites it needs at runtime -- OpenShell, its gateway, Docker, tmux --
-# are what `sbxd doctor` is for, and it is run at the end to say which of them
+# are what `hurad doctor` is for, and it is run at the end to say which of them
 # are missing.
 #
-# `sbx` was a second binary here until v0.4.0, when it folded into this one.
-# An `sbx` still on the PATH is not upgraded and not removed: it is left where
+# `hura` was a second binary here until v0.4.0, when it folded into this one.
+# An `hura` still on the PATH is not upgraded and not removed: it is left where
 # it is, because deleting a binary somebody may still be running is not an
-# installer's decision. `sbxd` is what to run.
+# installer's decision. `hurad` is what to run.
 #
 # Options, as flags or as environment variables:
 #
-#   --version v0.4.0   SBX_VERSION    a specific release; default the newest
-#   --bin-dir DIR      SBX_BIN_DIR    where to install; default ~/.local/bin
-#   --from-source      SBX_FROM_SOURCE=1
+#   --version v0.4.0   HURA_VERSION    a specific release; default the newest
+#   --bin-dir DIR      HURA_BIN_DIR    where to install; default ~/.local/bin
+#   --from-source      HURA_FROM_SOURCE=1
 #                                     build with cargo instead of downloading
 #
 # Piped into sh, flags go after `-s --`:
@@ -26,10 +26,10 @@
 #   curl -fsSL .../install.sh | sh -s -- --bin-dir ~/bin
 set -eu
 
-REPO="tobiaswadsethdev/sbx"
-VERSION="${SBX_VERSION:-}"
-BIN_DIR="${SBX_BIN_DIR:-}"
-FROM_SOURCE="${SBX_FROM_SOURCE:-}"
+REPO="tobiaswadsethdev/hura"
+VERSION="${HURA_VERSION:-}"
+BIN_DIR="${HURA_BIN_DIR:-}"
+FROM_SOURCE="${HURA_FROM_SOURCE:-}"
 
 say() { printf '%s\n' "$*"; }
 err() { printf 'install.sh: %s\n' "$*" >&2; }
@@ -42,15 +42,15 @@ die() {
 # there is no script file to read the comments back out of.
 usage() {
     cat <<'USAGE'
-install.sh -- install sbxd without a checkout or a Rust toolchain
+install.sh -- install hurad without a checkout or a Rust toolchain
 
-  curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/sbx/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/install.sh | sh
 
 Options, as flags or as environment variables:
 
-  --version v0.4.0   SBX_VERSION       a specific release; default the newest
-  --bin-dir DIR      SBX_BIN_DIR       where to install; default ~/.local/bin
-  --from-source      SBX_FROM_SOURCE=1 build with cargo instead of downloading
+  --version v0.4.0   HURA_VERSION       a specific release; default the newest
+  --bin-dir DIR      HURA_BIN_DIR       where to install; default ~/.local/bin
+  --from-source      HURA_FROM_SOURCE=1 build with cargo instead of downloading
 
 Piped into sh, flags go after `-s --`:
 
@@ -91,8 +91,8 @@ build_from_source() {
     have cargo || die "no releases to install and no cargo to build with.
      fix: install Rust from https://rustup.rs, then re-run this script"
     say "==> building from source with cargo (this takes a few minutes)"
-    cargo install --git "https://github.com/${REPO}" sbxd --locked
-    say "==> installed to $(cargo_bin)/sbxd"
+    cargo install --git "https://github.com/${REPO}" hurad --locked
+    say "==> installed to $(cargo_bin)/hurad"
     finish "$(cargo_bin)"
 }
 
@@ -101,11 +101,11 @@ cargo_bin() { printf '%s\n' "${CARGO_HOME:-$HOME/.cargo}/bin"; }
 # ------------------------------------------------------------------- platform
 
 # Only Linux, and only the two architectures releases are built for. The
-# isolation sbx provides is kernel-enforced, so there is nothing to install
+# isolation hura provides is kernel-enforced, so there is nothing to install
 # anywhere else -- but say that rather than failing on a 404 later.
 detect_target() {
     os="$(uname -s)"
-    [ "$os" = "Linux" ] || die "sbx is Linux-only: the isolation is kernel-enforced.
+    [ "$os" = "Linux" ] || die "hura is Linux-only: the isolation is kernel-enforced.
      (this is $os)"
     case "$(uname -m)" in
         x86_64 | amd64) printf 'x86_64-unknown-linux-musl\n' ;;
@@ -144,10 +144,10 @@ install_release() {
         return
     fi
 
-    asset="sbxd-${tag}-${target}.tar.gz"
+    asset="hurad-${tag}-${target}.tar.gz"
     base="https://github.com/${REPO}/releases/download/${tag}"
 
-    tmp="$(mktemp -d "${TMPDIR:-/tmp}/sbx-install.XXXXXX")"
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/hura-install.XXXXXX")"
     trap 'rm -rf "$tmp"' EXIT INT TERM
 
     say "==> downloading ${asset}"
@@ -165,18 +165,18 @@ install_release() {
      fix: report this at https://github.com/${REPO}/security/advisories/new"
 
     tar -xzf "${tmp}/${asset}" -C "$tmp" || die "could not unpack ${asset}"
-    [ -f "${tmp}/sbxd" ] || die "${asset} does not contain an sbxd binary"
+    [ -f "${tmp}/hurad" ] || die "${asset} does not contain an hurad binary"
 
     mkdir -p "$BIN_DIR" || die "cannot create ${BIN_DIR}"
-    install_binary "${tmp}/sbxd" sbxd
+    install_binary "${tmp}/hurad" hurad
 
-    say "==> installed ${tag} to ${BIN_DIR}/sbxd"
+    say "==> installed ${tag} to ${BIN_DIR}/hurad"
     finish "$BIN_DIR"
 }
 
 # Copy next door and rename, rather than writing over the target: `install` and
 # `cp` both write in place, which fails with ETXTBSY when the binary they are
-# overwriting is one a TUI in another terminal is running -- or, for `sbxd`, one
+# overwriting is one a TUI in another terminal is running -- or, for `hurad`, one
 # that systemd has running as a user service. A rename inside one directory
 # replaces it atomically instead, and Linux is content to rename over an
 # executing binary.
@@ -210,13 +210,13 @@ finish() {
             ;;
     esac
 
-    if [ -x "${dir}/sbxd" ]; then
+    if [ -x "${dir}/hurad" ]; then
         say ""
-        say "==> sbxd doctor"
+        say "==> hurad doctor"
         # Never fatal: doctor exits non-zero when a prerequisite is missing,
         # which is the normal state of a machine that has just installed this
         # and is exactly what the output is for.
-        "${dir}/sbxd" doctor || true
+        "${dir}/hurad" doctor || true
         say ""
         say "Prerequisites and what to do about them:"
         say "    https://github.com/${REPO}/blob/main/docs/install.md"

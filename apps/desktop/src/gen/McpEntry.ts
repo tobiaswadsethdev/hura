@@ -3,7 +3,7 @@ import type { Managed } from "./Managed";
 import type { Server } from "./Server";
 
 /**
- * One catalog entry: what a session is given, and how it is run if `sbxd` runs
+ * One catalog entry: what a session is given, and how it is run if `hurad` runs
  * it.
  *
  * The [`Server`] is what goes into a session's record and what the agent is

@@ -4,14 +4,14 @@
  * What `GET /version` answers, to anyone, without a token.
  *
  * Unauthenticated on purpose. A client that cannot even tell whether it is
- * talking to an `sbxd` has nothing useful to say to the user, and there is
+ * talking to an `hurad` has nothing useful to say to the user, and there is
  * nothing here worth withholding: the version of a thing you are already
  * connected to is not a secret, and the alternative is a pairing flow that
  * fails identically for a wrong token and an unsupported server.
  */
 export type Hello = { 
 /**
- * Always `"sbxd"`. What distinguishes this from any other server that
+ * Always `"hurad"`. What distinguishes this from any other server that
  * happens to answer on the port.
  */
 server: string, 
@@ -20,6 +20,6 @@ server: string,
  */
 protocol: number, 
 /**
- * The `sbxd` release, for a human reading an error message.
+ * The `hurad` release, for a human reading an error message.
  */
 version: string, };

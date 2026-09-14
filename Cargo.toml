@@ -1,15 +1,30 @@
 [workspace]
 resolver = "3"
-members = ["crates/openshell-client", "crates/sbx-core", "crates/sbx-proto", "crates/sbx-client", "crates/sbxd"]
+members = ["crates/openshell-client", "crates/hura-core", "crates/hura-proto", "crates/hura-client", "crates/hurad"]
 
 [workspace.package]
 version = "0.9.2"
 edition = "2024"
 rust-version = "1.89"
 license = "Apache-2.0"
-repository = "https://github.com/tobiaswadsethdev/sbx"
+repository = "https://github.com/tobiaswadsethdev/hura"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+
+# Debug info is line tables and nothing else, which is what a backtrace is made
+# of. The default `debug = 2` carries every variable and every type of every
+# dependency into every binary that links it. Measured as two clean builds of
+# `--workspace --all-targets` differing only in this key: `target/debug/deps`
+# goes from 962 MB to 624 MB and the whole `target` from 1.5 GB to 1.1 GB, for
+# no change in build time. Worth having, though it is worth being clear that it
+# is the smaller half of the problem -- a clean build was never the thing that
+# filled the disk, accumulation across months of them was.
+#
+# A panic still names its file and its line; what goes is a step debugger's
+# ability to print a local, and on the day that is wanted it is one
+# `cargo build --config profile.dev.debug=2` away for that build alone.
+[profile.dev]
+debug = "line-tables-only"

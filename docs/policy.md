@@ -13,7 +13,7 @@ binary, and the **events** pane is the allow/deny feed behind them:
 ```
 
 The events feed is **kept on disk**, one file per session under
-`~/.config/sbx/events/`, because the gateway's log is a rolling window and sbx is
+`~/.config/hura/events/`, because the gateway's log is a rolling window and hura is
 what makes it roll: every exec it takes to read a sandbox writes three lines of
 its own, so at these poll intervals a 1500-line window covers about two minutes
 and held *one* event worth showing. Each fetch is merged into what the session has
@@ -21,7 +21,7 @@ already shown, deduplicated and trimmed to the last few thousand, so the feed is
 record rather than a peephole -- and closing the tool no longer looks like it wiped
 the log. Destroying a session takes its history with it.
 
-`sbxd policy <name> --widen` opens egress to the package registries and
+`hurad policy <name> --widen` opens egress to the package registries and
 `--tighten` closes it back, without restarting the agent -- for the task that
 turns out to need a dependency installed.
 
@@ -34,7 +34,7 @@ The preset offers npm and PyPI and not crates.io or nuget, which is not an overs
 it grants them to `/usr/bin/node` and `/usr/local/bin/uv`, and those are in every
 sandbox because the base image has them. A rule for cargo in a sandbox with no
 cargo in it would be decoration -- the same argument `net-open.yaml` makes. A
-toolchain is what brings both halves: `sbxd new --toolchain rust` runs the session
+toolchain is what brings both halves: `hurad new --toolchain rust` runs the session
 on an image carrying cargo *and* opens crates.io for it, so a rule like
 
 ```
@@ -49,18 +49,18 @@ nothing else in the sandbox. See [toolchains.md](toolchains.md).
 ## Acting on a denial
 
 `--widen` and `--tighten` are one preset, all or nothing. The events feed is
-where the *specific* answer lives -- `sbxd events <name>` names the endpoint and
+where the *specific* answer lives -- `hurad events <name>` names the endpoint and
 the binary of each denial, and the global lists are what turn one into a
 standing rule.
 
 A session-level change goes through the same live `policy update` that
 `--widen` uses. Recording the endpoint in a global list applies it to every
-`sbxd new` from then on:
+`hurad new` from then on:
 
 ```sh
-sbxd endpoints                                     # what is on them
-sbxd endpoints --allow crates.io:443 --binary /usr/bin/cargo
-sbxd endpoints --block pastebin.com:443
+hurad endpoints                                     # what is on them
+hurad endpoints --allow crates.io:443 --binary /usr/bin/cargo
+hurad endpoints --block pastebin.com:443
 ```
 
 That writes the same file under the same lock, and applies to sandboxes started
@@ -88,7 +88,7 @@ never reachable -- and blocking `platform.claude.com` is real, because
 
 The third column is the point: a list entry describes what a *new* session gets,
 and the session in front of you may predate it or have moved since. The lists
-live in `~/.config/sbx/endpoints.json`, are written under a lock like the session
+live in `~/.config/hura/endpoints.json`, are written under a lock like the session
 cache, and are applied to a fresh sandbox in one `policy update` before the clone
 starts -- so nothing has run in it yet. A block that fails to apply **fails the
 create**; an allow that fails is a warning. The two are not symmetric: a missing
