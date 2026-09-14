@@ -30,3 +30,10 @@ tauri-plugin-notification = "2.4.0"
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# The same trade the root workspace makes, stated a second time because this is
+# deliberately its own workspace -- see the comment at the top -- and a
+# `[profile.dev]` at the root does not reach a crate outside it. Easy to fix one
+# half and wonder why the other keeps growing.
+[profile.dev]
+debug = "line-tables-only"
