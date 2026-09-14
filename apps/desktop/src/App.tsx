@@ -370,7 +370,7 @@ export default function App() {
   // only empty state in the window that has to be instructions. The glyph
   // carries "there is no server", which is the part that used to be a heading;
   // what is left in words is the two commands, because no picture of a terminal
-  // is going to tell anybody to type `sbxd pair`.
+  // is going to tell anybody to type `hurad pair`.
   //
   // The servers screen is reachable from here and from nowhere else at this
   // point -- there is no header yet, because a header of destinations that all
@@ -387,8 +387,8 @@ export default function App() {
       <div className="app">
         <Empty size="page" icon={NoServer} note="no server paired">
           <pre>
-            sbxd serve{"\n"}
-            sbxd pair desktop --host 127.0.0.1
+            hurad serve{"\n"}
+            hurad pair desktop --host 127.0.0.1
           </pre>
           {/* Without --host the string carries the machine's own hostname,
               which on a Debian-family box resolves to 127.0.1.1 while the
@@ -412,7 +412,7 @@ export default function App() {
     <div className="app">
       <UpdateBar />
       <header>
-        <span className="mark">sbx</span>
+        <span className="mark">hura</span>
         {/* The chooser only when there is a choice, and nothing at all when
             there is not: with one paired server there is nothing to
             disambiguate, and the servers screen names it.

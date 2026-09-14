@@ -6,7 +6,7 @@
 // next, which is a handful of fields with defaults good enough to submit on
 // sight.
 //
-// Nothing here decides anything `sbx new` decides differently. The name is
+// Nothing here decides anything `hura new` decides differently. The name is
 // derived by the server when this leaves it blank, the policy list and the
 // ticked toolchains and credentials arrive from the server, and the skills and
 // MCP servers are shown rather than offered, because they are one decision made
@@ -35,7 +35,7 @@ export function NewWorktreeDialog({
   project: Project;
   // The ticket this is being started from, when it came from the inbox. What it
   // fills in -- the task, the name, the branch -- is the server's answer,
-  // derived in `sbx_core::tracker`, so the terminal and the window would agree
+  // derived in `hura_core::tracker`, so the terminal and the window would agree
   // if the terminal had an inbox.
   from?: Task | null;
   onClose: () => void;
@@ -191,7 +191,7 @@ function Form({
         // What makes the round trip possible: the session records the ticket,
         // and publishing comments the pull request back onto it.
         ticket: from ? ticketOf(from) : null,
-        // Blank means "derive it", which is what `sbx new` without `--name`
+        // Blank means "derive it", which is what `hura new` without `--name`
         // does. The rule lives on the server so there is one of it.
         name: name.trim() || null,
         repo: project.repo,

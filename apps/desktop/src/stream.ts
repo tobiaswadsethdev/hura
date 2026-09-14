@@ -30,7 +30,7 @@ export function nextChannelId(): number {
 }
 
 function ensureListening() {
-  listening ??= listen<ServerFrame>("sbx://frame", (event) => {
+  listening ??= listen<ServerFrame>("hura://frame", (event) => {
     const frame = event.payload;
     if (frame.id === ALL_CHANNELS) {
       // The connection went, so every channel went with it.
@@ -96,7 +96,7 @@ export const terminal = {
     invoke("terminal_resize", { id, cols, rows }),
 };
 
-/// Base64, matching `sbx_proto::stream::bytes` at the other end.
+/// Base64, matching `hura_proto::stream::bytes` at the other end.
 ///
 /// Terminal traffic is raw bytes: a pty read lands wherever it lands, so a
 /// multi-byte character can be split across two frames. Decoding to a

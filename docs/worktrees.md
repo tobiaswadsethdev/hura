@@ -2,7 +2,7 @@
 
 Every session up to here has been a sandbox: a container the gateway made, a
 clone inside it, and a policy on everything that leaves. This page is about the
-other kind — a session that is a `git worktree` on the machine running `sbxd`,
+other kind — a session that is a `git worktree` on the machine running `hurad`,
 with no sandbox around it at all.
 
 It exists because a clone is expensive and a worktree is not, and because there
@@ -15,10 +15,10 @@ isolation is the product.
 account. It reads that account's files, uses its git credentials, and reaches
 whatever the network allows it to reach. There is no gateway in the path, so:
 
-* **no policy.** `sbxd policy <name>` says so rather than printing rules, and the
+* **no policy.** `hurad policy <name>` says so rather than printing rules, and the
   window's policy pane says so where the rules would be.
 * **no allow/deny feed.** Nothing is deciding anything, so there is nothing to
-  report. `sbxd events` and the events pane say that too.
+  report. `hurad events` and the events pane say that too.
 * **no credential swap.** A provider is a secret the *gateway* substitutes into
   an outgoing request, which is what keeps a token off the sandbox filesystem.
   A worktree session pushes with the server's own git credentials, and its agent
@@ -30,7 +30,7 @@ fills in; on a worktree session it is a plain `git push` as the server's user.
 Same outcome, materially different guarantee.
 
 Everything that shows a session says which kind it is: a `worktree` badge in the
-window's tree, a `KIND` column in `sbxd ls`, and
+window's tree, a `KIND` column in `hurad ls`, and
 an `isolation` row in the facts pane.
 
 ## What you get
@@ -58,7 +58,7 @@ involved.
 From the terminal:
 
 ```sh
-sbxd new --worktree --repo ~/dev/thing --task "add the changelog"
+hurad new --worktree --repo ~/dev/thing --task "add the changelog"
 ```
 
 `--repo` has to be a checkout **on the machine that will run the session**,
@@ -75,14 +75,14 @@ believes it is isolated.
 
 | | |
 | --- | --- |
-| the working copy | `~/.local/share/sbx/worktrees/<name>`, or `worktree_root` in the config file |
-| the record | `~/.local/state/sbx/worktrees/<name>/meta.json` |
-| the agent | a tmux session named `sbx-<name>` on the server |
-| its shells | `sbx-<name>-shell-1`, `-2`, … beside it |
+| the working copy | `~/.local/share/hura/worktrees/<name>`, or `worktree_root` in the config file |
+| the record | `~/.local/state/hura/worktrees/<name>/meta.json` |
+| the agent | a tmux session named `hura-<name>` on the server |
+| its shells | `hura-<name>-shell-1`, `-2`, … beside it |
 
 **The record is deliberately not in the working copy.** A sandboxed session
 keeps `meta.json` inside its own sandbox, which is what lets it survive losing
-the local cache. A worktree has nowhere equivalent: `.sbx/` in the working copy
+the local cache. A worktree has nowhere equivalent: `.hura/` in the working copy
 would appear in every `git status` the agent runs, in every diff you review, and
 one `git clean -fdx` from being deleted. So it lives beside the server's other
 state, and adoption after a lost cache is that directory reconciled against the
@@ -96,7 +96,7 @@ your own tmux sessions showing up as a session's shells.
 
 ## Ending one
 
-`sbxd rm <name>`, or the window. It kills the agent and its shells, runs
+`hurad rm <name>`, or the window. It kills the agent and its shells, runs
 `git worktree remove --force`, prunes, and drops the record.
 
 `--force`, because the point of removing a session is removing it: git refuses a
@@ -111,7 +111,7 @@ deleting work.
 
 Leaving it unconditionally is what this used to do, and it is why removing a
 session and starting a fresh one under the same name resumed the old one: seeding
-checks out an existing `sbx/<name>` rather than cutting a new one, so the new
+checks out an existing `hura/<name>` rather than cutting a new one, so the new
 session inherited the old branch, old commits and all. If you want the name back
 for a branch that git refused to delete, delete the branch yourself.
 
@@ -122,11 +122,11 @@ A session whose record the cache has lost is looked for where the naming
 convention would have put it, `<root>/<name>`. One created under a *different*
 configured root is the case the convention cannot find — a worktree's directory is
 not recoverable from the name once a root has been reconfigured — and there
-`sbxd rm` drops the record and says so; the directory is yours to remove.
+`hurad rm` drops the record and says so; the directory is yours to remove.
 
 ## What is missing
 
-* **No hook-driven status.** The image bakes in `sbx-status`, which is what
+* **No hook-driven status.** The image bakes in `hura-status`, which is what
   makes a sandboxed session's `waiting` state exact. A worktree session's state
   comes from reading the agent's screen, which is what the terminal has always
   fallen back to and is good but not perfect.

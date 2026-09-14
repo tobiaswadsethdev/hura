@@ -8,7 +8,7 @@
 //
 // Worktrees whose session records no project -- everything created from the
 // terminal, which has none -- are grouped by their clone URL at the bottom
-// rather than hidden or forced into one. `sbx new` is not going away, and a
+// rather than hidden or forced into one. `hura new` is not going away, and a
 // worktree started from it should still be reachable here.
 //
 // The shape of a row is Orca's, and deliberately: a card rather than a line,

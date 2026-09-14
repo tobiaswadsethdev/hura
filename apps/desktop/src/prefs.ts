@@ -3,7 +3,7 @@
 // The other half of the settings screen, and the line between the two is not
 // where the code happens to live -- it is who the answer belongs to. A branch
 // prefix decides what every session on the server is called, including the ones
-// `sbx new` starts, so it lives in the server's config file and this window
+// `hura new` starts, so it lives in the server's config file and this window
 // only edits it. How wide the sidebars are is nobody's business but this
 // window's, and putting it on the server would mean two people looking at the
 // same sessions from two machines fighting over one number.
@@ -16,9 +16,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-/// One key, so a stray `sbx.theme` from some future build cannot be mistaken
+/// One key, so a stray `hura.theme` from some future build cannot be mistaken
 /// for part of this object.
-const KEY = "sbx.prefs";
+const KEY = "hura.prefs";
 
 export type Prefs = {
   /// The sidebars, in pixels. Also what dragging their edges writes -- there is

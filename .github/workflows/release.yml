@@ -1,6 +1,6 @@
 name: Release
 
-# Tag a version and this publishes the binary `install.sh` and `sbxd update`
+# Tag a version and this publishes the binary `install.sh` and `hurad update`
 # download, plus the Windows desktop installer.
 #
 # The tag is normally not made by hand: `tag.yml` bumps the seven files that
@@ -13,7 +13,7 @@ name: Release
 # the tree agree, and once they did not.
 #
 # The asset names are part of the contract with both installers, and a test in
-# `crates/sbx-core/src/update.rs` fails if the three ever disagree.
+# `crates/hura-core/src/update.rs` fails if the three ever disagree.
 on:
   push:
     tags: ["v*"]
@@ -30,7 +30,7 @@ env:
   CARGO_TERM_COLOR: always
   # One resolved tag for both triggers. `github.ref_name` is the tag on a tag
   # push and the *branch* on a workflow_dispatch, which would name every asset
-  # `sbx-main-...` and produce a release neither install.sh nor `sbx update`
+  # `hura-main-...` and produce a release neither install.sh nor `hura update`
   # can find.
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
@@ -83,11 +83,11 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      # The whole Linux side, in one binary. `sbx` was a second one until
+      # The whole Linux side, in one binary. `hura` was a second one until
       # v0.4.0, when it folded into this: two front ends onto one set of
       # sessions cost more than the terminal one was worth.
       - name: Build
-        run: cargo build --release --locked --bin sbxd --target ${{ matrix.target }}
+        run: cargo build --release --locked --bin hurad --target ${{ matrix.target }}
 
       - name: Package
         run: |
@@ -95,33 +95,33 @@ jobs:
           bin="target/${{ matrix.target }}/release"
           # Ask it what it is. A binary built from the wrong commit answers the
           # wrong version, and that is cheaper to find out here than in
-          # `sbxd update`, which refuses the swap over exactly this.
-          "$bin/sbxd" --version
+          # `hurad update`, which refuses the swap over exactly this.
+          "$bin/hurad" --version
           # Flat, one file at the root of the archive: install.sh and
-          # `sbxd update` both expect to find `sbxd` and nothing else.
+          # `hurad update` both expect to find `hurad` and nothing else.
           #
           # The asset is named after what it holds, so it changed name in
           # v0.4.0 along with the binary. Nothing older can follow that -- an
-          # `sbx update` replaces the binary it is running and there is no
-          # longer an `sbx` to replace it with -- so it fails saying this
-          # release has no `sbx-...tar.gz`, which is true. v0.3.1 is the last
-          # release `sbx update` can reach at all, which is what keeps anyone
+          # `hura update` replaces the binary it is running and there is no
+          # longer an `hura` to replace it with -- so it fails saying this
+          # release has no `hura-...tar.gz`, which is true. v0.3.1 is the last
+          # release `hura update` can reach at all, which is what keeps anyone
           # from being stranded on v0.3.0 -- but it is not a bridge across this
-          # rename, because the `sbxd` it installs is the server alone and has
+          # rename, because the `hurad` it installs is the server alone and has
           # no `update` of its own. One `install.sh`, and never again.
-          tar -czf "sbxd-${TAG}-${{ matrix.target }}.tar.gz" -C "$bin" sbxd
-          sha256sum "sbxd-${TAG}-${{ matrix.target }}.tar.gz" > "${{ matrix.target }}.sha256"
+          tar -czf "hurad-${TAG}-${{ matrix.target }}.tar.gz" -C "$bin" hurad
+          sha256sum "hurad-${TAG}-${{ matrix.target }}.tar.gz" > "${{ matrix.target }}.sha256"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: sbxd-${{ matrix.target }}
+          name: hurad-${{ matrix.target }}
           path: |
-            sbxd-${{ env.TAG }}-${{ matrix.target }}.tar.gz
+            hurad-${{ env.TAG }}-${{ matrix.target }}.tar.gz
             ${{ matrix.target }}.sha256
           if-no-files-found: error
 
   # The desktop application for Windows, which is the one platform where there
-  # is nothing else to install: `sbxd` needs a gateway, a Docker daemon and
+  # is nothing else to install: `hurad` needs a gateway, a Docker daemon and
   # tmux, so the Windows side is the window and nothing but the window. It
   # pairs with a server from its own connect dialog rather than from a CLI --
   # see docs/desktop.md -- which is what makes an installer on its own useful.
@@ -285,10 +285,10 @@ jobs:
           bundle=apps/desktop/src-tauri/target/release/bundle
           mkdir -p dist
           for msi in "$bundle"/msi/*.msi; do
-            cp "$msi" "dist/sbx-desktop-${TAG}-x86_64-pc-windows-msvc.msi"
+            cp "$msi" "dist/hura-desktop-${TAG}-x86_64-pc-windows-msvc.msi"
           done
           for exe in "$bundle"/nsis/*-setup.exe; do
-            cp "$exe" "dist/sbx-desktop-${TAG}-x86_64-pc-windows-msvc-setup.exe"
+            cp "$exe" "dist/hura-desktop-${TAG}-x86_64-pc-windows-msvc-setup.exe"
           done
           cd dist
           sha256sum *.msi *.exe > desktop-windows.sha256
@@ -315,7 +315,7 @@ jobs:
           # in its filename, and a pattern that has to be kept in step with
           # `tauri.conf.json` is a pattern that will not be.
           sig=$(ls "$bundle"/nsis/*-setup.exe.sig)
-          asset="sbx-desktop-${TAG}-x86_64-pc-windows-msvc-setup.exe"
+          asset="hura-desktop-${TAG}-x86_64-pc-windows-msvc-setup.exe"
           jq -n \
             --arg version "${TAG#v}" \
             --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -331,10 +331,10 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: sbx-desktop-windows
+          name: hura-desktop-windows
           path: |
-            dist/sbx-desktop-${{ env.TAG }}-x86_64-pc-windows-msvc.msi
-            dist/sbx-desktop-${{ env.TAG }}-x86_64-pc-windows-msvc-setup.exe
+            dist/hura-desktop-${{ env.TAG }}-x86_64-pc-windows-msvc.msi
+            dist/hura-desktop-${{ env.TAG }}-x86_64-pc-windows-msvc-setup.exe
             dist/desktop-windows.sha256
             dist/latest.json
           # `warn` and not `error`, because `latest.json` is written only when
@@ -363,7 +363,7 @@ jobs:
           merge-multiple: true
 
       # One SHA256SUMS covering every architecture, which is what install.sh
-      # verifies against with --ignore-missing and what `sbx update` reads the
+      # verifies against with --ignore-missing and what `hura update` reads the
       # single line it needs out of.
       - name: Collect checksums
         run: |

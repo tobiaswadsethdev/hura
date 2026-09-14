@@ -6,7 +6,7 @@ import type { Settings } from "./Settings";
  *
  * The file's answers, where the file is, and the built-in default behind the
  * one field whose absence a person needs to see spelled out -- a blank branch
- * prefix field has to say `sbx` somewhere or it reads as "no prefix".
+ * prefix field has to say `hura` somewhere or it reads as "no prefix".
  */
 export type SettingsView = { 
 /**

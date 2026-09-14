@@ -1,16 +1,16 @@
-# Installing sbx
+# Installing hura
 
-There are two things to install and they do not go in the same place. **`sbxd`
+There are two things to install and they do not go in the same place. **`hurad`
 runs where the sandboxes are**, which is Linux, because the isolation is
 kernel-enforced. **The desktop application runs where you are sitting**, which
-may be the same machine or may be Windows -- it makes requests of an `sbxd` and
+may be the same machine or may be Windows -- it makes requests of an `hurad` and
 needs no gateway, no Docker and no tmux of its own.
 
-`sbx` was a second Linux binary until v0.4.0, carrying this CLI and a terminal
-interface beside it. It folded into `sbxd`: every command it had, `sbxd` has,
+`hura` was a second Linux binary until v0.4.0, carrying this CLI and a terminal
+interface beside it. It folded into `hurad`: every command it had, `hurad` has,
 and the window is the interactive surface now. Upgrading from v0.3.1 or earlier
-means running `install.sh` once -- `sbx update` cannot cross the rename,
-because there is no longer an `sbx` for it to replace itself with.
+means running `install.sh` once -- `hura update` cannot cross the rename,
+because there is no longer an `hura` for it to replace itself with.
 
 Most of this page is the first half. [The desktop
 application](#the-desktop-application) at the end is the second, and is all that
@@ -25,20 +25,20 @@ is portable to macOS, because the isolation is kernel-enforced.
 | --- | --- |
 | [OpenShell](https://github.com/NVIDIA/OpenShell) | 0.0.110 -- CLI, gateway and sandbox helper |
 | Docker | server 29.x, reachable by your user |
-| tmux | on the host, for `sbxd attach` |
-| Rust | 1.89 or newer -- only to build `sbxd` yourself (edition 2024, let-chains, `File::lock`) |
+| tmux | on the host, for `hurad attach` |
+| Rust | 1.89 or newer -- only to build `hurad` yourself (edition 2024, let-chains, `File::lock`) |
 
-`sbxd doctor` checks every one of them, plus the sandbox image and whether
+`hurad doctor` checks every one of them, plus the sandbox image and whether
 systemd lingering is enabled, and says what to do about whatever is missing:
 
 ```
-[  ok  ] version      sbxd 0.4.0, newest
+[  ok  ] version      hurad 0.4.0, newest
 [  ok  ] openshell    openshell 0.0.110
 [  ok  ] gateway      https://127.0.0.1:17670 0.0.110 (authenticated)
 [  ok  ] docker       server 29.6.0
 [  ok  ] tmux         tmux 3.6b
 [  ok  ] linger       enabled
-[  ok  ] image        sbx-base:latest built, claude 2.1.246
+[  ok  ] image        hura-base:latest built, claude 2.1.246
 ```
 
 ## Installing the pieces
@@ -73,23 +73,23 @@ openshell provider create --name claude-oauth \
 `read` needs a TTY, so that has to be a real terminal. For Azure DevOps, do the
 same with `providers/azure-devops-pat.yaml` (see [Git hosts](git-hosts.md)).
 
-**`sbxd` itself.** The policy templates and the whole image recipe -- Dockerfile,
+**`hurad` itself.** The policy templates and the whole image recipe -- Dockerfile,
 status hook, Claude settings -- are compiled into the binary, so it needs
 nothing from this tree at runtime except the provider profiles above, which the
 `openshell` CLI reads directly. That is what makes a one-line install possible:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/sbx/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/install.sh | sh
 ```
 
 It works out which release fits this machine, downloads it, **checks it against
 the release's published `SHA256SUMS` and installs nothing if that does not
-match**, puts `sbxd` in `~/.local/bin`, and finishes by running `sbxd doctor` so
+match**, puts `hurad` in `~/.local/bin`, and finishes by running `hurad doctor` so
 the prerequisites above are named rather than discovered one at a time.
 
-It does not remove an `sbx` left over from an earlier install. Deleting a
+It does not remove an `hura` left over from an earlier install. Deleting a
 binary somebody may still have running is not an installer's decision -- but
-nothing updates it any more, and `sbxd` is what to run. Read
+nothing updates it any more, and `hurad` is what to run. Read
 it first if you would rather not pipe a script into a shell -- it is
 [install.sh](../install.sh) in this repository, and downloading it and running
 it separately works exactly the same.
@@ -98,26 +98,26 @@ Three things it takes, as flags or environment variables:
 
 | | |
 | --- | --- |
-| `--bin-dir DIR` / `SBX_BIN_DIR` | where to install; default `~/.local/bin`, and it says so when that is not on your `PATH` |
-| `--version vX.Y.Z` / `SBX_VERSION` | a specific release rather than the newest |
-| `--from-source` / `SBX_FROM_SOURCE=1` | build with `cargo` instead of downloading |
+| `--bin-dir DIR` / `HURA_BIN_DIR` | where to install; default `~/.local/bin`, and it says so when that is not on your `PATH` |
+| `--version vX.Y.Z` / `HURA_VERSION` | a specific release rather than the newest |
+| `--from-source` / `HURA_FROM_SOURCE=1` | build with `cargo` instead of downloading |
 
 Building it yourself is the other way, and the one to use from a checkout. It
 is also the automatic fallback when no release is built for your architecture:
 
 ```sh
-cargo install --path crates/sbxd                                  # from a checkout
-cargo install --git https://github.com/tobiaswadsethdev/sbx sbxd --locked   # without one
+cargo install --path crates/hurad                                  # from a checkout
+cargo install --git https://github.com/tobiaswadsethdev/hura hurad --locked   # without one
 ```
 
 Then:
 
 ```sh
-sbxd image build                      # also happens on first `sbxd new`
-sbxd doctor
+hurad image build                      # also happens on first `hurad new`
+hurad doctor
 ```
 
-Start something: `sbxd new --repo <url> --task "..."`. For a picker and a form
+Start something: `hurad new --repo <url> --task "..."`. For a picker and a form
 instead of flags, that is [the desktop application](#the-desktop-application),
 which is the interactive surface -- there was a terminal interface here until
 v0.4.0, and [desktop.md](desktop.md) is what replaced it.
@@ -133,15 +133,15 @@ versions it was verified on.
 
 ## The desktop application
 
-A window onto an `sbxd`. It holds no sandboxes and starts none itself: it dials
+A window onto an `hurad`. It holds no sandboxes and starts none itself: it dials
 a server, pins that server's certificate, and asks. So the machine it runs on
 needs none of the prerequisites above -- and the server it dials can be this
 machine, a box on the LAN, or the Linux side of the same laptop.
 
 Whichever platform, the last step is the same: **the window pairs with a server
 from its own screen**, so nothing above has to be installed beside it. Run
-`sbxd pair desktop --host <the address the window will dial>` on the server,
-paste the `sbx://…` line it prints into the window, and that is the install
+`hurad pair desktop --host <the address the window will dial>` on the server,
+paste the `hura://…` line it prints into the window, and that is the install
 finished. [desktop.md](desktop.md#connecting-it-to-a-server) is that step in
 full, and [server.md](server.md) is the case where the two are on different
 machines.
@@ -176,22 +176,22 @@ npm run tauri dev        # or run it from the tree, which is what to do while wo
 
 **`npm run tauri dev` rather than the debug binary.** A development build loads
 the frontend from Vite's dev server, and that is what starts it; running
-`src-tauri/target/debug/sbx-desktop` on its own gives a window that says
+`src-tauri/target/debug/hura-desktop` on its own gives a window that says
 `Operation was cancelled` and reads exactly like a broken frontend.
 
 ### Windows
 
-There is no `sbxd` for Windows and there is not meant to be. The CLI drives
+There is no `hurad` for Windows and there is not meant to be. The CLI drives
 Docker, tmux and a gateway, and none of those are on that side; what runs there
 is the window, which pairs itself. This is the arrangement the server was built
 for: Linux in WSL doing the work, the window out on Windows.
 
 Download the installer for the release you want from the [releases
-page](https://github.com/tobiaswadsethdev/sbx/releases) -- either of:
+page](https://github.com/tobiaswadsethdev/hura/releases) -- either of:
 
 ```
-sbx-desktop-vX.Y.Z-x86_64-pc-windows-msvc.msi          # Windows Installer
-sbx-desktop-vX.Y.Z-x86_64-pc-windows-msvc-setup.exe    # the same application, NSIS
+hura-desktop-vX.Y.Z-x86_64-pc-windows-msvc.msi          # Windows Installer
+hura-desktop-vX.Y.Z-x86_64-pc-windows-msvc-setup.exe    # the same application, NSIS
 ```
 
 Both are covered by the release's `SHA256SUMS`, the same file `install.sh`
@@ -199,7 +199,7 @@ verifies a Linux binary against, so an installer can be checked before it is
 run:
 
 ```powershell
-(Get-FileHash .\sbx-desktop-vX.Y.Z-x86_64-pc-windows-msvc.msi -Algorithm SHA256).Hash.ToLower()
+(Get-FileHash .\hura-desktop-vX.Y.Z-x86_64-pc-windows-msvc.msi -Algorithm SHA256).Hash.ToLower()
 ```
 
 **A release built without a signing certificate is unsigned**, and SmartScreen
@@ -216,7 +216,7 @@ WebView2 is the only runtime it needs, and Windows 11 ships with it; on Windows
 Building it there instead needs Rust, Node 22 or newer, and the MSVC build tools
 (the *Desktop development with C++* workload), then the same two commands as on
 Linux. Only the client half of this repository compiles for Windows, which CI
-checks on every change; `sbxd` does not, and is not asked to.
+checks on every change; `hurad` does not, and is not asked to.
 
 **The window updates itself, once you say so.** It checks for a newer release
 at launch and puts a bar across the top when there is one; *install and
@@ -230,43 +230,43 @@ updater to fetch.
 
 **If the server is in WSL**, which is the case this was built for, the address
 the window dials depends on how WSL is networked -- mirrored means
-`localhost:17671` and NAT means an address that changes on every restart. `sbx
+`localhost:17671` and NAT means an address that changes on every restart. `hura
 doctor` on the Linux side says which is in force and what to dial. See [the WSL
 case](server.md#the-wsl-case).
 
 ## Updating
 
-`sbxd update` is the install script's three steps performed by the binary that
+`hurad update` is the install script's three steps performed by the binary that
 is already there: read the release list, verify the download against
 `SHA256SUMS`, and replace itself.
 
 ```sh
-sbxd update                 # to the newest release
-sbxd update --check         # say what that would do, and do none of it
-sbxd update --tag v0.1.0    # to one named release, to get back to one that worked
-sbxd update --force         # reinstall the version already running
+hurad update                 # to the newest release
+hurad update --check         # say what that would do, and do none of it
+hurad update --tag v0.1.0    # to one named release, to get back to one that worked
+hurad update --force         # reinstall the version already running
 ```
 
 The replacement is a rename over the running binary, which Linux allows and
-which means a torn download cannot leave half an `sbxd` on your `PATH`. A
+which means a torn download cannot leave half an `hurad` on your `PATH`. A
 session already running is untouched -- its agent lives in a sandbox, not in
-this binary -- but the sandbox image is versioned separately, so `sbxd image
+this binary -- but the sandbox image is versioned separately, so `hurad image
 build` after an update is what picks up a change to the image recipe.
 
-`sbxd doctor` reports when a newer release is out, whether or not anything is
+`hurad doctor` reports when a newer release is out, whether or not anything is
 going to act on it:
 
 ```
-[ warn ] version      sbxd 0.4.0; 0.4.1 is out
-         fix: sbxd update
+[ warn ] version      hurad 0.4.0; 0.4.1 is out
+         fix: hurad update
 ```
 
 ### Updating without being asked
 
-`sbxd serve` looks for a newer release every six hours, and **downloads one
+`hurad serve` looks for a newer release every six hours, and **downloads one
 without installing it**. The verified binary waits beside the running one as
-`.sbxd-staged`, and the swap happens the next time `sbxd` starts -- any start,
-whether that is a `systemctl --user restart sbxd` or your next `sbxd ls`.
+`.hurad-staged`, and the swap happens the next time `hurad` starts -- any start,
+whether that is a `systemctl --user restart hurad` or your next `hurad ls`.
 
 That split is the point. Replacing a binary is safe; replacing it *now* is not,
 because a server driving four agents is a server somebody is using. Staging
@@ -280,17 +280,17 @@ the version it started as however many times the file underneath it changes;
 what the new one is, is what the next start gets.
 
 ```toml
-auto_update = false      # never reach github; `sbxd update` still works by hand
+auto_update = false      # never reach github; `hurad update` still works by hand
 ```
 
 The staged file is discarded rather than applied if it is not newer than what
-is running -- stale after a manual `sbxd update`, a downgrade, or a truncated
+is running -- stale after a manual `hurad update`, a downgrade, or a truncated
 download that will not run. It never becomes newer, so carrying it around is
 not worth the stat.
 
 A binary installed with `cargo install` can still be updated this way, since it
 is replaced where it stands. Going the other way -- back to a build from the
-tree -- is `cargo install --path crates/sbxd` again.
+tree -- is `cargo install --path crates/hurad` again.
 
 ---
 

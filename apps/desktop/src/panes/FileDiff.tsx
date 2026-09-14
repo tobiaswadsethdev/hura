@@ -2,7 +2,7 @@
 //
 // Monaco's diff editor rather than the unified text the TUI draws, because this
 // is the window and it can afford two columns. The comments are the same
-// comments -- `sbx_core::comments` stores {file, line, excerpt}, which is
+// comments -- `hura_core::comments` stores {file, line, excerpt}, which is
 // already per file, so nothing about the review had to change to move it here.
 //
 // Monaco computes the diff in a **web worker**. Without one it renders two

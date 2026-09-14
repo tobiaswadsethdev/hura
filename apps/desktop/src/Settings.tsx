@@ -4,7 +4,7 @@
 // Two sections, and the split between them is the only structure this screen
 // has -- because it is the only structure that matters. **Who owns the answer.**
 // A branch prefix names the work branch of every session on the server,
-// including the ones `sbx new` starts from a terminal, so it is a line in the
+// including the ones `hura new` starts from a terminal, so it is a line in the
 // server's config file and this screen edits that file. How wide the sidebars
 // are is nobody's business but this window's, and two people looking at the
 // same server from two machines would otherwise fight over one number.
@@ -91,7 +91,7 @@ export function SettingsScreen({
   /// Blank is not a value, it is the absence of one.
   ///
   /// The whole screen turns on this: an empty branch prefix field means "take
-  /// the key out of the file and go back to `sbx`", not "name branches
+  /// the key out of the file and go back to `hura`", not "name branches
   /// `/foo`". The server normalises the same way, and this is here so the
   /// placeholder a person sees and the value that gets sent agree.
   const text = (value: string): string | null => (value.trim() === "" ? null : value);
@@ -149,7 +149,7 @@ export function SettingsScreen({
             <h3>new sessions</h3>
             <p className="hint">
               Defaults on the server, so they hold for a session started from a terminal with{" "}
-              <code>sbx new</code> as well as one started here. A choice in the create form still
+              <code>hura new</code> as well as one started here. A choice in the create form still
               wins over any of them.
             </p>
 
@@ -196,7 +196,7 @@ export function SettingsScreen({
                 onChange={(e) => edit({ policy: text(e.target.value) })}
               >
                 {/* The built-in default is an option rather than a blank
-                    row: "whatever sbx chooses" is a real answer here, and
+                    row: "whatever hura chooses" is a real answer here, and
                     the one that survives the default changing. */}
                 <option value="">
                   {options ? `${options.default_policy} — the built-in default` : "the default"}
@@ -258,7 +258,7 @@ export function SettingsScreen({
             </label>
             <p className="hint indent">
               It never replaces a running binary: the download is verified and left beside the
-              current one, and the swap happens the next time <code>sbxd</code> starts. Turn it
+              current one, and the swap happens the next time <code>hurad</code> starts. Turn it
               off for a machine that would rather not reach github at all.
             </p>
           </section>

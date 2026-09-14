@@ -34,7 +34,7 @@ import type { FileText } from "../gen/FileText";
 };
 
 /// Matching style.css, so the editor is not a white rectangle in a dark pane.
-export const THEME = "sbx-dark";
+export const THEME = "hura-dark";
 
 /// Define it, once, against the palette the window is actually using.
 ///

@@ -1,13 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/openshell-client", "crates/sbx-core", "crates/sbx-proto", "crates/sbx-client", "crates/sbxd"]
+members = ["crates/openshell-client", "crates/hura-core", "crates/hura-proto", "crates/hura-client", "crates/hurad"]
 
 [workspace.package]
 version = "0.9.2"
 edition = "2024"
 rust-version = "1.89"
 license = "Apache-2.0"
-repository = "https://github.com/tobiaswadsethdev/sbx"
+repository = "https://github.com/tobiaswadsethdev/hura"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

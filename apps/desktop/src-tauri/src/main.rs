@@ -1,22 +1,22 @@
 //! The desktop application's Rust half.
 //!
 //! Thin on purpose. Every command here is a paired server's [`Remote::call`]
-//! and a `?`; the reasoning about what a session *is* stays in `sbx-core`, and
-//! the wire stays in `sbx-proto`. A behaviour that existed only here would be
+//! and a `?`; the reasoning about what a session *is* stays in `hura-core`, and
+//! the wire stays in `hura-proto`. A behaviour that existed only here would be
 //! one the CLI cannot do, which is the drift the whole split exists to avoid.
 //!
 //! **The connection is made on this side, and it has to be.** The certificate
 //! is pinned by fingerprint, and a webview cannot do that -- `fetch` has no say
 //! in which certificate it will accept, and asking a user to click through a
 //! warning is how a self-signed server becomes an unauthenticated one. So the
-//! webview never speaks to `sbxd` at all: it calls these, and `sbx-client` --
+//! webview never speaks to `hurad` at all: it calls these, and `hura-client` --
 //! the same client the CLI uses -- makes the connection.
 //!
 //! ## Every command is `(async)`, and it has to be
 //!
 //! **Tauri runs a synchronous command on the main thread** -- the one pumping
 //! the window's messages -- and every command in this file is blocking I/O: a
-//! TLS round trip to `sbxd`, which may itself shell out to the gateway CLI. The
+//! TLS round trip to `hurad`, which may itself shell out to the gateway CLI. The
 //! session list is re-read every three seconds and each read is an
 //! `openshell sandbox list` on the other end, so the window spent a large part
 //! of every second not pumping anything.
@@ -34,21 +34,21 @@
 
 use std::sync::Mutex;
 
-use sbx_client::{Incoming, Remote, Remotes, Sink};
-use sbx_core::comments::{Comment, NewComment};
-use sbx_core::events::Event;
-use sbx_core::files::{Dir, FileText};
-use sbx_core::git::{Against, FileDiff, Status as GitStatus};
-use sbx_core::ops::{NewOptions, NewSession, Picked, Poll};
-use sbx_core::policy::View as PolicyView;
-use sbx_core::projects::{NewProject, Project};
-use sbx_core::repos::Listing;
-use sbx_core::session::Session;
-use sbx_core::settings::{Settings, SettingsView};
-use sbx_proto::stream::{Channel, ChannelId, ClientFrame, ServerFrame};
-use sbx_core::integrations::View as IntegrationsView;
-use sbx_core::tracker::{Inbox, Source as TrackerSource};
-use sbx_proto::{FailureKind, GitOp, McpOp, Reply, Request};
+use hura_client::{Incoming, Remote, Remotes, Sink};
+use hura_core::comments::{Comment, NewComment};
+use hura_core::events::Event;
+use hura_core::files::{Dir, FileText};
+use hura_core::git::{Against, FileDiff, Status as GitStatus};
+use hura_core::ops::{NewOptions, NewSession, Picked, Poll};
+use hura_core::policy::View as PolicyView;
+use hura_core::projects::{NewProject, Project};
+use hura_core::repos::Listing;
+use hura_core::session::Session;
+use hura_core::settings::{Settings, SettingsView};
+use hura_proto::stream::{Channel, ChannelId, ClientFrame, ServerFrame};
+use hura_core::integrations::View as IntegrationsView;
+use hura_core::tracker::{Inbox, Source as TrackerSource};
+use hura_proto::{FailureKind, GitOp, McpOp, Reply, Request};
 use serde::Serialize;
 use tauri::{Emitter as _, Manager as _};
 
@@ -70,13 +70,13 @@ struct Failed {
     message: String,
 }
 
-fn to_message(e: sbx_client::Error) -> Failed {
+fn to_message(e: hura_client::Error) -> Failed {
     let message = e.to_string();
     Failed {
         // A transport error and a reply that was not a reply are both failures
         // of this request; only the server's own `Failure` carries a kind.
         kind: match e {
-            sbx_client::Error::Failed(f) => f.kind,
+            hura_client::Error::Failed(f) => f.kind,
             _ => FailureKind::Failed,
         },
         message,
@@ -113,7 +113,7 @@ fn servers() -> Result<Vec<ServerSummary>, Failed> {
 }
 
 /// What pairing produced: the server just added, the list it is now in, and
-/// the version of the `sbxd` that answered.
+/// the version of the `hurad` that answered.
 ///
 /// The version is in here because it is the proof: a pairing string is a claim
 /// about an address, and a version that came back over the pinned connection is
@@ -128,14 +128,14 @@ struct Paired {
 
 /// Pair with a server from the window, rather than from a terminal.
 ///
-/// The whole of the checking is `sbx_client::pair`, which is what `sbx connect`
+/// The whole of the checking is `hura_client::pair`, which is what `hura connect`
 /// calls -- so a string this window accepts is one the CLI would accept, and a
 /// server it refuses is refused for the same stated reason. This command exists
 /// because the alternative on Windows is installing a CLI whose other half
 /// cannot run there at all.
 #[tauri::command(async)]
 fn connect(pairing: String, name: Option<String>) -> Result<Paired, Failed> {
-    let (remote, hello) = sbx_client::pair(&pairing, name.as_deref()).map_err(failed)?;
+    let (remote, hello) = hura_client::pair(&pairing, name.as_deref()).map_err(failed)?;
     Ok(Paired {
         server: ServerSummary {
             name: remote.name.clone(),
@@ -146,10 +146,10 @@ fn connect(pairing: String, name: Option<String>) -> Result<Paired, Failed> {
     })
 }
 
-/// Forget one, which is `sbx remotes --forget`.
+/// Forget one, which is `hura remotes --forget`.
 ///
 /// It drops a token this machine holds and nothing on the server: the server
-/// stops accepting one when `sbxd revoke` says so, which is the half that
+/// stops accepting one when `hurad revoke` says so, which is the half that
 /// matters if the token has been somewhere it should not.
 #[tauri::command(async)]
 fn forget(name: String) -> Result<Vec<ServerSummary>, Failed> {
@@ -471,25 +471,25 @@ fn forget_tracker(server: String, name: String) -> Result<IntegrationsView, Fail
 /// **The reading and the packing happen on this side of the bridge**, which is
 /// the whole reason this is a Tauri command and not something the webview does:
 /// `~/.claude/skills` is on *this* machine, a webview cannot read it, and the
-/// packing is `sbx_core::skills::payload` -- the same tar the seeder carries, so
+/// packing is `hura_core::skills::payload` -- the same tar the seeder carries, so
 /// there is one definition of what a packed skill is.
 ///
 /// Every skill the agent would load, not a selection: a list to maintain here
 /// would be a list that goes stale the first time you add a skill and forget.
 #[tauri::command(async)]
 fn upload_skills(server: String) -> Result<IntegrationsView, Failed> {
-    let mine = sbx_core::skills::local();
+    let mine = hura_core::skills::local();
     if mine.is_empty() {
         return Err(failed(format!(
             "no skills in {} to upload",
-            sbx_core::skills::host_skills_dir().display()
+            hura_core::skills::host_skills_dir().display()
         )));
     }
     let mut uploads = Vec::new();
     let mut problems = Vec::new();
     for skill in &mine {
-        match sbx_core::skills::payload(&skill.source) {
-            Ok(tar) => uploads.push(sbx_core::skills::Upload {
+        match hura_core::skills::payload(&skill.source) {
+            Ok(tar) => uploads.push(hura_core::skills::Upload {
                 name: skill.name.clone(),
                 origin: skill.source.display().to_string(),
                 tar,
@@ -522,7 +522,7 @@ fn forget_skill(server: String, name: String) -> Result<IntegrationsView, Failed
 /// anything is sent.
 #[tauri::command(async)]
 fn my_skills() -> Vec<String> {
-    sbx_core::skills::local()
+    hura_core::skills::local()
         .into_iter()
         .map(|s| s.name)
         .collect()
@@ -532,7 +532,7 @@ fn my_skills() -> Vec<String> {
 ///
 /// Read on the server, with the credentials in its store, so this window shows
 /// a list and never holds a token. Whatever could not be read comes back beside
-/// what could -- see `sbx_core::tracker`.
+/// what could -- see `hura_core::tracker`.
 #[tauri::command(async)]
 fn tasks(server: String) -> Result<Inbox, Failed> {
     let reply = remote(&server)?.call(Request::Tasks).map_err(to_message)?;
@@ -570,7 +570,7 @@ fn set_settings(server: String, settings: Settings) -> Result<SettingsView, Fail
 ///
 /// One per window rather than one per pane: the protocol multiplexes, so four
 /// terminals and four feeds share a socket, a token check and a reconnect. See
-/// [`sbx_proto::stream`].
+/// [`hura_proto::stream`].
 #[derive(Default)]
 struct Streaming {
     open: Mutex<Option<Open>>,
@@ -587,7 +587,7 @@ struct Open {
 /// already carries its channel id, and a listener per channel would mean the
 /// frontend unsubscribing correctly every time a pane closes -- which it would
 /// eventually not.
-const FRAME: &str = "sbx://frame";
+const FRAME: &str = "hura://frame";
 
 /// Connect if the window is not already connected to this server.
 ///

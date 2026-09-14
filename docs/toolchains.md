@@ -6,9 +6,9 @@ community image does. Anything else -- the .NET SDK, a Rust toolchain -- is aske
 for per session:
 
 ```sh
-sbxd new --repo <url> --task "fix the failing test" --toolchain dotnet
-sbxd new --repo <url> --task "..."                  --toolchain dotnet,rust
-sbxd toolchains                                     # what is available
+hurad new --repo <url> --task "fix the failing test" --toolchain dotnet
+hurad new --repo <url> --task "..."                  --toolchain dotnet,rust
+hurad toolchains                                     # what is available
 ```
 
 In the window it is a field on the create form, beside the policy, and it usually
@@ -40,9 +40,9 @@ shipping something that did not verify.
 Each set is its own tag, layered onto the base image:
 
 ```
-sbx-base:latest        the base -- what a session with no toolchain runs
-sbx-base:dotnet        the base plus the .NET SDK
-sbx-base:dotnet-rust   the base plus both
+hura-base:latest        the base -- what a session with no toolchain runs
+hura-base:dotnet        the base plus the .NET SDK
+hura-base:dotnet-rust   the base plus both
 ```
 
 Docker shares the base's layers between all of them, so a variant costs its own
@@ -54,29 +54,29 @@ and `--toolchain dotnet,rust` name one image rather than building two identical
 ones. It is built on first use, or ahead of time:
 
 ```sh
-sbxd image build --toolchain dotnet,rust
+hurad image build --toolchain dotnet,rust
 ```
 
 The window will not build one -- the build streams docker's output, which would tear
 the interface apart mid-frame -- so a create asking for a toolchain nobody has
 built yet fails with the command that builds it.
 
-A variant is `FROM sbx-base:latest`, which means rebuilding the base for a newer
+A variant is `FROM hura-base:latest`, which means rebuilding the base for a newer
 agent leaves the variants behind on the old one. Nothing about that looks wrong
 from outside: sessions start, the toolchain works, and the agent is whatever
-version it was. `sbxd doctor` is what says so:
+version it was. `hurad doctor` is what says so:
 
 ```
-[  ok  ] image        sbx-base:latest built, claude 2.1.246
-[ warn ] toolchains   sbx-base:dotnet older than sbx-base:latest, so still on its previous agent
-         → sbxd image build --toolchain dotnet
+[  ok  ] image        hura-base:latest built, claude 2.1.246
+[ warn ] toolchains   hura-base:dotnet older than hura-base:latest, so still on its previous agent
+         → hurad image build --toolchain dotnet
 ```
 
 When they are current it reports what each one actually carries, read from a
 manifest the layers write inside the image rather than inferred from the tag:
 
 ```
-[  ok  ] toolchains   sbx-base:dotnet (dotnet 9.0.317); sbx-base:rust (rust 1.98.0)
+[  ok  ] toolchains   hura-base:dotnet (dotnet 9.0.317); hura-base:rust (rust 1.98.0)
 ```
 
 ## The registry, and the binary that may reach it
@@ -151,8 +151,8 @@ verification itself is untouched.
 
 ## Adding one
 
-`crates/sbx-core/src/toolchain.rs` is one table, and a toolchain is an entry in it
-plus a Dockerfile fragment under `images/sbx-base/toolchains/`. The entry names
+`crates/hura-core/src/toolchain.rs` is one table, and a toolchain is an entry in it
+plus a Dockerfile fragment under `images/hura-base/toolchains/`. The entry names
 the registries and the *kernel-resolved* binaries that may reach them, and the
 markers that make the create form tick it. The tests in that module check the
 three halves against each other: every binary in a rule is a path its layer

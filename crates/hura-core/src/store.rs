@@ -1,0 +1,601 @@
+//! The local session cache, and reconciling it against the gateway.
+//!
+//! The cache is only ever a cache. The gateway knows which sandboxes exist and
+//! each sandbox carries its own metadata, so losing this file costs nothing but
+//! a round trip. That is what makes a crashed TUI able to re-adopt live work.
+//!
+//! **Every change goes through [`update`], which locks the file.** More than one
+//! writer is the normal case, not an edge: a TUI refreshes the whole list on a
+//! timer while a `hura new` in another terminal walks a session through
+//! `creating`, `seeding`, `ready` -- and a create takes minutes on a large
+//! repository. Load-modify-save without a lock loses whichever write lands
+//! second, which showed up as a session whose sandbox was perfectly healthy --
+//! cloned, branched, agent running -- and whose record still said `seeding`.
+//! `save` alone is atomic (temp file and rename); it is the *read* before it that
+//! has to be inside the same lock.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io;
+use std::path::PathBuf;
+
+use openshell_client::{Phase, Sandbox};
+
+use crate::session::{self, LABEL_SESSION, Session, State};
+
+#[derive(Debug, Default)]
+pub struct Store {
+    path: PathBuf,
+    sessions: BTreeMap<String, Session>,
+}
+
+impl Store {
+    /// `$XDG_CONFIG_HOME/hura/sessions.json`, falling back to `~/.config`.
+    pub fn default_path() -> PathBuf {
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+            .unwrap_or_else(|| PathBuf::from("."));
+        base.join("hura").join("sessions.json")
+    }
+
+    pub fn load() -> io::Result<Self> {
+        Self::load_from(Self::default_path())
+    }
+
+    pub fn load_from(path: impl Into<PathBuf>) -> io::Result<Self> {
+        let path = path.into();
+        let sessions = match fs::read_to_string(&path) {
+            Ok(text) => {
+                let list: Vec<Session> = serde_json::from_str(&text).map_err(io::Error::other)?;
+                list.into_iter().map(|s| (s.name.clone(), s)).collect()
+            }
+            // A missing cache is the normal first-run case, not an error.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(e),
+        };
+        Ok(Store { path, sessions })
+    }
+
+    /// Write via a temporary file and rename, so an interrupted save cannot
+    /// truncate an existing cache.
+    pub fn save(&self) -> io::Result<()> {
+        if let Some(dir) = self.path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let list: Vec<&Session> = self.sessions.values().collect();
+        let json = serde_json::to_string_pretty(&list).map_err(io::Error::other)?;
+        let tmp = self.path.with_extension("json.tmp");
+        fs::write(&tmp, json)?;
+        fs::rename(&tmp, &self.path)
+    }
+
+    pub fn list(&self) -> Vec<&Session> {
+        self.sessions.values().collect()
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Session> {
+        self.sessions.get(name)
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.sessions.contains_key(name)
+    }
+
+    pub fn upsert(&mut self, session: Session) {
+        self.sessions.insert(session.name.clone(), session);
+    }
+
+    pub fn remove(&mut self, name: &str) -> Option<Session> {
+        self.sessions.remove(name)
+    }
+
+    /// Take the state of every session listed, leaving any record not mentioned
+    /// alone.
+    ///
+    /// Not `replace_all`, which is what this was: a refresh knows only what it
+    /// loaded, and a create running in another process may have added a session
+    /// since. Wholesale replacement dropped that record; merging keeps it.
+    /// Removal is [`Store::remove`]'s job, which is what destroying a session
+    /// calls.
+    pub fn merge(&mut self, sessions: Vec<Session>) {
+        for s in sessions {
+            self.sessions.insert(s.name.clone(), s);
+        }
+    }
+}
+
+/// Where the lock lives. Beside the cache, so a stale one is obvious.
+fn lock_path() -> PathBuf {
+    Store::default_path().with_extension("lock")
+}
+
+/// Read the cache, change it, and write it back, with the file locked
+/// throughout.
+///
+/// The lock is held across the read *and* the write, which is the whole point:
+/// two processes each doing load-modify-save without it lose one of the two
+/// changes, and the loser is whichever finished first. Held for the length of a
+/// file read and a rename -- microseconds -- so nothing waits on it meaningfully.
+/// Slow work (a gateway call, an exec) belongs outside.
+pub fn update<T>(f: impl FnOnce(&mut Store) -> T) -> io::Result<T> {
+    update_at(Store::default_path(), lock_path(), f)
+}
+
+/// [`update`], against a given pair of paths, so it can be tested.
+pub fn update_at<T>(
+    store: impl Into<PathBuf>,
+    lock: impl Into<PathBuf>,
+    f: impl FnOnce(&mut Store) -> T,
+) -> io::Result<T> {
+    let lock = lock.into();
+    if let Some(dir) = lock.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let guard = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock)?;
+    guard.lock()?;
+
+    let result = (|| {
+        let mut s = Store::load_from(store)?;
+        let out = f(&mut s);
+        s.save()?;
+        Ok(out)
+    })();
+
+    // Explicit rather than left to the drop, so the order is visible: the write
+    // above has to be inside the lock.
+    let _ = guard.unlock();
+    result
+}
+
+/// What reconciling the cache against live sandboxes produced.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Reconciliation {
+    /// Cached sessions with state corrected against the gateway.
+    pub sessions: Vec<Session>,
+    /// Session names present at the gateway but missing from the cache. Their
+    /// metadata has to be read out of the sandbox before they can be added.
+    pub orphans: Vec<String>,
+    /// Sessions whose sandbox has disappeared.
+    pub dead: Vec<String>,
+    /// Destroyed sessions whose sandbox is still there. Their tombstones are
+    /// still earning their keep, and [`crate::removed::keep_only`] is what reads
+    /// this: anything tombstoned and *not* named here has finally gone, so the
+    /// tombstone can go with it.
+    pub lingering: Vec<String>,
+}
+
+/// How long a record may sit in `creating` with no sandbox behind it.
+///
+/// [`crate::ops::create`] writes the record before it asks the gateway for
+/// anything, so that a session appears in every client's list the moment it is
+/// asked for rather than however many seconds the gateway takes to answer. That
+/// makes "cached but not live" the normal shape of a young create rather than a
+/// dead session, and this is how long "young" lasts. Generous: creating a
+/// sandbox is a gateway round trip and, the first time an image variant is
+/// used, a docker build behind it.
+const CREATING_GRACE: u64 = 15 * 60;
+
+/// Correct cached state against what the gateway reports.
+///
+/// Pure so it can be tested without a gateway. State is only changed where the
+/// evidence is unambiguous: an absent sandbox, an explicitly failed one, or a
+/// sandbox that has come back after being marked dead. Anything else is left
+/// alone, because a create may still be in flight.
+///
+/// `removed` is the set of names [`crate::removed`] holds -- sessions destroyed
+/// whose sandbox the gateway has not finished taking away. None of them is an
+/// orphan, whatever phase it is reporting: adopting one writes the record back
+/// that `destroy` just dropped, and the session someone removed returns to the
+/// list a second later with its old task and its old branch.
+pub fn reconcile(
+    cached: Vec<Session>,
+    live: &[Sandbox],
+    removed: &BTreeSet<String>,
+) -> Reconciliation {
+    let by_name: BTreeMap<&str, &Sandbox> = live.iter().map(|s| (s.name.as_str(), s)).collect();
+    let now = session::now_epoch();
+
+    let mut out = Reconciliation::default();
+
+    for mut session in cached {
+        match by_name.get(session.sandbox.as_str()) {
+            // A record written by a create that has not asked the gateway for
+            // anything yet. Absence is what `creating` *means* here, so it is
+            // not evidence of anything -- but only for as long as a create
+            // plausibly takes, or a create whose process died in that window
+            // would leave a session nothing could ever reconcile.
+            None if session.state == State::Creating
+                && now.saturating_sub(session.created_at) < CREATING_GRACE => {}
+            None => {
+                if session.state != State::Dead {
+                    out.dead.push(session.name.clone());
+                }
+                session.state = State::Dead;
+            }
+            Some(sb) => match sb.phase {
+                // Deletion is asynchronous: the sandbox stays listed as
+                // `Deleting` for a while, and treating that as alive leaves a
+                // removed session showing as healthy.
+                Phase::Deleting => {
+                    if session.state != State::Dead {
+                        out.dead.push(session.name.clone());
+                    }
+                    session.state = State::Dead;
+                }
+                Phase::Error => session.state = State::Failed,
+                Phase::Stopped => session.state = State::Idle,
+                Phase::Ready if session.state == State::Dead => session.state = State::Ready,
+                // A sandbox that is not running yet, under a record that claims
+                // it is. Only reachable for a session whose create finished
+                // long ago -- a create of its own waits for `Ready` before it
+                // seeds -- which leaves a gateway restart, or a sandbox the
+                // gateway is bringing back. Left as `Ready` it is a row the user
+                // can click, and every exec behind it fails with the gateway's
+                // own `is not ready (phase: Provisioning)`. `Creating` is what
+                // it actually is, and the states in flight are left alone for
+                // the reason `in_flight_states_are_left_alone` gives: a create
+                // in another process owns them.
+                Phase::Provisioning | Phase::Starting
+                    if matches!(session.state, State::Ready | State::Idle | State::Dead) =>
+                {
+                    session.state = State::Creating;
+                }
+                _ => {}
+            },
+        }
+        out.sessions.push(session);
+    }
+
+    let known: Vec<&str> = out.sessions.iter().map(|s| s.name.as_str()).collect();
+    for sb in live {
+        let Some(name) = sb.labels.get(LABEL_SESSION) else {
+            continue;
+        };
+        // A session someone destroyed, whose sandbox the gateway is still
+        // carrying. Never an orphan -- see the doc comment -- and worth saying
+        // so, because "still there" is what keeps its tombstone alive.
+        if removed.contains(name.as_str()) {
+            out.lingering.push(name.clone());
+            continue;
+        }
+        // Not a sandbox on its way out. Deletion is asynchronous, so a session
+        // destroyed a moment ago is still listed for a while -- and with its
+        // record already dropped it looks exactly like an orphan worth adopting.
+        // Reading its metadata then fails with "sandbox not found", which is a
+        // frightening thing to print for a deletion that worked.
+        //
+        // Kept as well as the tombstone above rather than replaced by it: this
+        // one also covers a sandbox removed by something that is not this tool,
+        // which leaves no tombstone at all.
+        if sb.phase == Phase::Deleting {
+            continue;
+        }
+        if !known.contains(&name.as_str()) {
+            out.orphans.push(name.clone());
+        }
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use openshell_client::{Phase, Sandbox};
+
+    use super::*;
+    use crate::session::{LABEL_MANAGED, Session};
+
+    fn sandbox(name: &str, phase: Phase, session_label: Option<&str>) -> Sandbox {
+        let mut labels = BTreeMap::new();
+        labels.insert(LABEL_MANAGED.to_string(), "true".to_string());
+        if let Some(s) = session_label {
+            labels.insert(LABEL_SESSION.to_string(), s.to_string());
+        }
+        Sandbox {
+            id: format!("id-{name}"),
+            name: name.to_string(),
+            phase,
+            created_at: "2026-08-21 14:15:56".to_string(),
+            labels,
+            workspace: "default".to_string(),
+        }
+    }
+
+    fn session(name: &str, state: State) -> Session {
+        let mut s = Session::new(name.into(), "repo".into(), "task".into());
+        s.state = state;
+        s
+    }
+
+    /// [`super::reconcile`] with nothing tombstoned, which is what every case
+    /// below except the two about tombstones is about. Shadows the real one so
+    /// those cases stay one argument wide.
+    fn reconcile(cached: Vec<Session>, live: &[Sandbox]) -> Reconciliation {
+        super::reconcile(cached, live, &BTreeSet::new())
+    }
+
+    /// The bug this lock exists for, as the property that prevents it: a writer
+    /// always reads the state that is on disk *now*, never one it loaded earlier.
+    ///
+    /// What went wrong without it: a create held a snapshot from before its clone
+    /// -- minutes, on a large repository -- and wrote `ready` into it, while a TUI
+    /// refreshing every second wrote the list back from its own older read. The
+    /// last write won and it was usually the refresh, so a session whose sandbox
+    /// was cloned, branched and running an agent had a record still saying
+    /// `seeding`.
+    #[test]
+    fn every_writer_reads_the_state_that_is_there_now() {
+        let dir = TempDir::new("store-race");
+        let path = dir.0.join("sessions.json");
+        let lock = dir.0.join("sessions.lock");
+
+        update_at(&path, &lock, |s| s.upsert(session("a", State::Seeding))).unwrap();
+
+        // Anyone holding a snapshot from before this write is holding `seeding`.
+        let stale = Store::load_from(&path).unwrap();
+        assert_eq!(stale.get("a").map(|s| s.state), Some(State::Seeding));
+
+        // The create finishes.
+        update_at(&path, &lock, |s| s.upsert(session("a", State::Ready))).unwrap();
+
+        // Every later writer -- including the one that had the stale copy, since
+        // its write also goes through here -- sees `ready` and not what it read.
+        let seen = update_at(&path, &lock, |s| s.get("a").map(|x| x.state)).unwrap();
+        assert_eq!(seen, Some(State::Ready));
+    }
+
+    /// A record added by another process during a refresh must not be dropped by
+    /// it. `replace_all` dropped exactly this.
+    #[test]
+    fn a_refresh_leaves_records_it_never_saw_alone() {
+        let dir = TempDir::new("store-merge");
+        let path = dir.0.join("sessions.json");
+        let lock = dir.0.join("sessions.lock");
+
+        update_at(&path, &lock, |s| s.upsert(session("old", State::Ready))).unwrap();
+        // A create in another process adds one.
+        update_at(&path, &lock, |s| s.upsert(session("new", State::Seeding))).unwrap();
+        // The refresh writes back only what it knew about.
+        update_at(&path, &lock, |s| s.merge(vec![session("old", State::Idle)])).unwrap();
+
+        let after = Store::load_from(&path).unwrap();
+        assert_eq!(after.get("old").map(|s| s.state), Some(State::Idle));
+        assert!(after.contains("new"), "the record the refresh never saw");
+    }
+
+    /// Two writers at once, for real: the lock has to serialise them, and both
+    /// changes have to be there afterwards.
+    #[test]
+    fn concurrent_writers_both_land() {
+        let dir = TempDir::new("store-threads");
+        let path = dir.0.join("sessions.json");
+        let lock = dir.0.join("sessions.lock");
+
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let (path, lock) = (path.clone(), lock.clone());
+                std::thread::spawn(move || {
+                    update_at(&path, &lock, |s| {
+                        // A read, a pause, then a write -- the shape that loses a
+                        // change without a lock around both halves.
+                        let seen = s.list().len();
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        s.upsert(session(&format!("s{i}"), State::Ready));
+                        seen
+                    })
+                    .unwrap()
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        let after = Store::load_from(&path).unwrap();
+        assert_eq!(after.list().len(), 8, "every writer's session is there");
+    }
+
+    /// `hura rm` followed by `hura ls` used to print "could not adopt ...: sandbox
+    /// not found": the record was gone and the sandbox was still listed as
+    /// `Deleting`, which together look like an orphan. A deletion that worked
+    /// must not report an error.
+    #[test]
+    fn a_sandbox_being_deleted_is_not_an_orphan() {
+        let live = vec![sandbox("hura-gone", Phase::Deleting, Some("gone"))];
+        let out = reconcile(vec![], &live);
+        assert!(out.orphans.is_empty(), "{:?}", out.orphans);
+    }
+
+    #[test]
+    fn missing_sandbox_marks_session_dead() {
+        let r = reconcile(vec![session("a", State::Ready)], &[]);
+        assert_eq!(r.sessions[0].state, State::Dead);
+        assert_eq!(r.dead, vec!["a"]);
+    }
+
+    /// A create writes its record before the gateway has been asked for a
+    /// sandbox, so that the session shows up the instant it is asked for. For
+    /// that window "no sandbox" is what `creating` means, not a death -- and a
+    /// refresh runs every second, so getting this wrong would kill every new
+    /// session before it was made.
+    #[test]
+    fn a_create_that_has_not_reached_the_gateway_yet_is_not_dead() {
+        let r = reconcile(vec![session("a", State::Creating)], &[]);
+        assert_eq!(r.sessions[0].state, State::Creating);
+        assert!(r.dead.is_empty(), "{:?}", r.dead);
+
+        // Not forever: a create whose process died before it placed anything
+        // would otherwise leave a record nothing can ever reconcile.
+        let mut old = session("a", State::Creating);
+        old.created_at = session::now_epoch() - CREATING_GRACE - 1;
+        let r = reconcile(vec![old], &[]);
+        assert_eq!(r.sessions[0].state, State::Dead);
+        assert_eq!(r.dead, vec!["a"]);
+    }
+
+    #[test]
+    fn already_dead_session_is_not_reported_twice() {
+        let r = reconcile(vec![session("a", State::Dead)], &[]);
+        assert_eq!(r.sessions[0].state, State::Dead);
+        assert!(r.dead.is_empty(), "should only report the transition");
+    }
+
+    #[test]
+    fn deleting_phase_counts_as_dead() {
+        // Regression: a deleted sandbox lingers in `Deleting` and used to keep
+        // reporting the last cached state, so `ls` showed it as ready.
+        let live = [sandbox("hura-a", Phase::Deleting, Some("a"))];
+        let r = reconcile(vec![session("a", State::Ready)], &live);
+        assert_eq!(r.sessions[0].state, State::Dead);
+        assert_eq!(r.dead, vec!["a"]);
+    }
+
+    #[test]
+    fn stopped_sandbox_reads_as_idle() {
+        let live = [sandbox("hura-a", Phase::Stopped, Some("a"))];
+        let r = reconcile(vec![session("a", State::Ready)], &live);
+        assert_eq!(r.sessions[0].state, State::Idle);
+    }
+
+    #[test]
+    fn error_phase_overrides_cached_state() {
+        let live = [sandbox("hura-a", Phase::Error, Some("a"))];
+        let r = reconcile(vec![session("a", State::Ready)], &live);
+        assert_eq!(r.sessions[0].state, State::Failed);
+        assert!(r.dead.is_empty());
+    }
+
+    #[test]
+    fn returning_sandbox_revives_a_dead_session() {
+        let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
+        let r = reconcile(vec![session("a", State::Dead)], &live);
+        assert_eq!(r.sessions[0].state, State::Ready);
+    }
+
+    #[test]
+    fn in_flight_states_are_left_alone() {
+        // A create still running must not be clobbered into Ready.
+        let live = [sandbox("hura-a", Phase::Provisioning, Some("a"))];
+        let r = reconcile(vec![session("a", State::Seeding)], &live);
+        assert_eq!(r.sessions[0].state, State::Seeding);
+    }
+
+    /// Regression: a record saying `ready` over a sandbox the gateway has not
+    /// finished bringing up is a row the user can click, and every exec behind
+    /// it -- the agent terminal above all -- fails with the gateway's own
+    /// `is not ready (phase: Provisioning)`.
+    #[test]
+    fn a_provisioning_sandbox_is_not_reported_ready() {
+        let live = [sandbox("hura-a", Phase::Provisioning, Some("a"))];
+        let r = reconcile(vec![session("a", State::Ready)], &live);
+        assert_eq!(r.sessions[0].state, State::Creating);
+    }
+
+    #[test]
+    fn unknown_managed_sandbox_is_an_orphan() {
+        let live = [
+            sandbox("hura-a", Phase::Ready, Some("a")),
+            sandbox("hura-b", Phase::Ready, Some("b")),
+        ];
+        let r = reconcile(vec![session("a", State::Ready)], &live);
+        assert_eq!(
+            r.orphans,
+            vec!["b"],
+            "b exists at the gateway but not in cache"
+        );
+    }
+
+    #[test]
+    fn managed_sandbox_without_a_session_label_is_ignored() {
+        let live = [sandbox("hura-weird", Phase::Ready, None)];
+        let r = reconcile(vec![], &live);
+        assert!(r.orphans.is_empty());
+    }
+
+    #[test]
+    fn a_removed_session_is_never_adopted_back() {
+        // The bug this pair of tests exists for. `destroy` drops the record and
+        // the gateway takes its time; the sandbox is still listed, still
+        // labelled, and no longer in the cache -- which is the exact shape of an
+        // orphan. Adopting it put the removed session straight back in the list,
+        // so creating a fresh one under the same name was then refused as a
+        // duplicate: removing a session and starting it again looked like hura
+        // insisting on resuming the old one.
+        //
+        // `Ready` rather than `Deleting` on purpose: `Deleting` was already
+        // skipped, and the phase the gateway reports in the seconds after a
+        // delete is not something this side gets to decide.
+        let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
+        let removed = BTreeSet::from(["a".to_string()]);
+
+        let r = super::reconcile(vec![], &live, &removed);
+
+        assert!(r.orphans.is_empty(), "{:?}", r.orphans);
+        assert_eq!(r.lingering, vec!["a"], "its tombstone is still needed");
+    }
+
+    #[test]
+    fn a_sandbox_that_has_finally_gone_stops_lingering() {
+        // The other half: nothing at the gateway means the tombstone has done
+        // its job, and `removed::keep_only` reads the empty list as permission
+        // to drop it.
+        let removed = BTreeSet::from(["a".to_string()]);
+
+        let r = super::reconcile(vec![], &[], &removed);
+
+        assert!(r.lingering.is_empty());
+    }
+
+    /// A directory of its own per test, removed on drop so a failing assertion
+    /// does not leave one behind.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "hura-{tag}-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn store_roundtrips_through_disk() {
+        let dir = std::env::temp_dir().join(format!("hura-test-{}", std::process::id()));
+        let path = dir.join("sessions.json");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut store = Store::load_from(&path).unwrap();
+        assert!(store.list().is_empty(), "missing file must load as empty");
+
+        store.upsert(session("a", State::Ready));
+        store.save().unwrap();
+
+        let reloaded = Store::load_from(&path).unwrap();
+        assert_eq!(reloaded.list().len(), 1);
+        assert_eq!(reloaded.get("a").unwrap().state, State::Ready);
+        assert!(reloaded.contains("a"));
+
+        // The temporary file must not be left behind.
+        assert!(!path.with_extension("json.tmp").exists());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

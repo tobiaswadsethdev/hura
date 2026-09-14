@@ -2,10 +2,10 @@
 //
 // A pairing string is an address, a token and the fingerprint of the
 // certificate the server will present, and pasting one here does exactly what
-// `sbx connect` does with it -- the checks and the saving are
-// `sbx_client::pair` on the Rust side, called by both. What this adds is that
+// `hura connect` does with it -- the checks and the saving are
+// `hura_client::pair` on the Rust side, called by both. What this adds is that
 // the machine running the window does not need a CLI: on Windows there is no
-// `sbx` to install, because the half of it that drives sandboxes needs a
+// `hura` to install, because the half of it that drives sandboxes needs a
 // gateway and a Docker daemon that only exist on the Linux side.
 //
 // The string carries a credential, so it is never echoed back into an error
@@ -72,7 +72,7 @@ export function ServersScreen({
           docs/desktop.md it is the single commonest reason a paired server
           cannot be reached. */}
       <p className="hint">
-        <code>sbxd pair desktop --host …</code> on the machine with the
+        <code>hurad pair desktop --host …</code> on the machine with the
         sandboxes prints one of these. <code>--host</code> is the address{" "}
         <em>this</em> window should dial — leaving it out is the usual reason a
         paired server cannot be reached.
@@ -84,7 +84,7 @@ export function ServersScreen({
           ref={field}
           rows={3}
           spellCheck={false}
-          placeholder="sbx://host:17671/<token>#<fingerprint>"
+          placeholder="hura://host:17671/<token>#<fingerprint>"
           value={pairing}
           onChange={(e) => setPairing(e.target.value)}
           // Enter submits, because the field holds one line that was pasted
@@ -125,7 +125,7 @@ export function ServersScreen({
                 <span className="name">{s.name}</span>
                 <span className="address">{s.address}</span>
                 {/* Forgetting drops the token this machine holds. The server
-                    goes on accepting it until `sbxd revoke` says otherwise,
+                    goes on accepting it until `hurad revoke` says otherwise,
                     which is the half that matters if it has leaked.
 
                     The same bin the tree forgets a project with, so one glyph
@@ -135,7 +135,7 @@ export function ServersScreen({
                     for it. */}
                 <button
                   className="quiet-icon danger"
-                  title={`forget ${s.name} (the server keeps accepting the token until sbxd revoke)`}
+                  title={`forget ${s.name} (the server keeps accepting the token until hurad revoke)`}
                   onClick={() => void forget(s.name)}
                 >
                   <Forget aria-label={`forget ${s.name}`} />

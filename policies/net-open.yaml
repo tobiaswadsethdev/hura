@@ -15,7 +15,7 @@
 # with no binary able to reach it is decoration. That is now a *toolchain's* to
 # open rather than a template's -- `--toolchain rust` builds an image variant
 # carrying cargo and opens crates.io for it in that session and no other. See
-# `crates/sbx/src/toolchain.rs` and docs/toolchains.md.
+# `crates/hura/src/toolchain.rs` and docs/toolchains.md.
 #
 # npm and PyPI stay here, because the base image really does ship node and uv, so
 # this template can promise something true about every sandbox it is applied to.

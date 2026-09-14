@@ -10,7 +10,7 @@
 // **It asks.** The download is verified against a signature the release was
 // built with, so the risk is not what arrives; it is *when*. A window watching
 // four agents is a window somebody is using, and replacing it out from under
-// them mid-session is the same mistake `sbxd` refuses to make with its own
+// them mid-session is the same mistake `hurad` refuses to make with its own
 // binary. So: a bar, a button, and it waits.
 //
 // The check is one request at launch and never again. A window left open for a
@@ -70,7 +70,7 @@ export function UpdateBar() {
       } catch {
         // Silence is right here. Nothing is broken, the window works, and
         // "could not reach github" is not worth a bar across the top of it.
-        // `sbxd doctor` is where a version question gets a real answer.
+        // `hurad doctor` is where a version question gets a real answer.
       }
     })();
 
@@ -96,7 +96,7 @@ export function UpdateBar() {
         <span className="what">could not install {phase.version}</span>
         <span className="note">{phase.why}</span>
         <a
-          href={`https://github.com/tobiaswadsethdev/sbx/releases/tag/v${phase.version}`}
+          href={`https://github.com/tobiaswadsethdev/hura/releases/tag/v${phase.version}`}
           target="_blank"
           rel="noreferrer"
         >
@@ -110,7 +110,7 @@ export function UpdateBar() {
   const { found } = phase;
   return (
     <div className="update">
-      <span className="what">sbx {found.version} is available</span>
+      <span className="what">hura {found.version} is available</span>
       <button
         className="take"
         onClick={async () => {

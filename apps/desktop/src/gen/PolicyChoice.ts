@@ -6,7 +6,7 @@
  * A [`policy::Template`] flattened, plus the one case a template cannot cover:
  * a config file may name a YAML path instead, and that has to be offered or a
  * client would quietly create sessions under a different policy from
- * `sbx new`.
+ * `hura new`.
  */
 export type PolicyChoice = { 
 /**

@@ -11,7 +11,7 @@ export type McpStatus = { name: string,
  */
 url: string, 
 /**
- * Whether `sbxd` runs it. An external entry has a state of `Unknown` and
+ * Whether `hurad` runs it. An external entry has a state of `Unknown` and
  * nothing to press.
  */
 managed: boolean, image: string | null, state: McpState, 
