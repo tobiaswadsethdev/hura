@@ -1,13 +1,17 @@
-# The task inbox
+# Tickets
 
-What your trackers say is assigned to you, in the window, with one button that
-turns a ticket into a session — and a publish that comments the pull request
-back onto it.
+What your trackers' filters say, in the window, with one button that turns a
+ticket into a session — and a publish that comments the pull request back onto
+it. The same screen is where each tracker is set up: its connection, its token
+and its filters.
 
 ```
-   PROJ-123   jira    In Progress   Add the changelog        [ tools ▾ ] start
-   AB#1234    ado     Active        Order backfill throws…   [ tools ▾ ] start
-   #45        github  open          Readme says the wrong…   [ hura  ▾ ] start
+   JIRA · READY TO START
+   PROJ-12    Story   To Do         Add the changelog        [ tools ▾ ] start
+   JIRA · ASSIGNED TO ME
+   PROJ-7     Bug     In Progress   Retry uploads            [ tools ▾ ] start
+   AZURE-DEVOPS · ASSIGNED TO ME
+   AB#1234    Task    Active        Order backfill throws…   [ tools ▾ ] start
 ```
 
 GitHub, Azure DevOps and Jira, read **on the server, over REST, with the
@@ -25,15 +29,17 @@ both would serve both badly.
 
 ## Configuring one
 
-**From the window:** the integrations screen has a *trackers* section — pick the
-kind, say where it points, name the secret and paste the token, and the entry
-and its credential land on the server in one go. That is the whole setup, and it
-is the only one available when the server is on another machine.
+**From the window:** the tickets screen (the ticket icon in the header) starts
+with the trackers — pick the kind, say where it points, name the secret and
+paste the token, and the entry and its credential land on the server in one go.
+A tracker whose token is missing or has expired has a field on its row to paste
+a new one. That is the whole setup, and it is the only one available when the
+server is on another machine.
 
 What it writes is a `[[tracker]]` table in the **server's** config file, which is
 the other way to do it. The credential is named, never written: the value lives
 in the server's secret store (see [mcp.md](mcp.md#secrets)), which is also where
-the window's integrations screen puts it.
+the window's tickets screen puts it.
 
 ```toml
 branch_prefix = "tobias"                  # what a work branch is named under
@@ -62,16 +68,68 @@ Then store the credentials:
 
 ```sh
 printf %s "$JIRA_API_TOKEN" | hurad secret JIRA_API_TOKEN
-hurad tasks                                 # the inbox, from a terminal
+hurad tasks                                 # the tickets, from a terminal
 hura --server=<name> tasks                 # ... or from a client
 ```
 
 `hurad doctor` says when a tracker names a secret the store does not have, because
-that produces an inbox **silently missing its rows** — which looks exactly like
+that produces a list **silently missing its rows** — which looks exactly like
 having nothing assigned to you.
 
-The default query is "assigned to me and not done", which is what an inbox is.
-`query` replaces it: JQL for Jira, WIQL for Azure DevOps.
+## Filters
+
+A Jira or Azure DevOps tracker can have several **named filters**, each its own
+section of the tickets screen: "ready to start", "assigned to me", whatever your process
+has a question for. A ticket two filters match is in both sections.
+
+From the window, each tracker's row on the tickets screen lists the filters it
+runs, with edit, remove and *add filter*. A tracker with none runs
+one called `assigned to me` — "assigned to me and not done", which is what an
+list is for — and the list starts from it, so adding a second filter adds a section
+rather than replacing the one you had.
+
+In the file they are an array on the tracker:
+
+```toml
+[[tracker]]
+kind    = "jira"
+site    = "https://your-org.atlassian.net"
+email   = "you@example.com"
+secret  = "JIRA_API_TOKEN"
+filters = [
+  { name = "ready to start", query = "project = PROJ AND status = \"Ready\" AND assignee is EMPTY" },
+  { name = "assigned to me", query = "assignee = currentUser() AND statusCategory != Done" },
+]
+```
+
+JQL for Jira, WIQL for Azure DevOps. The older single `query` key still works,
+and is what a tracker with no `filters` runs; saving filters from the window
+replaces it. GitHub trackers take no filters: they list what is assigned to you.
+
+## Notifications
+
+The window reads your tickets every three minutes and sends an OS notification when
+a ticket in one of your filters:
+
+* **changes status** — `PROJ-7 · To Do → In Progress`;
+* **gets a comment from somebody else** — your own are never announced, which is
+  why Jira is asked who the credential belongs to;
+* **turns up in a filter** it was not in before — `PROJ-12 · now in ready to
+  start`.
+
+Other edits are deliberately left out: a notification for every re-estimate is
+one nobody reads by Friday. More than three changed tickets at once — the window
+opening after a weekend — is one notification listing them.
+
+What was seen is kept per server in the window's own storage, so a ticket that
+moved while the window was closed is announced when it opens. The first read is
+the baseline and says nothing, and so is the first read of a filter you have
+just added. A tracker that could not be read is not a list of tickets that left
+it, and it coming back is not a list of arrivals.
+
+It is **notify me when a ticket in my filters changes** on the settings screen.
+Turned off, the timer stops too, so nothing asks your tracker on the window's
+behalf.
 
 ## What a ticket becomes
 
@@ -115,7 +173,7 @@ beside whatever git said. A publish with `--no-pr` writes nothing back, because
 there is nothing to point at.
 
 The record on the session is what makes this work minutes or days later, from a
-different client, after the inbox has moved on — the ticket's tracker, id, key
+different client, after the list has moved on — the ticket's tracker, id, key
 and URL, which is everything a write-back is addressed with and nothing else.
 
 ## What it costs
@@ -124,7 +182,7 @@ The server holds a credential that can read your tickets and comment on them.
 It is in the same store, with the same protection, as the pairing tokens and the
 TLS key — and a pairing token was already a login to that machine. What is new
 is the blast radius of *that machine* being compromised: it now includes leaving
-comments and moving tickets. Scope the tokens to what the inbox needs (read
+comments and moving tickets. Scope the tokens to what this needs (read
 work items, add comments) rather than reusing an administrative one.
 
 ---

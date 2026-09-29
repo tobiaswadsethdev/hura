@@ -53,9 +53,9 @@ import {
   FolderSearch,
   FolderTree,
   GitBranch,
-  Inbox as InboxGlyph,
   Info,
   KeyRound,
+  Pencil,
   Play,
   Plug,
   Plus as PlusGlyph,
@@ -68,7 +68,6 @@ import {
   ServerOff,
   Settings as SettingsGlyph,
   Shield,
-  ShieldOff,
   Sparkles,
   Square,
   Ticket,
@@ -111,7 +110,6 @@ export const ICON_PAGE = 40;
 
 // The header's five destinations. Icon-only, and the window's own nav: see
 // `App.tsx` for why the labels went and what replaced them.
-export const Inbox = InboxGlyph;
 export const NewProject = FolderPlus;
 export const Integrations = Plug;
 export const Servers = ServerGlyph;
@@ -151,6 +149,8 @@ export const Restart = RotateCw;
 export const Store = Save;
 export const Secret = KeyRound;
 export const Tracker = Ticket;
+/// Editing a line in place: a tracker's filter.
+export const Edit = Pencil;
 export const Skill = Sparkles;
 
 // The chrome.
@@ -163,10 +163,6 @@ export const Find = Search;
 /// "this leaves the window".
 export const Elsewhere = ExternalLink;
 export const Forget = Trash;
-/// A session with no sandbox around it. There is no `Sandboxed` beside it on
-/// purpose: sandboxed is what every session is, and a mark on the rule as well
-/// as on the exception is a mark that says nothing. See `Tree.tsx`.
-export const Unsandboxed = ShieldOff;
 
 // ---------------------------------------------------------------------------
 // The absences. One glyph per kind of nothing, and they are a vocabulary in

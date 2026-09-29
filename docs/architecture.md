@@ -27,13 +27,13 @@ has the decisions and the increments that got here; this is the map.
                                   |
                     +-------------+-------------+
                     |     Backend (a trait)     |   where a session runs
-                    +------+-------------+------+
-                           |             |
-                   Sandboxed          Worktree
-                           |             |
-   SessionStore     openshell-client   git worktree + tmux
-   (~/.config/hura/  (CLI subprocess)   (on the server itself,
-    sessions.json)         |            no isolation)
+                    +-------------+-------------+
+                                  |
+                              Sandboxed
+                                  |
+   SessionStore            openshell-client
+   (~/.config/hura/         (CLI subprocess)
+    sessions.json)                |
                     openshell gateway (docker driver)
                            |
         +------------------+-------------------+
@@ -64,18 +64,18 @@ Everything is in `hura-core` unless the second column says otherwise.
 | --- | --- |
 | `main.rs` | *(hura)* the clap CLI, and dispatch into `ops` |
 | `ops.rs` | the operations the CLI and the window both need, so neither reimplements the other. Everything here takes a `Backend` rather than a gateway client |
-| `backend.rs` | *where* a session runs, as a trait: the sandboxed one and the worktree one. `backend/sandboxed.rs` is what `ops` used to do directly; `backend/worktree.rs` is a `git worktree` on the server with no isolation at all, and says so. See [worktrees.md](worktrees.md) |
+| `backend.rs` | *where* a session runs, as a trait, so the scripts never name the gateway. `backend/sandboxed.rs` is the one implementation. There used to be a second, a `git worktree` on the server with no isolation; it was removed to keep one of everything |
 | `session.rs` | what a session *is*: identity, the derived branch and sandbox names, and the metadata record written inside the sandbox |
 | `store.rs` | the local cache and its reconciliation against the gateway; every write is locked |
-| `removed.rs` | the names of destroyed sessions, kept until the sandbox or worktree behind them has actually gone. Deletion is asynchronous, and a sandbox still listed with its record already dropped is the exact shape of an orphan worth adopting -- so without this a removed session came back on the next refresh, and the name could not be used again |
+| `removed.rs` | the names of destroyed sessions, kept until the sandbox behind them has actually gone. Deletion is asynchronous, and a sandbox still listed with its record already dropped is the exact shape of an orphan worth adopting -- so without this a removed session came back on the next refresh, and the name could not be used again |
 | `seed.rs` | the detached script that clones, cuts the branch, writes the record and starts the agent |
 | `status.rs` | what the agent is doing, from hooks and from its screen |
 | `policy.rs` | the templates, the mid-run widen/tighten, and `View`: the policy pane as facts, which each renderer words for itself |
 | `endpoints.rs` | the global allow and block lists applied to every new session |
 | `events.rs` | the allow/deny feed, merged and kept on disk per session |
 | `forge.rs` | which git host a session works against, derived from the repo URL |
-| `tracker.rs` | the task inbox: GitHub, Azure DevOps and Jira over REST, and the comment and transition a publish writes back. The parsers are pure and tested against captured answers, because reading somebody else's JSON is the part that is easy to get wrong quietly |
-| `publish.rs` | push and open a pull request, both from inside the sandbox -- or, for a worktree session, with the server's own git credentials |
+| `tracker.rs` | the tickets: GitHub, Azure DevOps and Jira over REST, and the comment and transition a publish writes back. The parsers are pure and tested against captured answers, because reading somebody else's JSON is the part that is easy to get wrong quietly |
+| `publish.rs` | push and open a pull request, both from inside the sandbox |
 | `image.rs` | the sandbox image, with its whole build context embedded in the binary |
 | `toolchain.rs` | the toolchains, their image variants, and the registry each one opens |
 | `skills.rs` | packing host skills into a session, and the server-side library a client pushes its own into |
@@ -131,9 +131,7 @@ handler that renders.
 
 **The sandbox is the source of truth.** Seeding writes
 `/sandbox/.hura/meta.json`, so a session describes itself and survives losing the
-local cache. (A worktree session has nowhere equivalent and keeps its record in
-the server's state directory instead -- the one place this rule bends, and
-[worktrees.md](worktrees.md) says why.) Labels carry identity only -- the gateway restricts label values to
+local cache. Labels carry identity only -- the gateway restricts label values to
 Kubernetes rules, at most 63 characters of `[A-Za-z0-9._-]`, which cannot hold a
 repo URL or a branch name with a `/` in it.
 

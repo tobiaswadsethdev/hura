@@ -24,13 +24,13 @@ The window is a workspace: projects containing worktrees, the agent's terminal
 and extra shells beside it, the working copy in a file tree, diffs in an editor
 with comments that go back to the agent, and git on the right.
 
-![The hura workspace: projects and their worktrees on the left, the agent's terminal in the middle, the working copy on the right](docs/images/workspace.png)
+![The hura workspace: the Hello-World and Spoon-Knife projects and their worktrees on the left, the agent's terminal in the middle showing git status in the sandbox, and the git pane on the right listing the two changed files](docs/images/workspace.png)
 
 **The isolation is not a claim, it is a pane.** Every allow and deny the gateway
 made, newest first, each tagged with the rule that decided it. At the top, what
 `curl` gets when it reaches for the very host `git` is cloning from:
 
-![The events feed for a session: a denied GET to github.com from /usr/bin/curl at the top, and below it a run of allowed git requests to github.com:443, each tagged with the github_git rule](docs/images/events.png)
+![The events feed for a session: a denied GET to github.com from /usr/bin/curl at the top, and below it the allowed git requests to github.com:443 that cloned the repository, each tagged with the github_git rule](docs/images/events.png)
 
 The rules behind those decisions are what the policy pane shows -- each one an
 endpoint, the binaries it is granted to, and how much of it they get:
@@ -63,10 +63,12 @@ endpoint, the binaries it is granted to, and how much of it they get:
   secrets, with a screen that says what each one is doing.
 - **Publish from inside.** `hurad publish` pushes the branch and opens a pull
   request on GitHub or Azure DevOps without the token ever reaching your host.
-- **An inbox, and the loop back to it.** What GitHub, Azure DevOps and Jira say
-  is assigned to you, read by the server; one button turns a ticket into a
-  session with the task, the name and the branch already right, and publishing
-  comments the pull request back onto the ticket and moves it.
+- **Tickets, and the loop back to them.** Named filters over Jira, Azure DevOps
+  and GitHub -- "ready to start", "assigned to me" -- read by the server, set up
+  token and all from the window, with a notification when a ticket changes
+  status, gets a comment or turns up. One button turns a ticket into a session
+  with the task, the name and the branch already right, and publishing comments
+  the pull request back onto the ticket and moves it.
 - **Set up once, from the window.** The branch prefix a work branch is named
   under, and the base branch, policy and credentials a new session starts with,
   are edited on the settings screen and written into the server's own config
@@ -78,11 +80,6 @@ endpoint, the binaries it is granted to, and how much of it they get:
   authenticated TLS port, so the machine you sit at needs no gateway, no Docker
   and no tmux of its own -- a Linux server inside WSL with the window out on
   Windows is the case it was built for. See [docs/server.md](docs/server.md).
-- **A worktree, when a sandbox is the wrong tool.** `--worktree` starts the
-  session as a `git worktree` on the server instead: seconds rather than
-  minutes, the machine's own toolchains, and **no isolation whatsoever** -- so
-  it is labelled that way in every list, the policy and events panes say so, and
-  it is never the default. [docs/worktrees.md](docs/worktrees.md) is the trade.
 
 ## Quickstart
 
@@ -143,13 +140,12 @@ hurad doctor                                    # check gateway, docker, tmux, i
 hurad image build                               # build the sandbox image (automatic on first use)
 hurad image build --toolchain dotnet,rust       # ... plus toolchains, as their own image variant
 hurad new --repo <url> --task "what to do"      # sandbox + clone + branch + agent
-hurad new --worktree --repo <path> --task "..."  # ... or a git worktree here, with no isolation
 hurad ls                                        # sessions, reconciled with the gateway
 hurad attach <name>                             # attach to the agent; Ctrl-b d to detach
 hurad diff <name>                               # what the agent has changed so far
 hurad policy <name>                             # the policy the gateway is enforcing
 hurad events <name>                             # recent allow/deny decisions
-hurad tasks                                     # the task inbox: what is assigned to you
+hurad tasks                                     # your tickets, by filter
 hurad policies                                  # the policy templates shipped in the binary
 hurad toolchains                                # the toolchains a sandbox image can be built with
 hurad config                                    # the defaults in force, and where they came from
@@ -190,8 +186,7 @@ else. See [docs/toolchains.md](docs/toolchains.md).
 | [The server](docs/server.md)               | `hurad`, pairing a client on another machine, WSL, what a token is worth |
 | [Configuration](docs/configuration.md)     | `~/.config/hura/config.toml`, and which default wins                   |
 | [Policy and events](docs/policy.md)        | what is enforced, the audit feed, and acting on a denial              |
-| [Worktree sessions](docs/worktrees.md)     | sessions with no sandbox: what they buy, and everything they give up  |
-| [The task inbox](docs/inbox.md)            | tickets in, sessions out, and the publish that writes back            |
+| [Tickets](docs/tickets.md)                 | filters, notifications, sessions out, and the publish that writes back |
 | [Git hosts](docs/git-hosts.md)             | GitHub and Azure DevOps, and how publishing keeps the token away      |
 | [Toolchains](docs/toolchains.md)           | node, .NET and Rust in a sandbox, and the registry each one may reach |
 | [Skills](docs/skills.md)                   | carrying your own skills into a sandbox                               |

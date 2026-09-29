@@ -127,14 +127,18 @@ export const api = {
     invoke<Integrations>("forget_skill", { server, name }),
   mySkills: () => invoke<string[]>("my_skills"),
   // A tracker is a `[[tracker]]` table in the server's config file. Adding one
-  // is what makes the inbox able to show anything at all; its credential is an
+  // is what makes the tickets screen able to show anything at all; its credential is an
   // ordinary secret, stored with `secret` under the name the entry gives.
   addTracker: (server: string, tracker: Tracker) =>
     invoke<Integrations>("add_tracker", { server, tracker }),
   forgetTracker: (server: string, name: string) =>
     invoke<Integrations>("forget_tracker", { server, name }),
+  // Replaced where it stands in the file, by the name it has now. How a
+  // tracker's filters are edited.
+  updateTracker: (server: string, name: string, tracker: Tracker) =>
+    invoke<Integrations>("update_tracker", { server, name, tracker }),
 
-  // The task inbox, read on the server with the credentials in its store: this
+  // The tickets, read on the server with the credentials in its store: this
   // window shows a list and never holds a token.
   tasks: (server: string) => invoke<Inbox>("tasks", { server }),
 
@@ -155,9 +159,7 @@ export const api = {
 /// A rejected command, as the bridge sends it: see `Failed` in main.rs.
 ///
 /// The message is written for a person and is shown rather than interpreted.
-/// The kind is the one thing worth branching on: `no-isolation` is not a
-/// failure at all -- it is a worktree session saying it has no policy to show --
-/// and drawing it as an error would make every one of them look broken.
+/// The kind is the one thing worth branching on.
 export type Failed = { kind: FailureKind; message: string };
 
 function isFailed(e: unknown): e is Failed {

@@ -257,6 +257,13 @@ pub enum Request {
     /// Take one out by name. The secret it named is left in the store, because
     /// nothing here can tell whether something else uses it.
     ForgetTracker { name: String },
+    /// Replace one, by the name it has now, keeping its place in the file.
+    /// How a tracker's filters are edited. Answers with
+    /// [`Reply::Integrations`], re-read.
+    UpdateTracker {
+        name: String,
+        tracker: Box<TrackerSource>,
+    },
 
     /// The task inbox: what the configured trackers say is assigned to you.
     ///
@@ -316,6 +323,7 @@ impl Request {
             | Request::ForgetSkill { .. }
             | Request::AddTracker(_)
             | Request::ForgetTracker { .. }
+            | Request::UpdateTracker { .. }
             | Request::Tasks
             | Request::Settings
             | Request::SetSettings(_) => None,
@@ -491,15 +499,6 @@ pub enum FailureKind {
     /// A request this server does not have, which is what an older server says
     /// to a newer client rather than failing to parse it.
     Unsupported,
-    /// The session has no isolation, so the thing asked for does not exist for
-    /// it: a worktree session has no policy and no decision feed.
-    ///
-    /// Its own kind rather than a [`Self::Failed`], because it is not a failure
-    /// and a client must not draw it as one. The `message` is the server's
-    /// explanation and the client shows it where the pane would have been --
-    /// which is the difference between a stated absence and a pane that looks
-    /// like it could not load.
-    NoIsolation,
     /// Anything else the server could not do.
     Failed,
 }
@@ -523,13 +522,6 @@ impl Failure {
         Self {
             kind: FailureKind::Unsupported,
             message: format!("this hurad does not support `{op}`; it speaks protocol {VERSION}"),
-        }
-    }
-
-    pub fn no_isolation(message: impl Into<String>) -> Self {
-        Self {
-            kind: FailureKind::NoIsolation,
-            message: message.into(),
         }
     }
 
@@ -665,6 +657,7 @@ mod tests {
                     ..Default::default()
                 },
                 secret_set: true,
+                filters: Vec::new(),
             }],
         };
         let json = serde_json::to_string(&Reply::Integrations(view)).unwrap();

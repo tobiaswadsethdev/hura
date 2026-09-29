@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 use std::sync::mpsc::{Sender, channel};
 
 use hura_core::secrets;
-use hura_core::tracker::{Kind, Source, Ticket, on_publish};
+use hura_core::tracker::{Filter, Kind, Source, Ticket, inbox, on_publish};
 
 /// The one state directory this file uses, with the credential already in it.
 ///
@@ -62,22 +62,39 @@ struct Seen {
 /// A tracker on loopback: answers the two GETs Jira's transition lookup makes
 /// and records every POST.
 fn stand_in(seen: Sender<Seen>) -> u16 {
+    // Three requests and then done: the comment, the transition list, and the
+    // transition itself.
+    answering(3, seen, |method, path| {
+        // The transition list is the only thing that has to answer with
+        // anything.
+        let payload = if path.contains("/transitions") && method == "GET" {
+            r#"{"transitions":[
+                 {"id":"21","name":"Ready for Review","to":{"name":"Ready for Review"}},
+                 {"id":"31","name":"Done","to":{"name":"Done"}}
+               ]}"#
+        } else {
+            r#"{"id":"10001"}"#
+        };
+        (200, payload.to_string())
+    })
+}
+
+/// A tracker on loopback that answers `requests` requests with `respond`.
+fn answering(requests: usize, seen: Sender<Seen>, respond: fn(&str, &str) -> (u16, String)) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {
-        // Three requests and then done: the comment, the transition list, and
-        // the transition itself.
-        for _ in 0..3 {
+        for _ in 0..requests {
             let Ok((stream, _)) = listener.accept() else {
                 return;
             };
-            serve(stream, &seen);
+            serve(stream, &seen, respond);
         }
     });
     port
 }
 
-fn serve(mut stream: TcpStream, seen: &Sender<Seen>) {
+fn serve(mut stream: TcpStream, seen: &Sender<Seen>, respond: fn(&str, &str) -> (u16, String)) {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
@@ -107,17 +124,9 @@ fn serve(mut stream: TcpStream, seen: &Sender<Seen>) {
     }
     let body = String::from_utf8_lossy(&body).into_owned();
 
-    // The transition list is the only thing that has to answer with anything.
-    let payload = if path.contains("/transitions") && method == "GET" {
-        r#"{"transitions":[
-             {"id":"21","name":"Ready for Review","to":{"name":"Ready for Review"}},
-             {"id":"31","name":"Done","to":{"name":"Done"}}
-           ]}"#
-    } else {
-        r#"{"id":"10001"}"#
-    };
+    let (status, payload) = respond(&method, &path);
     let answer = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
+        "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
         payload.len()
     );
     let _ = stream.write_all(answer.as_bytes());
@@ -146,6 +155,7 @@ fn publishing_comments_on_the_ticket_and_moves_it() {
         site: Some(format!("http://127.0.0.1:{port}")),
         email: Some("you@example.com".into()),
         query: None,
+        filters: Vec::new(),
         on_publish: Some("Ready for Review".into()),
     };
     let ticket = Ticket {
@@ -217,6 +227,7 @@ fn a_transition_that_does_not_exist_says_what_does() {
         site: Some(format!("http://127.0.0.1:{port}")),
         email: Some("you@example.com".into()),
         query: None,
+        filters: Vec::new(),
         on_publish: Some("In Review".into()),
     };
     let ticket = Ticket {
@@ -234,4 +245,86 @@ fn a_transition_that_does_not_exist_says_what_does() {
     assert!(said.contains("In Review"), "{said}");
     assert!(said.contains("Ready for Review"), "{said}");
     assert!(said.contains("Done"), "{said}");
+}
+
+/// Every filter is its own search, each row says which filter found it, and a
+/// filter that fails is a warning that leaves the others -- and the record of
+/// which ones were read -- alone.
+#[test]
+fn each_filter_is_its_own_search_and_a_failing_one_is_only_a_warning() {
+    state();
+
+    let (tx, rx) = channel();
+    // `/myself`, then one search per filter.
+    let port = answering(4, tx, |_, path| {
+        if path.contains("/myself") {
+            return (200, r#"{"accountId":"me-1"}"#.to_string());
+        }
+        if path.contains("Ready") {
+            let body = r#"{"issues":[{"key":"PROJ-12","fields":{
+                "summary":"Add changelog","status":{"name":"To Do"},
+                "issuetype":{"name":"Story"},"updated":"2026-09-28T10:00:00.000+0000",
+                "comment":{"total":1,"comments":[
+                  {"created":"2026-09-28T09:00:00.000+0000",
+                   "author":{"accountId":"me-1","displayName":"Tobias"}}]}}}]}"#;
+            return (200, body.to_string());
+        }
+        if path.contains("broken") {
+            return (
+                400,
+                r#"{"errorMessages":["the JQL is not valid"]}"#.to_string(),
+            );
+        }
+        (200, r#"{"issues":[]}"#.to_string())
+    });
+    let source = Source {
+        kind: Kind::Jira,
+        name: "work".into(),
+        secret: "JIRA_TOKEN".into(),
+        site: Some(format!("http://127.0.0.1:{port}")),
+        email: Some("you@example.com".into()),
+        filters: vec![
+            Filter {
+                name: "ready to start".into(),
+                query: "status = Ready".into(),
+            },
+            Filter {
+                name: "assigned to me".into(),
+                query: "assignee = currentUser()".into(),
+            },
+            Filter {
+                name: "typo".into(),
+                query: "broken".into(),
+            },
+        ],
+        ..Default::default()
+    };
+
+    let got = inbox(std::slice::from_ref(&source), "tobias");
+    assert_eq!(got.tasks.len(), 1, "{got:?}");
+    let t = &got.tasks[0];
+    assert_eq!(t.filter, "ready to start");
+    assert_eq!(t.comments, Some(1));
+    assert!(t.last_comment_mine, "the comment is the credential owner's");
+
+    let read: Vec<&str> = got.read.iter().map(|r| r.filter.as_str()).collect();
+    assert_eq!(read, ["ready to start", "assigned to me"]);
+    assert_eq!(got.warnings.len(), 1, "{:?}", got.warnings);
+    assert!(
+        got.warnings[0].starts_with("work · typo:"),
+        "{:?}",
+        got.warnings
+    );
+
+    let paths: Vec<String> = rx.try_iter().map(|s| s.path).collect();
+    assert_eq!(
+        paths.iter().filter(|p| p.contains("/myself")).count(),
+        1,
+        "{paths:?}"
+    );
+    assert!(
+        paths
+            .iter()
+            .all(|p| !p.contains("/search/jql") || p.contains("comment"))
+    );
 }

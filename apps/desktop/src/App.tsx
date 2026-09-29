@@ -10,7 +10,7 @@
 // and the decisions it made.
 //
 // **The window has destinations now, and the workspace is one of them.** The
-// inbox, the integrations, the servers and the settings used to be modal
+// tickets, the integrations, the servers and the settings used to be modal
 // dialogs stacked over this; they are screens, and `Screen.tsx` says at length
 // why. What that costs here is the two things a router has to do: hold which
 // screen is showing, and keep the workspace *mounted* while another one is --
@@ -24,14 +24,14 @@ import { Dock } from "./Dock";
 import { Empty } from "./Empty";
 import {
   Branch,
-  Inbox,
   Integrations,
   NewProject,
   NoServer,
   Servers,
   Settings,
+  Tracker,
 } from "./icons";
-import { InboxScreen } from "./Inbox";
+import { TicketsScreen } from "./Tickets";
 import { IntegrationsScreen } from "./Integrations";
 import { ServersScreen } from "./Connect";
 import type { Project } from "./gen/Project";
@@ -39,6 +39,7 @@ import type { Session } from "./gen/Session";
 import type { Task } from "./gen/Task";
 import type { Poll } from "./gen/Poll";
 import { onSessions, reset as resetNotifications } from "./notify";
+import { onTickets } from "./ticketNotify";
 import { close, nextChannelId, open } from "./stream";
 import { NewProjectDialog } from "./NewProject";
 import { NewWorktreeDialog } from "./NewWorktree";
@@ -57,7 +58,10 @@ import { UpdateBar } from "./Update";
 /// is what the window *is* when nothing is over it. Writing it as one of five
 /// equal names would invite code that tears it down to show another, which is
 /// the one thing that must not happen -- the terminals live in it.
-type Screen = "inbox" | "integrations" | "servers" | "settings";
+type Screen = "tickets" | "integrations" | "servers" | "settings";
+
+/// How often the tickets are read for changes. See the effect that uses it.
+const TICKET_POLL_MS = 3 * 60_000;
 
 /// The tabs a worktree has open.
 ///
@@ -130,12 +134,12 @@ export default function App() {
 
   /// Which destination is showing, if any. One value rather than the four
   /// booleans this used to be: they were four states that had to be false
-  /// together, and nothing enforced it -- opening the inbox from the settings
+  /// together, and nothing enforced it -- opening the tickets from the settings
   /// screen put both on screen at once, each with its own scrim.
   const [screen, setScreen] = useState<Screen | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [creatingIn, setCreatingIn] = useState<Project | null>(null);
-  /// The ticket a create was started from, carried from the inbox to the form.
+  /// The ticket a create was started from, carried from the tickets screen to the form.
   const [fromTask, setFromTask] = useState<Task | null>(null);
   // Every worktree's last poll: what its agent is doing, what it has spent, and
   // how full its context is. From a status channel each rather than a request
@@ -318,6 +322,25 @@ export default function App() {
     onSessions(live, prefs.notify);
   }, [live, prefs.notify]);
 
+  // The tickets, on a timer, for what has changed in them. Minutes rather than
+  // the session list's seconds: every read is one search per filter against
+  // somebody else's API, and a ticket that moved two minutes ago is news
+  // enough. The first read on start is the baseline, or catches up with what
+  // moved while the window was closed.
+  useEffect(() => {
+    if (!server || !prefs.notifyTickets) return;
+    const read = () =>
+      api
+        .tasks(server)
+        .then((tickets) => onTickets(server, tickets))
+        // A tracker that cannot be read is the tickets screen's to say; a
+        // timer has nowhere to put it.
+        .catch(() => {});
+    void read();
+    const timer = setInterval(read, TICKET_POLL_MS);
+    return () => clearInterval(timer);
+  }, [server, prefs.notifyTickets]);
+
   const groups = useMemo(() => group(projects, live), [projects, live]);
 
   // The diff each worktree carries, lifted out of the polls for the tree.
@@ -487,11 +510,11 @@ export default function App() {
           </button>
           <span className="dest-split" />
           <Destination
-            icon={Inbox}
-            label="inbox"
-            on={screen === "inbox"}
+            icon={Tracker}
+            label="tickets"
+            on={screen === "tickets"}
             disabled={!server}
-            onOpen={() => setScreen("inbox")}
+            onOpen={() => setScreen("tickets")}
             onClose={() => setScreen(null)}
           />
           <Destination
@@ -561,17 +584,7 @@ export default function App() {
               // sandbox goes, and with it whatever the agent had not pushed.
               ask({
                 title: `Destroy ${s.name}?`,
-                body:
-                  s.backend === "worktree" ? (
-                    <>
-                      Its worktree on the server goes with it, and anything uncommitted in{" "}
-                      <code>{s.name}</code> is lost.
-                    </>
-                  ) : (
-                    <>
-                      Its sandbox goes with it, and anything the agent has not pushed is lost.
-                    </>
-                  ),
+                body: <>Its sandbox goes with it, and anything the agent has not pushed is lost.</>,
                 confirm: "destroy",
                 onConfirm: () => {
                   api
@@ -693,14 +706,15 @@ export default function App() {
           )}
         </div>
 
-        {screen === "inbox" && server && (
-          <InboxScreen
+        {screen === "tickets" && server && (
+          <TicketsScreen
             server={server}
+            notify={prefs.notifyTickets}
             projects={projects}
             currentProject={sessions.find((s) => s.name === selected)?.project ?? null}
             onClose={() => setScreen(null)}
             onStart={(project, task) => {
-              // Straight into the create form, pre-filled: the inbox's whole
+              // Straight into the create form, pre-filled: the list's whole
               // point is that starting work on a ticket is one step. The screen
               // closes under the dialog rather than behind it -- the form
               // answers back to the workspace, which is where the session will
@@ -713,7 +727,11 @@ export default function App() {
         )}
 
         {screen === "integrations" && server && (
-          <IntegrationsScreen server={server} onClose={() => setScreen(null)} />
+          <IntegrationsScreen
+            server={server}
+            onClose={() => setScreen(null)}
+            onOpenTickets={() => setScreen("tickets")}
+          />
         )}
 
         {screen === "servers" && (

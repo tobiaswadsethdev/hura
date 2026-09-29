@@ -4,8 +4,7 @@
 //! Removing a session drops its record immediately, because the row
 //! disappearing is what "remove" means to the person who asked. Deleting the
 //! thing behind it is not immediate: the gateway's delete is asynchronous and a
-//! sandbox stays listed for a while afterwards, and a worktree whose directory
-//! could not be removed is still on disk.
+//! sandbox stays listed for a while afterwards.
 //!
 //! That gap is the whole bug this module exists for. A sandbox still listed,
 //! labelled `hura.session=foo`, with no record in the cache, is *exactly* the
@@ -19,8 +18,8 @@
 //! hura insisting on restarting the old one.
 //!
 //! A tombstone closes it. `destroy` writes the name here, adoption skips every
-//! name it holds, and a refresh that could reach every backend drops the ones
-//! whose sandbox or worktree has finally gone. Creating a session under the name
+//! name it holds, and a refresh that reached the gateway drops the ones whose
+//! sandbox has finally gone. Creating a session under the name
 //! drops it too: that is someone saying out loud that the name is theirs again.
 //!
 //! Losing this file costs what it always cost -- a removed session may come back
@@ -84,9 +83,9 @@ pub fn forget_at(path: &Path, name: &str) {
     }
 }
 
-/// Keep only the tombstones whose sandbox or worktree is still there.
+/// Keep only the tombstones whose sandbox is still there.
 ///
-/// Called by a refresh that reached *every* backend, and only then: a gateway
+/// Called by a refresh that reached the gateway, and only then: a gateway
 /// that could not be asked reports nothing lingering, and pruning on that would
 /// forget precisely the tombstones that are still doing their job.
 pub fn keep_only(still_there: &BTreeSet<String>) {

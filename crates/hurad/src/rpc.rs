@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use hura_core::backend::{Backend, Backends, Isolation};
+use hura_core::backend::{Backend, Backends};
 use hura_core::session::Session;
 use hura_core::store::Store;
 use hura_core::{
@@ -23,11 +23,8 @@ use openshell_client::CliClient;
 
 /// Answer one request.
 ///
-/// Every arm that is about one session asks [`Backends::for_session`] which
-/// backend it belongs to and then does exactly what it did before. The two
-/// exceptions are [`Request::Policy`] and [`Request::Events`], which are about
-/// the isolation itself and so are the two things a worktree session cannot
-/// answer -- and they say so rather than coming back empty.
+/// Every arm that is about one session asks [`Backends::for_session`] for its
+/// backend and hands it to the matching op.
 pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
     match request {
         Request::Ls => ls(backends),
@@ -183,6 +180,16 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
         // `hura_core::settings`.
         Request::AddTracker(source) => {
             match hura_core::settings::add_tracker(&config::Config::default_path(), &source) {
+                Ok(_) => integrations(),
+                Err(e) => Failure::failed(e.to_string()).into(),
+            }
+        }
+        Request::UpdateTracker { name, tracker } => {
+            match hura_core::settings::update_tracker(
+                &config::Config::default_path(),
+                &name,
+                &tracker,
+            ) {
                 Ok(_) => integrations(),
                 Err(e) => Failure::failed(e.to_string()).into(),
             }
@@ -404,12 +411,7 @@ fn create(new: hura_core::ops::NewSession) -> Outcome {
         // is what a client watching the list sees either way, only for longer
         // the first time a set of toolchains is used.
         let backends = backends();
-        // Only a sandbox has an image. A worktree session runs on the server
-        // with the server's toolchains, which is both its point and its
-        // limitation.
-        if draft.backend == hura_core::session::Kind::Sandbox
-            && let Err(e) = image::ensure_for(&draft.toolchains)
-        {
+        if let Err(e) = image::ensure_for(&draft.toolchains) {
             eprintln!("hurad: {}: could not build the image: {e}", draft.name);
             return;
         }
@@ -445,13 +447,9 @@ fn ls(backends: &Backends) -> Outcome {
     }
 }
 
-/// The policy pane's contents, or the sentence that says why there is no pane.
-///
-/// Not a `Failed`: a session with no isolation has no policy in the same way it
-/// has no sandbox, and drawing that as an error would make an ordinary worktree
-/// session look broken every time its dock is opened.
+/// The policy pane's contents.
 fn policy(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
-    let revision = ops::policy(backend, session).map_err(|e| no_isolation(backend, e))?;
+    let revision = ops::policy(backend, session).map_err(Failure::gateway)?;
     Ok(Reply::Policy(policy::View::of(
         &revision,
         session.policy.as_deref(),
@@ -460,27 +458,14 @@ fn policy(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
 }
 
 fn events(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
-    let events = ops::events(backend, session).map_err(|e| no_isolation(backend, e))?;
+    let events = ops::events(backend, session).map_err(Failure::gateway)?;
     Ok(Reply::Events { events })
 }
 
-/// Which failure the two panes above report.
-///
-/// One function, because the pane and the feed are the same question asked
-/// twice and a client that got two different kinds for it would draw one of
-/// them wrong.
-fn no_isolation(backend: &dyn Backend, message: String) -> Failure {
-    match backend.isolation() {
-        Isolation::Sandboxed => Failure::gateway(message),
-        Isolation::None => Failure::no_isolation(message),
-    }
-}
-
-/// Both backends, as this server holds them.
+/// The backend, as this server holds it.
 ///
 /// Built per use rather than kept in a `static`: a `CliClient` is a path and two
-/// options, the worktree backend is two paths, and building them costs a config
-/// read. What that buys is an `hurad` that picks up an edited `config.toml`
+/// options, and building it costs a config read. What that buys is an `hurad` that picks up an edited `config.toml`
 /// without a restart, which is the same promise every other read here makes.
 pub fn backends() -> Backends {
     let cfg = config::Config::load().unwrap_or_default();
@@ -488,7 +473,7 @@ pub fn backends() -> Backends {
     if let Some(g) = &cfg.gateway {
         client = client.with_gateway(g.clone());
     }
-    Backends::from_config(Box::new(client), &cfg)
+    Backends::from_client(Box::new(client))
 }
 
 /// Look a session up by name, and answer for it.

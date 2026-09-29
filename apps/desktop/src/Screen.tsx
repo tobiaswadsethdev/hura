@@ -1,7 +1,7 @@
 // A screen: one of the window's destinations, filling the middle instead of
 // floating over it.
 //
-// The inbox, the integrations, the servers and the settings were four modal
+// The tickets, the integrations, the servers and the settings were four modal
 // dialogs, and being modal was wrong for all four in the same way. A dialog is
 // the right shape for a *question* -- it takes the window hostage because it
 // needs one answer before anything else can happen, which is exactly what
@@ -17,10 +17,10 @@
 //     scrim around it was reserving a third of a 1600-pixel display to draw
 //     black over.
 //   - **A scrim over the thing you were reading.** These screens explain the
-//     workspace behind them -- a tracker with no credential is why the inbox is
+//     workspace behind them -- a tracker with no credential is why the tickets are
 //     empty -- and the modal dimmed the evidence while you read about it.
 //   - **Nowhere to be.** A dialog has no address. Two of them could not be open
-//     at once, going from the inbox to the create form meant one closing and
+//     at once, going from the tickets to the create form meant one closing and
 //     another opening over the top, and nothing in the window said where you
 //     were. The header's icons now do: the one you are on is lit.
 //

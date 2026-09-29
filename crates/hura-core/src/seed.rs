@@ -165,8 +165,7 @@ fn meta_write_command(meta_json: &str, paths: &Paths) -> String {
 pub enum SeedError {
     #[error(transparent)]
     Client(#[from] openshell_client::Error),
-    /// Whatever the session's own backend said: an unreachable gateway for a
-    /// sandbox, a command that would not spawn for a worktree.
+    /// Whatever the session's backend said, such as an unreachable gateway.
     #[error(transparent)]
     Backend(#[from] crate::backend::Error),
     #[error("seeding failed (exit {code}): {stderr}")]
@@ -226,16 +225,7 @@ pub fn detached_script(backend: &dyn Backend, session: &Session, start_agent: bo
     // skills directory when it starts. Warnings are the caller's to report --
     // this function returns a script -- so they are recomputed by
     // `ops::create`, which is the only place that has anywhere to put them.
-    //
-    // Both steps are the sandbox's: a worktree session's agent is the server's
-    // own, which reads the server user's `~/.claude` already, and packing skills
-    // into the worktree would put them in every `git status` the agent runs.
-    // `seeds_tooling` is the backend saying which it is.
-    let (skills_script, _) = if backend.seeds_tooling() {
-        crate::skills::pack(&session.skills)
-    } else {
-        (String::new(), Vec::new())
-    };
+    let (skills_script, _) = crate::skills::pack(&session.skills);
     let skills = if skills_script.is_empty() {
         String::new()
     } else {
@@ -247,7 +237,7 @@ pub fn detached_script(backend: &dyn Backend, session: &Session, start_agent: bo
     // sandbox without tools. Its own step so the state file says which part of
     // the seeding failed, and skipped entirely when none are configured, so an
     // ordinary session's script is exactly what it was.
-    let mcp = if session.mcp.is_empty() || !backend.seeds_tooling() {
+    let mcp = if session.mcp.is_empty() {
         String::new()
     } else {
         format!("step mcp\n{}", crate::mcp::register_script(&session.mcp))
@@ -819,9 +809,8 @@ mkdir -p "$dest/.git"
     #[test]
     fn meta_write_command_is_idempotent_and_quoted() {
         let cmd = meta_write_command(r#"{"a":"it's"}"#, &Paths::in_sandbox());
-        // Quoted now that the directory is the backend's rather than a
-        // literal: a worktree session's record directory is a path someone
-        // configured, and an unquoted one would break on a space in it.
+        // Quoted because the directory is the backend's rather than a
+        // literal.
         assert!(cmd.starts_with("mkdir -p '/sandbox/.hura' &&"), "{cmd}");
         assert!(cmd.contains(r"it'\''s"), "JSON must be shell-quoted: {cmd}");
     }

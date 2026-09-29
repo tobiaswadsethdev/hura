@@ -35,7 +35,7 @@ let seen: Map<string, string> | null = null;
 /// answer is only needed the first time an agent actually waits.
 let allowed: Promise<boolean> | null = null;
 
-function permitted(): Promise<boolean> {
+export function permitted(): Promise<boolean> {
   allowed ??= (async () => {
     if (await isPermissionGranted()) return true;
     return (await requestPermission()) === "granted";

@@ -156,7 +156,7 @@ enum Command {
         tighten: bool,
     },
 
-    /// The task inbox: what the configured trackers say is assigned to you
+    /// Your tickets: what each configured tracker's filters match
     Tasks,
     /// Print a session's recent allow/deny decisions, newest first.
     Events {
@@ -354,22 +354,6 @@ struct NewArgs {
     /// Create the sandbox and clone, but do not start the agent.
     #[arg(long)]
     no_start: bool,
-
-    /// Run the session in a `git worktree` on this machine instead of in a
-    /// sandbox.
-    ///
-    /// **There is no isolation.** The agent runs as you, with your files, your
-    /// git credentials and whatever the network allows; there is no policy to
-    /// apply and nothing to allow or deny, so `hurad policy` and `hurad events`
-    /// have nothing to show for it. What it buys is a session in seconds
-    /// sharing an existing checkout's object store, which is the case a clone
-    /// into a fresh sandbox is slowest at.
-    ///
-    /// `--repo` must be a checkout on this machine, since a worktree is added
-    /// to one. `--policy`, `--provider` and `--toolchain` do not apply and are
-    /// refused rather than ignored.
-    #[arg(long)]
-    worktree: bool,
 }
 
 #[derive(Subcommand)]
@@ -428,10 +412,9 @@ fn main() -> ExitCode {
     if let Some(g) = cli.gateway.clone().or_else(|| cfg.gateway.clone()) {
         client = client.with_gateway(g);
     }
-    // Both backends. Every command that works on a session goes through this
-    // rather than the client, because which one a session belongs to is a fact
-    // about the session and not about the command.
-    let backends = Backends::from_config(Box::new(client.clone()), &cfg);
+    // Every command that works on a session goes through this rather than the
+    // client.
+    let backends = Backends::from_client(Box::new(client.clone()));
 
     // Read out before the match, which moves `cli.command`.
     let chosen = cli.server.clone();
@@ -775,7 +758,7 @@ fn remote_events(remote: &remote::Remote, name: &str) -> Fallible {
 
 fn remote_tasks(remote: &remote::Remote) -> Fallible {
     let hura_proto::Reply::Tasks(inbox) = remote.call(hura_proto::Request::Tasks)? else {
-        return Err("the server answered something other than a task inbox".into());
+        return Err("the server answered something other than a ticket list".into());
     };
     print_tasks(&inbox);
     Ok(())
@@ -806,14 +789,15 @@ fn print_tasks(inbox: &tracker::Inbox) {
         return;
     }
     println!(
-        "{:<12} {:<12} {:<14} {:<40} BRANCH",
-        "KEY", "TRACKER", "STATE", "TITLE"
+        "{:<12} {:<12} {:<16} {:<14} {:<40} BRANCH",
+        "KEY", "TRACKER", "FILTER", "STATE", "TITLE"
     );
     for t in &inbox.tasks {
         println!(
-            "{:<12} {:<12} {:<14} {:<40} {}",
+            "{:<12} {:<12} {:<16} {:<14} {:<40} {}",
             t.key,
             t.tracker,
+            truncate(&t.filter, 16),
             truncate(&t.status, 14),
             truncate(&t.title, 40),
             t.branch,
@@ -830,25 +814,6 @@ fn truncate(s: &str, width: usize) -> String {
 }
 
 fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
-    // Refused rather than ignored: each of these is an instruction to a gateway
-    // that will not be involved, and a session created with a policy flag that
-    // did nothing would be one whose owner believes it is isolated.
-    if args.worktree {
-        for (flag, given) in [
-            ("--policy", args.policy.is_some()),
-            ("--provider", !args.providers.is_empty()),
-            ("--toolchain", !args.toolchains.is_empty()),
-        ] {
-            if given {
-                return Err(format!(
-                    "{flag} does not apply to --worktree: there is no sandbox and no policy. \
-                     See `hurad new --help`."
-                )
-                .into());
-            }
-        }
-    }
-
     let repo = args.repo.or_else(|| cfg.repo.clone()).ok_or_else(|| {
         format!(
             "no repository: pass --repo, or set `repo` in {}",
@@ -864,11 +829,6 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     };
 
     let draft = ops::Draft {
-        backend: if args.worktree {
-            session::Kind::Worktree
-        } else {
-            session::Kind::Sandbox
-        },
         // The convention, from the config file, because this builds a `Draft`
         // directly rather than going through `NewSession::into_draft` -- which
         // is the server's one place for this and is where the window's answer
@@ -907,11 +867,7 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     // build streams docker's output to the terminal, which only a command-line
     // caller can afford. The first session wanting a toolchain pays for the
     // variant; every one after it starts as fast as any other.
-    // Only a sandbox has an image; a worktree session uses this machine's
-    // toolchains, which is both its point and its limitation.
-    if draft.backend == session::Kind::Sandbox {
-        image::ensure_for(&draft.toolchains)?;
-    }
+    image::ensure_for(&draft.toolchains)?;
     // The managed MCP containers, before the seeder points the agent at them.
     // Here rather than in `ops::create` for the reason the image build is here:
     // it is a side effect on this machine, with output of its own, and `ops` is
@@ -921,12 +877,11 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     }
 
     let repo = draft.repo.clone();
-    let kind = draft.backend;
-    let created = ops::create(backends, &draft, &mut |step| match (step, kind) {
+    let created = ops::create(backends, &draft, &mut |step| match step {
         // The URL is worth naming, since this is the slow step and the one that
         // fails when a credential or a policy is wrong.
-        (ops::Step::Clone, session::Kind::Sandbox) => println!("cloning {repo} ..."),
-        (other, kind) => println!("{} ...", other.label(kind)),
+        ops::Step::Clone => println!("cloning {repo} ..."),
+        other => println!("{} ...", other.label()),
     })?;
 
     for warning in &created.warnings {
@@ -943,25 +898,12 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     println!();
     println!("session  {}", s.name);
     let backend = backends.for_session(&s);
-    match s.backend {
-        session::Kind::Sandbox => {
-            println!("sandbox  {}", s.sandbox);
-            println!("policy   {}", s.policy.as_deref().unwrap_or("-"));
-        }
-        // What a sandboxed session says here is the isolation it got. This one
-        // has none, and the line that would have named a policy says so
-        // instead of being left blank.
-        session::Kind::Worktree => {
-            println!("isolation {}", backend.isolation().label());
-            println!("         {}", backend.isolation().explain());
-        }
-    }
+    println!("sandbox  {}", s.sandbox);
+    println!("policy   {}", s.policy.as_deref().unwrap_or("-"));
     if !s.toolchains.is_empty() {
         println!("tools    {}", s.toolchains.join(", "));
     }
     println!("branch   {}", s.work_branch);
-    // The backend's, not a constant: `/sandbox/repo` is where a sandboxed
-    // session's working copy is and a worktree's is wherever it was put.
     println!("workdir  {}", backend.paths(&s).repo);
     Ok(())
 }
@@ -1133,7 +1075,7 @@ fn cmd_config(cfg: &Config, init: bool, path_only: bool) -> Fallible {
         "trackers",
         !cfg.trackers().is_empty(),
         if cfg.trackers().is_empty() {
-            "(none; the inbox has nothing to read)".into()
+            "(none; there are no tickets to read)".into()
         } else {
             cfg.trackers()
                 .iter()
@@ -1203,18 +1145,14 @@ fn print_sessions(rows: &[(Session, State)]) {
     }
 
     let now = session::now_epoch();
-    // The kind is a column rather than a suffix on the state, because it is not
-    // a state: it says what the session *is*, and a product whose pitch is
-    // isolation cannot have a mode where the isolation is invisible in the list.
     println!(
-        "{:<20} {:<9} {:<10} {:>5}  {:<24} REPO",
-        "NAME", "KIND", "STATE", "AGE", "BRANCH"
+        "{:<20} {:<10} {:>5}  {:<24} REPO",
+        "NAME", "STATE", "AGE", "BRANCH"
     );
     for (s, state) in rows {
         println!(
-            "{:<20} {:<9} {:<10} {:>5}  {:<24} {}",
+            "{:<20} {:<10} {:>5}  {:<24} {}",
             s.name,
-            s.backend.to_string(),
             state.to_string(),
             session::humanize_age(s.created_at, now),
             s.work_branch,

@@ -56,6 +56,10 @@ pub struct View {
 pub struct Tracker {
     pub source: tracker::Source,
     pub secret_set: bool,
+    /// The filters the inbox runs for it, the implied default included. What
+    /// an editor starts from, so the first filter somebody adds does not
+    /// silently replace the "assigned to me" they have been reading.
+    pub filters: Vec<tracker::Filter>,
 }
 
 /// Ask the server everything, once.
@@ -76,6 +80,7 @@ pub fn view(cfg: &crate::config::Config) -> View {
             .iter()
             .map(|t| Tracker {
                 secret_set: stored.contains(&t.secret),
+                filters: t.effective(),
                 source: t.clone(),
             })
             .collect(),

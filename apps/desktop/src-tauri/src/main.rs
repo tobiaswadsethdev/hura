@@ -56,11 +56,7 @@ use tauri::{Emitter as _, Manager as _};
 ///
 /// It was a bare string, on the grounds that every one of these is shown to a
 /// person rather than branched on, and that when something did need to branch
-/// this would grow a field rather than have the UI parse English. That is what
-/// has happened: a worktree session answers `no-isolation` to a request for its
-/// policy, and the difference between "there is no policy, here is why" and
-/// "the policy could not be read" is the difference between a pane that states
-/// a fact and one that looks broken.
+/// this would grow a field rather than have the UI parse English.
 ///
 /// The `message` is still the server's own words. What the kind decides is how
 /// they are drawn.
@@ -458,6 +454,22 @@ fn add_tracker(server: String, tracker: TrackerSource) -> Result<IntegrationsVie
     expect_reply!(reply, Reply::Integrations(view) => view, "the integrations view")
 }
 
+/// Replace a tracker by its current name, which is how its filters are edited.
+#[tauri::command(async)]
+fn update_tracker(
+    server: String,
+    name: String,
+    tracker: TrackerSource,
+) -> Result<IntegrationsView, Failed> {
+    let reply = remote(&server)?
+        .call(Request::UpdateTracker {
+            name,
+            tracker: Box::new(tracker),
+        })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Integrations(view) => view, "the integrations view")
+}
+
 #[tauri::command(async)]
 fn forget_tracker(server: String, name: String) -> Result<IntegrationsView, Failed> {
     let reply = remote(&server)?
@@ -756,6 +768,7 @@ fn main() {
             secret,
             add_tracker,
             forget_tracker,
+            update_tracker,
             upload_skills,
             forget_skill,
             my_skills,
