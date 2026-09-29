@@ -52,4 +52,28 @@ branch: string,
  * file. Carried because `/issues` spans repositories: a comment has to go
  * to the one the issue is actually in, which the entry may not name.
  */
-repo: string | null, };
+repo: string | null, 
+/**
+ * Which of the tracker's filters this row came from. A ticket two filters
+ * match is two rows, one in each section.
+ */
+filter: string, 
+/**
+ * When the tracker last saw it change, in the tracker's own format. Only
+ * ever compared with an earlier value of itself.
+ */
+updated: string | null, 
+/**
+ * How many comments it has. `None` where the tracker's list answer does
+ * not say.
+ */
+comments: number | null, 
+/**
+ * Who wrote the newest comment, as the tracker shows them.
+ */
+last_commenter: string | null, 
+/**
+ * Whether the newest comment is the credential owner's own -- which is
+ * the one comment nobody needs to be told about.
+ */
+last_comment_mine: boolean, };

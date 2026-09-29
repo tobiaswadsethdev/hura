@@ -334,6 +334,19 @@ export function SettingsScreen({
           transition — never for one that has been waiting a while.
         </p>
 
+        <label className="tick">
+          <input
+            type="checkbox"
+            checked={prefs.notifyTickets}
+            onChange={(e) => onPrefs({ notifyTickets: e.target.checked })}
+          />
+          <span>notify me when a ticket in my filters changes</span>
+        </label>
+        <p className="hint indent">
+          Your tickets are read every few minutes. A status change, somebody else's comment, or a
+          ticket turning up in a filter — never your own comments, and not every edit.
+        </p>
+
         <div className="setting-actions">
           <button className="quiet" onClick={() => onPrefs(DEFAULTS)}>
             back to defaults

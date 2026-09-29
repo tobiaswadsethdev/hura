@@ -4,7 +4,7 @@
  * The defaults a client may change.
  *
  * A subset of the file, and the subset is "what a new session starts with"
- * plus the one switch about the server itself. `repo_roots`, `worktree_root`,
+ * plus the one switch about the server itself. `repo_roots`,
  * `skills` and `[[mcp]]` are deliberately not here: each is a decision about
  * what an agent of yours can reach or where its files land, and a text field
  * in a window is the wrong shape for any of it.

@@ -384,9 +384,8 @@ fn pty_worker(
     use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 
     // The backend decides what attaching *is*: an `openshell sandbox exec
-    // --tty` into the sandbox's tmux, or the shell itself for a session that is
-    // a worktree on this machine. Either way it is spawned under the pty below
-    // exactly as a terminal emulator would.
+    // --tty` into the sandbox's tmux, spawned under the pty below exactly as a
+    // terminal emulator would.
     let backends = crate::rpc::backends();
     let backend = backends.for_session(&session);
     let Ok(argv) = ops::attach_argv(backend, &session, &tmux) else {

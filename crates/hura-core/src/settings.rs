@@ -36,7 +36,7 @@ use crate::session;
 /// The defaults a client may change.
 ///
 /// A subset of the file, and the subset is "what a new session starts with"
-/// plus the one switch about the server itself. `repo_roots`, `worktree_root`,
+/// plus the one switch about the server itself. `repo_roots`,
 /// `skills` and `[[mcp]]` are deliberately not here: each is a decision about
 /// what an agent of yours can reach or where its files land, and a text field
 /// in a window is the wrong shape for any of it.
@@ -204,15 +204,47 @@ pub fn add_tracker(path: &Path, source: &crate::tracker::Source) -> Result<Confi
     Ok(cfg)
 }
 
-/// Take one out by name, and answer with the config as it now reads.
+/// Replace one in place, by name, and answer with the config as it now reads.
 ///
-/// The name is resolved against the *parsed* config and the table is then
-/// removed by position, rather than by looking for a `name = ` line: a tracker
-/// with no `name` key is named after its kind by the parser, and a textual
-/// search would not find the entry it is being asked to remove.
-pub fn forget_tracker(path: &Path, name: &str) -> Result<Config, Error> {
+/// In place rather than forget-then-add, so editing a tracker's filters does
+/// not move its table to the bottom of a file somebody arranged. The new entry
+/// may carry a different name; the one it replaces is found by the old.
+pub fn update_tracker(
+    path: &Path,
+    name: &str,
+    source: &crate::tracker::Source,
+) -> Result<Config, Error> {
     let current = read_or_example(path)?;
-    let cfg = Config::parse(path, &current)?;
+    let newline = if current.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let (mut lines, extent) = locate_tracker(path, &current, name)?;
+    // `table` starts with the blank line that separates it, which `extent`
+    // took away with the old one.
+    let text = table(&source.normalized(), newline);
+    let replacement: Vec<String> = text
+        .trim_end_matches(newline)
+        .split(newline)
+        .map(str::to_string)
+        .collect();
+    lines.splice(extent, replacement);
+    let mut next = lines.join(newline);
+    next.push_str(newline);
+
+    let cfg = Config::parse(path, &next)?;
+    write_atomically(path, &next)?;
+    Ok(cfg)
+}
+
+/// The file's lines, and the extent of the named tracker's table in them.
+fn locate_tracker(
+    path: &Path,
+    current: &str,
+    name: &str,
+) -> Result<(Vec<String>, Range<usize>), Error> {
+    let cfg = Config::parse(path, current)?;
     let missing = |message: String| Error::Invalid {
         path: path.to_path_buf(),
         key: "tracker",
@@ -220,12 +252,6 @@ pub fn forget_tracker(path: &Path, name: &str) -> Result<Config, Error> {
     };
     let Some(index) = cfg.trackers().iter().position(|t| t.name == name) else {
         return Err(missing(format!("no tracker called `{name}`")));
-    };
-
-    let newline = if current.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
     };
     let mut lines: Vec<String> = current
         .split('\n')
@@ -239,6 +265,23 @@ pub fn forget_tracker(path: &Path, name: &str) -> Result<Config, Error> {
             "`{name}` is in the config as it parsed but not in its text"
         )));
     };
+    Ok((lines, extent))
+}
+
+/// Take one out by name, and answer with the config as it now reads.
+///
+/// The name is resolved against the *parsed* config and the table is then
+/// removed by position, rather than by looking for a `name = ` line: a tracker
+/// with no `name` key is named after its kind by the parser, and a textual
+/// search would not find the entry it is being asked to remove.
+pub fn forget_tracker(path: &Path, name: &str) -> Result<Config, Error> {
+    let current = read_or_example(path)?;
+    let newline = if current.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let (mut lines, extent) = locate_tracker(path, &current, name)?;
     lines.splice(extent, None);
     let mut next = lines.join(newline);
     next.push_str(newline);
@@ -285,6 +328,21 @@ fn table(source: &crate::tracker::Source, newline: &str) -> String {
         if let Some(value) = value {
             line(format!("{key} = {}", quote(value)));
         }
+    }
+    // An array of inline tables, one per line, rather than `[[tracker.filter]]`
+    // sub-tables: a sub-table is a line starting with `[`, which is where
+    // `nth_table` says the tracker's own table ends -- and removing the
+    // tracker would then leave its filters behind, attached to the one above.
+    if !source.filters.is_empty() {
+        line("filters = [".to_string());
+        for f in &source.filters {
+            line(format!(
+                "  {{ name = {}, query = {} }},",
+                quote(&f.name),
+                quote(&f.query)
+            ));
+        }
+        line("]".to_string());
     }
     out
 }
@@ -852,6 +910,45 @@ mod tests {
         // or a tracker added and removed a few times leaves a growing gap.
         assert_eq!(fs::read_to_string(&path).unwrap(), before);
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Editing a tracker's filters rewrites its table where it stands, and the
+    /// filters come back out of the file as they went in -- JQL quotes and all.
+    /// Removing it afterwards takes the filters with it rather than leaving
+    /// them attached to whatever is above.
+    #[test]
+    fn a_tracker_is_edited_in_place_and_its_filters_survive_the_file() {
+        let dir = tracker_dir("update");
+        let path = dir.join("config.toml");
+        fs::write(&path, "branch_prefix = \"tobias\"\n").unwrap();
+        add_tracker(&path, &jira("first")).unwrap();
+        add_tracker(&path, &jira("second")).unwrap();
+
+        let mut edited = jira("first");
+        edited.filters = vec![
+            crate::tracker::Filter {
+                name: "ready to start".into(),
+                query: "status = \"Ready\" AND sprint in openSprints()".into(),
+            },
+            crate::tracker::Filter {
+                name: "assigned to me".into(),
+                query: "assignee = currentUser()".into(),
+            },
+        ];
+        let cfg = update_tracker(&path, "first", &edited).unwrap();
+        let names: Vec<&str> = cfg.trackers().iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["first", "second"], "edited where it stands");
+        assert_eq!(cfg.trackers()[0].filters, edited.filters);
+
+        let cfg = forget_tracker(&path, "first").unwrap();
+        assert_eq!(cfg.trackers().len(), 1);
+        assert!(
+            cfg.trackers()[0].filters.is_empty(),
+            "no filters left behind"
+        );
+        let after = fs::read_to_string(&path).unwrap();
+        assert!(!after.contains("ready to start"), "{after}");
         let _ = fs::remove_dir_all(&dir);
     }
 

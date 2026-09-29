@@ -113,8 +113,7 @@ pub fn clean(path: &str) -> Result<String, String> {
 
 /// A cleaned relative path, under the working copy of *this* session.
 ///
-/// The root is the backend's: `/sandbox/repo` for a sandboxed session and the
-/// worktree's own directory for the other. The path was already checked
+/// The root is the backend's, `/sandbox/repo`. The path was already checked
 /// component by component by [`clean`], which is what makes joining it safe.
 fn absolute(root: &str, rel: &str) -> String {
     if rel.is_empty() {

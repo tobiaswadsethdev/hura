@@ -27,7 +27,7 @@ import type { DiffStat } from "./gen/DiffStat";
 import type { Project } from "./gen/Project";
 import type { Session } from "./gen/Session";
 import { Empty } from "./Empty";
-import { Branch, Chevron, Forget, Plus, StateDot, Unsandboxed } from "./icons";
+import { Branch, Chevron, Forget, Plus, StateDot } from "./icons";
 
 export type Group = {
   /// The project, or `null` for the by-repository groups at the bottom.
@@ -156,8 +156,7 @@ export function Tree({
                   told you something the label above it already says: a group
                   with no project is drawn in the mono face at the dimmer rank,
                   which is the difference. A badge earns its space when it
-                  marks an exception -- `unsandboxed` on a worktree session does
-                  -- and `external` marked a whole category. The full URL is
+                  marks an exception, and `external` marked a whole category. The full URL is
                   still one hover away on the group's own title. */}
               {g.project && (
                 <span className="group-actions">
@@ -247,18 +246,6 @@ function Worktree({
       <span className="wt-body">
         <span className="wt-head">
           <span className="wt-name">{s.name}</span>
-          {/* A worktree session runs on the server with the server's own
-              rights, and the list is the first place that has to say so: a
-              product whose pitch is isolation cannot have a kind of session
-              that looks like every other row. Spelled out rather than reduced
-              to the icon beside it, which would be a mark you have to have
-              been taught. */}
-          {s.backend === "worktree" && (
-            <span className="wt-bare" title="no sandbox: runs on the server with its rights">
-              <Unsandboxed />
-              unsandboxed
-            </span>
-          )}
         </span>
 
         <span className="wt-meta">
@@ -278,11 +265,7 @@ function Worktree({
       <span className="wt-actions">
         <button
           className="quiet-icon danger"
-          title={
-            s.backend === "worktree"
-              ? "destroy this session (the worktree on the server goes with it)"
-              : "destroy this session and its sandbox"
-          }
+          title="destroy this session and its sandbox"
           onClick={() => onDestroy(s)}
         >
           <Forget aria-label={`destroy ${s.name}`} />

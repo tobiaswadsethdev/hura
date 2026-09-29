@@ -292,7 +292,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .workspace[hidden] { display: none; }
 
 /* ------------------------------------------------------------------------- */
-/* the screens: the inbox, the integrations, the servers, the settings        */
+/* the screens: the tickets, the integrations, the servers, the settings      */
 /* ------------------------------------------------------------------------- */
 
 .screen {
@@ -565,29 +565,6 @@ main { display: flex; flex: 1; min-height: 0; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-/* A session with no sandbox around it.
-   Amber, and spelled out. Not red, because it is a deliberate choice someone
-   made and not a fault; never the neutral grey the rest of this card is in,
-   which would let it pass for a sandboxed row at a glance. The icon and the
-   word both, because the icon alone is a mark you have to have been taught and
-   this is the one thing on the card that must not be missed. */
-.wt-bare {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  flex: none;
-  padding: 0 4px 0 3px;
-  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--warn) 12%, transparent);
-  color: var(--warn);
-  font-size: 8.5px;
-  line-height: 14px;
-  letter-spacing: 0.01em;
-  text-transform: uppercase;
-}
-.wt-bare > svg { width: 8px; height: 8px; }
 
 /* The second line: what branch, how far along, how old. All of it dim and all
    of it monospace -- these are identifiers and numbers you compare down the
@@ -1271,24 +1248,6 @@ main { display: flex; flex: 1; min-height: 0; }
   padding-left: 2px;
 }
 
-/* What the policy pane and the events feed show for a session that has no
-   isolation. A stated absence, styled as a statement: an empty pane is what a
-   pane that failed to load looks like. */
-.unisolated { color: var(--dim); font-size: 12px; }
-/* Amber, and the one glyph in the window drawn at `ICON_BIG` outside an
-   `Empty`. It is not an absence -- it is a warning that happens to fill a pane
-   -- so it wears `--warn` rather than the grey every nothing here is in. */
-.unisolated-mark { display: block; color: var(--warn); margin-bottom: 8px; }
-.unisolated h3 {
-  margin: 0 0 6px;
-  color: var(--warn);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.unisolated p { margin: 0; max-width: 46ch; }
-
 /* Shared by every pane that can be waiting or broken. */
 .loading { color: var(--dim); font-size: 12px; }
 .error { color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
@@ -1383,7 +1342,7 @@ main { display: flex; flex: 1; min-height: 0; }
 :is(.dialog, .screen) .tick input { width: auto; accent-color: var(--primary); }
 :is(.dialog, .screen) .hint { color: var(--dimmer); font-size: 12px; }
 
-/* A section of a screen: a heading, a hint, and rows. Shared by the inbox, the
+/* A section of a screen: a heading, a hint, and rows. Shared by the tickets, the
    integrations and the servers screens, which is the whole reason it is no
    longer called `.panel` -- the paired-servers list wearing a class
    named after a different screen was a lie a stylesheet should not tell.
@@ -1400,6 +1359,9 @@ main { display: flex; flex: 1; min-height: 0; }
   color: var(--dim);
 }
 .panel > .hint { margin: 3px 0 8px; max-width: 66ch; }
+/* The filter a section is, beside the tracker it belongs to: the part that
+   differs between two sections of one tracker, so it reads a rank brighter. */
+.panel h3 .ticket-filter { color: var(--text); }
 
 .panel .row {
   display: flex;
@@ -1423,7 +1385,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .panel .row .no { color: var(--bad); }
 .panel .row .quiet-icon { margin-left: 4px; }
 
-/* An inbox row: the key, the title, what kind and what state, and where to
+/* A ticket row: the key, the title, what kind and what state, and where to
    start it. The title takes the slack because it is the part you read. */
 /* The ticket key and the mark that says it leaves the window, as one target. */
 .panel .row.task .row-name a {
@@ -1481,6 +1443,35 @@ main { display: flex; flex: 1; min-height: 0; }
 }
 .panel .row.tracker.new select { width: auto; }
 
+/* A tracker's filters: one line each under the tracker, the name in the text
+   face and the query in the mono one, because the query is the part you
+   check character by character. Indented to sit under the row it belongs to. */
+.panel .filters {
+  flex-basis: 100%;
+  min-width: 100%;
+  margin: 6px 0 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-strong);
+}
+.panel .filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.panel .filter .filter-name { flex: none; width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel .filter code.filter-query {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: 11px;
+}
+.panel .filter.editing input.filter-query { flex: 1; font-family: var(--font-mono); font-size: 11px; }
+.panel .filters .add-filter { display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; }
+
 .panel .problem {
   flex-basis: 100%;
   min-width: 100%;
@@ -1511,10 +1502,6 @@ main { display: flex; flex: 1; min-height: 0; }
 .panel .actions { align-items: center; gap: 12px; }
 .panel .actions .hint { margin-right: auto; }
 
-/* The where-it-runs choice: the hint beside each is the part that matters, so
-   it wraps under the label rather than being clipped on one line. */
-:is(.dialog, .screen) .kinds .tick { align-items: baseline; flex-wrap: wrap; }
-:is(.dialog, .screen) .kinds .hint { flex-basis: 100%; padding-left: 22px; max-width: 52ch; }
 
 /* What picking the second one gives up. Amber and boxed, because it is the one
    thing in this dialog that changes what the session promises -- and it is a

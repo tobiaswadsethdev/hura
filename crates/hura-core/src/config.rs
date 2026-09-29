@@ -67,12 +67,6 @@ pub struct Config {
     /// Where the TUI's picker looks for repositories. Replaces the built-in
     /// roots rather than adding to them, like `HURA_REPO_ROOTS`, which still wins.
     pub repo_roots: Option<Vec<PathBuf>>,
-    /// Where worktree sessions put their working copies, one directory each.
-    ///
-    /// Server-side, like [`Self::repo_roots`] and for the same reason: the
-    /// machine that adds the worktree is the one that has the checkout. `None`
-    /// means [`crate::backend::Worktree::default_root`].
-    pub worktree_root: Option<PathBuf>,
     /// How often the terminal interface read the sandboxes. Nothing reads it
     /// since that went in v0.4.0; it is still parsed so existing config files
     /// keep loading. See:
@@ -324,6 +318,15 @@ impl Config {
                 site: entry.site.clone(),
                 email: entry.email.clone(),
                 query: entry.query.clone(),
+                filters: entry
+                    .filters
+                    .iter()
+                    .flatten()
+                    .map(|f| tracker::Filter {
+                        name: f.name.clone(),
+                        query: f.query.clone(),
+                    })
+                    .collect(),
                 on_publish: entry.on_publish.clone(),
             };
             if let Some(problem) = source.problem() {
@@ -362,7 +365,6 @@ impl Config {
             repo_roots: raw
                 .repo_roots
                 .map(|list| list.iter().map(|p| expand_tilde(p)).collect()),
-            worktree_root: raw.worktree_root.as_deref().map(expand_tilde),
             refresh,
             auto_update: raw.auto_update,
             skills: resolved_skills,
@@ -428,6 +430,9 @@ struct Raw {
     policy: Option<String>,
     providers: Option<Vec<String>>,
     repo_roots: Option<Vec<PathBuf>>,
+    /// Where worktree sessions went. Nothing reads it since that backend was
+    /// removed; still accepted so existing config files keep loading.
+    #[allow(dead_code)]
     worktree_root: Option<PathBuf>,
     refresh: Option<String>,
     auto_update: Option<bool>,
@@ -453,7 +458,16 @@ struct RawTracker {
     site: Option<String>,
     email: Option<String>,
     query: Option<String>,
+    filters: Option<Vec<RawFilter>>,
     on_publish: Option<String>,
+}
+
+/// One entry of a tracker's `filters` array.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFilter {
+    name: String,
+    query: String,
 }
 
 impl RawTracker {
@@ -769,6 +783,15 @@ mod tests {
         assert_eq!(c.refresh, None);
     }
 
+    /// `worktree_root` configured a backend that no longer exists. A file that
+    /// still names it has to keep loading, or removing the backend would stop
+    /// every command on a machine that ever used it.
+    #[test]
+    fn a_retired_worktree_root_still_parses() {
+        parse("worktree_root = \"~/.local/share/hura/worktrees\"\n")
+            .expect("a retired key is accepted and ignored");
+    }
+
     /// Every key the example mentions has to be a key the parser accepts, or the
     /// documentation and the code drift apart silently.
     #[test]
@@ -780,7 +803,6 @@ mod tests {
             "policy",
             "providers",
             "repo_roots",
-            "worktree_root",
             "refresh",
             "skills",
         ] {

@@ -1,19 +1,8 @@
 //! Publishing a session's work: push the branch, then open a pull request.
 //!
-//! For a sandboxed session both happen *inside* the sandbox, which is the whole
-//! point -- the host never holds the credential and never touches the working
+//! Both happen *inside* the sandbox, which is the whole point -- the host never holds the credential and never touches the working
 //! copy. One exec does the lot, because exec on a sandbox is serialised and a
 //! push followed by a separate REST call would queue behind itself.
-//!
-//! **A worktree session publishes with the server's own git credentials, and
-//! that is a materially different guarantee behind the same button.** The
-//! script is unchanged and does not need to be: [`forge::git_auth_prelude`]
-//! looks for the credential the gateway injects and degrades to a plain `git`
-//! when there is none, which on the server is a `git` using whatever helper the
-//! server user has configured. What the interface owes the person pressing the
-//! button is to have said which kind of session it is -- see
-//! [`crate::backend::Isolation`] -- because the token being reachable by the
-//! agent is exactly the difference.
 //!
 //! The two forges diverge only at the last step. GitHub has `gh` in the image
 //! and it knows its own API. Azure DevOps has no equivalent short of the Azure

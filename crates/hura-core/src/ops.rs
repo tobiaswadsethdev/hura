@@ -1,20 +1,15 @@
 //! Operations shared by the CLI, the TUI and the server.
 //!
 //! Everything here takes a [`Backend`] -- the place a session runs -- rather
-//! than a gateway client. That is the whole of increment 32 as far as this
-//! module is concerned: the scripts, the ordering and the reasoning are
-//! unchanged, and where they used to name `/sandbox/repo` and the image's tmux
-//! they now ask the session's own backend. A worktree session is not a special
-//! case in any function below; it is a different set of answers to the same
-//! three questions -- where does an exec go, where are the files, is there any
-//! isolation to report.
+//! than a gateway client, so the scripts ask it where an exec goes and where
+//! the files are instead of naming `/sandbox/repo` and the image's tmux.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
 use openshell_client::{PolicyRevision, PolicyUpdate};
 
-use crate::backend::{self, Backend, Backends, Isolation, Torn};
+use crate::backend::{Backend, Backends, Torn};
 use crate::comments;
 use crate::events;
 use crate::forge;
@@ -69,109 +64,50 @@ pub fn refresh_with(
     backends: &Backends,
     repair: bool,
 ) -> Result<Refreshed, Box<dyn std::error::Error>> {
-    // Each backend asked before the lock is taken: the gateway call is the slow
-    // part, and holding a lock across it would stall a create in another process
-    // for no reason. The two are asked separately because "still there" means a
-    // different question to each of them, and neither can answer for the other's
-    // sessions -- a worktree has no sandbox to be missing from a gateway list,
-    // and marking it dead for that is what a single list would have done.
+    // Asked before the lock is taken: the gateway call is the slow part, and
+    // holding a lock across it would stall a create in another process for no
+    // reason.
     //
     // Reconciled against what is on disk *now*, not against a snapshot taken
-    // before those calls. A create walking a session through `seeding` to
+    // before that call. A create walking a session through `seeding` to
     // `ready` in another process finishes inside that window often enough that
     // the difference is a session whose record disagrees with its own sandbox.
     let cached: Vec<Session> = Store::load()?.list().into_iter().cloned().collect();
     let mut out = Refreshed::default();
-    let mut recs = Vec::new();
-    let mut failures = Vec::new();
-    for backend in backends.each() {
-        let mine: Vec<Session> = cached
-            .iter()
-            .filter(|s| s.backend == backend.kind())
-            .cloned()
-            .collect();
-        match backend.live(mine.clone()) {
-            Ok(rec) => recs.push((backend, rec)),
-            // **One backend being unreachable is not the other's problem.** A
-            // machine with no gateway -- no `openshell` on the path at all --
-            // still has git, and refusing to list its worktree sessions because
-            // a sandbox could not be asked about would make the second backend
-            // useless exactly where it is most useful. Its sessions pass
-            // through with the state they were last known to have, which is
-            // what "could not ask" means, and never as `dead`.
-            Err(e) => {
-                failures.push(format!(
-                    "{} sessions could not be checked: {e}",
-                    backend.kind()
-                ));
-                recs.push((
-                    backend,
-                    store::Reconciliation {
-                        sessions: mine,
-                        ..Default::default()
-                    },
-                ));
-            }
-        }
-    }
-    // Unless every one of them failed, which is not a degraded list -- it is no
-    // information at all, and the caller should say so rather than draw a table
-    // of stale rows as though it were current.
-    if failures.len() == backends.each().len() {
-        return Err(failures.join("; ").into());
-    }
-    let all_answered = failures.is_empty();
-    out.warnings.extend(failures);
-
-    for (_, rec) in &recs {
-        out.dead.extend(rec.dead.clone());
-    }
+    let backend = backends.sandboxed();
+    let rec = backend.live(cached)?;
+    out.dead.extend(rec.dead.clone());
 
     // Tombstones outlive the removal that wrote them only for as long as the
-    // thing they name does. When every backend answered, anything tombstoned and
-    // reported by none of them has finally gone and the tombstone can go with
-    // it. Skipped entirely when one could not be asked: a gateway that did not
-    // answer reports nothing lingering, and pruning on that would forget exactly
-    // the tombstones still doing their job.
-    if all_answered {
-        let lingering: BTreeSet<String> = recs
-            .iter()
-            .flat_map(|(_, rec)| rec.lingering.iter().cloned())
-            .collect();
-        removed::keep_only(&lingering);
-    }
-    let merged: Vec<Session> = recs
-        .iter()
-        .flat_map(|(_, rec)| rec.sessions.clone())
-        .collect();
+    // thing they name does: anything tombstoned and no longer reported by the
+    // gateway has finally gone, and the tombstone can go with it.
+    removed::keep_only(&rec.lingering.iter().cloned().collect::<BTreeSet<_>>());
+    let merged = rec.sessions.clone();
     out.sessions = store::update(|store| {
         store.merge(merged.clone());
         merged
     })?;
 
-    for (backend, rec) in &recs {
-        for orphan in &rec.orphans {
-            // Outside the lock, because reading a record is an exec for one
-            // backend and a file read for the other; the adopted record is
-            // written on its own once it is known.
-            match backend.read_meta(orphan) {
-                Ok(s) => {
-                    out.adopted.push(s.name.clone());
-                    let record = s.clone();
-                    store::update(|store| store.upsert(record))?;
-                    out.sessions.push(s);
-                }
-                // Phrased as the session's state rather than as a failure of
-                // this code, since the usual cause is a create in flight in
-                // another process and the next refresh adopts it.
-                Err(e) => out.warnings.push(format!("{orphan} {e}")),
+    for orphan in &rec.orphans {
+        // Outside the lock, because reading a record is an exec; the adopted
+        // record is written on its own once it is known.
+        match backend.read_meta(orphan) {
+            Ok(s) => {
+                out.adopted.push(s.name.clone());
+                let record = s.clone();
+                store::update(|store| store.upsert(record))?;
+                out.sessions.push(s);
             }
+            // Phrased as the session's state rather than as a failure of
+            // this code, since the usual cause is a create in flight in
+            // another process and the next refresh adopts it.
+            Err(e) => out.warnings.push(format!("{orphan} {e}")),
         }
     }
 
     if repair {
         // Only where there is something there to be asked: a record whose
-        // sandbox or worktree has gone was just marked `dead` above, and asking
+        // sandbox has gone was just marked `dead` above, and asking
         // it how its seeding went would be one failed exec per refresh.
         let stuck: Vec<Session> = out
             .sessions
@@ -182,7 +118,6 @@ pub fn refresh_with(
             .collect();
 
         for s in stuck {
-            let backend = backends.for_session(&s);
             // The seeder's own report, which is the only thing that knows: it runs
             // detached inside the sandbox, so "still cloning" and "gave up" look
             // identical from out here.
@@ -339,11 +274,7 @@ pub fn toolchain_choices() -> Vec<ToolchainChoice> {
 /// rather than refusing to open a form whose other five fields are fine.
 pub fn new_options(backends: &Backends, cfg: &crate::config::Config) -> NewOptions {
     let configured = cfg.policy();
-    // The gateway's, because that is whose providers they are: a credential a
-    // provider holds is one the gateway swaps into a request. A worktree session
-    // is offered none, and the form hides the field rather than showing an empty
-    // list -- see `NewSession::backend`.
-    let (providers, providers_error) = match backends.of_kind(session::Kind::Sandbox).providers() {
+    let (providers, providers_error) = match backends.sandboxed().providers() {
         Ok(list) => (
             list.into_iter()
                 .map(|p| ProviderChoice {
@@ -465,11 +396,6 @@ pub fn preselect_providers(
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NewSession {
-    /// Which kind of session to make. Defaults to a sandbox, which is both the
-    /// point of the tool and what a client written before there was a choice
-    /// asks for by saying nothing.
-    #[serde(default)]
-    pub backend: session::Kind,
     /// The project to start it in. `None` from the command line, which has no
     /// projects, and from a client that is not working inside one.
     pub project: Option<String>,
@@ -536,7 +462,6 @@ impl NewSession {
         session::validate_branch(&branch).map_err(|e| e.to_string())?;
         Ok(Draft {
             name,
-            backend: self.backend,
             project: self.project,
             repo: self.repo,
             task: self.task,
@@ -583,9 +508,6 @@ fn with_library(configured: &[skills::Skill]) -> Vec<skills::Skill> {
 #[derive(Debug, Clone, Default)]
 pub struct Draft {
     pub name: String,
-    /// Which backend runs it. See [`session::Kind`]; the sandbox is the default
-    /// everywhere, including for a `Draft` built by hand in a test.
-    pub backend: session::Kind,
     /// The work branch, already validated. `None` means the convention.
     pub branch: Option<String>,
     /// The ticket this session is for, if any. Recorded on the session so a
@@ -629,7 +551,7 @@ pub struct Draft {
 /// caller is told what is happening rather than being left with one long wait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
-    /// Making the place the session runs: a sandbox, or a worktree.
+    /// Making the sandbox the session runs in.
     Place,
     Clone,
     Agent,
@@ -637,17 +559,11 @@ pub enum Step {
 
 impl Step {
     /// What to say while this step is happening.
-    ///
-    /// Takes the kind because the first two steps are different things for the
-    /// two backends -- "creating the sandbox" is a lie about a worktree, and a
-    /// progress line that lies is worse than one that is vague.
-    pub fn label(self, kind: session::Kind) -> &'static str {
-        match (self, kind) {
-            (Step::Place, session::Kind::Sandbox) => "creating the sandbox",
-            (Step::Place, session::Kind::Worktree) => "preparing the worktree",
-            (Step::Clone, session::Kind::Sandbox) => "cloning the repository",
-            (Step::Clone, session::Kind::Worktree) => "adding the worktree",
-            (Step::Agent, _) => "starting the agent",
+    pub fn label(self) -> &'static str {
+        match self {
+            Step::Place => "creating the sandbox",
+            Step::Clone => "cloning the repository",
+            Step::Agent => "starting the agent",
         }
     }
 
@@ -695,11 +611,9 @@ pub struct Created {
 /// checked first, so a bad name or an unknown policy fails while nothing exists
 /// yet, and every failure afterwards leaves a record saying what happened.
 ///
-/// One function for both backends, which is what the [`Backend`] trait is for.
-/// The three things it asks of the backend are the three things that differ:
-/// [`Backend::place`] makes the sandbox or the worktree,
-/// [`Backend::configure`] imposes what a gateway can be told to impose, and the
-/// seeder's first step is [`Backend::fetch_script`].
+/// [`Backend::place`] makes the sandbox, [`Backend::configure`] imposes what
+/// the gateway can be told to impose, and the seeder's first step is
+/// [`Backend::fetch_script`].
 ///
 /// The sandbox image is deliberately *not* built here. `image::build` streams
 /// docker's output to the terminal, which would tear a TUI apart; the CLI calls
@@ -712,7 +626,7 @@ pub fn create(
     progress: &mut dyn FnMut(Step),
 ) -> Result<Created, String> {
     let mut warnings = Vec::new();
-    let backend = backends.of_kind(draft.backend);
+    let backend = backends.sandboxed();
 
     session::validate_name(&draft.name).map_err(|e| e.to_string())?;
 
@@ -762,7 +676,6 @@ pub fn create(
     removed::forget(&draft.name);
 
     let mut s = Session::new(draft.name.clone(), draft.repo.clone(), draft.task.clone());
-    s.backend = draft.backend;
     s.base_branch = draft.base.clone();
     s.ticket = draft.ticket.clone();
     if let Some(branch) = &draft.branch {
@@ -771,13 +684,8 @@ pub fn create(
     s.project = draft.project.clone();
     s.providers = draft.providers.clone();
     s.toolchains = toolchain::labels(&draft.toolchains);
-    // Only where they mean something. A worktree session's agent is the
-    // server's own, reading the server user's `~/.claude`; recording skills it
-    // was never given would be a record claiming something untrue about it.
-    if backend.seeds_tooling() {
-        s.mcp = draft.mcp.clone();
-        s.skills = draft.skills.clone();
-    }
+    s.mcp = draft.mcp.clone();
+    s.skills = draft.skills.clone();
 
     // Written before the gateway is asked for anything, because until there is
     // a record there is nothing for a client to show: creating a sandbox is
@@ -811,7 +719,7 @@ pub fn create(
     // closes it: a record in `creating` is one the repair pass knows to leave
     // alone until the seeder has something to say. This is an update rather than
     // the first write -- the record went in above -- and what it adds is what
-    // `place` filled in: the sandbox's name, or the worktree's directory.
+    // `place` filled in.
     save(s.clone(), &mut warnings);
 
     if let Err(e) = backend.configure(&s, draft, &mut warnings) {
@@ -969,12 +877,9 @@ impl DiffStat {
 /// if it cannot be resolved, which callers must handle: a fresh clone of a
 /// repository with an unusual remote layout has no usable base.
 ///
-/// The local branch is the last resort, and it is what makes a worktree session
-/// in a repository with no remote diff against anything at all: there is no
-/// `origin/main` to compare with because there is no origin. Tried last rather
-/// than first, because a local branch moves -- the agent commits to it in a
-/// sandboxed session -- and the remote-tracking ref is the one that still
-/// points at where the work started.
+/// The local branch is the last resort. Tried last rather than first, because a
+/// local branch moves -- the agent commits to it -- and the remote-tracking ref
+/// is the one that still points at where the work started.
 pub(crate) fn resolve_base_script(session: &Session) -> String {
     // A stored base branch names a local branch; the remote-tracking ref is the
     // one that still points at the base after the agent commits.
@@ -1122,18 +1027,10 @@ pub fn send_comments(backend: &dyn Backend, session: &Session) -> Result<String,
 ///
 /// A gateway call, not an exec, so unlike the diff and the poll this does not
 /// queue behind whatever else is running against the sandbox.
-///
-/// A session with no isolation has no policy, and the error says which session
-/// and why rather than coming back empty: an empty policy view is
-/// indistinguishable from one that failed to load, and this is the pane whose
-/// whole job is to say what the sandbox will not allow.
 pub fn policy(backend: &dyn Backend, session: &Session) -> Result<PolicyRevision, String> {
     backend
         .policy(session)
-        .map_err(|e| match backend.isolation() {
-            Isolation::Sandboxed => format!("could not read the policy: {e}"),
-            Isolation::None => e.to_string(),
-        })
+        .map_err(|e| format!("could not read the policy: {e}"))
 }
 
 /// How many log lines to ask for. The gateway returns the newest, so this is a
@@ -1152,12 +1049,7 @@ const LOG_LINES: usize = 1500;
 pub fn events(backend: &dyn Backend, session: &Session) -> Result<Vec<events::Event>, String> {
     let raw = backend
         .logs(session, LOG_LINES)
-        .map_err(|e| match backend.isolation() {
-            Isolation::Sandboxed => format!("could not read the log: {e}"),
-            // Nothing is deciding anything, so there is nothing to report. The
-            // sentence is the answer, not a failure to produce one.
-            Isolation::None => e.to_string(),
-        })?;
+        .map_err(|e| format!("could not read the log: {e}"))?;
     // Merged into what this session has already shown rather than replacing it:
     // the gateway's window is a couple of minutes wide at these poll intervals,
     // and the feed is meant to be a record. Newest first comes back from the
@@ -1174,10 +1066,7 @@ pub fn repolicy(
 ) -> Result<PolicyRevision, String> {
     backend
         .policy_update(session, update)
-        .map_err(|e| match backend.isolation() {
-            Isolation::Sandboxed => format!("policy update failed: {e}"),
-            Isolation::None => e.to_string(),
-        })?;
+        .map_err(|e| format!("policy update failed: {e}"))?;
     policy(backend, session)
 }
 
@@ -1283,10 +1172,8 @@ pub fn attach_argv(
 /// it: a shell survives the window closing, the server restarting, and a second
 /// window opening -- none of which a list in a client would.
 ///
-/// Filtered by the backend's prefix, and that is load-bearing for a worktree
-/// session: its tmux is the *server's*, shared with every other worktree
-/// session and with whatever the person at that machine is running themselves.
-/// Listing everything would offer someone else's work as this session's shells.
+/// Filtered by the backend's prefix, so the agent's own tmux session is not
+/// offered as a shell.
 pub fn shells(backend: &dyn Backend, session: &Session) -> Result<Vec<String>, String> {
     let prefix = backend.shell_prefix(session);
     let list = format!("{} list-sessions -F '#{{session_name}}'", backend.tmux());
@@ -1344,9 +1231,7 @@ pub fn new_shell(backend: &dyn Backend, session: &Session) -> Result<String, Str
 /// Close one, killing whatever is running in it.
 pub fn kill_shell(backend: &dyn Backend, session: &Session, tmux: &str) -> Result<(), String> {
     // The agent's session is not a shell and closing its tab must not stop it.
-    // Checked here rather than trusted from the request, which is a client's --
-    // and against the backend's own prefix, so a worktree session cannot be
-    // asked to kill a tmux session belonging to another one.
+    // Checked here rather than trusted from the request, which is a client's.
     if tmux == session.tmux || !tmux.starts_with(&backend.shell_prefix(session)) {
         return Err(format!("`{tmux}` is not a shell"));
     }
@@ -1371,45 +1256,6 @@ pub enum Destroyed {
     Sandbox,
     /// There was no sandbox left to delete; only the record went.
     RecordOnly,
-}
-
-/// Take away whatever the session ran in, whichever backend that was.
-///
-/// With a record this is one backend, the one the record names. Without a record
-/// it is *both*, because there is no longer anything that knows which kind the
-/// name was -- and the answer used to be "assume a sandbox", which quietly made
-/// a worktree unremovable: the gateway would say it had never heard of
-/// `hura-<name>`, the record-only answer came back, and the directory stayed
-/// where it was. `Backend::place` refuses a directory that is already there, so
-/// the name was then unusable for good.
-///
-/// Neither backend has anything to do for a name that was not its own, so asking
-/// both costs one `sandbox delete` that answers not-found and one `exists` on a
-/// directory that does not. A backend that could not be *reached* only fails the
-/// removal if the other one found nothing either: a gateway that is down is not
-/// a reason to refuse to remove a worktree.
-fn tear_down(
-    backends: &Backends,
-    name: &str,
-    record: Option<&Session>,
-) -> Result<Torn, backend::Error> {
-    if let Some(record) = record {
-        return backends.for_session(record).tear_down(name, Some(record));
-    }
-
-    let mut torn = Torn::RecordOnly;
-    let mut failure = None;
-    for backend in backends.each() {
-        match backend.tear_down(name, None) {
-            Ok(Torn::Removed) => torn = Torn::Removed,
-            Ok(Torn::RecordOnly) => {}
-            Err(e) => failure = Some(e),
-        }
-    }
-    match failure {
-        Some(e) if torn == Torn::RecordOnly => Err(e),
-        _ => Ok(torn),
-    }
 }
 
 /// Delete a session's sandbox and drop its record.
@@ -1446,7 +1292,7 @@ pub fn destroy(backends: &Backends, name: &str) -> Result<Destroyed, String> {
     // after the refresh it exists to stop. See [`crate::removed`].
     removed::remember(name);
 
-    let outcome = match tear_down(backends, name, record.as_ref()) {
+    let outcome = match backends.sandboxed().tear_down(name, record.as_ref()) {
         Ok(Torn::Removed) => Destroyed::Sandbox,
         Ok(Torn::RecordOnly) => Destroyed::RecordOnly,
         Err(e) => {

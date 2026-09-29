@@ -186,14 +186,6 @@ than hidden. Forgetting a project leaves its worktrees alive and moves them
 there; a sandbox is a real thing with an agent in it, and removing one is
 `hurad rm`'s job, said out loud.
 
-**A worktree with no sandbox around it says so on its row.** The `worktree`
-badge beside the name means the session runs on the server with the server's own
-rights: no policy, no allow/deny feed, and a publish that uses the server's git
-credentials. The policy and events panes say the same thing where their contents
-would be, in the server's own words rather than a wording kept here, and the
-facts pane shows `isolation: none` with the directory instead of a sandbox name.
-[worktrees.md](worktrees.md) is what it buys and what it costs.
-
 **Tabs are per worktree.** A tab is a thing you have open *in* a working copy,
 so switching worktree switches the set and coming back finds it as you left it.
 Every tab stays mounted and is hidden rather than unmounted: a terminal that
@@ -234,7 +226,7 @@ costs width the editor would otherwise have; that is the trade.
 ## Where it goes, and why it is all icons
 
 The window has five destinations in the top-right of the header: new project,
-then the inbox, the integrations, the servers and the settings. **None of them
+then the tickets, the integrations, the servers and the settings. **None of them
 carries a word.** The row used to read `inbox  new project  integrations
 servers  settings` -- about 210 pixels of label for five things pressed once
 each per sitting, in a 40-pixel strip that also has to hold a rate-limit
@@ -269,7 +261,7 @@ container per row with its own log under it, living in a 760-pixel box with a
 `max-height: 82vh` and a scrollbar of its own inside a window that already had
 one, while the scrim reserved a third of the display to draw black over. These
 screens also *explain* the workspace behind them -- a tracker with no
-credential is why the inbox is empty -- and a scrim dimmed the evidence while
+credential is why the tickets are empty -- and a scrim dimmed the evidence while
 you read about it.
 
 The create forms stayed dialogs, and so did the destroy confirmation. Those are
@@ -313,13 +305,6 @@ than a shortfall. Every other mark is `--dimmer`. That is the rule at the top of
 wants you", "it passed" and "it failed", and a grey pane with nothing in it is
 not one of them -- which is also why a pane fetching its own contents draws a
 neutral spinner rather than borrowing the working one.
-
-A session with no sandbox is the deliberate exception, and it keeps its words.
-The policy and events panes show an amber `ShieldOff` above `not isolated` and
-the server's own explanation, because that is not an absence -- it is a warning
-that happens to fill a pane. The `unsandboxed` badge on the worktree row keeps
-its word for the same reason: the icon alone is a mark you have to have been
-taught, and it is the one thing on that card that must not be missed.
 
 ### The vocabulary is in one file
 
@@ -401,19 +386,33 @@ installer and no Linux one, because a Tauri bundle links against the webkit2gtk
 of the distribution that built it. On Linux the window is built from the tree,
 so there is nothing for an updater to fetch and no bar ever appears.
 
-## The inbox
+## Tickets
 
-The inbox icon in the header is what your trackers say is assigned to you, read
-on the server with the credentials in its store — so this window shows a list
-and never holds a token. A row is a ticket; the play button turns it into a
-session with the task, the name and the branch already right, and the session
-remembers which ticket it came from, so publishing comments the pull request
-back onto it.
+The ticket icon in the header is your trackers and what they say, on one
+screen. It replaced an inbox that showed the tickets and a section of the
+integrations screen that set up where they came from — the second was the one
+nobody found, and a tracker with no token is exactly why its list is empty.
 
-There is no count on that icon, and it is a decision rather than a gap: a badge
-would mean asking Jira, Azure DevOps and GitHub what is assigned to you on a
-timer, forever, for a number nobody is waiting on. The list is read when the
-screen is opened, which is when somebody has asked for it.
+**At the top, the trackers.** Each row is one tracker: its kind, where it
+points, and whether its token is stored — with a field beside it to paste one
+or replace it. The token goes into the server's store and is never shown again.
+Under each Jira or Azure DevOps tracker are its **filters**, the named queries
+("ready to start", "assigned to me") with edit, remove and *add filter*. Below
+the rows is the form that adds a tracker: the kind, where it points, the name
+of the secret and the token, stored first so the entry is never in the file with
+nothing behind it. Removing a tracker takes its table out of the config file and
+leaves the secret alone.
+
+**Below, the tickets**, one section per filter. A row is a ticket; the play
+button turns it into a session with the task, the name and the branch already
+right, and the session remembers which ticket it came from, so publishing
+comments the pull request back onto it.
+
+There is no count on that icon: a badge is a number nobody is waiting on. What
+is worth interrupting for is a ticket *changing* — its status, somebody else's
+comment, a ticket turning up in a filter — and the window reads the tickets every
+few minutes to say so, as an OS notification. It is a switch on the settings
+screen; see [tickets.md](tickets.md#notifications).
 
 A row carries a project chooser, because **a ticket does not know which
 repository it is about**: a Jira issue names a project and a work item names an
@@ -422,17 +421,17 @@ where. It opens on the project of whatever is selected in the tree, which is the
 most likely answer.
 
 A tracker that could not be read says so at the top of the list rather than
-leaving its rows quietly missing — an inbox short of a tracker looks exactly
-like having nothing assigned. [inbox.md](inbox.md) is the whole of it.
+leaving its rows quietly missing — a list short of a tracker looks exactly
+like having nothing assigned. [tickets.md](tickets.md) is the whole of it.
 
 ## Integrations
 
 The integrations icon in the header opens what the server holds on your
-sessions' behalf: the MCP servers and what each one is doing, the secret names it has, the
-trackers the inbox reads, and the skills this machine has pushed to it. Four
-things that used to be four procedures in a document -- a `docker run` line to
-copy, a `-e` argument in a shell history, a `[[tracker]]` table in a file on
-another machine, a path in a config file that cannot reach your laptop.
+sessions' behalf: the MCP servers and what each one is doing, the secret names it has, and the skills this machine has pushed to it. Three
+things that used to be three procedures in a document -- a `docker run` line to
+copy, a `-e` argument in a shell history, a path in a config file that cannot
+reach your laptop. Trackers used to be here too; they are on the tickets screen
+now, and this one links to it.
 
 Every button there answers with the whole view, re-read, for the reason the git
 view does the same: they explain each other, and a container that will not start
@@ -447,16 +446,6 @@ carries names and whether each is set, and nothing in it returns a value. The
 warning about what an MCP server costs you is beside the list rather than only
 in [mcp.md](mcp.md), which is a document nobody re-reads at the moment it
 matters.
-
-A tracker is added here too, which is the only reason the inbox can ever have
-anything in it for someone who does not edit the server's config file by hand:
-the kind, where it points, the name of the secret and the token itself, in one
-row. The token is stored under that name first and the `[[tracker]]` table is
-written second, so the entry is never in the file for a moment with nothing
-behind the name it gives. Removing one takes the table out and leaves the secret
-alone -- nothing here can tell what else might use it. A row whose secret is not
-set says so, because that is a configuration that looks complete and fetches
-nothing. [inbox.md](inbox.md) has the fields each kind needs.
 
 The skills section pushes this machine's own `~/.claude/skills` to the server,
 which also happens before every create -- so editing a skill here still means
@@ -514,9 +503,7 @@ in it and no amount of bookkeeping removes one.
 
 **Destroy a worktree** -- the icon on the row, shown when the row is hovered or
 focused -- is the one that ends something. The sandbox goes, and with it
-anything the agent has not pushed. It asks first, and it says which of the two
-things you are doing: a sandbox session names its sandbox, a worktree session
-names the directory on the server that goes with it.
+anything the agent has not pushed. It asks first, and says so.
 
 The row's control is in a gutter the card reserves rather than floating over
 it. Over the card it would cover the age and the diff stat on exactly the rows
@@ -540,16 +527,6 @@ checkouts exist is a fact about the machine that will do the cloning, and
 `repo_roots` is configured there. So `Repos` and `Inspect` are requests like any
 other, and a window pointed at a server on another continent lists that server's
 repositories rather than a set of paths it cannot reach.
-
-**Where it runs** is the first question, because it decides which of the others
-mean anything. A sandbox is the default and the point; a worktree is seconds
-instead of minutes and gives up every guarantee, so the form spells that out
-beside the choice and again as a notice once it is picked. Picking it hides the
-policy, toolchain and credential fields rather than disabling them: each is an
-instruction to a gateway that will not be involved, and a greyed-out policy
-chooser suggests a choice that has been taken away when the truth is there is
-nothing to apply one to. The command line refuses those flags outright for the
-same reason.
 
 Nothing in the form decides anything `hurad new` decides differently, and that is
 enforced by where the decisions live rather than by care:
@@ -577,8 +554,7 @@ enforced by where the decisions live rather than by care:
   what your agents can reach, made in the server's config file, and
   `NewSession::into_draft` reads them from there rather than from the request --
   so a client cannot attach a tool, or the endpoint the policy then opens for
-  it, by asking. A worktree session is given neither and the form says why: its
-  agent is the server's own, reading that user's `~/.claude` already.
+  it, by asking.
 
 `Create` answers as soon as the request is accepted, not when the agent is
 running. Creating takes tens of seconds and the states it passes through --

@@ -1,33 +1,16 @@
-//! Where a session's work actually happens, and the two answers to that.
+//! Where a session's work actually happens.
 //!
-//! Every session up to now ran in a sandbox: the gateway created it, an exec
-//! reached into it, and the policy the gateway enforced was the product. This
-//! module is the seam that lets a second kind exist -- a plain `git worktree` on
-//! the server, running with the server's own rights -- without either kind
-//! being a special case anywhere above it. [`crate::ops`], [`crate::git`],
-//! [`crate::files`] and [`crate::seed`] all talk to a [`Backend`] now, and none
-//! of them ask which one they have.
+//! [`crate::ops`], [`crate::git`], [`crate::files`] and [`crate::seed`] all talk
+//! to a [`Backend`] rather than to the gateway directly. The scripts -- the
+//! diff, the poll, the status scrape, the file tree, the review, the shells --
+//! are shared and pure; where they run, where the files are and how tmux is
+//! invoked is this trait's business rather than theirs. There is one
+//! implementation, [`Sandboxed`]: a session inside an OpenShell sandbox, with
+//! the gateway's policy on everything that leaves it.
 //!
-//! **The isolation is the product, so its absence is stated rather than
-//! implied.** [`Isolation`] is on the trait for one reason: a worktree session
-//! has no policy to show and no decisions to feed, and an empty policy pane
-//! looks exactly like one that failed to load. Everything that would render a
-//! guarantee asks for the isolation first and says which kind it is looking at.
-//!
-//! What the two backends differ in is small and entirely about *where*:
-//!
-//! | | Sandboxed | Worktree |
-//! | --- | --- | --- |
-//! | `exec` | `openshell sandbox exec` | a child process on the server |
-//! | [`Paths::repo`] | `/sandbox/repo` | the worktree's own directory |
-//! | [`Paths::hura`] | `/sandbox/.hura` | under the server's state directory |
-//! | tmux | in the sandbox, on the image's config | on the server |
-//! | policy, events | the gateway's | absent |
-//! | publish | pushes from inside, credential never on the host | the server's own git credentials |
-//!
-//! Everything else -- the diff, the poll, the status scrape, the file tree, the
-//! review, the shells -- is a script that runs somewhere, and the somewhere is
-//! this trait's business rather than theirs.
+//! There used to be a second, a plain `git worktree` on the server with no
+//! isolation at all. It was removed: two backends meant two of everything to
+//! keep working, and the isolation is the product.
 
 use openshell_client::{
     Error as OsError, ExecOutput, OpenShell, PolicyRevision, PolicyUpdate, Provider,
@@ -36,10 +19,8 @@ use openshell_client::{
 use crate::session::{self, Session};
 
 mod sandboxed;
-mod worktree;
 
 pub use sandboxed::Sandboxed;
-pub use worktree::Worktree;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -52,11 +33,6 @@ pub enum Error {
     /// directory that is not there.
     #[error("{0}")]
     Local(String),
-    /// Asked of a backend that has no such thing. Its own variant because the
-    /// answer a caller gives for it is an explanation rather than an error --
-    /// see [`Isolation`].
-    #[error("{0}")]
-    Unsupported(String),
 }
 
 impl Error {
@@ -71,62 +47,9 @@ impl Error {
     }
 }
 
-/// What a session is isolated by, which is the one thing the two backends do
-/// not have in common.
-///
-/// A product whose pitch is isolation cannot have a mode where the isolation is
-/// quietly absent, so this is carried everywhere a session is: the list badge,
-/// the policy pane, the events feed, and the sentence a publish button owes the
-/// person pressing it.
-// No `ts(export)`: this never crosses the wire. What a client is told is the
-// session's `Kind` and, for the two requests a worktree cannot answer, a
-// `no-isolation` failure carrying the sentence below -- so the wording stays
-// here rather than being reimplemented beside a generated enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Isolation {
-    /// A kernel-enforced sandbox with a policy the gateway applies.
-    Sandboxed,
-    /// None: the session runs on the server with the server's own rights.
-    None,
-}
-
-impl Isolation {
-    pub fn is_sandboxed(self) -> bool {
-        self == Isolation::Sandboxed
-    }
-
-    /// Two or three words, for a column or a badge.
-    pub fn label(self) -> &'static str {
-        match self {
-            Isolation::Sandboxed => "sandboxed",
-            Isolation::None => "not isolated",
-        }
-    }
-
-    /// The sentence a client shows where a policy pane would be.
-    ///
-    /// Here rather than in a front end because there are two front ends and
-    /// this is a statement about a guarantee: the terminal and the window have
-    /// to make the same one, and a wording kept in TypeScript would be a
-    /// second answer to what a session promises.
-    pub fn explain(self) -> &'static str {
-        match self {
-            Isolation::Sandboxed => "every outbound request goes through the gateway's policy",
-            Isolation::None => {
-                "this session is a git worktree on the server, running with the \
-                 server's own rights. There is no policy to enforce and no \
-                 decisions to report."
-            }
-        }
-    }
-}
-
 /// Where a session's things are, from the point of view of its own `exec`.
 ///
-/// Two absolute paths and everything else derived from them. A sandbox has one
-/// filesystem and one obvious place to put both; a worktree session has the
-/// working copy where git put it and its record deliberately somewhere else --
-/// see [`Worktree`] -- so the two cannot be one root plus a suffix.
+/// Two absolute paths and everything else derived from them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
     /// The repository's working copy.
@@ -193,11 +116,6 @@ pub enum Torn {
 /// invocation it should use. A backend that grew its own copy of the diff
 /// script would be a second answer to what a diff is.
 pub trait Backend {
-    fn isolation(&self) -> Isolation;
-
-    /// Which of the two kinds this is, for a record and for a badge.
-    fn kind(&self) -> session::Kind;
-
     fn paths(&self, session: &Session) -> Paths;
 
     fn exec(&self, session: &Session, argv: &[&str]) -> Result<ExecOutput>;
@@ -207,26 +125,18 @@ pub trait Backend {
 
     /// How to invoke tmux where this session's agent runs.
     ///
-    /// The image ships a config and a sandbox exec inherits no locale, so the
-    /// sandboxed form carries both; the server's tmux has the user's own config
-    /// and a locale already. `-u` is in both, because it says "this terminal is
-    /// UTF-8" outright rather than inferring it from an environment.
+    /// The image ships a config and a sandbox exec inherits no locale, so this
+    /// carries both. `-u` says "this terminal is UTF-8" outright rather than
+    /// inferring it from an environment.
     fn tmux(&self) -> &'static str;
 
     /// The prefix the shells beside the agent are named with.
-    ///
-    /// Per session rather than global, because a worktree session's tmux is the
-    /// *server's* tmux: `shell-1` there would be one name for every session on
-    /// the machine, and opening a second shell in one worktree would attach to
-    /// another's.
     fn shell_prefix(&self, session: &Session) -> String;
 
-    /// Make the thing the session runs in exist: a sandbox with its policy, or
-    /// a worktree and somewhere to keep its record.
+    /// Make the thing the session runs in exist: a sandbox with its policy.
     ///
     /// Takes the session `&mut` because placing it decides facts that belong on
-    /// the record: which policy revision it got, and -- for a worktree -- which
-    /// directory it is, which there is nowhere else to learn afterwards.
+    /// the record, such as which policy revision it got.
     fn place(&self, session: &mut Session, draft: &crate::ops::Draft) -> Result<()>;
 
     /// Everything imposed on a session that already exists: the global endpoint
@@ -252,114 +162,58 @@ pub trait Backend {
     /// the tool that asked for it going away.
     fn fetch_script(&self, session: &Session) -> String;
 
-    /// Whether this backend wants the skills and MCP steps.
-    ///
-    /// A sandbox is a fresh machine and has to be given both. A worktree
-    /// session's agent is the server's own, reading the server user's
-    /// `~/.claude`, and copying skills into the worktree would put them in
-    /// every `git status` the agent runs.
-    fn seeds_tooling(&self) -> bool {
-        self.isolation().is_sandboxed()
-    }
-
     /// Remove what this session ran in. The record is the caller's to drop.
     fn tear_down(&self, name: &str, session: Option<&Session>) -> Result<Torn>;
 
-    /// Reconcile this backend's share of the cache against what it can see.
-    ///
-    /// A backend knows what "still there" means for its own kind and nothing
-    /// else does: a sandbox is a phase the gateway reports, a worktree is a
-    /// directory that either exists or has been deleted from under it. Both
-    /// answer with the same [`crate::store::Reconciliation`], so
-    /// [`crate::ops::refresh_with`] merges them without a match on the kind.
+    /// Reconcile the cache against what the backend can see.
     fn live(&self, cached: Vec<Session>) -> Result<crate::store::Reconciliation>;
 
     /// Read a session's own record, from wherever this backend keeps it.
     fn read_meta(&self, name: &str) -> Result<Session>;
 
-    /// The effective policy, for a backend that enforces one.
-    fn policy(&self, session: &Session) -> Result<PolicyRevision> {
-        Err(self.no_isolation(session))
-    }
+    /// The effective policy.
+    fn policy(&self, session: &Session) -> Result<PolicyRevision>;
 
-    fn policy_update(&self, session: &Session, _update: &PolicyUpdate) -> Result<()> {
-        Err(self.no_isolation(session))
-    }
+    fn policy_update(&self, session: &Session, update: &PolicyUpdate) -> Result<()>;
 
-    /// The decision log, for a backend that decides anything.
-    fn logs(&self, session: &Session, _lines: usize) -> Result<String> {
-        Err(self.no_isolation(session))
-    }
+    /// The decision log.
+    fn logs(&self, session: &Session, lines: usize) -> Result<String>;
 
-    /// Credential providers a new session of this kind may be given.
-    ///
-    /// Empty rather than an error for a worktree: a provider is a secret the
-    /// *gateway* swaps into a request, and there is no gateway in that path --
-    /// the server's own credentials are what a worktree session pushes with.
-    fn providers(&self) -> Result<Vec<Provider>> {
-        Ok(Vec::new())
-    }
-
-    /// The refusal a backend with no isolation gives, in the same words
-    /// everywhere.
-    fn no_isolation(&self, session: &Session) -> Error {
-        // Not "has no policy": the same refusal answers the events feed, and a
-        // feed that said "no policy" would be answering a question nobody
-        // asked. `explain` covers both, in one wording.
-        Error::Unsupported(format!(
-            "`{}` is {}: {}",
-            session.name,
-            self.isolation().label(),
-            self.isolation().explain()
-        ))
-    }
+    /// Credential providers a new session may be given.
+    fn providers(&self) -> Result<Vec<Provider>>;
 }
 
-/// Both backends, and which of them a session belongs to.
+/// The backend every session runs on, as configured.
 ///
-/// The one thing above this that still knows there are two. Everything that
-/// works on a session takes a `&dyn Backend` and is handed the right one; the
-/// two operations that span both kinds -- listing what exists and creating
-/// something new -- take this.
+/// One of them since the worktree backend went; kept as the thing callers are
+/// handed so that a session-shaped call site reads the same as it always has.
 pub struct Backends {
     sandboxed: Sandboxed,
-    worktree: Worktree,
 }
 
 impl Backends {
-    pub fn new(sandboxed: Sandboxed, worktree: Worktree) -> Self {
-        Backends {
-            sandboxed,
-            worktree,
-        }
+    pub fn new(sandboxed: Sandboxed) -> Self {
+        Backends { sandboxed }
     }
 
-    /// The pair as configured: the gateway client for one, the server's
-    /// worktree root for the other.
-    pub fn from_config(client: Box<dyn OpenShell>, cfg: &crate::config::Config) -> Self {
-        Backends::new(Sandboxed::new(client), Worktree::from_config(cfg))
+    pub fn from_client(client: Box<dyn OpenShell>) -> Self {
+        Backends::new(Sandboxed::new(client))
     }
 
-    pub fn for_session(&self, session: &Session) -> &dyn Backend {
-        self.of_kind(session.backend)
+    pub fn for_session(&self, _session: &Session) -> &dyn Backend {
+        &self.sandboxed
     }
 
-    pub fn of_kind(&self, kind: session::Kind) -> &dyn Backend {
-        match kind {
-            session::Kind::Sandbox => &self.sandboxed,
-            session::Kind::Worktree => &self.worktree,
-        }
+    /// The backend itself, for the operations that are not about one session:
+    /// listing what exists and creating something new.
+    pub fn sandboxed(&self) -> &dyn Backend {
+        &self.sandboxed
     }
 
-    /// The sandboxed backend, for the few callers that are about the gateway
-    /// itself rather than about a session: `hura doctor`, the provider list, the
-    /// image build.
+    /// The gateway client, for the few callers that are about the gateway
+    /// itself rather than about a session: `hura doctor`, the image build.
     pub fn gateway(&self) -> &dyn OpenShell {
         self.sandboxed.client()
-    }
-
-    pub fn each(&self) -> [&dyn Backend; 2] {
-        [&self.sandboxed, &self.worktree]
     }
 }
 
@@ -447,18 +301,5 @@ mod tests {
         assert_eq!(p.seed_state(), session::SEED_STATE_PATH);
         assert_eq!(p.seed_log(), session::SEED_LOG_PATH);
         assert_eq!(p.seed_script(), session::SEED_SCRIPT_PATH);
-    }
-
-    /// The sentence a client shows where the policy pane would be. It is the
-    /// difference between a stated absence and a pane that looks broken, so it
-    /// says which kind of session it is talking about.
-    #[test]
-    fn the_absent_isolation_explains_itself() {
-        assert_eq!(Isolation::None.label(), "not isolated");
-        let said = Isolation::None.explain();
-        assert!(said.contains("worktree on the server"), "{said}");
-        assert!(said.contains("server's own rights"), "{said}");
-        assert!(!Isolation::None.is_sandboxed());
-        assert!(Isolation::Sandboxed.is_sandboxed());
     }
 }

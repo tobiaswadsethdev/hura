@@ -36,6 +36,13 @@ export type Prefs = {
   /// terminal. Off is for somebody who keeps it on screen anyway and does not
   /// want their notification centre to hold a record of it.
   notify: boolean;
+  /// Whether the window reads your tickets on a timer and says when a ticket in
+  /// one of your filters changes status, gets a comment or turns up.
+  ///
+  /// On by default, and costs nothing without a tracker: the server answers an
+  /// empty list without asking anyone. Off also stops the timer, so no
+  /// tracker is asked on this window's behalf.
+  notifyTickets: boolean;
 };
 
 /// The bounds, and the reasons.
@@ -66,6 +73,7 @@ export const DEFAULTS: Prefs = {
   dockWidth: 400,
   refreshMs: 3000,
   notify: true,
+  notifyTickets: true,
 };
 
 function clamp(value: number, { min, max }: { min: number; max: number }): number {
@@ -90,6 +98,8 @@ export function sanitize(stored: unknown): Prefs {
     dockWidth: number(raw.dockWidth, LIMITS.dockWidth, DEFAULTS.dockWidth),
     refreshMs: number(raw.refreshMs, LIMITS.refreshMs, DEFAULTS.refreshMs),
     notify: typeof raw.notify === "boolean" ? raw.notify : DEFAULTS.notify,
+    notifyTickets:
+      typeof raw.notifyTickets === "boolean" ? raw.notifyTickets : DEFAULTS.notifyTickets,
   };
 }
 

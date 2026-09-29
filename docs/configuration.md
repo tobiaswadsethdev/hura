@@ -11,7 +11,6 @@ base       = "develop"                                # unset: the remote's defa
 policy     = "feature-work"                           # a template, or a path to a YAML file
 providers  = ["claude-oauth", "azure-pat"]            # credentials for a new session
 repo_roots = ["~/dev", "~/work"]                      # where the picker looks
-worktree_root = "~/.local/share/hura/worktrees"        # where worktree sessions go
 branch_prefix = "tobias"                              # <prefix>/<name> for a work branch
 refresh    = "1s"                                     # unused since v0.4.0; still parsed
 auto_update = true                                    # download new releases ahead of a restart
@@ -28,8 +27,8 @@ image   = "ghcr.io/example/mcp-sentry:1.4"
 port    = 9000
 secrets = ["SENTRY_TOKEN"]                            # names; values live on the server
 
-[[tracker]]                                           # the task inbox
-kind    = "jira"                                      # see docs/inbox.md
+[[tracker]]                                           # the tickets screen
+kind    = "jira"                                      # see docs/tickets.md
 site    = "https://your-org.atlassian.net"
 email   = "you@example.com"
 secret  = "JIRA_API_TOKEN"
@@ -49,7 +48,7 @@ from `hurad new`, and a window keeping its own prefix would be a second
 convention that disagrees with the first. See [desktop.md](desktop.md#settings).
 
 The rest of the file is not editable from there, and the omissions are the
-point. `repo_roots`, `worktree_root` and `skills` are paths on the server;
+point. `repo_roots` and `skills` are paths on the server;
 `[[mcp]]` and `[[tracker]]` are lists of tables, each one a decision about what
 an agent of yours can reach, and the integrations screen already says so about
 the MCP half.
@@ -111,10 +110,11 @@ specific answer wins:
 * `repo_roots` **replaces** the conventional places rather than adding to them,
   and `HURA_REPO_ROOTS` still wins over it.
 
-`repo_roots` and `worktree_root` are both about the machine that *runs* the
-sessions, which with a server is not the machine with the window on it: a
-worktree is added to a checkout, and both the checkout and the worktree are the
-server's. See [worktrees.md](worktrees.md).
+`repo_roots` is about the machine that *runs* the sessions, which with a server
+is not the machine with the window on it.
+
+`worktree_root` configured worktree sessions, which have been removed. It is
+still accepted, and ignored, so an existing file keeps loading.
 
 Two things are deliberately *not* in this file. **Secrets** are named here and
 stored in `$XDG_STATE_HOME/hura/secrets.json`, because a config file is the kind

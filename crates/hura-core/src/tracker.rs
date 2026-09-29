@@ -101,7 +101,16 @@ pub struct Source {
     /// The query to run: JQL for Jira, WIQL for Azure DevOps, a search
     /// qualifier string for GitHub. `None` means "assigned to me and not done",
     /// which is what an inbox is.
+    ///
+    /// The single-query form, from before [`Self::filters`]. Still read: a
+    /// tracker with no filters has one, made from this. See [`Self::effective`].
     pub query: Option<String>,
+    /// Named queries, each its own section of the inbox: "ready to start",
+    /// "assigned to me". Empty means the one [`Self::query`] describes.
+    ///
+    /// Jira and Azure DevOps only, because they are the two with a query
+    /// language this reads. A GitHub tracker lists what is assigned to you.
+    pub filters: Vec<Filter>,
     /// What to move a ticket to when its session is published. `None` leaves it
     /// where it is.
     pub on_publish: Option<String>,
@@ -123,12 +132,70 @@ impl Default for Source {
             site: None,
             email: None,
             query: None,
+            filters: Vec::new(),
             on_publish: None,
         }
     }
 }
 
+/// One named query on a tracker.
+///
+/// A name rather than only a query, because the name is what the inbox shows
+/// and what a notification says a ticket turned up in: `PROJ-12 is ready to
+/// start` is a sentence, and a line of JQL is not.
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, rename = "TrackerFilter")
+)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Filter {
+    pub name: String,
+    /// JQL for Jira, WIQL for Azure DevOps.
+    pub query: String,
+}
+
+/// What a tracker with no query of its own asks for: assigned to me, not done.
+///
+/// Per kind, and public, because a client editing a tracker's filters starts
+/// from the one it has been reading -- and that has to be the same text the
+/// server would have sent, not a client's guess at it.
+pub fn default_query(kind: Kind) -> &'static str {
+    match kind {
+        // `statusCategory != Done` rather than a list of status names: every
+        // Jira project renames its statuses and none of them rename the
+        // categories.
+        Kind::Jira => "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
+        Kind::AzureDevOps => {
+            "SELECT [System.Id] FROM WorkItems \
+             WHERE [System.AssignedTo] = @Me \
+             AND [System.State] NOT IN ('Closed', 'Done', 'Removed', 'Resolved') \
+             ORDER BY [System.ChangedDate] DESC"
+        }
+        // Not a query: GitHub's `/issues` is asked with parameters.
+        Kind::GitHub => "",
+    }
+}
+
+/// The name of the filter a tracker without any has.
+pub const DEFAULT_FILTER: &str = "assigned to me";
+
 impl Source {
+    /// The filters this tracker actually runs: its own, or the one its
+    /// `query` -- or the kind's default -- makes.
+    pub fn effective(&self) -> Vec<Filter> {
+        if !self.filters.is_empty() {
+            return self.filters.clone();
+        }
+        vec![Filter {
+            name: DEFAULT_FILTER.to_string(),
+            query: self
+                .query
+                .clone()
+                .unwrap_or_else(|| default_query(self.kind).to_string()),
+        }]
+    }
+
     /// Trim every field, and fall back to the kind for an unnamed tracker --
     /// the same defaulting [`crate::config`] does when it reads one out of the
     /// file, so a tracker added from a client and one written by hand come out
@@ -155,12 +222,23 @@ impl Source {
             site: text(&self.site),
             email: text(&self.email),
             query: text(&self.query),
+            filters: self
+                .filters
+                .iter()
+                .map(|f| Filter {
+                    name: f.name.trim().to_string(),
+                    query: f.query.trim().to_string(),
+                })
+                .collect(),
             on_publish: text(&self.on_publish),
         }
     }
 
     /// What is missing, if anything.
     pub fn problem(&self) -> Option<String> {
+        if let Some(problem) = self.filter_problem() {
+            return Some(problem);
+        }
         let missing = |what: &str| {
             Some(format!(
                 "`{}` is a {} tracker with no {what}",
@@ -191,6 +269,40 @@ impl Source {
             }
             Kind::GitHub => None,
         }
+    }
+
+    fn filter_problem(&self) -> Option<String> {
+        if self.filters.is_empty() {
+            return None;
+        }
+        if self.kind == Kind::GitHub {
+            return Some(format!(
+                "`{}` is a github tracker, which takes no filters: it lists what is assigned to you",
+                self.name
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for f in &self.filters {
+            if f.name.trim().is_empty() {
+                return Some(format!("`{}` has a filter with no name", self.name));
+            }
+            if f.query.trim().is_empty() {
+                return Some(format!(
+                    "`{}` has a filter `{}` with no query",
+                    self.name, f.name
+                ));
+            }
+            // The inbox's sections and a notification's sentence both name a
+            // filter, and two with one name would be two sections nobody can
+            // tell apart.
+            if !seen.insert(f.name.trim()) {
+                return Some(format!(
+                    "`{}` has two filters called `{}`",
+                    self.name, f.name
+                ));
+            }
+        }
+        None
     }
 }
 
@@ -230,6 +342,20 @@ pub struct Task {
     /// file. Carried because `/issues` spans repositories: a comment has to go
     /// to the one the issue is actually in, which the entry may not name.
     pub repo: Option<String>,
+    /// Which of the tracker's filters this row came from. A ticket two filters
+    /// match is two rows, one in each section.
+    pub filter: String,
+    /// When the tracker last saw it change, in the tracker's own format. Only
+    /// ever compared with an earlier value of itself.
+    pub updated: Option<String>,
+    /// How many comments it has. `None` where the tracker's list answer does
+    /// not say.
+    pub comments: Option<u32>,
+    /// Who wrote the newest comment, as the tracker shows them.
+    pub last_commenter: Option<String>,
+    /// Whether the newest comment is the credential owner's own -- which is
+    /// the one comment nobody needs to be told about.
+    pub last_comment_mine: bool,
 }
 
 /// What a session remembers about the ticket it was started from.
@@ -273,6 +399,23 @@ pub struct Inbox {
     /// a row missing from a list, which is invisible -- so it is said out loud
     /// rather than left as an empty inbox.
     pub warnings: Vec<String>,
+    /// Every filter that was read, in order, whether or not it matched
+    /// anything.
+    ///
+    /// What lets a client tell "nothing matches" from "could not ask": a
+    /// filter missing from here was not read, so a ticket missing from it has
+    /// not left it -- and one appearing in it after an outage has not just
+    /// arrived.
+    #[serde(default)]
+    pub read: Vec<FilterRead>,
+}
+
+/// One filter an inbox read.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FilterRead {
+    pub tracker: String,
+    pub filter: String,
 }
 
 /// How long to give a tracker before giving up on it.
@@ -282,7 +425,7 @@ pub struct Inbox {
 /// enough that three of them cannot stack into a minute.
 const TIMEOUT: &str = "20";
 
-/// Read every configured tracker.
+/// Read every configured tracker, one filter at a time.
 ///
 /// Sequentially, because there are one or two of them and a thread per tracker
 /// would buy milliseconds at the cost of ordering the result.
@@ -293,25 +436,66 @@ pub fn inbox(sources: &[Source], branch_prefix: &str) -> Inbox {
             out.warnings.push(problem);
             continue;
         }
-        match read(source, branch_prefix) {
-            Ok(mut tasks) => out.tasks.append(&mut tasks),
-            Err(e) => out.warnings.push(format!("{}: {e}", source.name)),
+        let Some(token) = secrets::get(&source.secret) else {
+            out.warnings.push(format!(
+                "{}: no value stored for `{}`; set it from the integrations screen",
+                source.name, source.secret
+            ));
+            continue;
+        };
+        let reader = Reader::new(source, &token);
+        for filter in source.effective() {
+            match reader.read(&filter, branch_prefix) {
+                Ok(mut tasks) => {
+                    for t in &mut tasks {
+                        t.filter = filter.name.clone();
+                    }
+                    out.tasks.append(&mut tasks);
+                    out.read.push(FilterRead {
+                        tracker: source.name.clone(),
+                        filter: filter.name.clone(),
+                    });
+                }
+                Err(e) => out
+                    .warnings
+                    .push(format!("{} · {}: {e}", source.name, filter.name)),
+            }
         }
     }
     out
 }
 
-fn read(source: &Source, prefix: &str) -> Result<Vec<Task>, String> {
-    let token = secrets::get(&source.secret).ok_or_else(|| {
-        format!(
-            "no value stored for `{}`; set it from the integrations screen",
-            source.secret
-        )
-    })?;
-    match source.kind {
-        Kind::GitHub => github(source, &token, prefix),
-        Kind::AzureDevOps => azure(source, &token, prefix),
-        Kind::Jira => jira(source, &token, prefix),
+/// One tracker, with its credential, for as many filters as it has.
+struct Reader<'a> {
+    source: &'a Source,
+    token: &'a str,
+    /// Jira's account id for the credential's owner, asked once per read of
+    /// the inbox rather than once per filter. `None` when it could not be
+    /// asked, which only costs knowing whose the last comment was.
+    me: Option<String>,
+}
+
+impl<'a> Reader<'a> {
+    fn new(source: &'a Source, token: &'a str) -> Self {
+        let me = match source.kind {
+            Kind::Jira => jira_me(source, token),
+            _ => None,
+        };
+        Reader { source, token, me }
+    }
+
+    fn read(&self, filter: &Filter, prefix: &str) -> Result<Vec<Task>, String> {
+        match self.source.kind {
+            Kind::GitHub => github(self.source, self.token, prefix),
+            Kind::AzureDevOps => azure(self.source, self.token, &filter.query, prefix),
+            Kind::Jira => jira(
+                self.source,
+                self.token,
+                &filter.query,
+                self.me.as_deref(),
+                prefix,
+            ),
+        }
     }
 }
 
@@ -369,6 +553,13 @@ fn parse_github(
                 status: string(i, "state"),
                 item_type: label_of(i).unwrap_or_default(),
                 repo: (!repo.is_empty()).then_some(repo),
+                filter: String::new(),
+                updated: Some(string(i, "updated_at")).filter(|s| !s.is_empty()),
+                comments: i.get("comments").and_then(|c| c.as_u64()).map(|c| c as u32),
+                // `/issues` counts comments but does not say whose the last
+                // one is; finding out is a request per issue.
+                last_commenter: None,
+                last_comment_mine: false,
             })
         })
         .collect())
@@ -382,19 +573,12 @@ fn label_of(issue: &serde_json::Value) -> Option<String> {
 
 // ---------------------------------------------------------- Azure DevOps
 
-fn azure(source: &Source, token: &str, prefix: &str) -> Result<Vec<Task>, String> {
+fn azure(source: &Source, token: &str, wiql: &str, prefix: &str) -> Result<Vec<Task>, String> {
     let org = source.org.as_deref().unwrap_or_default();
     let project = source.project.as_deref().unwrap_or_default();
     let auth = azure_auth(token);
 
     // Two requests, and there is no way around it: WIQL answers with ids only.
-    let wiql = source.query.clone().unwrap_or_else(|| {
-        "SELECT [System.Id] FROM WorkItems \
-         WHERE [System.AssignedTo] = @Me \
-         AND [System.State] NOT IN ('Closed', 'Done', 'Removed', 'Resolved') \
-         ORDER BY [System.ChangedDate] DESC"
-            .to_string()
-    });
     let query_url =
         format!("https://dev.azure.com/{org}/{project}/_apis/wit/wiql?api-version=7.1&$top=50");
     let body = serde_json::json!({ "query": wiql });
@@ -408,7 +592,7 @@ fn azure(source: &Source, token: &str, prefix: &str) -> Result<Vec<Task>, String
     // `fields` rather than the whole work item: a work item with its history is
     // tens of kilobytes and four of those fields are the whole row.
     let detail_url = format!(
-        "https://dev.azure.com/{org}/{project}/_apis/wit/workitems?ids={}&fields=System.Id,System.Title,System.State,System.WorkItemType&api-version=7.1",
+        "https://dev.azure.com/{org}/{project}/_apis/wit/workitems?ids={}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.ChangedDate,System.CommentCount&api-version=7.1",
         ids.join(",")
     );
     let detail = get(&detail_url, &auth, &[])?;
@@ -465,6 +649,14 @@ fn parse_azure(
                 status: string(fields, "System.State"),
                 item_type: string(fields, "System.WorkItemType"),
                 repo: None,
+                filter: String::new(),
+                updated: Some(string(fields, "System.ChangedDate")).filter(|s| !s.is_empty()),
+                comments: fields
+                    .get("System.CommentCount")
+                    .and_then(|c| c.as_u64())
+                    .map(|c| c as u32),
+                last_commenter: None,
+                last_comment_mine: false,
             })
         })
         .collect())
@@ -483,37 +675,63 @@ fn azure_auth(token: &str) -> String {
 
 // ------------------------------------------------------------------ Jira
 
-fn jira(source: &Source, token: &str, prefix: &str) -> Result<Vec<Task>, String> {
-    let site = source
+fn jira_site(source: &Source) -> &str {
+    source
         .site
         .as_deref()
         .unwrap_or_default()
-        .trim_end_matches('/');
+        .trim_end_matches('/')
+}
+
+fn jira_auth(source: &Source, token: &str) -> String {
     let email = source.email.as_deref().unwrap_or_default();
-    let auth = format!(
+    format!(
         "Basic {}",
         crate::skills::base64(format!("{email}:{token}").as_bytes())
-    );
+    )
+}
 
-    let jql = source.query.clone().unwrap_or_else(|| {
-        // `statusCategory != Done` rather than a list of status names: every
-        // Jira project renames its statuses and none of them rename the
-        // categories.
-        "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC".to_string()
-    });
+/// The credential owner's account id, which is how a comment says who wrote
+/// it. Emails are hidden on most Jira Cloud sites, so the configured one
+/// cannot be matched against an author.
+fn jira_me(source: &Source, token: &str) -> Option<String> {
+    let url = format!("{}/rest/api/3/myself", jira_site(source));
+    let body = get(
+        &url,
+        &jira_auth(source, token),
+        &["Accept: application/json"],
+    )
+    .ok()?;
+    Some(string(&body, "accountId")).filter(|s| !s.is_empty())
+}
+
+fn jira(
+    source: &Source,
+    token: &str,
+    jql: &str,
+    me: Option<&str>,
+    prefix: &str,
+) -> Result<Vec<Task>, String> {
+    let site = jira_site(source);
     // `/search/jql`, not `/search`: the older endpoint is deprecated on Jira
-    // Cloud and answers 410 on newer sites.
+    // Cloud and answers 410 on newer sites. `comment` is what makes a new
+    // comment noticeable without a request per issue.
     let url = format!(
-        "{site}/rest/api/3/search/jql?jql={}&fields=summary,status,issuetype&maxResults=50",
-        urlencode(&jql)
+        "{site}/rest/api/3/search/jql?jql={}&fields=summary,status,issuetype,updated,comment&maxResults=50",
+        urlencode(jql)
     );
-    let body = get(&url, &auth, &["Accept: application/json"])?;
-    parse_jira(&body, source, prefix)
+    let body = get(
+        &url,
+        &jira_auth(source, token),
+        &["Accept: application/json"],
+    )?;
+    parse_jira(&body, source, me, prefix)
 }
 
 fn parse_jira(
     body: &serde_json::Value,
     source: &Source,
+    me: Option<&str>,
     prefix: &str,
 ) -> Result<Vec<Task>, String> {
     let site = source
@@ -535,6 +753,13 @@ fn parse_jira(
             }
             let fields = i.get("fields")?;
             let title = string(fields, "summary");
+            let comment = fields.get("comment");
+            // The newest by `created`, rather than the last in the list: the
+            // list is a page, and its order is Jira's to change.
+            let last = comment
+                .and_then(|c| c.get("comments"))
+                .and_then(|c| c.as_array())
+                .and_then(|list| list.iter().max_by_key(|c| string(c, "created")));
             Some(Task {
                 tracker: source.name.clone(),
                 kind: Kind::Jira,
@@ -555,6 +780,20 @@ fn parse_jira(
                     .map(|t| string(t, "name"))
                     .unwrap_or_default(),
                 repo: None,
+                filter: String::new(),
+                updated: Some(string(fields, "updated")).filter(|s| !s.is_empty()),
+                comments: comment
+                    .and_then(|c| c.get("total"))
+                    .and_then(|t| t.as_u64())
+                    .map(|t| t as u32),
+                last_commenter: last
+                    .and_then(|c| c.get("author"))
+                    .map(|a| string(a, "displayName"))
+                    .filter(|s| !s.is_empty()),
+                last_comment_mine: match (me, last.and_then(|c| c.get("author"))) {
+                    (Some(me), Some(author)) => string(author, "accountId") == me,
+                    _ => false,
+                },
             })
         })
         .collect())
@@ -1028,6 +1267,7 @@ mod tests {
             site: Some("https://example.atlassian.net".into()),
             email: Some("you@example.com".into()),
             query: None,
+            filters: Vec::new(),
             on_publish: None,
         }
     }
@@ -1150,6 +1390,7 @@ mod tests {
         let tasks = parse_jira(
             &serde_json::from_str(JIRA).unwrap(),
             &source(Kind::Jira),
+            None,
             "tobias",
         )
         .unwrap();
@@ -1165,6 +1406,110 @@ mod tests {
         assert_eq!(t.url, "https://example.atlassian.net/browse/PROJ-123");
         assert_eq!(t.session_name, "proj-123-add-the-changelog");
         assert_eq!(t.branch, "tobias/PROJ-123-add-the-changelog");
+    }
+
+    /// What a notification is made from: when it last changed, how many
+    /// comments it has, and whose the newest is. The newest by `created`,
+    /// whatever order the page came in.
+    #[test]
+    fn a_jira_issue_says_what_changed_and_who_commented_last() {
+        let body = r#"{
+          "issues": [{
+            "key": "PROJ-7",
+            "fields": {
+              "summary": "Retry uploads",
+              "status": { "name": "To Do" },
+              "issuetype": { "name": "Bug" },
+              "updated": "2026-09-28T10:00:00.000+0000",
+              "comment": {
+                "total": 3,
+                "comments": [
+                  { "created": "2026-09-27T09:00:00.000+0000",
+                    "author": { "accountId": "me-1", "displayName": "Tobias" } },
+                  { "created": "2026-09-28T09:30:00.000+0000",
+                    "author": { "accountId": "them-2", "displayName": "Alex" } },
+                  { "created": "2026-09-26T08:00:00.000+0000",
+                    "author": { "accountId": "me-1", "displayName": "Tobias" } }
+                ]
+              }
+            }
+          }]
+        }"#;
+        let tasks = parse_jira(
+            &serde_json::from_str(body).unwrap(),
+            &source(Kind::Jira),
+            Some("me-1"),
+            "tobias",
+        )
+        .unwrap();
+        let t = &tasks[0];
+        assert_eq!(t.updated.as_deref(), Some("2026-09-28T10:00:00.000+0000"));
+        assert_eq!(t.comments, Some(3), "the total, not the page");
+        assert_eq!(t.last_commenter.as_deref(), Some("Alex"));
+        assert!(!t.last_comment_mine);
+
+        // The same answer, read as Alex: now it is theirs.
+        let tasks = parse_jira(
+            &serde_json::from_str(body).unwrap(),
+            &source(Kind::Jira),
+            Some("them-2"),
+            "tobias",
+        )
+        .unwrap();
+        assert!(tasks[0].last_comment_mine);
+    }
+
+    /// A tracker with no filters runs one, from its `query` or the kind's
+    /// default, so every file written before filters existed reads as it did.
+    #[test]
+    fn a_tracker_without_filters_has_the_one_it_always_had() {
+        let s = source(Kind::Jira);
+        let f = s.effective();
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].name, DEFAULT_FILTER);
+        assert_eq!(f[0].query, default_query(Kind::Jira));
+
+        let s = Source {
+            query: Some("project = X".into()),
+            ..source(Kind::Jira)
+        };
+        assert_eq!(s.effective()[0].query, "project = X");
+
+        let s = Source {
+            query: Some("project = X".into()),
+            filters: vec![
+                Filter {
+                    name: "ready".into(),
+                    query: "status = Ready".into(),
+                },
+                Filter {
+                    name: "mine".into(),
+                    query: "assignee = currentUser()".into(),
+                },
+            ],
+            ..source(Kind::Jira)
+        };
+        let names: Vec<String> = s.effective().into_iter().map(|f| f.name).collect();
+        assert_eq!(names, ["ready", "mine"], "filters replace the single query");
+    }
+
+    #[test]
+    fn filters_that_cannot_work_are_refused() {
+        let with = |kind: Kind, filters: Vec<Filter>| Source {
+            filters,
+            ..source(kind)
+        };
+        let f = |name: &str, query: &str| Filter {
+            name: name.into(),
+            query: query.into(),
+        };
+        let dup = with(Kind::Jira, vec![f("a", "x = 1"), f("a", "y = 2")]);
+        assert!(dup.problem().unwrap().contains("two filters called `a`"));
+        let empty = with(Kind::Jira, vec![f("a", "  ")]);
+        assert!(empty.problem().unwrap().contains("no query"));
+        let github = with(Kind::GitHub, vec![f("a", "x")]);
+        assert!(github.problem().unwrap().contains("takes no filters"));
+        assert_eq!(with(Kind::Jira, vec![f("a", "x = 1")]).problem(), None);
     }
 
     /// The convention this whole loop exists to keep. The key keeps its case in

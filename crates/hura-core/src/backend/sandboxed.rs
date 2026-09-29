@@ -1,10 +1,9 @@
 //! The backend this tool exists for: a session inside a kernel-enforced
 //! sandbox, with the gateway applying a policy to everything that leaves it.
 //!
-//! Nothing here is new. It is what [`crate::ops`] did directly against
-//! [`OpenShell`] before there was a second kind of session, moved behind the
-//! trait so that the second kind could exist without the first growing an `if`.
-//! The comments that explain *why* each step is ordered as it is came with it.
+//! What [`crate::ops`] once did directly against [`OpenShell`], behind the
+//! [`Backend`] trait so the scripts above it never name the gateway. The
+//! comments that explain *why* each step is ordered as it is came with it.
 
 use std::time::{Duration, Instant};
 
@@ -13,7 +12,7 @@ use openshell_client::{
     Provider, Sandbox,
 };
 
-use super::{Backend, Error, Isolation, Paths, Result, Torn};
+use super::{Backend, Error, Paths, Result, Torn};
 use crate::endpoints;
 use crate::mcp;
 use crate::ops::Draft;
@@ -222,14 +221,6 @@ const READY_LIMIT: Duration = Duration::from_secs(5 * 60);
 const READY_EVERY: Duration = Duration::from_millis(500);
 
 impl Backend for Sandboxed {
-    fn isolation(&self) -> Isolation {
-        Isolation::Sandboxed
-    }
-
-    fn kind(&self) -> session::Kind {
-        session::Kind::Sandbox
-    }
-
     fn paths(&self, _session: &Session) -> Paths {
         Paths::in_sandbox()
     }

@@ -2092,8 +2092,12 @@ for free, with nothing persisted client-side.
   read back, which is how it surfaced. Controls get the explicit line-height the
   rest of the document must not have, and their padding absorbs the two pixels
   it puts the baseline out by.
-- **32. Worktree backend** — DONE. The `Backend` trait, the second
-  implementation, and the labelling that keeps it honest. 552 tests, five of
+- **32. Worktree backend** — DONE, and later REMOVED. The `Backend` trait
+  stays; the worktree implementation, `Isolation`, `Kind`, `--worktree`, the
+  `no-isolation` failure kind and the desktop's badge and toggle went, to keep
+  one of everything (see Risks). What follows is the increment as it shipped.
+  The `Backend` trait, the second implementation, and the labelling that keeps
+  it honest. 552 tests, five of
   them against a real git repository.
 
   Everything in `ops`, `git`, `files`, `publish` and `seed` takes a backend
@@ -2417,8 +2421,12 @@ for free, with nothing persisted client-side.
   flag to widen, pinned certificates, hashed and revocable tokens -- and saying
   so plainly rather than implying more safety than there is.
 - **Two backends dilute the pitch.** "Kernel-enforced isolation" and "also, a
-  mode without any" is a harder sentence. Mitigation is the labelling in
-  increment 29, and keeping sandboxed the default everywhere it is offered.
+  mode without any" is a harder sentence. Resolved by removing the worktree
+  backend (increment 32) after it shipped: it was a second answer to every
+  question -- where an exec goes, where a record lives, what a publish is
+  allowed to use -- and the maintenance it cost was out of proportion to how
+  often it was the right tool. The `Backend` trait stays, with one
+  implementation, as the seam between the scripts and the gateway.
 - **Tauri on Linux is WebKitGTK.** A heavy terminal there will be worse than on
   Windows. Accepted: the Linux user has the TUI, and the fallback if it does
   bite is serving the same web UI to a browser, which the transport already
