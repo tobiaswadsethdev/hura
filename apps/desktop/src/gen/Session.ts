@@ -32,9 +32,8 @@ base_branch: string | null, work_branch: string, task: string,
 /**
  * The ticket this session was started from, if it was started from one.
  *
- * On the record rather than looked up, because the round trip happens at
- * publish time -- minutes or days later, from a possibly different client,
- * after the inbox has moved on. See [`crate::tracker::Ticket`].
+ * A note about where the work came from; nothing writes back through it.
+ * See [`crate::tracker::Ticket`].
  */
 ticket: Ticket | null, policy: string | null, providers: Array<string>, 
 /**

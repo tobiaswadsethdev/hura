@@ -240,13 +240,6 @@ export function StateDot({ state, className }: { state: State; className?: strin
         </span>
       );
 
-    case "published":
-      return (
-        <span className={box} role="img" aria-label="published">
-          <CircleCheck />
-        </span>
-      );
-
     case "failed":
     case "dead":
       return (

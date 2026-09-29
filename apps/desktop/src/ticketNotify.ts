@@ -6,10 +6,11 @@
 // sprint, a re-estimate) is left alone, because a notification for every edit
 // is one nobody reads by the end of the week.
 //
-// **Compared with a snapshot kept on disk, per server.** Not in memory, like
-// `notify.ts` keeps session states: a ticket that moved while the window was
-// closed has still moved, and finding out when the window opens is the point.
-// The very first read on a server is the baseline and announces nothing.
+// **Compared with a snapshot kept on disk.** Not in memory, like `notify.ts`
+// keeps session states: a ticket that moved while the window was closed has
+// still moved, and finding out when the window opens is the point. The very
+// first read is the baseline and announces nothing. One snapshot, not one per
+// server: the trackers are this machine's, not a server's.
 //
 // **Only filters that were read take part.** A tracker that is down reads as
 // an empty filter, and treating that as every ticket having left would make
@@ -35,7 +36,7 @@ type Snapshot = {
 /// One change worth saying, about one ticket.
 export type Change = { key: string; title: string; what: string };
 
-const STORE = "hura.tickets.v1.";
+const STORE = "hura.tickets.v2";
 
 /// Past this many changed tickets in one read, one notification says how many
 /// rather than a stack of them -- the usual cause is the window opening after a
@@ -51,10 +52,10 @@ const filterKey = (tracker: string, filter: string) => `${tracker}\0${filter}`;
 /// tickets screen both. **`on` gates the notification and not the bookkeeping**,
 /// for the reason `onSessions` gives: a change seen while notifications were
 /// off must not be announced when they come back on.
-export function onTickets(server: string, inbox: Inbox, on = true): Change[] {
-  const before = load(server);
+export function onTickets(inbox: Inbox, on = true): Change[] {
+  const before = load();
   const next = snapshot(before, inbox);
-  save(server, next);
+  save(next);
   if (before === null) return [];
 
   const changes = diff(before, inbox);
@@ -153,9 +154,9 @@ async function announce(changes: Change[]) {
   }
 }
 
-function load(server: string): Snapshot | null {
+function load(): Snapshot | null {
   try {
-    const raw = window.localStorage.getItem(STORE + server);
+    const raw = window.localStorage.getItem(STORE);
     if (raw === null) return null;
     const parsed = JSON.parse(raw) as Partial<Snapshot>;
     if (typeof parsed !== "object" || parsed === null) return null;
@@ -167,9 +168,9 @@ function load(server: string): Snapshot | null {
   }
 }
 
-function save(server: string, snapshot: Snapshot) {
+function save(snapshot: Snapshot) {
   try {
-    window.localStorage.setItem(STORE + server, JSON.stringify(snapshot));
+    window.localStorage.setItem(STORE, JSON.stringify(snapshot));
   } catch {
     // Storage full or refused: the next read compares with the last one that
     // did save, which errs towards telling you twice rather than never.

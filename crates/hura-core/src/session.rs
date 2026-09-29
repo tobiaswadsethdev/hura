@@ -45,7 +45,7 @@ pub const TMUX_SESSION: &str = "agent";
 /// What a work branch is named under unless the config file says otherwise.
 ///
 /// Every session's branch has been `hura/<name>` until now, and this keeps that
-/// the default. The reason it is configurable at all is the task inbox: a
+/// the default. The reason it is configurable at all is tickets: a
 /// session started from a ticket wants the branch its tracker's commit hooks
 /// and its reviewers already look for, which is `<you>/PROJ-123-description`.
 pub const DEFAULT_BRANCH_PREFIX: &str = "hura";
@@ -349,12 +349,14 @@ pub enum BranchError {
 pub enum State {
     Creating,
     Seeding,
+    /// `published` too: that state went with `hurad publish`, and a record
+    /// written while it existed is a session whose sandbox is still ready.
+    #[serde(alias = "published")]
     Ready,
     Running,
     Waiting,
     Idle,
     Failed,
-    Published,
     /// The sandbox backing this session is gone.
     Dead,
 }
@@ -369,7 +371,6 @@ impl std::fmt::Display for State {
             State::Waiting => "waiting",
             State::Idle => "idle",
             State::Failed => "failed",
-            State::Published => "published",
             State::Dead => "dead",
         };
         // `pad`, not `write_str`: a Display impl that writes directly ignores
@@ -407,9 +408,8 @@ pub struct Session {
     pub task: String,
     /// The ticket this session was started from, if it was started from one.
     ///
-    /// On the record rather than looked up, because the round trip happens at
-    /// publish time -- minutes or days later, from a possibly different client,
-    /// after the inbox has moved on. See [`crate::tracker::Ticket`].
+    /// A note about where the work came from; nothing writes back through it.
+    /// See [`crate::tracker::Ticket`].
     #[serde(default)]
     pub ticket: Option<crate::tracker::Ticket>,
     #[serde(default)]
@@ -740,10 +740,18 @@ mod tests {
         }
     }
 
+    /// `published` went with `hurad publish`. A record still carrying it is a
+    /// session whose sandbox is ready, not a cache that fails to parse.
+    #[test]
+    fn a_published_record_reads_as_ready() {
+        let s: State = serde_json::from_str("\"published\"").unwrap();
+        assert_eq!(s, State::Ready);
+    }
+
     #[test]
     fn state_display_honours_a_width() {
         assert_eq!(format!("{:<9}|", State::Ready), "ready    |");
-        assert_eq!(format!("{:<9}|", State::Published), "published|");
+        assert_eq!(format!("{:<9}|", State::Failed), "failed   |");
         assert_eq!(format!("{}", State::Waiting), "waiting");
     }
 

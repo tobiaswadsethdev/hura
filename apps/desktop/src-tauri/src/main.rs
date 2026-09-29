@@ -47,7 +47,8 @@ use hura_core::session::Session;
 use hura_core::settings::{Settings, SettingsView};
 use hura_proto::stream::{Channel, ChannelId, ClientFrame, ServerFrame};
 use hura_core::integrations::View as IntegrationsView;
-use hura_core::tracker::{Inbox, Source as TrackerSource};
+use hura_client::trackers::Trackers;
+use hura_core::tracker::{Configured, Inbox, Source as TrackerSource};
 use hura_proto::{FailureKind, GitOp, McpOp, Reply, Request};
 use serde::Serialize;
 use tauri::{Emitter as _, Manager as _};
@@ -440,42 +441,55 @@ fn secret(server: String, name: String, value: Option<String>) -> Result<Integra
     expect_reply!(reply, Reply::Integrations(view) => view, "the integrations view")
 }
 
-/// Add a tracker to the server's config file, so the inbox has something to
-/// read.
+/// The trackers this machine reads, as the window may see them: whether each
+/// has a token, never the token.
 ///
-/// The credential is not in here: it is a secret like any other, stored with
-/// `secret` under the name this entry gives, which is why the two are one form
-/// in the window and two requests underneath.
+/// **Kept on this machine, not the server's.** See `hura_client::trackers`:
+/// the tokens are logins to somebody's tickets and a server has no use for
+/// them, so a tracker is set up, stored and read entirely from here.
 #[tauri::command(async)]
-fn add_tracker(server: String, tracker: TrackerSource) -> Result<IntegrationsView, Failed> {
-    let reply = remote(&server)?
-        .call(Request::AddTracker(Box::new(tracker)))
-        .map_err(to_message)?;
-    expect_reply!(reply, Reply::Integrations(view) => view, "the integrations view")
+fn trackers() -> Result<Vec<Configured>, Failed> {
+    Ok(load_trackers()?.views())
+}
+
+#[tauri::command(async)]
+fn add_tracker(tracker: TrackerSource, token: Option<String>) -> Result<Vec<Configured>, Failed> {
+    change_trackers(|t| t.add(&tracker, token.as_deref()))
 }
 
 /// Replace a tracker by its current name, which is how its filters are edited.
+/// Its token stays.
 #[tauri::command(async)]
-fn update_tracker(
-    server: String,
-    name: String,
-    tracker: TrackerSource,
-) -> Result<IntegrationsView, Failed> {
-    let reply = remote(&server)?
-        .call(Request::UpdateTracker {
-            name,
-            tracker: Box::new(tracker),
-        })
-        .map_err(to_message)?;
-    expect_reply!(reply, Reply::Integrations(view) => view, "the integrations view")
+fn update_tracker(name: String, tracker: TrackerSource) -> Result<Vec<Configured>, Failed> {
+    change_trackers(|t| t.update(&name, &tracker))
 }
 
 #[tauri::command(async)]
-fn forget_tracker(server: String, name: String) -> Result<IntegrationsView, Failed> {
-    let reply = remote(&server)?
-        .call(Request::ForgetTracker { name })
-        .map_err(to_message)?;
-    expect_reply!(reply, Reply::Integrations(view) => view, "the integrations view")
+fn set_tracker_token(name: String, token: String) -> Result<Vec<Configured>, Failed> {
+    change_trackers(|t| t.set_token(&name, &token))
+}
+
+#[tauri::command(async)]
+fn forget_tracker(name: String) -> Result<Vec<Configured>, Failed> {
+    change_trackers(|t| t.forget(&name))
+}
+
+/// One change to the trackers file, under a lock: commands run on a pool, and
+/// two load-modify-saves racing would lose whichever finished first.
+fn change_trackers(
+    f: impl FnOnce(&mut Trackers) -> Result<(), String>,
+) -> Result<Vec<Configured>, Failed> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut t = load_trackers()?;
+    f(&mut t).map_err(failed)?;
+    t.save()
+        .map_err(|e| failed(format!("could not save the trackers: {e}")))?;
+    Ok(t.views())
+}
+
+fn load_trackers() -> Result<Trackers, Failed> {
+    Trackers::load().map_err(|e| failed(format!("could not read the trackers: {e}")))
 }
 
 /// Push this machine's own skills to the server.
@@ -540,15 +554,36 @@ fn my_skills() -> Vec<String> {
         .collect()
 }
 
-/// The task inbox: what the server's trackers say is assigned to you.
+/// Your tickets: what each tracker's filters match, read from this machine.
 ///
-/// Read on the server, with the credentials in its store, so this window shows
-/// a list and never holds a token. Whatever could not be read comes back beside
-/// what could -- see `hura_core::tracker`.
+/// The server is asked one thing, and only for the branch names: its
+/// `branch_prefix`, so a ticket suggests the branch a session started from it
+/// will actually get. A server that cannot be reached costs that and nothing
+/// else -- the tickets are still read, under the built-in prefix, and the
+/// warning says so.
 #[tauri::command(async)]
-fn tasks(server: String) -> Result<Inbox, Failed> {
-    let reply = remote(&server)?.call(Request::Tasks).map_err(to_message)?;
-    expect_reply!(reply, Reply::Tasks(inbox) => inbox, "a task inbox")
+fn tickets(server: Option<String>) -> Result<Inbox, Failed> {
+    let trackers = load_trackers()?;
+    let mut warnings = Vec::new();
+    let prefix = match server.as_deref().map(|s| {
+        remote(s).and_then(|r| r.call(Request::Settings).map_err(to_message))
+    }) {
+        Some(Ok(Reply::Settings(view))) => view
+            .settings
+            .branch_prefix
+            .unwrap_or(view.default_branch_prefix),
+        Some(Err(e)) => {
+            warnings.push(format!(
+                "branch names use the default prefix: the server did not answer ({})",
+                e.message
+            ));
+            hura_core::session::DEFAULT_BRANCH_PREFIX.to_string()
+        }
+        _ => hura_core::session::DEFAULT_BRANCH_PREFIX.to_string(),
+    };
+    let mut inbox = hura_core::tracker::inbox(trackers.list(), &prefix);
+    inbox.warnings.extend(warnings);
+    Ok(inbox)
 }
 
 /// The editable defaults in the server's config file.
@@ -766,13 +801,15 @@ fn main() {
             integrations,
             mcp,
             secret,
+            trackers,
             add_tracker,
-            forget_tracker,
             update_tracker,
+            set_tracker_token,
+            forget_tracker,
             upload_skills,
             forget_skill,
             my_skills,
-            tasks,
+            tickets,
             settings,
             set_settings,
             watch,

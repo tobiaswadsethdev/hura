@@ -26,13 +26,12 @@ name    = "sentry"                                    # ... or one hurad runs
 image   = "ghcr.io/example/mcp-sentry:1.4"
 port    = 9000
 secrets = ["SENTRY_TOKEN"]                            # names; values live on the server
-
-[[tracker]]                                           # the tickets screen
-kind    = "jira"                                      # see docs/tickets.md
-site    = "https://your-org.atlassian.net"
-email   = "you@example.com"
-secret  = "JIRA_API_TOKEN"
 ```
+
+Trackers are not in this file. They are set up in the desktop application and
+kept on the computer it runs on, tokens included -- see
+[tickets.md](tickets.md). A `[[tracker]]` table left from an older version is
+accepted and ignored.
 
 Everything in it is a *default*: a flag on the command line wins, and so does an
 explicit choice in the create form. `hurad config` prints what is in force with
@@ -49,7 +48,7 @@ convention that disagrees with the first. See [desktop.md](desktop.md#settings).
 
 The rest of the file is not editable from there, and the omissions are the
 point. `repo_roots` and `skills` are paths on the server;
-`[[mcp]]` and `[[tracker]]` are lists of tables, each one a decision about what
+`[[mcp]]` is a list of tables, each one a decision about what
 an agent of yours can reach, and the integrations screen already says so about
 the MCP half.
 

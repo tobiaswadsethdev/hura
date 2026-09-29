@@ -3,23 +3,19 @@ import type { TrackerFilter } from "./TrackerFilter";
 import type { TrackerKind } from "./TrackerKind";
 
 /**
- * One configured tracker.
+ * One configured tracker, without its token.
  *
- * Validated when the config file is read, so a Jira entry with no site or an
- * Azure DevOps entry with no organisation fails against the line that wrote it
- * rather than against a 404 on a timer.
+ * Validated when it is saved, so a Jira entry with no site or an Azure DevOps
+ * entry with no organisation fails against the form that made it rather than
+ * against a 404 on a timer. The token is kept beside it rather than in it --
+ * see [`Configured`] -- so this is safe to hand a webview.
  */
 export type Tracker = { kind: TrackerKind, 
 /**
- * What the inbox calls it. Defaults to the kind, which is right until
- * somebody has two Jira sites.
+ * What the tickets screen calls it. Defaults to the kind, which is right
+ * until somebody has two Jira sites.
  */
 name: string, 
-/**
- * The name of the secret holding the credential. Never the credential:
- * see [`crate::secrets`].
- */
-secret: string, 
 /**
  * GitHub: `owner/name`, or `None` for everything assigned to you.
  */
@@ -34,24 +30,10 @@ org: string | null, project: string | null,
  */
 site: string | null, email: string | null, 
 /**
- * The query to run: JQL for Jira, WIQL for Azure DevOps, a search
- * qualifier string for GitHub. `None` means "assigned to me and not done",
- * which is what an inbox is.
- *
- * The single-query form, from before [`Self::filters`]. Still read: a
- * tracker with no filters has one, made from this. See [`Self::effective`].
- */
-query: string | null, 
-/**
- * Named queries, each its own section of the inbox: "ready to start",
- * "assigned to me". Empty means the one [`Self::query`] describes.
+ * Named queries, each its own section of the tickets screen: "ready to
+ * start", "assigned to me". Empty means the one [`DEFAULT_FILTER`].
  *
  * Jira and Azure DevOps only, because they are the two with a query
  * language this reads. A GitHub tracker lists what is assigned to you.
  */
-filters: Array<TrackerFilter>, 
-/**
- * What to move a ticket to when its session is published. `None` leaves it
- * where it is.
- */
-on_publish: string | null, };
+filters: Array<TrackerFilter>, };

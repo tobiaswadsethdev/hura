@@ -1,82 +1,25 @@
-//! The write-back half of the task inbox, against a tracker on loopback.
+//! Reading tickets, against a tracker on loopback.
 //!
 //! The parsers are unit-tested against captured answers; what this covers is
 //! everything between them and the wire -- the curl configuration, the
-//! credential going in on stdin, the Atlassian Document Format a Jira comment
-//! has to be, and a transition looked up by name rather than by id.
+//! credential going in on stdin, one search per filter.
 //!
 //! It stands up thirty lines of HTTP on `127.0.0.1` rather than mocking the
-//! module, because the questions worth asking are "does curl send what we
-//! think" and "is the body the shape Jira wants", and neither survives being
-//! answered by a fake in the same process.
-//!
-//! Its own file so it gets its own process: it sets `XDG_STATE_HOME`, which is
-//! how the secret store is found, and an environment variable is not something
-//! to change under the rest of the suite.
-//!
-//! **And one directory for the whole file, set once.** A file's tests share a
-//! process and run on threads, so two of them each pointing `XDG_STATE_HOME` at
-//! a directory of their own is a race: whichever sets it last decides where
-//! *both* look, and the other reads a directory with no secret in it. It passed
-//! here and failed on the first CI run, which is the only kind of luck this
-//! sort of test has.
+//! module, because the question worth asking is "does curl send what we
+//! think", and that does not survive being answered by a fake in the same
+//! process.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::sync::mpsc::{Sender, channel};
 
-use hura_core::secrets;
-use hura_core::tracker::{Filter, Kind, Source, Ticket, inbox, on_publish};
-
-/// The one state directory this file uses, with the credential already in it.
-///
-/// Set once however many tests ask for it: `set_var` is process-global, and the
-/// point is that every test in this process agrees about where the secret store
-/// is. Storing the token here too means neither test writes it, so neither can
-/// race the other into writing it somewhere the other is not looking.
-fn state() -> &'static PathBuf {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        let dir = std::env::temp_dir().join(format!("hura-tracker-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        // Safety: once, and before anything in this process reads the
-        // environment -- which is what `OnceLock` is here to guarantee.
-        unsafe { std::env::set_var("XDG_STATE_HOME", &dir) };
-        secrets::set("JIRA_TOKEN", "a-token").expect("stored");
-        dir
-    })
-}
+use hura_core::tracker::{Filter, Kind, Source, Stored, inbox};
 
 /// One request the stand-in received.
 #[derive(Debug)]
 struct Seen {
-    method: String,
     path: String,
     auth: String,
-    body: String,
-}
-
-/// A tracker on loopback: answers the two GETs Jira's transition lookup makes
-/// and records every POST.
-fn stand_in(seen: Sender<Seen>) -> u16 {
-    // Three requests and then done: the comment, the transition list, and the
-    // transition itself.
-    answering(3, seen, |method, path| {
-        // The transition list is the only thing that has to answer with
-        // anything.
-        let payload = if path.contains("/transitions") && method == "GET" {
-            r#"{"transitions":[
-                 {"id":"21","name":"Ready for Review","to":{"name":"Ready for Review"}},
-                 {"id":"31","name":"Done","to":{"name":"Done"}}
-               ]}"#
-        } else {
-            r#"{"id":"10001"}"#
-        };
-        (200, payload.to_string())
-    })
 }
 
 /// A tracker on loopback that answers `requests` requests with `respond`.
@@ -131,120 +74,8 @@ fn serve(mut stream: TcpStream, seen: &Sender<Seen>, respond: fn(&str, &str) -> 
     );
     let _ = stream.write_all(answer.as_bytes());
     let _ = stream.flush();
-    let _ = seen.send(Seen {
-        method,
-        path,
-        auth,
-        body,
-    });
-}
-
-#[test]
-fn publishing_comments_on_the_ticket_and_moves_it() {
-    state();
-
-    let (tx, rx) = channel();
-    let port = stand_in(tx);
-    let source = Source {
-        kind: Kind::Jira,
-        name: "contoso-jira".into(),
-        secret: "JIRA_TOKEN".into(),
-        repo: None,
-        org: None,
-        project: None,
-        site: Some(format!("http://127.0.0.1:{port}")),
-        email: Some("you@example.com".into()),
-        query: None,
-        filters: Vec::new(),
-        on_publish: Some("Ready for Review".into()),
-    };
-    let ticket = Ticket {
-        tracker: "contoso-jira".into(),
-        kind: Kind::Jira,
-        id: "INET-4821".into(),
-        key: "INET-4821".into(),
-        url: format!("http://127.0.0.1:{port}/browse/INET-4821"),
-        repo: None,
-    };
-
-    let warnings = on_publish(
-        std::slice::from_ref(&source),
-        &ticket,
-        "https://github.com/o/r/pull/7",
-    );
-    assert!(warnings.is_empty(), "{warnings:?}");
-
-    let comment = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-    assert_eq!(comment.method, "POST");
-    assert_eq!(comment.path, "/rest/api/3/issue/INET-4821/comment");
-    // Basic, with the email as the username: a bearer token authenticates as
-    // nobody on Jira Cloud. And it arrived, which is the whole point of putting
-    // it on curl's stdin rather than in its arguments.
-    assert_eq!(
-        comment.auth,
-        format!(
-            "Basic {}",
-            hura_core::skills::base64(b"you@example.com:a-token")
-        )
-    );
-    // Atlassian Document Format: a plain string body is a 400.
-    let sent: serde_json::Value = serde_json::from_str(&comment.body).expect("json");
-    assert_eq!(sent["body"]["type"], "doc");
-    assert_eq!(sent["body"]["version"], 1);
-    assert_eq!(
-        sent["body"]["content"][0]["content"][0]["text"],
-        "Pull request: https://github.com/o/r/pull/7"
-    );
-
-    // The transition is looked up by name, because Jira moves an issue by id
-    // and which ids exist depends on the workflow and where the issue is.
-    let listed = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-    assert_eq!(listed.method, "GET");
-    assert_eq!(listed.path, "/rest/api/3/issue/INET-4821/transitions");
-
-    let moved = rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-    assert_eq!(moved.method, "POST");
-    let sent: serde_json::Value = serde_json::from_str(&moved.body).expect("json");
-    assert_eq!(sent["transition"]["id"], "21", "matched by name");
-}
-
-/// A status nothing can transition to is a configuration mistake, and the
-/// message has to name what the issue *can* do -- Jira's own answer to a bad
-/// transition names neither.
-#[test]
-fn a_transition_that_does_not_exist_says_what_does() {
-    state();
-
-    let (tx, _rx) = channel();
-    let port = stand_in(tx);
-    let source = Source {
-        kind: Kind::Jira,
-        name: "contoso-jira".into(),
-        secret: "JIRA_TOKEN".into(),
-        repo: None,
-        org: None,
-        project: None,
-        site: Some(format!("http://127.0.0.1:{port}")),
-        email: Some("you@example.com".into()),
-        query: None,
-        filters: Vec::new(),
-        on_publish: Some("In Review".into()),
-    };
-    let ticket = Ticket {
-        tracker: "contoso-jira".into(),
-        kind: Kind::Jira,
-        id: "INET-4821".into(),
-        key: "INET-4821".into(),
-        url: "http://example.invalid".into(),
-        repo: None,
-    };
-
-    let warnings = on_publish(std::slice::from_ref(&source), &ticket, "https://pr");
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    let said = &warnings[0];
-    assert!(said.contains("In Review"), "{said}");
-    assert!(said.contains("Ready for Review"), "{said}");
-    assert!(said.contains("Done"), "{said}");
+    let _ = body;
+    let _ = seen.send(Seen { path, auth });
 }
 
 /// Every filter is its own search, each row says which filter found it, and a
@@ -252,8 +83,6 @@ fn a_transition_that_does_not_exist_says_what_does() {
 /// which ones were read -- alone.
 #[test]
 fn each_filter_is_its_own_search_and_a_failing_one_is_only_a_warning() {
-    state();
-
     let (tx, rx) = channel();
     // `/myself`, then one search per filter.
     let port = answering(4, tx, |_, path| {
@@ -280,7 +109,6 @@ fn each_filter_is_its_own_search_and_a_failing_one_is_only_a_warning() {
     let source = Source {
         kind: Kind::Jira,
         name: "work".into(),
-        secret: "JIRA_TOKEN".into(),
         site: Some(format!("http://127.0.0.1:{port}")),
         email: Some("you@example.com".into()),
         filters: vec![
@@ -300,7 +128,13 @@ fn each_filter_is_its_own_search_and_a_failing_one_is_only_a_warning() {
         ..Default::default()
     };
 
-    let got = inbox(std::slice::from_ref(&source), "tobias");
+    let got = inbox(
+        &[Stored {
+            source,
+            token: Some("a-token".into()),
+        }],
+        "tobias",
+    );
     assert_eq!(got.tasks.len(), 1, "{got:?}");
     let t = &got.tasks[0];
     assert_eq!(t.filter, "ready to start");
@@ -316,7 +150,14 @@ fn each_filter_is_its_own_search_and_a_failing_one_is_only_a_warning() {
         got.warnings
     );
 
-    let paths: Vec<String> = rx.try_iter().map(|s| s.path).collect();
+    let seen: Vec<Seen> = rx.try_iter().collect();
+    // The token arrived, as Jira Cloud's Basic of email and token -- through
+    // curl's stdin, since it is in no argument this process passed.
+    assert!(
+        seen.iter().all(|s| s.auth.starts_with("Basic ")),
+        "{seen:?}"
+    );
+    let paths: Vec<String> = seen.into_iter().map(|s| s.path).collect();
     assert_eq!(
         paths.iter().filter(|p| p.contains("/myself")).count(),
         1,
@@ -327,4 +168,69 @@ fn each_filter_is_its_own_search_and_a_failing_one_is_only_a_warning() {
             .iter()
             .all(|p| !p.contains("/search/jql") || p.contains("comment"))
     );
+}
+
+/// A tracker with no token yet is a warning naming it, and nothing is asked:
+/// a request without a credential is a 401 on a timer.
+#[test]
+fn a_tracker_without_a_token_is_a_warning_and_no_request() {
+    let got = inbox(
+        &[Stored {
+            source: Source {
+                kind: Kind::Jira,
+                name: "work".into(),
+                site: Some("http://127.0.0.1:9".into()),
+                email: Some("you@example.com".into()),
+                ..Default::default()
+            },
+            token: None,
+        }],
+        "tobias",
+    );
+    assert!(got.tasks.is_empty());
+    assert!(got.read.is_empty(), "nothing was read");
+    assert_eq!(got.warnings.len(), 1, "{:?}", got.warnings);
+    assert!(got.warnings[0].contains("no token"), "{:?}", got.warnings);
+}
+
+/// A token Jira will not accept is one warning, found by the first request,
+/// and no search is attempted: each would fail the same way.
+#[test]
+fn a_refused_token_is_one_warning_and_no_searches() {
+    let (tx, rx) = channel();
+    let port = answering(1, tx, |_, _| {
+        (
+            401,
+            r#"{"errorMessages":["Client must be authenticated"]}"#.to_string(),
+        )
+    });
+    let source = Source {
+        kind: Kind::Jira,
+        name: "work".into(),
+        site: Some(format!("http://127.0.0.1:{port}")),
+        email: Some("you@example.com".into()),
+        filters: vec![
+            Filter {
+                name: "a".into(),
+                query: "x = 1".into(),
+            },
+            Filter {
+                name: "b".into(),
+                query: "y = 2".into(),
+            },
+        ],
+        ..Default::default()
+    };
+    let got = inbox(
+        &[Stored {
+            source,
+            token: Some("wrong".into()),
+        }],
+        "tobias",
+    );
+    assert!(got.read.is_empty());
+    assert_eq!(got.warnings.len(), 1, "{:?}", got.warnings);
+    assert!(got.warnings[0].starts_with("work:"), "{:?}", got.warnings);
+    let paths: Vec<String> = rx.try_iter().map(|s| s.path).collect();
+    assert!(paths.iter().all(|p| p.contains("/myself")), "{paths:?}");
 }

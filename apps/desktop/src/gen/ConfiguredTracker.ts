@@ -3,16 +3,12 @@ import type { Tracker } from "./Tracker";
 import type { TrackerFilter } from "./TrackerFilter";
 
 /**
- * One configured tracker, as a screen that can add and remove them needs it.
- *
- * The entry as the file has it, plus the one fact that is not in the file and
- * decides whether it works: a tracker names a secret, and a name with nothing
- * behind it is an inbox that fails on a timer with a 401.
+ * A tracker as a webview sees it: whether there is a token, never the token.
  */
-export type ConfiguredTracker = { source: Tracker, secret_set: boolean, 
+export type ConfiguredTracker = { source: Tracker, token_set: boolean, 
 /**
- * The filters the inbox runs for it, the implied default included. What
- * an editor starts from, so the first filter somebody adds does not
- * silently replace the "assigned to me" they have been reading.
+ * The filters it runs, the implied default included. What an editor
+ * starts from, so the first filter somebody adds does not silently
+ * replace the "assigned to me" they have been reading.
  */
 filters: Array<TrackerFilter>, };

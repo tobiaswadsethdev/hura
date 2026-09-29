@@ -15,7 +15,6 @@ use crate::events;
 use crate::forge;
 use crate::mcp;
 use crate::policy;
-use crate::publish;
 use crate::removed;
 use crate::seed;
 use crate::session::{self, Session, State};
@@ -510,8 +509,8 @@ pub struct Draft {
     pub name: String,
     /// The work branch, already validated. `None` means the convention.
     pub branch: Option<String>,
-    /// The ticket this session is for, if any. Recorded on the session so a
-    /// publish can write back to it.
+    /// The ticket this session is for, if any. Recorded on the session as a
+    /// note of where the work came from.
     pub ticket: Option<crate::tracker::Ticket>,
     /// The project this worktree is being started in, if it was started from
     /// one. See [`Session::project`].
@@ -632,13 +631,13 @@ pub fn create(
 
     // An unusable remote fails before a sandbox exists. An unknown *host* is
     // only a warning: a public repository on any host still clones, and only
-    // publishing needs to know the forge.
+    // the credential the seeder hands git depends on knowing the forge.
     match forge::Remote::parse(&draft.repo) {
         Ok(_) => {}
         Err(e @ (forge::Error::Ssh(_) | forge::Error::Incomplete { .. })) => {
             return Err(e.to_string());
         }
-        Err(e) => warnings.push(format!("{e}; publishing will not be available")),
+        Err(e) => warnings.push(format!("{e}; git will run without a credential for it")),
     }
 
     // A first look for a name clash, so an obvious mistake fails before a
@@ -1068,51 +1067,6 @@ pub fn repolicy(
         .policy_update(session, update)
         .map_err(|e| format!("policy update failed: {e}"))?;
     policy(backend, session)
-}
-
-/// Publish a session and record that it happened.
-///
-/// The store update lives here rather than in [`crate::publish`] so the CLI and
-/// the TUI cannot disagree about it -- the TUI reads the state back on its next
-/// refresh, and a publish that updated only one of the two paths would show as
-/// unpublished in whichever was missed.
-pub fn publish(
-    backend: &dyn Backend,
-    session: &Session,
-    opts: &publish::Options,
-) -> Result<publish::Outcome, String> {
-    let mut outcome = publish::publish(backend, session, opts).map_err(|e| e.to_string())?;
-
-    // The round trip, and it is the *last* thing: the branch is pushed and the
-    // pull request is open by now, so a tracker that cannot be written to costs
-    // a comment rather than the publish. Each failure comes back as a warning
-    // beside whatever the push itself had to say.
-    //
-    // Only with a pull request to point at. A `--no-pr` publish, or one whose
-    // pull request could not be opened, has nothing to comment -- and a comment
-    // saying "the branch was pushed" is not what a ticket wants.
-    if let Some(ticket) = &session.ticket
-        && let Some(pr) = &outcome.pull_request
-    {
-        let cfg = crate::config::Config::load().unwrap_or_default();
-        outcome
-            .warnings
-            .extend(crate::tracker::on_publish(cfg.trackers(), ticket, pr));
-    }
-
-    if outcome.pushed {
-        // Published is a fact about the branch, not the sandbox, so it is
-        // recorded even when the pull request could not be opened: the work has
-        // left the sandbox either way, which is what the state means.
-        store::update(|store| {
-            if let Some(mut s) = store.get(&session.name).cloned() {
-                s.state = session::State::Published;
-                store.upsert(s);
-            }
-        })
-        .map_err(|e| e.to_string())?;
-    }
-    Ok(outcome)
 }
 
 /// The shell that attaches to a session's agent, for both `hura attach` and the
@@ -1936,8 +1890,7 @@ mod tests {
             "trimmed, and otherwise the client's own"
         );
         // Carried through, unlike the skills and the MCP servers beside it: a
-        // ticket is a note about where the work came from rather than a grant,
-        // and it is what makes the publish write back.
+        // ticket is a note about where the work came from rather than a grant.
         assert_eq!(from_ticket.ticket, Some(ticket));
 
         for bad in ["a branch", "-leading", "double//slash", "dots..", "ends/"] {

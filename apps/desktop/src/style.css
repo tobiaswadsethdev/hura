@@ -655,7 +655,6 @@ main { display: flex; flex: 1; min-height: 0; }
 .state-dot.waiting { color: var(--attention); }
 .state-dot.ready { color: var(--ok); }
 .state-dot.idle { color: var(--dimmer); }
-.state-dot.published { color: var(--ok); }
 .state-dot.failed, .state-dot.dead { color: var(--bad); }
 
 /* ------------------------------------------------------------------------- */
@@ -1430,18 +1429,23 @@ main { display: flex; flex: 1; min-height: 0; }
   font-family: var(--font-mono);
   color: var(--dim);
 }
-/* The add form is a row of many small fields rather than a stacked form: it is
-   the same shape as the secret above it, and a tracker is four short answers.
-   The hint under it takes the whole width so the wrap is deliberate. */
-.panel .row.tracker.new { align-items: flex-start; }
-.panel .row.tracker.new input { width: 150px; }
-.panel .row.tracker.new .hint {
-  flex-basis: 100%;
-  min-width: 100%;
-  white-space: normal;
-  overflow: visible;
+/* The add form: labelled fields in the settings grid, under the trackers it
+   adds to. Set off by a rule, because it is a form and the rows above are
+   things that exist. */
+.panel .new-tracker {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line-strong);
 }
-.panel .row.tracker.new select { width: auto; }
+.panel .new-tracker h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+.panel .new-tracker .setting-actions { display: flex; align-items: center; gap: 12px; max-width: 568px; }
+.panel .new-tracker .setting-actions .hint { margin-right: auto; }
+.setting-group .required { color: var(--warn); }
 
 /* A tracker's filters: one line each under the tracker, the name in the text
    face and the query in the mono one, because the query is the part you

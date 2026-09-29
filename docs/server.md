@@ -62,11 +62,10 @@ policy and the event feed; the working copy's files; git, including staging,
 commit, push, pull and fetch; the diff and the review comments that go back to
 the agent; and the agent's terminal and any shells beside it, streamed.
 
-Two things are still the local machine's. **Attaching** with `hurad attach` hands
+One thing is still the local machine's. **Attaching** with `hurad attach` hands
 *this* terminal to the agent, which is a thing about the process you are
 sitting in rather than a request; the desktop application's terminal is the
-remote equivalent and it works over the connection. **Publishing** with
-`hurad publish` has no remote half yet.
+remote equivalent and it works over the connection.
 
 Reading is `/rpc`, one request and one answer. The three things a client wants
 *told* -- the agent's screen, the gateway's decisions as it makes them, and the

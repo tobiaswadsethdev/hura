@@ -1,7 +1,7 @@
 //! Which git host a session is working against, and what that implies.
 //!
 //! Two things differ between hosts and nothing else does: the policy rules that
-//! let git reach them, and how a pull request is opened. Both are derived from
+//! let git reach them, and how git authenticates to them. Both are derived from
 //! the repo URL rather than configured, because the URL is the one thing a
 //! session always has and cannot be wrong about.
 //!
@@ -11,7 +11,7 @@
 //! organisation in the userinfo position -- which changes how git authenticates.
 //! See [`Remote::parse`].
 
-/// A git host `hura` knows how to publish to.
+/// A git host `hura` knows how to authenticate git to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Forge {
     GitHub,
@@ -20,8 +20,8 @@ pub enum Forge {
 
 impl Forge {
     /// The policy rule that grants this forge's git traffic, as named in the
-    /// shipped templates. Shown when a publish is denied, so the message can
-    /// name the block to look at rather than saying "check your policy".
+    /// shipped templates, so a message about a denied push can name the block
+    /// to look at rather than saying "check your policy".
     pub fn policy_rule(self) -> &'static str {
         match self {
             Forge::GitHub => "github_git",
@@ -493,7 +493,7 @@ mod tests {
         }
     }
 
-    /// Each forge names the policy block that grants it, so a denied publish can
+    /// Each forge names the policy block that grants it, so a denied push can
     /// point at the thing to look at.
     #[test]
     fn each_forge_names_its_policy_rule_and_provider() {

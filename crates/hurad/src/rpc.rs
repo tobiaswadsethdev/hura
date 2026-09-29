@@ -16,7 +16,6 @@ use hura_core::session::Session;
 use hura_core::store::Store;
 use hura_core::{
     comments, config, endpoints, files, git, image, ops, policy, projects, repos, secrets, skills,
-    tracker,
 };
 use hura_proto::{Failure, GitOp, McpOp, Outcome, Reply, Request};
 use openshell_client::CliClient;
@@ -174,42 +173,6 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             Ok(()) => integrations(),
             Err(e) => Failure::failed(e).into(),
         },
-        // The config file is edited rather than regenerated, and the result is
-        // parsed before it is written: a tracker that would not load is refused
-        // in the parser's words and the file is left alone. See
-        // `hura_core::settings`.
-        Request::AddTracker(source) => {
-            match hura_core::settings::add_tracker(&config::Config::default_path(), &source) {
-                Ok(_) => integrations(),
-                Err(e) => Failure::failed(e.to_string()).into(),
-            }
-        }
-        Request::UpdateTracker { name, tracker } => {
-            match hura_core::settings::update_tracker(
-                &config::Config::default_path(),
-                &name,
-                &tracker,
-            ) {
-                Ok(_) => integrations(),
-                Err(e) => Failure::failed(e.to_string()).into(),
-            }
-        }
-        Request::ForgetTracker { name } => {
-            match hura_core::settings::forget_tracker(&config::Config::default_path(), &name) {
-                Ok(_) => integrations(),
-                Err(e) => Failure::failed(e.to_string()).into(),
-            }
-        }
-
-        // The inbox. A tracker that could not be read is a warning inside the
-        // reply rather than a failed request: one tracker being down should not
-        // empty the list of the others, and an inbox silently missing rows is
-        // the failure worth avoiding here.
-        Request::Tasks => match config::Config::load() {
-            Ok(cfg) => Reply::Tasks(tracker::inbox(cfg.trackers(), cfg.branch_prefix())).into(),
-            Err(e) => Failure::failed(format!("could not read the config file: {e}")).into(),
-        },
-
         // The config file's editable defaults. Read and written here rather
         // than through `ops`, because there is no session in it: this is the
         // machine's own answer to what a *new* session starts with, which is

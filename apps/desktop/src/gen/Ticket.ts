@@ -4,10 +4,10 @@ import type { TrackerKind } from "./TrackerKind";
 /**
  * What a session remembers about the ticket it was started from.
  *
- * On the session record, because the round trip happens at publish time --
- * minutes or days later, from a different client, possibly after the inbox has
- * moved on. Enough to address the write-back without asking the tracker
- * anything.
+ * On the session record as a note about where the work came from: which
+ * tracker, which ticket, and where to open it. Nothing writes back through
+ * it -- commenting on or moving a ticket is an agent's job, through an MCP
+ * server, or yours.
  */
 export type Ticket = { tracker: string, kind: TrackerKind, id: string, key: string, url: string, 
 /**
