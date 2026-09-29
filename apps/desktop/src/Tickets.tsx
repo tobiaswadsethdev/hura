@@ -13,10 +13,14 @@
 //
 // **A ticket does not know which repository it is about.** A Jira issue names a
 // project and an Azure DevOps work item names an area path; neither is a clone
-// URL. So a row carries a project chooser: the tracker says what to do and you
+// URL. So a card carries a project chooser: the tracker says what to do and you
 // say where.
 //
-// **One section per filter**, and a ticket two filters match is in both.
+// **A board, one column per filter**, side by side and each scrolling on its
+// own, so a fourth filter costs width rather than a page of scrolling; a
+// ticket two filters match is in both. The setup is the screen's other half,
+// behind the `trackers` toggle in its header -- it used to sit above the
+// tickets and push them off the screen.
 // What is worth interrupting for -- a ticket changing -- is `ticketNotify.ts`,
 // fed from here and from the window's own timer.
 
@@ -31,7 +35,18 @@ import type { Task } from "./gen/Task";
 import type { Tracker } from "./gen/Tracker";
 import type { TrackerFilter } from "./gen/TrackerFilter";
 import type { TrackerKind } from "./gen/TrackerKind";
-import { Edit, Elsewhere, Forget, Plus, Start, Store, Tracker as TrackerGlyph } from "./icons";
+import {
+  Comments,
+  Edit,
+  Elsewhere,
+  Forget,
+  Plus,
+  Refresh,
+  Setup,
+  Start,
+  Store,
+  Tracker as TrackerGlyph,
+} from "./icons";
 import { Screen } from "./Screen";
 import { onTickets } from "./ticketNotify";
 
@@ -62,6 +77,9 @@ export function TicketsScreen({
   // tracker again, which a dependency would make it.
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
+  // Which half of the screen is showing, once somebody has chosen; until
+  // then it follows from whether there are any trackers. See `view` below.
+  const [chosen, setView] = useState<"board" | "trackers" | null>(null);
 
   // The tickets are re-read after every change to a tracker, because every
   // change to a tracker -- a token stored, a filter edited -- is a change to
@@ -108,93 +126,143 @@ export function TicketsScreen({
     }
   };
 
-  // Every filter that was read, in the server's order, whether or not it
-  // matched anything -- an empty "ready to start" is worth seeing as empty.
-  // Then any whose rows came without a record of the read, which is what an
-  // older server sends.
-  const sections: { tracker: string; filter: string }[] = [...(tickets?.read ?? [])];
+  // Every filter that was read, in order, whether or not it matched anything
+  // -- an empty "ready to start" is worth seeing as empty.
+  const columns: { tracker: string; filter: string }[] = [...(tickets?.read ?? [])];
   for (const t of tickets?.tasks ?? []) {
-    if (!sections.some((s) => s.tracker === t.tracker && s.filter === t.filter)) {
-      sections.push({ tracker: t.tracker, filter: t.filter });
+    if (!columns.some((c) => c.tracker === t.tracker && c.filter === t.filter)) {
+      columns.push({ tracker: t.tracker, filter: t.filter });
     }
   }
 
-  return (
-    <Screen icon={TrackerGlyph} title="tickets" onClose={onClose}>
-      {error && <p className="error">{error}</p>}
+  // The board unless there is nothing to put on it: with no trackers, the
+  // only useful thing this screen can show is how to add one.
+  const view = chosen ?? (trackers !== null && trackers.length === 0 ? "trackers" : "board");
+  // The tracker's name on a column only when there is more than one tracker;
+  // with one, it would say the same word on every column.
+  const many = new Set(columns.map((c) => c.tracker)).size > 1;
 
-      <section className="panel">
-        <h3>trackers</h3>
-        <p className="hint">
-          Where tickets come from. Kept on this computer, token included, and read from here — the
-          server never sees either.
-        </p>
-        {trackers === null && !error && <Waiting />}
-        {trackers?.length === 0 && (
-          <Empty icon={TrackerGlyph} note="no trackers yet — add one below" />
-        )}
-        {trackers?.map((t) => (
-          <TrackerRow
-            key={t.source.name}
-            tracker={t}
-            busy={busy}
-            onToken={(value) =>
-              act(`tracker:${t.source.name}`, () => api.setTrackerToken(t.source.name, value))
-            }
-            onForget={() =>
-              void act(`tracker:${t.source.name}`, () => api.forgetTracker(t.source.name))
-            }
-            onFilters={(filters) =>
-              act(`tracker:${t.source.name}`, () =>
-                api.updateTracker(t.source.name, { ...t.source, filters }),
-              )
+  const actions = (
+    <>
+      {view === "board" && (
+        <button
+          className="quiet-icon"
+          title="read the tickets again"
+          disabled={tickets === null && !error}
+          onClick={() => void readTickets()}
+        >
+          <Refresh aria-label="refresh" />
+        </button>
+      )}
+      <button
+        className={view === "trackers" ? "quiet on" : "quiet"}
+        title={view === "trackers" ? "back to the tickets" : "set up trackers, tokens and filters"}
+        onClick={() => setView(view === "trackers" ? "board" : "trackers")}
+      >
+        <Setup /> trackers
+      </button>
+    </>
+  );
+
+  if (view === "trackers") {
+    return (
+      <Screen icon={TrackerGlyph} title="tickets" actions={actions} onClose={onClose}>
+        {error && <p className="error">{error}</p>}
+        <section className="panel">
+          <h3>trackers</h3>
+          <p className="hint">
+            Where tickets come from. Kept on this computer, token included, and read from here —
+            the server never sees either.
+          </p>
+          {trackers === null && !error && <Waiting />}
+          {trackers?.length === 0 && (
+            <Empty icon={TrackerGlyph} note="no trackers yet — add one below" />
+          )}
+          {trackers?.map((t) => (
+            <TrackerRow
+              key={t.source.name}
+              tracker={t}
+              busy={busy}
+              onToken={(value) =>
+                act(`tracker:${t.source.name}`, () => api.setTrackerToken(t.source.name, value))
+              }
+              onForget={() =>
+                void act(`tracker:${t.source.name}`, () => api.forgetTracker(t.source.name))
+              }
+              onFilters={(filters) =>
+                act(`tracker:${t.source.name}`, () =>
+                  api.updateTracker(t.source.name, { ...t.source, filters }),
+                )
+              }
+            />
+          ))}
+          <NewTracker
+            busy={busy !== null}
+            onAdd={(tracker, token) =>
+              act(`tracker:${tracker.name}`, () => api.addTracker(tracker, token))
             }
           />
-        ))}
-        <NewTracker
-          busy={busy !== null}
-          onAdd={(tracker, token) =>
-            act(`tracker:${tracker.name}`, () => api.addTracker(tracker, token))
-          }
-        />
-      </section>
+        </section>
+      </Screen>
+    );
+  }
 
-      {/* A tracker that could not be read is said out loud rather than
-          leaving its rows quietly missing -- which is invisible, and looks
-          like having nothing assigned. */}
-      {tickets?.warnings.map((w) => (
-        <p key={w} className="warn">
-          {w}
-        </p>
-      ))}
-      {trackers !== null && trackers.length > 0 && tickets === null && !error && <Waiting />}
-
-      {sections.map(({ tracker, filter }) => {
-        const rows = tickets!.tasks.filter((t) => t.tracker === tracker && t.filter === filter);
-        return (
-          <section key={`${tracker}:${filter}`} className="panel">
-            <h3>
-              {tracker}
-              {filter && <span className="ticket-filter"> · {filter}</span>}
-            </h3>
-            {rows.length === 0 && <p className="hint">nothing matches</p>}
-            {rows.map((task) => (
-              <Row
-                key={`${task.tracker}:${task.filter}:${task.id}`}
-                task={task}
-                projects={projects}
-                currentProject={currentProject}
-                onStart={onStart}
-              />
-            ))}
-          </section>
-        );
-      })}
+  return (
+    <Screen icon={TrackerGlyph} title="tickets" actions={actions} onClose={onClose} wide>
+      {(error || (tickets?.warnings.length ?? 0) > 0) && (
+        <div className="board-notes">
+          {error && <p className="error">{error}</p>}
+          {/* A tracker that could not be read is said out loud rather than
+              leaving its column quietly missing -- which is invisible, and
+              looks like having nothing assigned. */}
+          {tickets?.warnings.map((w) => (
+            <p key={w} className="warn">
+              {w}
+            </p>
+          ))}
+        </div>
+      )}
+      {tickets === null && !error && <Waiting />}
+      {tickets !== null && columns.length === 0 && (
+        <Empty size="page" icon={TrackerGlyph} note="no filters answered — see trackers" />
+      )}
+      {columns.length > 0 && (
+        <div className="board scrollbar-sleek">
+          {columns.map(({ tracker, filter }) => {
+            const cards = tickets!.tasks.filter(
+              (t) => t.tracker === tracker && t.filter === filter,
+            );
+            return (
+              <section key={`${tracker}:${filter}`} className="board-column">
+                <header>
+                  <span className="board-filter">{filter}</span>
+                  {many && <span className="board-tracker">{tracker}</span>}
+                  <span className="board-count">{cards.length}</span>
+                </header>
+                <div className="board-cards scrollbar-sleek">
+                  {cards.length === 0 && <p className="hint">nothing matches</p>}
+                  {cards.map((task) => (
+                    <Card
+                      key={`${task.tracker}:${task.filter}:${task.id}`}
+                      task={task}
+                      projects={projects}
+                      currentProject={currentProject}
+                      onStart={onStart}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
     </Screen>
   );
 }
 
-function Row({
+/// One ticket, as a card: what it is, where it stands, what happened to it
+/// last, and the one button that turns it into a session.
+function Card({
   task,
   projects,
   currentProject,
@@ -207,26 +275,44 @@ function Row({
 }) {
   const [where, setWhere] = useState(currentProject ?? projects[0]?.name ?? "");
   const project = projects.find((p) => p.name === where);
+  const updated = ago(task.updated);
+  const comments = task.comments ?? 0;
 
   return (
-    <div className="row task">
-      <span className="row-name">
-        {/* The key, linked: reading the ticket is still a browser's job, and a
-            row that could not be opened would be a worse list than the
-            tracker's own. The glyph after it is the window's one mark for
-            "this leaves the window" -- worth the eleven pixels because the
-            alternative is a link that looks exactly like the text beside it. */}
-        <a href={task.url} target="_blank" rel="noreferrer" title={task.url}>
+    <article className="ticket-card">
+      <div className="ticket-top">
+        {/* The key, linked: reading the ticket is still a browser's job. The
+            glyph after it is the window's one mark for "this leaves the
+            window". */}
+        <a className="ticket-key" href={task.url} target="_blank" rel="noreferrer" title={task.url}>
           {task.key}
           <Elsewhere />
         </a>
-      </span>
-      <span className="task-title" title={task.title}>
+        {task.item_type && <span className="ticket-type">{task.item_type}</span>}
+        <span className="ticket-status" title="status">
+          {task.status}
+        </span>
+      </div>
+      <p className="ticket-title" title={task.title}>
         {task.title}
-      </span>
-      {task.item_type && <span className="task-type">{task.item_type}</span>}
-      <span className="task-status">{task.status}</span>
-      <span className="row-actions">
+      </p>
+      {(updated || comments > 0) && (
+        <div className="ticket-meta">
+          {updated && <span title={task.updated ?? undefined}>updated {updated}</span>}
+          {comments > 0 && (
+            <span
+              className="ticket-comments"
+              title={task.last_commenter ? `last comment by ${task.last_commenter}` : undefined}
+            >
+              <Comments /> {comments}
+              {task.last_commenter && !task.last_comment_mine && (
+                <span className="ticket-commenter"> · {task.last_commenter}</span>
+              )}
+            </span>
+          )}
+        </div>
+      )}
+      <div className="ticket-actions">
         {projects.length > 1 ? (
           <select value={where} onChange={(e) => setWhere(e.target.value)}>
             {projects.map((p) => (
@@ -238,21 +324,34 @@ function Row({
         ) : (
           <span className="hint">{projects[0]?.name ?? "no project yet"}</span>
         )}
-        {/* The word `start` is gone from a button that appears on every row,
-            and the play glyph is the one place in the window it is used -- so
-            it means "begin work on this" and nothing else. The title carries
-            the part that actually varies, which is *where* it will start. */}
         <button
-          className="quiet-icon"
+          className="quiet start"
           disabled={!project}
           title={project ? `start a worktree in ${project.name}` : "make a project first"}
           onClick={() => project && onStart(project, task)}
         >
-          <Start aria-label={project ? `start a worktree in ${project.name}` : "start"} />
+          <Start /> start
         </button>
-      </span>
-    </div>
+      </div>
+    </article>
   );
+}
+
+/// How long ago a tracker's timestamp was, in the fewest words: `5m ago`,
+/// `3h ago`, `2d ago`. Null for anything it cannot read, which is then left
+/// off the card rather than shown wrong.
+function ago(stamp: string | null): string | null {
+  if (!stamp) return null;
+  // Jira writes `+0000` where the format wants `+00:00`, and WebKit is strict
+  // about it.
+  const when = Date.parse(stamp.replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
+  if (Number.isNaN(when)) return null;
+  const secs = Math.max(0, (Date.now() - when) / 1000);
+  if (secs < 60) return "just now";
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  if (secs < 86400 * 60) return `${Math.floor(secs / 86400)}d ago`;
+  return `${Math.floor(secs / (86400 * 30))}mo ago`;
 }
 
 /// What a tracker is pointed at, in one line.

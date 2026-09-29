@@ -1358,9 +1358,6 @@ main { display: flex; flex: 1; min-height: 0; }
   color: var(--dim);
 }
 .panel > .hint { margin: 3px 0 8px; max-width: 66ch; }
-/* The filter a section is, beside the tracker it belongs to: the part that
-   differs between two sections of one tracker, so it reads a rank brighter. */
-.panel h3 .ticket-filter { color: var(--text); }
 
 .panel .row {
   display: flex;
@@ -1384,32 +1381,137 @@ main { display: flex; flex: 1; min-height: 0; }
 .panel .row .no { color: var(--bad); }
 .panel .row .quiet-icon { margin-left: 4px; }
 
-/* A ticket row: the key, the title, what kind and what state, and where to
-   start it. The title takes the slack because it is the part you read. */
-/* The ticket key and the mark that says it leaves the window, as one target. */
-.panel .row.task .row-name a {
+/* The ticket board: one column per filter, side by side, each scrolling on
+   its own. Side by side so a fourth filter costs width rather than a page of
+   scrolling, and columns rather than one long list because a filter is a
+   question and each column is its answer. */
+.screen-body.wide { display: flex; flex-direction: column; overflow: hidden; }
+.board-notes { flex: none; padding: 12px 18px 0; display: flex; flex-direction: column; gap: 6px; }
+.board-notes > p { margin: 0; max-width: 90ch; }
+.board {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  padding: 14px 18px 16px;
+  overflow-x: auto;
+  align-items: stretch;
+}
+.board-column {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.board-column > header {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.board-filter { font-size: 12px; font-weight: 600; color: var(--text); }
+.board-tracker { font-size: 11px; color: var(--dimmer); font-family: var(--font-mono); }
+.board-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.board-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.board-cards > .hint { margin: 6px 4px; }
+
+/* A ticket: key and state on top, the title as the thing you read, what
+   happened to it last, and where to start it. */
+.ticket-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg);
+}
+.ticket-card:hover { border-color: var(--line-strong); }
+.ticket-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ticket-key {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
   color: var(--text);
   text-decoration: none;
 }
-.panel .row.task .row-name a:hover { text-decoration: underline; }
-.panel .row.task .row-name a .lucide { color: var(--dimmer); }
-.panel .row.task .row-name a:hover .lucide { color: var(--dim); }
-.panel .task-title {
-  flex: 1;
-  min-width: 12ch;
+.ticket-key:hover { text-decoration: underline; }
+.ticket-key .lucide { width: 11px; height: 11px; color: var(--dimmer); }
+.ticket-type { font-size: 11px; color: var(--dimmer); }
+.ticket-status {
+  margin-left: auto;
+  max-width: 50%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 1px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--dim);
 }
-/* The type and the state are two facts, not one phrase: without the gap
-   `Bug In Progress` reads as a single string. */
-.panel .task-type, .panel .task-status { color: var(--dim); font-size: 11px; }
-.panel .task-type { margin-right: 4px; }
-.panel .task-status { min-width: 10ch; }
-.panel .row.task select { width: auto; max-width: 160px; }
+/* Two lines and then an ellipsis: a card is a glance, and the whole title is
+   one hover away. */
+.ticket-title {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ticket-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: var(--dimmer); }
+.ticket-comments { display: inline-flex; align-items: center; gap: 3px; }
+.ticket-comments .lucide { width: 11px; height: 11px; }
+.ticket-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+/* Flat, not the native control: one of these is on every card, and WebKit's
+   own is the loudest thing on the board. The chevron is drawn here because
+   `appearance: none` takes the native one with it. */
+.ticket-actions select {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 22px 0 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: transparent
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23a1a1a1' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    no-repeat right 7px center;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+.ticket-actions select:hover { border-color: var(--line-strong); color: var(--text); }
+.ticket-actions > .hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket-actions .start { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+.ticket-actions .start .lucide { width: 12px; height: 12px; }
+/* The toggle between the board and the trackers, lit when the trackers are
+   showing -- the same grammar as the header's destinations. */
+.screen-head .quiet { display: inline-flex; align-items: center; gap: 6px; }
+.screen-head .quiet.on { background: var(--selected); color: var(--text); }
 
 /* One state per colour, so the list is scannable without reading it -- the same
    grammar the session list uses. `crashing` is the loud one: it is the state

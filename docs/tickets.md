@@ -1,17 +1,23 @@
 # Tickets
 
-What your trackers' filters say, in the window, with one button that turns a
-ticket into a session. The same screen is where each tracker is set up: where
-it points, its token and its filters.
+What your trackers' filters say, in the window, as a board: one column per
+filter, one card per ticket, and a button on each card that turns it into a
+session. The **trackers** button in the screen's header switches to where each
+tracker is set up — where it points, its token and its filters — and back.
 
 ```
-   JIRA · READY TO START
-   PROJ-12    Story   To Do         Add the changelog        [ tools ▾ ] start
-   JIRA · ASSIGNED TO ME
-   PROJ-7     Bug     In Progress   Retry uploads            [ tools ▾ ] start
-   AZURE-DEVOPS · ASSIGNED TO ME
-   AB#1234    Task    Active        Order backfill throws…   [ tools ▾ ] start
+ ┌ ready to start      3 ┐ ┌ assigned to me      2 ┐ ┌ needs my review     1 ┐
+ │ PROJ-12 Story   Ready │ │ PROJ-7  Bug   In Prog │ │ PROJ-28 Task  In Rev. │
+ │ Add a changelog to …  │ │ Retry uploads that …  │ │ Cache the dashboard … │
+ │ updated 3h ago        │ │ updated 1h · 4 · Sam  │ │ updated 5h · 3 · Jor… │
+ │ [web-app ▾]   ▷ start │ │ [web-app ▾]   ▷ start │ │ [web-app ▾]   ▷ start │
+ └───────────────────────┘ └───────────────────────┘ └───────────────────────┘
 ```
+
+Columns sit side by side and each scrolls on its own, so another filter costs
+width rather than a page of scrolling. A card shows the key (a link to the
+ticket), its type and status, the title, how long since it last changed, and
+how many comments it has and who wrote the newest one.
 
 GitHub, Azure DevOps and Jira, read over REST **by the desktop application,
 with tokens kept on the computer it runs on**. The server is not involved: it
@@ -27,8 +33,9 @@ want the agent to do it. This screen only reads.
 
 ## Setting one up
 
-The tickets screen (the ticket icon in the header) starts with your trackers
-and, under them, **add a tracker**:
+On the tickets screen (the ticket icon in the header), **trackers** in the
+screen's own header lists your trackers and, under them, **add a tracker**. With
+no trackers yet, the screen opens there:
 
 | Tracker | Asks for | Token |
 | --- | --- | --- |
@@ -54,8 +61,8 @@ A Jira or Azure DevOps tracker can have several **named filters**, each its own
 section of the tickets screen: "ready to start", "assigned to me", whatever your
 process has a question for. A ticket two filters match is in both sections.
 
-Each tracker's row lists the filters it runs, with edit, remove and **add
-filter**. A tracker with none runs one called `assigned to me` — assigned to you
+Each tracker's row, under **trackers**, lists the filters it runs, with edit,
+remove and **add filter**. A tracker with none runs one called `assigned to me` — assigned to you
 and not done — and the list starts from it, so adding a second filter adds a
 section rather than replacing the one you had. Remove them all and it goes back
 to that one.

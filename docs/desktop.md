@@ -393,7 +393,13 @@ screen. It replaced an inbox that showed the tickets and a section of the
 integrations screen that set up where they came from — the second was the one
 nobody found, and a tracker with no token is exactly why its list is empty.
 
-**At the top, the trackers**, kept on this computer and read from here — the
+**The board is what it opens on**: one column per filter, side by side and each
+scrolling on its own, with a card per ticket — its key, type and status, the
+title, how long since it changed, its comments — and a start button. The
+**trackers** button in the screen's header switches to the setup and back, and
+with no trackers yet the screen opens there instead.
+
+**The trackers** are kept on this computer and read from here — the
 server never sees a tracker or its token. Each row is one tracker: its kind,
 where it points, and whether its token is stored, with a field beside it to
 paste one or replace it; the window is never shown a token again. Under each
@@ -404,9 +410,8 @@ email, an Azure DevOps organisation and project, an optional GitHub repository
 — and the token, with the required ones marked. Removing a tracker removes its
 token with it.
 
-**Below, the tickets**, one section per filter. A row is a ticket; the play
-button turns it into a session with the task, the name and the branch already
-right, and the session notes which ticket it came from.
+Starting from a card fills in the task, the name and the branch, and the
+session notes which ticket it came from.
 
 There is no count on that icon: a badge is a number nobody is waiting on. What
 is worth interrupting for is a ticket *changing* — its status, somebody else's
@@ -414,14 +419,14 @@ comment, a ticket turning up in a filter — and the window reads the tickets ev
 few minutes to say so, as an OS notification. It is a switch on the settings
 screen; see [tickets.md](tickets.md#notifications).
 
-A row carries a project chooser, because **a ticket does not know which
+A card carries a project chooser, because **a ticket does not know which
 repository it is about**: a Jira issue names a project and a work item names an
 area path, and neither is a clone URL. The tracker says what to do and you say
 where. It opens on the project of whatever is selected in the tree, which is the
 most likely answer.
 
-A tracker that could not be read says so at the top of the list rather than
-leaving its rows quietly missing — a list short of a tracker looks exactly
+A tracker that could not be read says so above the board rather than
+leaving its column quietly missing — a list short of a tracker looks exactly
 like having nothing assigned. [tickets.md](tickets.md) is the whole of it.
 
 ## Integrations
