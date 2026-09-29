@@ -55,6 +55,7 @@ import {
   GitBranch,
   Info,
   KeyRound,
+  MessageSquare,
   Pencil,
   Play,
   Plug,
@@ -64,6 +65,7 @@ import {
   RotateCw,
   Save,
   Search,
+  SlidersHorizontal,
   Server as ServerGlyph,
   ServerOff,
   Settings as SettingsGlyph,
@@ -151,6 +153,11 @@ export const Secret = KeyRound;
 export const Tracker = Ticket;
 /// Editing a line in place: a tracker's filter.
 export const Edit = Pencil;
+/// A ticket's comments, beside how many there are.
+export const Comments = MessageSquare;
+/// The tickets screen's other half: trackers, their tokens and filters. Not
+/// the settings gear, which is the header's own destination.
+export const Setup = SlidersHorizontal;
 export const Skill = Sparkles;
 
 // The chrome.
