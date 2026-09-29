@@ -7,4 +7,4 @@
  * status detection arrives in a later increment. Until then a healthy session
  * sits in `Ready`.
  */
-export type State = "creating" | "seeding" | "ready" | "running" | "waiting" | "idle" | "failed" | "published" | "dead";
+export type State = "creating" | "seeding" | "ready" | "running" | "waiting" | "idle" | "failed" | "dead";

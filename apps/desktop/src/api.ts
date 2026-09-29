@@ -11,6 +11,7 @@ import type { Comment } from "./gen/Comment";
 import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
 import type { Integrations } from "./gen/Integrations";
+import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Tracker } from "./gen/Tracker";
 import type { McpOp } from "./gen/McpOp";
 import type { Dir } from "./gen/Dir";
@@ -126,21 +127,22 @@ export const api = {
   forgetSkill: (server: string, name: string) =>
     invoke<Integrations>("forget_skill", { server, name }),
   mySkills: () => invoke<string[]>("my_skills"),
-  // A tracker is a `[[tracker]]` table in the server's config file. Adding one
-  // is what makes the tickets screen able to show anything at all; its credential is an
-  // ordinary secret, stored with `secret` under the name the entry gives.
-  addTracker: (server: string, tracker: Tracker) =>
-    invoke<Integrations>("add_tracker", { server, tracker }),
-  forgetTracker: (server: string, name: string) =>
-    invoke<Integrations>("forget_tracker", { server, name }),
-  // Replaced where it stands in the file, by the name it has now. How a
-  // tracker's filters are edited.
-  updateTracker: (server: string, name: string, tracker: Tracker) =>
-    invoke<Integrations>("update_tracker", { server, name, tracker }),
+  // Trackers live on *this* machine, tokens included, and are never sent to a
+  // server: the window reads tickets itself. Each change answers with the
+  // whole list, which says whether each has a token and never what it is.
+  trackers: () => invoke<ConfiguredTracker[]>("trackers"),
+  addTracker: (tracker: Tracker, token: string | null) =>
+    invoke<ConfiguredTracker[]>("add_tracker", { tracker, token }),
+  // Replaced by the name it has now; its token stays. How filters are edited.
+  updateTracker: (name: string, tracker: Tracker) =>
+    invoke<ConfiguredTracker[]>("update_tracker", { name, tracker }),
+  setTrackerToken: (name: string, token: string) =>
+    invoke<ConfiguredTracker[]>("set_tracker_token", { name, token }),
+  forgetTracker: (name: string) => invoke<ConfiguredTracker[]>("forget_tracker", { name }),
 
-  // The tickets, read on the server with the credentials in its store: this
-  // window shows a list and never holds a token.
-  tasks: (server: string) => invoke<Inbox>("tasks", { server }),
+  // The tickets, read from this machine. The server is asked only for its
+  // branch prefix, so a ticket suggests the branch its session will get.
+  tickets: (server: string | null) => invoke<Inbox>("tickets", { server }),
 
   // The editable defaults in the server's config file. The server's, because
   // `branch_prefix` names the branch of every session on that machine and a

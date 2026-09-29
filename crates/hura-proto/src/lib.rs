@@ -36,7 +36,6 @@ use hura_core::repos::Listing;
 use hura_core::session::Session;
 use hura_core::settings::{Settings, SettingsView};
 use hura_core::skills::Upload as SkillUpload;
-use hura_core::tracker::{Inbox, Source as TrackerSource};
 
 /// The protocol this build speaks.
 ///
@@ -49,7 +48,7 @@ use hura_core::tracker::{Inbox, Source as TrackerSource};
 /// variant does not need a bump: an older server answers an unknown request
 /// with [`Failure::unsupported`], which is a better error than a version check
 /// would have produced anyway.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// The port `hurad` listens on unless told otherwise.
 ///
@@ -243,36 +242,6 @@ pub enum Request {
     /// Drop one uploaded skill. The client's own copy is untouched -- the
     /// library is a cache of a directory on another machine.
     ForgetSkill { name: String },
-    /// Add a `[[tracker]]` table to the server's config file, so the inbox has
-    /// something to read.
-    ///
-    /// Beside the MCP servers and the secrets rather than in the settings
-    /// screen, because a tracker is the same kind of thing they are: an outside
-    /// service the server talks to with a credential it holds. Answers with
-    /// [`Reply::Integrations`], re-read.
-    ///
-    /// Boxed for the reason [`Request::Create`] is: ten fields of `String`
-    /// against a `Poll` that goes out every second.
-    AddTracker(Box<TrackerSource>),
-    /// Take one out by name. The secret it named is left in the store, because
-    /// nothing here can tell whether something else uses it.
-    ForgetTracker { name: String },
-    /// Replace one, by the name it has now, keeping its place in the file.
-    /// How a tracker's filters are edited. Answers with
-    /// [`Reply::Integrations`], re-read.
-    UpdateTracker {
-        name: String,
-        tracker: Box<TrackerSource>,
-    },
-
-    /// The task inbox: what the configured trackers say is assigned to you.
-    ///
-    /// Read server-side, with the credentials in the server's store, so a
-    /// client shows a list rather than holding a token. Whatever could not be
-    /// read comes back beside what could -- an inbox missing a tracker's rows
-    /// is invisible otherwise.
-    Tasks,
-
     /// The editable defaults in the server's config file.
     ///
     /// The *server's*, and that is the point rather than an accident of where
@@ -321,10 +290,6 @@ impl Request {
             | Request::Secret { .. }
             | Request::UploadSkills { .. }
             | Request::ForgetSkill { .. }
-            | Request::AddTracker(_)
-            | Request::ForgetTracker { .. }
-            | Request::UpdateTracker { .. }
-            | Request::Tasks
             | Request::Settings
             | Request::SetSettings(_) => None,
             Request::Poll { name }
@@ -445,8 +410,6 @@ pub enum Reply {
     /// with rather than an acknowledgement: starting a container or storing a
     /// secret changes what the rest of the screen says.
     Integrations(IntegrationsView),
-    /// The inbox, and whatever could not be read.
-    Tasks(Inbox),
     /// The config file's editable defaults, and where the file is.
     ///
     /// What a write answers with as well as a read, for the reason the
@@ -614,7 +577,6 @@ mod tests {
                 Request::UploadSkills { skills: Vec::new() },
                 "upload-skills",
             ),
-            (Request::Tasks, "tasks"),
         ] {
             let v: serde_json::Value = serde_json::to_value(&req).unwrap();
             assert_eq!(v["op"], op, "{req:?}");
@@ -646,19 +608,6 @@ mod tests {
             }],
             skills: Vec::new(),
             configured_skills: Vec::new(),
-            // A tracker is the other thing that names a secret, and it carries
-            // the name for the same reason: what is in the file is a name, and
-            // the value lives in the store this reply cannot read.
-            trackers: vec![hura_core::integrations::Tracker {
-                source: hura_core::tracker::Source {
-                    kind: hura_core::tracker::Kind::GitHub,
-                    name: "github".into(),
-                    secret: "SENTRY_TOKEN".into(),
-                    ..Default::default()
-                },
-                secret_set: true,
-                filters: Vec::new(),
-            }],
         };
         let json = serde_json::to_string(&Reply::Integrations(view)).unwrap();
         assert!(json.contains("SENTRY_TOKEN"), "{json}");

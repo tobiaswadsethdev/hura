@@ -181,8 +181,7 @@ function Form({
       const created = await api.create(server, {
         project: project.name,
         branch: branch || null,
-        // What makes the round trip possible: the session records the ticket,
-        // and publishing comments the pull request back onto it.
+        // A note on the session of where the work came from.
         ticket: from ? ticketOf(from) : null,
         // Blank means "derive it", which is what `hura new` without `--name`
         // does. The rule lives on the server so there is one of it.
@@ -217,7 +216,7 @@ function Form({
           <a href={from.url} target="_blank" rel="noreferrer">
             {from.key}
           </a>{" "}
-          → <code>{from.branch}</code>. Publishing comments back onto it.
+          → <code>{from.branch}</code>
         </p>
       )}
       {facts && <Drift facts={facts} />}

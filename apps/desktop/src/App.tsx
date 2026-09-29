@@ -327,12 +327,15 @@ export default function App() {
   // somebody else's API, and a ticket that moved two minutes ago is news
   // enough. The first read on start is the baseline, or catches up with what
   // moved while the window was closed.
+  //
+  // Not gated on a server: the trackers are this machine's. A server only
+  // lends its branch prefix to the suggested branch names.
   useEffect(() => {
-    if (!server || !prefs.notifyTickets) return;
+    if (!prefs.notifyTickets) return;
     const read = () =>
       api
-        .tasks(server)
-        .then((tickets) => onTickets(server, tickets))
+        .tickets(server)
+        .then((tickets) => onTickets(tickets))
         // A tracker that cannot be read is the tickets screen's to say; a
         // timer has nowhere to put it.
         .catch(() => {});
@@ -727,11 +730,7 @@ export default function App() {
         )}
 
         {screen === "integrations" && server && (
-          <IntegrationsScreen
-            server={server}
-            onClose={() => setScreen(null)}
-            onOpenTickets={() => setScreen("tickets")}
-          />
+          <IntegrationsScreen server={server} onClose={() => setScreen(null)} />
         )}
 
         {screen === "servers" && (

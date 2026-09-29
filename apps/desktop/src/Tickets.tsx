@@ -26,7 +26,6 @@ import { api, messageOf } from "./api";
 import { Empty, Waiting } from "./Empty";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Inbox as Tickets } from "./gen/Inbox";
-import type { Integrations } from "./gen/Integrations";
 import type { Project } from "./gen/Project";
 import type { Task } from "./gen/Task";
 import type { Tracker } from "./gen/Tracker";
@@ -70,9 +69,9 @@ export function TicketsScreen({
   const readTickets = useCallback(() => {
     setTickets(null);
     return api
-      .tasks(server)
+      .tickets(server)
       .then((v) => {
-        onTickets(server, v, notifyRef.current);
+        onTickets(v, notifyRef.current);
         setTickets(v);
       })
       .catch((e) => setError(messageOf(e)));
@@ -81,8 +80,8 @@ export function TicketsScreen({
   useEffect(() => {
     let live = true;
     api
-      .integrations(server)
-      .then((v) => live && setTrackers(v.trackers))
+      .trackers()
+      .then((v) => live && setTrackers(v))
       .catch((e) => live && setError(messageOf(e)));
     void readTickets();
     return () => {
@@ -91,11 +90,14 @@ export function TicketsScreen({
   }, [server, readTickets]);
 
   /// One change to the trackers, and the view it answers with.
-  const act = async (what: string, run: () => Promise<Integrations>): Promise<boolean> => {
+  const act = async (
+    what: string,
+    run: () => Promise<ConfiguredTracker[]>,
+  ): Promise<boolean> => {
     setBusy(what);
     setError(null);
     try {
-      setTrackers((await run()).trackers);
+      setTrackers(await run());
       void readTickets();
       return true;
     } catch (e) {
@@ -124,9 +126,8 @@ export function TicketsScreen({
       <section className="panel">
         <h3>trackers</h3>
         <p className="hint">
-          Where tickets come from. Read on the server with the token it holds, so this window shows
-          rows and never a token — and a session started from a ticket comments its pull request
-          back onto it.
+          Where tickets come from. Kept on this computer, token included, and read from here — the
+          server never sees either.
         </p>
         {trackers === null && !error && <Waiting />}
         {trackers?.length === 0 && (
@@ -138,36 +139,22 @@ export function TicketsScreen({
             tracker={t}
             busy={busy}
             onToken={(value) =>
-              act(`tracker:${t.source.name}`, () => api.secret(server, t.source.secret, value))
+              act(`tracker:${t.source.name}`, () => api.setTrackerToken(t.source.name, value))
             }
             onForget={() =>
-              void act(`tracker:${t.source.name}`, () => api.forgetTracker(server, t.source.name))
+              void act(`tracker:${t.source.name}`, () => api.forgetTracker(t.source.name))
             }
             onFilters={(filters) =>
               act(`tracker:${t.source.name}`, () =>
-                api.updateTracker(server, t.source.name, {
-                  ...t.source,
-                  // The filters replace the single query rather than sitting
-                  // beside it: the list being saved already starts from
-                  // whatever that query was.
-                  query: null,
-                  filters,
-                }),
+                api.updateTracker(t.source.name, { ...t.source, filters }),
               )
             }
           />
         ))}
         <NewTracker
           busy={busy !== null}
-          onAdd={(tracker, credential) =>
-            act(`tracker:${tracker.name}`, async () => {
-              // The credential first, so the tracker is never in the file for
-              // a moment with nothing behind the name it gives.
-              if (credential.length > 0) {
-                await api.secret(server, tracker.secret, credential);
-              }
-              return api.addTracker(server, tracker);
-            })
+          onAdd={(tracker, token) =>
+            act(`tracker:${tracker.name}`, () => api.addTracker(tracker, token))
           }
         />
       </section>
@@ -289,21 +276,19 @@ function target(t: Tracker): string {
 /// The wire value is serde's kebab-case of the Rust variant -- `git-hub`,
 /// `azure-dev-ops` -- and those are not names anybody uses. The config file
 /// spells them the way this does, so a row and the file agree.
-const KINDS: { value: TrackerKind; label: string }[] = [
-  { value: "jira", label: "jira" },
-  { value: "azure-dev-ops", label: "azure-devops" },
-  { value: "git-hub", label: "github" },
+const KINDS: { value: TrackerKind; label: string; name: string }[] = [
+  { value: "jira", label: "jira", name: "Jira" },
+  { value: "azure-dev-ops", label: "azure-devops", name: "Azure DevOps" },
+  { value: "git-hub", label: "github", name: "GitHub" },
 ];
 
 function kindLabel(kind: TrackerKind): string {
   return KINDS.find((k) => k.value === kind)?.label ?? kind;
 }
 
-/// One configured tracker, and whether the credential it names is actually
-/// there.
+/// One tracker, and whether it has a token.
 ///
-/// The secret is the half that is not in the config file, and a name with
-/// nothing behind it is the whole of why a tracker's sections come back empty
+/// A tracker with no token is the whole of why its sections come back empty
 /// with a warning on them -- so it is said here, with the field to fix it.
 function TrackerRow({
   tracker,
@@ -314,11 +299,10 @@ function TrackerRow({
 }: {
   tracker: ConfiguredTracker;
   busy: string | null;
-  /// Store or replace the token under the name the tracker gives. Goes into
-  /// the server's store, which this window can never read back.
+  /// Store or replace the token. Kept on this computer and never shown again.
   onToken: (value: string) => Promise<boolean>;
   onForget: () => void;
-  /// Answers whether the server took the list, so an edit that was refused
+  /// Answers whether the list was taken, so an edit that was refused
   /// keeps what was typed.
   onFilters: (filters: TrackerFilter[]) => Promise<boolean>;
 }) {
@@ -332,23 +316,23 @@ function TrackerRow({
       <span className="hint" title={target(t)}>
         {target(t)}
       </span>
-      <span className={tracker.secret_set ? "yes" : "no"} title="the secret the token is stored under">
-        {tracker.secret_set ? t.secret : `${t.secret} NOT set`}
+      <span className={tracker.token_set ? "yes" : "no"}>
+        {tracker.token_set ? "token stored" : "no token"}
       </span>
       <span className="row-actions">
         <input
           type="password"
           value={token}
-          placeholder={tracker.secret_set ? "replace the token" : "paste the token"}
+          placeholder={tracker.token_set ? "replace the token" : "paste the token"}
           onChange={(e) => setToken(e.target.value)}
         />
         <button
           className="quiet-icon"
           disabled={working || token.trim().length === 0}
-          title={tracker.secret_set ? `replace ${t.secret}` : `store it as ${t.secret}`}
+          title={tracker.token_set ? "replace the token" : "store the token"}
           onClick={() => {
             // Cleared either way: a password field holding a token is worth
-            // nothing once the server has it, and less if it refused it.
+            // nothing once it is stored, and less if it was refused.
             void onToken(token.trim()).finally(() => setToken(""));
           }}
         >
@@ -357,18 +341,15 @@ function TrackerRow({
         <button
           className="quiet-icon danger"
           disabled={working}
-          title="remove it from the server's config file (the secret stays)"
+          title="remove this tracker and its token from this computer"
           onClick={onForget}
         >
           <Forget aria-label={`forget ${t.name}`} />
         </button>
       </span>
-      {/* The entry is in the file and the credential is not, which is a
-          working configuration that cannot fetch anything. */}
-      {!tracker.secret_set && (
+      {!tracker.token_set && (
         <p className="problem">
-          Nothing is stored under <code>{t.secret}</code> yet; paste the token above and this
-          tracker starts answering.
+          No token yet; paste one above and this tracker starts answering.
         </p>
       )}
       {/* GitHub's list is asked with parameters rather than a query, so there
@@ -522,165 +503,178 @@ function FilterForm({
   );
 }
 
-/// Add a tracker: the entry and its credential in one form.
+/// Add a tracker: where it points and the token, as labelled fields.
 ///
-/// Two requests underneath -- the secret, then the table -- because they are
-/// two different things on the server: the value goes into a store this window
-/// cannot read back, and the name of it goes into the config file. One form,
-/// because "add a tracker" is one intention and a screen that made you do it in
-/// two halves would be the documentation this replaced.
+/// Only what each kind needs, the required ones marked. Custom queries are
+/// not asked for here: a tracker starts with "assigned to me", and its row is
+/// where a filter is added once it exists -- one way to do it, not two.
 function NewTracker({
   busy,
   onAdd,
 }: {
   busy: boolean;
-  /// Answers whether the server took it. A rejected entry keeps what was typed
-  /// -- the reason it was rejected is one field, and re-typing the other six
-  /// would be the punishment for a typo.
-  onAdd: (tracker: Tracker, credential: string) => Promise<boolean>;
+  /// Answers whether it was taken. A rejected entry keeps what was typed --
+  /// the reason is usually one field, and re-typing the rest would be the
+  /// punishment for a typo.
+  onAdd: (tracker: Tracker, token: string) => Promise<boolean>;
 }) {
   const [kind, setKind] = useState<TrackerKind>("jira");
   const [name, setName] = useState("");
-  const [secret, setSecret] = useState("");
-  const [credential, setCredential] = useState("");
+  const [token, setToken] = useState("");
   const [repo, setRepo] = useState("");
   const [org, setOrg] = useState("");
   const [project, setProject] = useState("");
   const [site, setSite] = useState("");
   const [email, setEmail] = useState("");
-  const [query, setQuery] = useState("");
-  const [onPublish, setOnPublish] = useState("");
 
-  const blank = (v: string) => (v.trim().length > 0 ? v.trim() : null);
-  // What each kind cannot work without. The same rule the server enforces when
-  // it parses the file -- checked here as well so the answer is immediate, and
-  // there rather than here because the file can also be written by hand.
+  const filled = (v: string) => v.trim().length > 0;
+  const blank = (v: string) => (filled(v) ? v.trim() : null);
+  // What each kind cannot work without -- the same rule the store applies, so
+  // the button says so before the store has to.
   const ready =
-    secret.trim().length > 0 &&
-    (kind !== "jira" || (site.trim().length > 0 && email.trim().length > 0)) &&
-    (kind !== "azure-dev-ops" || (org.trim().length > 0 && project.trim().length > 0));
+    filled(token) &&
+    (kind !== "jira" || (filled(site) && filled(email))) &&
+    (kind !== "azure-dev-ops" || (filled(org) && filled(project)));
 
   const tracker = (): Tracker => ({
     kind,
-    // Blank means "call it after its kind", which is what the server does with
-    // a table that has no `name`.
+    // Blank means "call it after its kind".
     name: name.trim(),
-    secret: secret.trim(),
     repo: kind === "git-hub" ? blank(repo) : null,
     org: kind === "azure-dev-ops" ? blank(org) : null,
     project: kind === "azure-dev-ops" ? blank(project) : null,
     site: kind === "jira" ? blank(site) : null,
     email: kind === "jira" ? blank(email) : null,
-    query: blank(query),
-    // Added from the tracker's row once it exists, where the default it has
-    // been reading is shown to start from.
     filters: [],
-    on_publish: blank(onPublish),
   });
 
-  return (
-    <div className="row tracker new">
-      <select value={kind} onChange={(e) => setKind(e.target.value as TrackerKind)}>
-        {KINDS.map((k) => (
-          <option key={k.value} value={k.value}>
-            {k.label}
-          </option>
-        ))}
-      </select>
-      <input
-        value={name}
-        placeholder={kindLabel(kind)}
-        onChange={(e) => setName(e.target.value)}
-      />
+  const reset = () => {
+    setName("");
+    setRepo("");
+    setOrg("");
+    setProject("");
+    setSite("");
+    setEmail("");
+  };
 
-      {kind === "git-hub" && (
-        <input value={repo} placeholder="owner/name" onChange={(e) => setRepo(e.target.value)} />
+  return (
+    <div className="setting-group new-tracker">
+      <h4>add a tracker</h4>
+      <label>
+        <span>tracker</span>
+        <select value={kind} onChange={(e) => setKind(e.target.value as TrackerKind)}>
+          {KINDS.map((k) => (
+            <option key={k.value} value={k.value}>
+              {k.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {kind === "jira" && (
+        <>
+          <Field label="site" required>
+            <input
+              value={site}
+              placeholder="https://your-org.atlassian.net"
+              onChange={(e) => setSite(e.target.value)}
+            />
+          </Field>
+          <Field label="email" required>
+            <input
+              value={email}
+              placeholder="you@example.com"
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </Field>
+          <p className="hint indent">The Atlassian account the token belongs to.</p>
+        </>
       )}
       {kind === "azure-dev-ops" && (
         <>
-          <input value={org} placeholder="organisation" onChange={(e) => setOrg(e.target.value)} />
-          <input
-            value={project}
-            placeholder="project"
-            onChange={(e) => setProject(e.target.value)}
-          />
+          <Field label="organisation" required>
+            <input value={org} placeholder="your-org" onChange={(e) => setOrg(e.target.value)} />
+          </Field>
+          <Field label="project" required>
+            <input
+              value={project}
+              placeholder="YourProject"
+              onChange={(e) => setProject(e.target.value)}
+            />
+          </Field>
         </>
       )}
-      {kind === "jira" && (
+      {kind === "git-hub" && (
         <>
-          <input
-            value={site}
-            placeholder="https://you.atlassian.net"
-            onChange={(e) => setSite(e.target.value)}
-          />
-          {/* Jira Cloud is Basic auth with the email as the username, so a
-              token on its own authenticates as nobody. */}
-          <input
-            value={email}
-            placeholder="you@example.com"
-            onChange={(e) => setEmail(e.target.value)}
-          />
+          <Field label="repository">
+            <input value={repo} placeholder="owner/name" onChange={(e) => setRepo(e.target.value)} />
+          </Field>
+          <p className="hint indent">Leave it empty for every issue assigned to you.</p>
         </>
       )}
 
-      <input
-        className="secret-name"
-        value={secret}
-        placeholder="SECRET_NAME"
-        onChange={(e) => setSecret(e.target.value)}
-      />
-      <input
-        type="password"
-        value={credential}
-        placeholder="the token (optional here)"
-        onChange={(e) => setCredential(e.target.value)}
-      />
-      <input
-        value={query}
-        placeholder={
-          kind === "jira"
-            ? "JQL (optional)"
-            : kind === "git-hub"
-              ? "search (optional)"
-              : "WIQL (optional)"
-        }
-        onChange={(e) => setQuery(e.target.value)}
-      />
-      <input
-        value={onPublish}
-        placeholder="move to, on publish (optional)"
-        onChange={(e) => setOnPublish(e.target.value)}
-      />
-      <span className="row-actions">
+      <Field label={TOKEN_LABEL[kind]} required>
+        <input type="password" value={token} onChange={(e) => setToken(e.target.value)} />
+      </Field>
+      <p className="hint indent">{TOKEN_HINT[kind]}</p>
+
+      <Field label="name">
+        <input value={name} placeholder={kindLabel(kind)} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <p className="hint indent">What this tracker is called here. Only needed for a second one.</p>
+
+      <div className="setting-actions">
+        <span className="hint">* required</span>
         <button
           className="go"
           disabled={busy || !ready}
           onClick={() => {
-            void onAdd(tracker(), credential).then((added) => {
-              // The credential goes either way: it is in the server's store now
-              // if this worked, and a password field holding a token while the
-              // screen is open is worth nothing to anybody.
-              setCredential("");
-              if (!added) return;
-              setName("");
-              setSecret("");
-              setRepo("");
-              setOrg("");
-              setProject("");
-              setSite("");
-              setEmail("");
-              setQuery("");
-              setOnPublish("");
+            void onAdd(tracker(), token.trim()).then((added) => {
+              // The token goes either way: a password field holding one is
+              // worth nothing once it is stored, and less if it was refused.
+              setToken("");
+              if (added) reset();
             });
           }}
         >
-          add
+          add tracker
         </button>
-      </span>
-      <p className="hint">
-        The token is stored under the name beside it and stays on the server. Leave it out and the
-        entry is added anyway — paste it into the tracker's row once it is there.
-      </p>
+      </div>
     </div>
   );
 }
+
+/// A labelled field in the settings grid, with a mark when it is required.
+function Field({
+  label,
+  required = false,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <label>
+      <span>
+        {label}
+        {required && <span className="required"> *</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+/// What each kind calls its token, and where to get one.
+const TOKEN_LABEL: Record<TrackerKind, string> = {
+  jira: "API token",
+  "azure-dev-ops": "access token",
+  "git-hub": "token",
+};
+
+const TOKEN_HINT: Record<TrackerKind, string> = {
+  jira: "Created at id.atlassian.com → Security → API tokens. Stored on this computer only.",
+  "azure-dev-ops":
+    "A personal access token with Work Items (read). Stored on this computer only.",
+  "git-hub": "A token that can read issues. Stored on this computer only.",
+};

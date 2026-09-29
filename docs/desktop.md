@@ -279,7 +279,7 @@ it would simply be a window that flickers every time you look at a setting.
 
 Twelve panes used to keep twelve sentences for having nothing in them --
 `nothing changed`, `no policy decisions in the recent log`, `Nothing assigned
-to you — or no trackers yet, which is what the integrations screen adds`. The
+to you — or no trackers yet, which is what the tickets screen adds`. The
 cost was not the words; it was that none of them looked like the others, so a
 pane you had not seen before greeted you with a paragraph to read before you
 could tell whether anything was wrong.
@@ -393,20 +393,20 @@ screen. It replaced an inbox that showed the tickets and a section of the
 integrations screen that set up where they came from — the second was the one
 nobody found, and a tracker with no token is exactly why its list is empty.
 
-**At the top, the trackers.** Each row is one tracker: its kind, where it
-points, and whether its token is stored — with a field beside it to paste one
-or replace it. The token goes into the server's store and is never shown again.
-Under each Jira or Azure DevOps tracker are its **filters**, the named queries
-("ready to start", "assigned to me") with edit, remove and *add filter*. Below
-the rows is the form that adds a tracker: the kind, where it points, the name
-of the secret and the token, stored first so the entry is never in the file with
-nothing behind it. Removing a tracker takes its table out of the config file and
-leaves the secret alone.
+**At the top, the trackers**, kept on this computer and read from here — the
+server never sees a tracker or its token. Each row is one tracker: its kind,
+where it points, and whether its token is stored, with a field beside it to
+paste one or replace it; the window is never shown a token again. Under each
+Jira or Azure DevOps tracker are its **filters**, the named queries ("ready to
+start", "assigned to me") with edit, remove and *add filter*. Below the rows is
+**add a tracker**: labelled fields for what that kind needs — a Jira site and
+email, an Azure DevOps organisation and project, an optional GitHub repository
+— and the token, with the required ones marked. Removing a tracker removes its
+token with it.
 
 **Below, the tickets**, one section per filter. A row is a ticket; the play
 button turns it into a session with the task, the name and the branch already
-right, and the session remembers which ticket it came from, so publishing
-comments the pull request back onto it.
+right, and the session notes which ticket it came from.
 
 There is no count on that icon: a badge is a number nobody is waiting on. What
 is worth interrupting for is a ticket *changing* — its status, somebody else's

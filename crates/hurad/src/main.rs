@@ -26,8 +26,8 @@ use clap::{Parser, Subcommand};
 use hura_client as remote;
 use hura_core::backend::Backends;
 use hura_core::{
-    config, doctor, endpoints, events, forge, image, mcp, ops, pane, policy, publish, repos,
-    session, store, toolchain, tracker, update,
+    config, doctor, endpoints, events, image, mcp, ops, pane, policy, repos, session, store,
+    toolchain, update,
 };
 use hura_proto::{DEFAULT_PORT, Pairing};
 use openshell_client::CliClient;
@@ -156,8 +156,6 @@ enum Command {
         tighten: bool,
     },
 
-    /// Your tickets: what each configured tracker's filters match
-    Tasks,
     /// Print a session's recent allow/deny decisions, newest first.
     Events {
         /// Session name.
@@ -205,32 +203,6 @@ enum Command {
         /// Print the file's path and nothing else.
         #[arg(long)]
         path: bool,
-    },
-
-    /// Push a session's branch and open a pull request.
-    Publish {
-        /// Session name.
-        name: String,
-
-        /// Pull request title. Defaults to the session's task.
-        #[arg(long)]
-        title: Option<String>,
-
-        /// Pull request description.
-        #[arg(long)]
-        body: Option<String>,
-
-        /// Branch to merge into. Defaults to the remote's default branch.
-        #[arg(long)]
-        target: Option<String>,
-
-        /// Push the branch but do not open a pull request.
-        #[arg(long)]
-        no_pr: bool,
-
-        /// Open the pull request as a draft.
-        #[arg(long)]
-        draft: bool,
     },
 
     /// Manage the sandbox image.
@@ -481,11 +453,6 @@ fn main() -> ExitCode {
             Ok(None) => cmd_events(&backends, &name),
             Err(e) => Err(e),
         },
-        Some(Command::Tasks) => match server(chosen.as_deref()) {
-            Ok(Some(r)) => remote_tasks(&r),
-            Ok(None) => cmd_tasks(&cfg),
-            Err(e) => Err(e),
-        },
         Some(Command::Watch { name }) => match server(chosen.as_deref()) {
             Ok(Some(r)) => remote_watch(&r, &name),
             Ok(None) => Err("watch needs a server: try `hurad --server watch <name>`".into()),
@@ -501,24 +468,6 @@ fn main() -> ExitCode {
             println!("{}", toolchain::help());
             return ExitCode::SUCCESS;
         }
-        Some(Command::Publish {
-            name,
-            title,
-            body,
-            target,
-            no_pr,
-            draft,
-        }) => cmd_publish(
-            &backends,
-            &name,
-            publish::Options {
-                title,
-                body,
-                target,
-                no_pr,
-                draft,
-            },
-        ),
         Some(Command::Image { action }) => match action {
             ImageAction::Build { toolchains } => match toolchain::resolve(&toolchains) {
                 Ok(chains) => image::build_variant(&chains).map_err(Into::into),
@@ -754,63 +703,6 @@ fn remote_events(remote: &remote::Remote, name: &str) -> Fallible {
     };
     print_events(&events);
     Ok(())
-}
-
-fn remote_tasks(remote: &remote::Remote) -> Fallible {
-    let hura_proto::Reply::Tasks(inbox) = remote.call(hura_proto::Request::Tasks)? else {
-        return Err("the server answered something other than a ticket list".into());
-    };
-    print_tasks(&inbox);
-    Ok(())
-}
-
-fn cmd_tasks(cfg: &Config) -> Fallible {
-    if cfg.trackers().is_empty() {
-        return Err(format!(
-            "no trackers configured; add a `[[tracker]]` table to {}, or add one from the desktop's integrations screen",
-            cfg.path.display()
-        )
-        .into());
-    }
-    print_tasks(&tracker::inbox(cfg.trackers(), cfg.branch_prefix()));
-    Ok(())
-}
-
-/// The inbox, for whichever client fetched it.
-///
-/// Shared for the reason the session table is: two clients printing the same
-/// thing differently is the drift the protocol exists to prevent.
-fn print_tasks(inbox: &tracker::Inbox) {
-    for warning in &inbox.warnings {
-        eprintln!("hurad: {warning}");
-    }
-    if inbox.tasks.is_empty() {
-        println!("nothing assigned to you");
-        return;
-    }
-    println!(
-        "{:<12} {:<12} {:<16} {:<14} {:<40} BRANCH",
-        "KEY", "TRACKER", "FILTER", "STATE", "TITLE"
-    );
-    for t in &inbox.tasks {
-        println!(
-            "{:<12} {:<12} {:<16} {:<14} {:<40} {}",
-            t.key,
-            t.tracker,
-            truncate(&t.filter, 16),
-            truncate(&t.status, 14),
-            truncate(&t.title, 40),
-            t.branch,
-        );
-    }
-}
-
-/// Cut to a column width, so one long title does not fold the whole table.
-fn truncate(s: &str, width: usize) -> String {
-    if s.chars().count() <= width {
-        return s.to_string();
-    }
-    s.chars().take(width.saturating_sub(1)).collect::<String>() + "…"
 }
 
 fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
@@ -1069,32 +961,6 @@ fn cmd_config(cfg: &Config, init: bool, path_only: bool) -> Fallible {
                 .join(", ")
         },
     );
-    // The kind and where it points, because "jira" alone does not say which
-    // site an empty inbox failed to read.
-    row(
-        "trackers",
-        !cfg.trackers().is_empty(),
-        if cfg.trackers().is_empty() {
-            "(none; there are no tickets to read)".into()
-        } else {
-            cfg.trackers()
-                .iter()
-                .map(|t| {
-                    let where_ = t
-                        .site
-                        .clone()
-                        .or_else(|| match (&t.org, &t.project) {
-                            (Some(org), Some(project)) => Some(format!("{org}/{project}")),
-                            _ => None,
-                        })
-                        .or_else(|| t.repo.clone())
-                        .unwrap_or_else(|| "assigned to you".into());
-                    format!("{} ({}) -> {where_}", t.name, t.kind.label())
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
-        },
-    );
     println!();
     println!("* set here, - built-in default");
     Ok(())
@@ -1263,34 +1129,6 @@ fn print_events(events: &[events::Event]) {
             println!("                                   {reason}");
         }
     }
-}
-
-fn cmd_publish(backends: &Backends, name: &str, opts: publish::Options) -> Fallible {
-    let session = require_session(name)?;
-    let remote = forge::Remote::parse(&session.repo)?;
-    println!(
-        "publishing {} to {} ...",
-        session.work_branch,
-        remote.slug()
-    );
-
-    // ops::publish, not publish::publish: the state change belongs with the
-    // action, so the CLI and the TUI cannot disagree about whether a session
-    // has been published.
-    let outcome = ops::publish(backends.for_session(&session), &session, &opts)?;
-    for w in &outcome.warnings {
-        eprintln!("hurad: {w}");
-    }
-    if outcome.pushed {
-        println!("pushed   {}", session.work_branch);
-    }
-    match &outcome.pull_request {
-        Some(url) => println!("pr       {url}"),
-        None if opts.no_pr => {}
-        None => println!("pr       (not opened)"),
-    }
-
-    Ok(())
 }
 
 fn cmd_attach(backends: &Backends, name: &str) -> Fallible {

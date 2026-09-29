@@ -24,8 +24,8 @@ use crate::session::{Session, State};
 
 /// Sentinel a script prints when the working copy is not there at all.
 ///
-/// The same machine-readable channel [`crate::publish`] uses, and for the same
-/// reason: it has to be told apart from anything the shell might say on its own.
+/// Machine-readable, because it has to be told apart from anything the shell
+/// might say on its own.
 pub(crate) const NO_REPO: &str = "@@hura-no-repo@@";
 
 /// What every pane says when a session has no working copy.

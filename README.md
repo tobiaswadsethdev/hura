@@ -61,14 +61,12 @@ endpoint, the binaries it is granted to, and how much of it they get:
   servers run on the host, holding their own credentials, and are granted
   per-binary like everything else; `hurad` can own their containers and their
   secrets, with a screen that says what each one is doing.
-- **Publish from inside.** `hurad publish` pushes the branch and opens a pull
-  request on GitHub or Azure DevOps without the token ever reaching your host.
-- **Tickets, and the loop back to them.** Named filters over Jira, Azure DevOps
-  and GitHub -- "ready to start", "assigned to me" -- read by the server, set up
-  token and all from the window, with a notification when a ticket changes
-  status, gets a comment or turns up. One button turns a ticket into a session
-  with the task, the name and the branch already right, and publishing comments
-  the pull request back onto the ticket and moves it.
+- **Tickets.** Named filters over Jira, Azure DevOps and GitHub -- "ready to
+  start", "assigned to me" -- set up token and all in the desktop application
+  and read from there, with nothing to configure on the server, and a
+  notification when a ticket changes status, gets a comment or turns up. One
+  button turns a ticket into a session with the task, the name and the branch
+  already right.
 - **Set up once, from the window.** The branch prefix a work branch is named
   under, and the base branch, policy and credentials a new session starts with,
   are edited on the settings screen and written into the server's own config
@@ -145,12 +143,10 @@ hurad attach <name>                             # attach to the agent; Ctrl-b d 
 hurad diff <name>                               # what the agent has changed so far
 hurad policy <name>                             # the policy the gateway is enforcing
 hurad events <name>                             # recent allow/deny decisions
-hurad tasks                                     # your tickets, by filter
 hurad policies                                  # the policy templates shipped in the binary
 hurad toolchains                                # the toolchains a sandbox image can be built with
 hurad config                                    # the defaults in force, and where they came from
 hurad config --init                             # write a commented ~/.config/hura/config.toml
-hurad publish <name>                            # push the branch and open a pull request
 hurad update                                    # fetch and verify the newest release
 hurad rm <name>                                 # delete session and sandbox
 
@@ -186,8 +182,8 @@ else. See [docs/toolchains.md](docs/toolchains.md).
 | [The server](docs/server.md)               | `hurad`, pairing a client on another machine, WSL, what a token is worth |
 | [Configuration](docs/configuration.md)     | `~/.config/hura/config.toml`, and which default wins                   |
 | [Policy and events](docs/policy.md)        | what is enforced, the audit feed, and acting on a denial              |
-| [Tickets](docs/tickets.md)                 | filters, notifications, sessions out, and the publish that writes back |
-| [Git hosts](docs/git-hosts.md)             | GitHub and Azure DevOps, and how publishing keeps the token away      |
+| [Tickets](docs/tickets.md)                 | trackers and their filters, notifications, and sessions from tickets  |
+| [Git hosts](docs/git-hosts.md)             | GitHub and Azure DevOps, and how pushing keeps the token away         |
 | [Toolchains](docs/toolchains.md)           | node, .NET and Rust in a sandbox, and the registry each one may reach |
 | [Skills](docs/skills.md)                   | carrying your own skills into a sandbox                               |
 | [MCP servers](docs/mcp.md)                 | servers hurad runs or you do, their secrets, and what one costs you    |

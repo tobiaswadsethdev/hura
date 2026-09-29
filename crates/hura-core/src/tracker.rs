@@ -1,39 +1,29 @@
-//! The task inbox: what is assigned to you, in the trackers you use.
+//! Tickets: what your trackers' filters match, read over REST.
 //!
-//! Read **server-side over REST, with the credentials in the server's store**,
-//! and that is a deliberate split rather than a duplication of the MCP servers
-//! next door. REST is for what the *interface* shows: a list of tickets, on a
-//! timer, rendered as rows. MCP is for what the *agent* gets: a tool it calls
-//! when it decides to. They are different consumers with different failure
-//! modes -- a list that cannot be fetched is a pane with a message in it, a tool
-//! that cannot be reached is a session whose agent gives up on a step -- and
-//! conflating them would make both worse.
+//! **Read by the client, with the client's own tokens.** A tracker is set up in
+//! the desktop application and stored on the machine it runs on, and the
+//! requests go from there; the server holds no tracker, no token and no ticket.
+//! A server is where sandboxes run, and a Jira token is not something a
+//! sandbox -- or the machine hosting them -- has any business holding.
+//!
+//! REST is for what the *interface* shows: a list, on a timer, rendered as
+//! rows. What an *agent* does with a ticket -- commenting, moving it -- goes
+//! through an MCP server when the agent decides to, which is a different
+//! consumer with different failure modes.
 //!
 //! ## Why curl
 //!
-//! Three hosts, ordinary public certificates, JSON in and out. `curl` is
-//! already on any machine that runs this and already how [`crate::publish`]
-//! talks to Azure DevOps from inside a sandbox; the alternative is an HTTP
-//! client, a TLS root store and a redirect policy pulled in for six requests.
+//! Three hosts, ordinary public certificates, JSON in and out. `curl` is on
+//! every Linux machine and on every Windows since 10 1803, and the alternative
+//! is an HTTP client, a TLS root store and a redirect policy pulled in for a
+//! handful of GETs.
 //!
 //! **The credential goes in on stdin, never in the argument list.** `curl -K -`
 //! reads its configuration -- the url and the `Authorization` header
 //! included -- from standard input, so a token never appears in `ps` output or
-//! in the error text of a failed spawn. Same care as
-//! [`crate::mcp::managed::start`], for the same reason.
-//!
-//! ## The round trip
-//!
-//! A session started from a ticket records which ticket, so publishing can
-//! comment the pull request back onto it and move it along. That loop existed
-//! as a personal skill; it is the thing an ADE should do with a button. Both
-//! halves are best-effort and both say what happened: the branch is pushed and
-//! the pull request is open either way, and losing a comment is not worth
-//! failing a publish over.
+//! in the error text of a failed spawn.
 
 use serde::{Deserialize, Serialize};
-
-use crate::secrets;
 
 /// A tracker this knows how to read.
 // `TrackerKind` on the wire: `session::Kind` is already `Kind` in the one flat
@@ -69,26 +59,20 @@ impl Kind {
     }
 }
 
-/// One configured tracker.
+/// One configured tracker, without its token.
 ///
-/// Validated when the config file is read, so a Jira entry with no site or an
-/// Azure DevOps entry with no organisation fails against the line that wrote it
-/// rather than against a 404 on a timer.
-// Serialised as well as parsed, because the desktop both draws the configured
-// trackers and adds one: the shape the config file describes and the shape a
-// client sends are the same shape, and a second one would be a second place for
-// a Jira entry to be missing its email.
+/// Validated when it is saved, so a Jira entry with no site or an Azure DevOps
+/// entry with no organisation fails against the form that made it rather than
+/// against a 404 on a timer. The token is kept beside it rather than in it --
+/// see [`Configured`] -- so this is safe to hand a webview.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, rename = "Tracker"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Source {
     pub kind: Kind,
-    /// What the inbox calls it. Defaults to the kind, which is right until
-    /// somebody has two Jira sites.
+    /// What the tickets screen calls it. Defaults to the kind, which is right
+    /// until somebody has two Jira sites.
     pub name: String,
-    /// The name of the secret holding the credential. Never the credential:
-    /// see [`crate::secrets`].
-    pub secret: String,
     /// GitHub: `owner/name`, or `None` for everything assigned to you.
     pub repo: Option<String>,
     /// Azure DevOps organisation, and the project the query runs in.
@@ -98,22 +82,12 @@ pub struct Source {
     /// belongs to -- Jira Cloud is Basic auth with the email as the username.
     pub site: Option<String>,
     pub email: Option<String>,
-    /// The query to run: JQL for Jira, WIQL for Azure DevOps, a search
-    /// qualifier string for GitHub. `None` means "assigned to me and not done",
-    /// which is what an inbox is.
-    ///
-    /// The single-query form, from before [`Self::filters`]. Still read: a
-    /// tracker with no filters has one, made from this. See [`Self::effective`].
-    pub query: Option<String>,
-    /// Named queries, each its own section of the inbox: "ready to start",
-    /// "assigned to me". Empty means the one [`Self::query`] describes.
+    /// Named queries, each its own section of the tickets screen: "ready to
+    /// start", "assigned to me". Empty means the one [`DEFAULT_FILTER`].
     ///
     /// Jira and Azure DevOps only, because they are the two with a query
     /// language this reads. A GitHub tracker lists what is assigned to you.
     pub filters: Vec<Filter>,
-    /// What to move a ticket to when its session is published. `None` leaves it
-    /// where it is.
-    pub on_publish: Option<String>,
 }
 
 impl Default for Source {
@@ -125,15 +99,12 @@ impl Default for Source {
         Source {
             kind: Kind::GitHub,
             name: String::new(),
-            secret: String::new(),
             repo: None,
             org: None,
             project: None,
             site: None,
             email: None,
-            query: None,
             filters: Vec::new(),
-            on_publish: None,
         }
     }
 }
@@ -181,25 +152,18 @@ pub fn default_query(kind: Kind) -> &'static str {
 pub const DEFAULT_FILTER: &str = "assigned to me";
 
 impl Source {
-    /// The filters this tracker actually runs: its own, or the one its
-    /// `query` -- or the kind's default -- makes.
+    /// The filters this tracker actually runs: its own, or the kind's default.
     pub fn effective(&self) -> Vec<Filter> {
         if !self.filters.is_empty() {
             return self.filters.clone();
         }
         vec![Filter {
             name: DEFAULT_FILTER.to_string(),
-            query: self
-                .query
-                .clone()
-                .unwrap_or_else(|| default_query(self.kind).to_string()),
+            query: default_query(self.kind).to_string(),
         }]
     }
 
-    /// Trim every field, and fall back to the kind for an unnamed tracker --
-    /// the same defaulting [`crate::config`] does when it reads one out of the
-    /// file, so a tracker added from a client and one written by hand come out
-    /// the same.
+    /// Trim every field, and fall back to the kind for an unnamed tracker.
     pub fn normalized(&self) -> Source {
         let text = |v: &Option<String>| {
             v.as_deref()
@@ -215,13 +179,11 @@ impl Source {
             } else {
                 name.to_string()
             },
-            secret: self.secret.trim().to_string(),
             repo: text(&self.repo),
             org: text(&self.org),
             project: text(&self.project),
             site: text(&self.site),
             email: text(&self.email),
-            query: text(&self.query),
             filters: self
                 .filters
                 .iter()
@@ -230,7 +192,6 @@ impl Source {
                     query: f.query.trim().to_string(),
                 })
                 .collect(),
-            on_publish: text(&self.on_publish),
         }
     }
 
@@ -360,10 +321,10 @@ pub struct Task {
 
 /// What a session remembers about the ticket it was started from.
 ///
-/// On the session record, because the round trip happens at publish time --
-/// minutes or days later, from a different client, possibly after the inbox has
-/// moved on. Enough to address the write-back without asking the tracker
-/// anything.
+/// On the session record as a note about where the work came from: which
+/// tracker, which ticket, and where to open it. Nothing writes back through
+/// it -- commenting on or moving a ticket is an agent's job, through an MCP
+/// server, or yours.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ticket {
@@ -425,25 +386,69 @@ pub struct FilterRead {
 /// enough that three of them cannot stack into a minute.
 const TIMEOUT: &str = "20";
 
-/// Read every configured tracker, one filter at a time.
+/// A tracker as the client keeps it: the entry, and the token beside it.
+///
+/// Stored on the machine the window runs on, in its private state file. The
+/// token never leaves this type towards a webview: [`Configured`] is what one
+/// is shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stored {
+    pub source: Source,
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+/// A tracker as a webview sees it: whether there is a token, never the token.
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(export, rename = "ConfiguredTracker")
+)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Configured {
+    pub source: Source,
+    pub token_set: bool,
+    /// The filters it runs, the implied default included. What an editor
+    /// starts from, so the first filter somebody adds does not silently
+    /// replace the "assigned to me" they have been reading.
+    pub filters: Vec<Filter>,
+}
+
+impl From<&Stored> for Configured {
+    fn from(s: &Stored) -> Self {
+        Configured {
+            token_set: s.token.as_deref().is_some_and(|t| !t.trim().is_empty()),
+            filters: s.source.effective(),
+            source: s.source.clone(),
+        }
+    }
+}
+
+/// Read every tracker, one filter at a time.
 ///
 /// Sequentially, because there are one or two of them and a thread per tracker
 /// would buy milliseconds at the cost of ordering the result.
-pub fn inbox(sources: &[Source], branch_prefix: &str) -> Inbox {
+pub fn inbox(trackers: &[Stored], branch_prefix: &str) -> Inbox {
     let mut out = Inbox::default();
-    for source in sources {
+    for Stored { source, token } in trackers {
         if let Some(problem) = source.problem() {
             out.warnings.push(problem);
             continue;
         }
-        let Some(token) = secrets::get(&source.secret) else {
+        let Some(token) = token.as_deref().filter(|t| !t.trim().is_empty()) else {
             out.warnings.push(format!(
-                "{}: no value stored for `{}`; set it from the integrations screen",
-                source.name, source.secret
+                "{}: no token yet, so nothing was read",
+                source.name
             ));
             continue;
         };
-        let reader = Reader::new(source, &token);
+        let reader = match Reader::new(source, token) {
+            Ok(reader) => reader,
+            Err(e) => {
+                out.warnings.push(format!("{}: {e}", source.name));
+                continue;
+            }
+        };
         for filter in source.effective() {
             match reader.read(&filter, branch_prefix) {
                 Ok(mut tasks) => {
@@ -469,19 +474,22 @@ pub fn inbox(sources: &[Source], branch_prefix: &str) -> Inbox {
 struct Reader<'a> {
     source: &'a Source,
     token: &'a str,
-    /// Jira's account id for the credential's owner, asked once per read of
-    /// the inbox rather than once per filter. `None` when it could not be
-    /// asked, which only costs knowing whose the last comment was.
+    /// Jira's account id for the credential's owner, asked once per read
+    /// rather than once per filter.
     me: Option<String>,
 }
 
 impl<'a> Reader<'a> {
-    fn new(source: &'a Source, token: &'a str) -> Self {
+    /// Refused when Jira will not say who the token belongs to. That request
+    /// is the one every search would have failed the same way, so it stands
+    /// for all of them: one warning, rather than one per filter each waiting
+    /// out the timeout against a site that is not answering.
+    fn new(source: &'a Source, token: &'a str) -> Result<Self, String> {
         let me = match source.kind {
-            Kind::Jira => jira_me(source, token),
+            Kind::Jira => jira_me(source, token)?,
             _ => None,
         };
-        Reader { source, token, me }
+        Ok(Reader { source, token, me })
     }
 
     fn read(&self, filter: &Filter, prefix: &str) -> Result<Vec<Task>, String> {
@@ -694,15 +702,17 @@ fn jira_auth(source: &Source, token: &str) -> String {
 /// The credential owner's account id, which is how a comment says who wrote
 /// it. Emails are hidden on most Jira Cloud sites, so the configured one
 /// cannot be matched against an author.
-fn jira_me(source: &Source, token: &str) -> Option<String> {
+///
+/// Also the cheapest question that says whether the site and the token work
+/// at all: a failure here is the answer for every filter too.
+fn jira_me(source: &Source, token: &str) -> Result<Option<String>, String> {
     let url = format!("{}/rest/api/3/myself", jira_site(source));
     let body = get(
         &url,
         &jira_auth(source, token),
         &["Accept: application/json"],
-    )
-    .ok()?;
-    Some(string(&body, "accountId")).filter(|s| !s.is_empty())
+    )?;
+    Ok(Some(string(&body, "accountId")).filter(|s| !s.is_empty()))
 }
 
 fn jira(
@@ -867,183 +877,9 @@ fn truncate_at_dash(s: &str, max: usize) -> String {
     }
 }
 
-// ----------------------------------------------------------- the round trip
-
-/// Comment the pull request onto the ticket, and move it if the tracker was
-/// configured to.
-///
-/// Both halves are best-effort and each says what happened. The branch is
-/// pushed and the pull request is open by the time this runs; losing a comment
-/// is worth a warning and not worth failing a publish over -- and a transition
-/// that does not exist is a configuration mistake to report, not a reason to
-/// pretend the publish failed.
-pub fn on_publish(sources: &[Source], ticket: &Ticket, pr_url: &str) -> Vec<String> {
-    let Some(source) = sources.iter().find(|s| s.name == ticket.tracker) else {
-        return vec![format!(
-            "`{}` was started from {} in `{}`, which is no longer a configured tracker, so nothing was written back",
-            ticket.key, ticket.key, ticket.tracker
-        )];
-    };
-    let Some(token) = secrets::get(&source.secret) else {
-        return vec![format!(
-            "no value stored for `{}`, so {} was not updated",
-            source.secret, ticket.key
-        )];
-    };
-
-    let mut warnings = Vec::new();
-    if let Err(e) = comment(source, &token, ticket, pr_url) {
-        warnings.push(format!("could not comment on {}: {e}", ticket.key));
-    }
-    if let Some(target) = &source.on_publish
-        && let Err(e) = transition(source, &token, ticket, target)
-    {
-        warnings.push(format!("could not move {} to `{target}`: {e}", ticket.key));
-    }
-    warnings
-}
-
-fn comment(source: &Source, token: &str, ticket: &Ticket, pr_url: &str) -> Result<(), String> {
-    let text = format!("Pull request: {pr_url}");
-    match ticket.kind {
-        Kind::GitHub => {
-            // The issue's own repository first: `/issues` spans several, and
-            // the entry may name none.
-            let repo = ticket
-                .repo
-                .clone()
-                .or_else(|| source.repo.clone())
-                .ok_or("which github repository? the issue's own was not recorded")?;
-            let url = format!(
-                "https://api.github.com/repos/{repo}/issues/{}/comments",
-                ticket.id
-            );
-            let body = serde_json::json!({ "body": text });
-            post(&url, &format!("Bearer {token}"), &body.to_string(), JSON).map(|_| ())
-        }
-        Kind::AzureDevOps => {
-            let org = source.org.as_deref().unwrap_or_default();
-            let project = source.project.as_deref().unwrap_or_default();
-            // The comments API is still preview-versioned; 7.1-preview.3 is
-            // what answers on dev.azure.com.
-            let url = format!(
-                "https://dev.azure.com/{org}/{project}/_apis/wit/workItems/{}/comments?api-version=7.1-preview.3",
-                ticket.id
-            );
-            let body = serde_json::json!({ "text": text });
-            post(&url, &azure_auth(token), &body.to_string(), JSON).map(|_| ())
-        }
-        Kind::Jira => {
-            let site = source
-                .site
-                .as_deref()
-                .unwrap_or_default()
-                .trim_end_matches('/');
-            let email = source.email.as_deref().unwrap_or_default();
-            let url = format!("{site}/rest/api/3/issue/{}/comment", ticket.id);
-            // Atlassian Document Format: a Jira Cloud comment body is a
-            // document, not a string, and a string is rejected with a 400.
-            let body = serde_json::json!({
-                "body": {
-                    "type": "doc",
-                    "version": 1,
-                    "content": [{
-                        "type": "paragraph",
-                        "content": [{ "type": "text", "text": text }]
-                    }]
-                }
-            });
-            post(
-                &url,
-                &format!(
-                    "Basic {}",
-                    crate::skills::base64(format!("{email}:{token}").as_bytes())
-                ),
-                &body.to_string(),
-                JSON,
-            )
-            .map(|_| ())
-        }
-    }
-}
-
-fn transition(source: &Source, token: &str, ticket: &Ticket, target: &str) -> Result<(), String> {
-    match ticket.kind {
-        Kind::Jira => {
-            let site = source.site.as_deref().unwrap_or_default().trim_end_matches('/');
-            let email = source.email.as_deref().unwrap_or_default();
-            let auth = format!(
-                "Basic {}",
-                crate::skills::base64(format!("{email}:{token}").as_bytes())
-            );
-            // Jira moves an issue by *transition id*, and which transitions
-            // exist depends on the workflow and the issue's current status. So
-            // the target is matched by name against what this issue can
-            // actually do, and a name that is not among them says which are --
-            // the alternative is a 400 that names neither.
-            let url = format!("{site}/rest/api/3/issue/{}/transitions", ticket.id);
-            let body = get(&url, &auth, &["Accept: application/json"])?;
-            let transitions = body
-                .get("transitions")
-                .and_then(|t| t.as_array())
-                .ok_or("jira did not answer with transitions")?;
-            let found = transitions.iter().find(|t| {
-                let name = string(t, "name");
-                let to = t.get("to").map(|to| string(to, "name")).unwrap_or_default();
-                name.eq_ignore_ascii_case(target) || to.eq_ignore_ascii_case(target)
-            });
-            let id = match found {
-                Some(t) => string(t, "id"),
-                None => {
-                    let available: Vec<String> = transitions
-                        .iter()
-                        .map(|t| {
-                            t.get("to")
-                                .map(|to| string(to, "name"))
-                                .unwrap_or_else(|| string(t, "name"))
-                        })
-                        .collect();
-                    return Err(format!(
-                        "no transition to `{target}` from `{}`; it can go to: {}",
-                        ticket.key,
-                        available.join(", ")
-                    ));
-                }
-            };
-            let body = serde_json::json!({ "transition": { "id": id } });
-            post(&url, &auth, &body.to_string(), JSON).map(|_| ())
-        }
-        Kind::AzureDevOps => {
-            let org = source.org.as_deref().unwrap_or_default();
-            let project = source.project.as_deref().unwrap_or_default();
-            let url = format!(
-                "https://dev.azure.com/{org}/{project}/_apis/wit/workitems/{}?api-version=7.1",
-                ticket.id
-            );
-            let body = serde_json::json!([{
-                "op": "add",
-                "path": "/fields/System.State",
-                "value": target,
-            }]);
-            // A work item is edited with a JSON *patch*, and the content type
-            // is what tells Azure DevOps that: `application/json` on this body
-            // is a 400.
-            patch(&url, &azure_auth(token), &body.to_string(), JSON_PATCH).map(|_| ())
-        }
-        // GitHub has no status between open and closed, and closing an issue
-        // because a pull request exists is a decision for the person merging
-        // it. Said rather than silently doing nothing.
-        Kind::GitHub => Err(
-            "github issues have no status to move to; a pull request that says `Fixes #n` closes it on merge"
-                .into(),
-        ),
-    }
-}
-
 // -------------------------------------------------------------------- curl
 
 const JSON: &str = "application/json";
-const JSON_PATCH: &str = "application/json-patch+json";
 
 fn get(url: &str, auth: &str, headers: &[&str]) -> Result<serde_json::Value, String> {
     curl(url, auth, headers, None)
@@ -1056,15 +892,6 @@ fn post(
     content_type: &str,
 ) -> Result<serde_json::Value, String> {
     curl(url, auth, &[], Some(("POST", body, content_type)))
-}
-
-fn patch(
-    url: &str,
-    auth: &str,
-    body: &str,
-    content_type: &str,
-) -> Result<serde_json::Value, String> {
-    curl(url, auth, &[], Some(("PATCH", body, content_type)))
 }
 
 /// One request, with the credential on stdin.
@@ -1111,12 +938,22 @@ fn curl(
         config.push_str(&format!("data-raw = {}\n", quote(body)));
     }
 
-    let mut child = Command::new("curl")
+    let mut command = Command::new("curl");
+    command
         .arg("-K")
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    // A GUI process that spawns a console program gets a console window for it,
+    // flashing up every time the tickets are read. `CREATE_NO_WINDOW` is the
+    // flag that says not to.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command
         .spawn()
         .map_err(|e| format!("could not run curl: {e}"))?;
     child
@@ -1260,15 +1097,12 @@ mod tests {
         Source {
             kind,
             name: kind.label().to_string(),
-            secret: "TOKEN".into(),
             repo: None,
             org: Some("contoso".into()),
             project: Some("tools".into()),
             site: Some("https://example.atlassian.net".into()),
             email: Some("you@example.com".into()),
-            query: None,
             filters: Vec::new(),
-            on_publish: None,
         }
     }
 
@@ -1459,10 +1293,10 @@ mod tests {
         assert!(tasks[0].last_comment_mine);
     }
 
-    /// A tracker with no filters runs one, from its `query` or the kind's
-    /// default, so every file written before filters existed reads as it did.
+    /// A tracker with no filters runs the kind's default, and its own filters
+    /// replace it rather than sitting beside it.
     #[test]
-    fn a_tracker_without_filters_has_the_one_it_always_had() {
+    fn a_tracker_without_filters_runs_the_default() {
         let s = source(Kind::Jira);
         let f = s.effective();
         assert_eq!(f.len(), 1);
@@ -1470,13 +1304,6 @@ mod tests {
         assert_eq!(f[0].query, default_query(Kind::Jira));
 
         let s = Source {
-            query: Some("project = X".into()),
-            ..source(Kind::Jira)
-        };
-        assert_eq!(s.effective()[0].query, "project = X");
-
-        let s = Source {
-            query: Some("project = X".into()),
             filters: vec![
                 Filter {
                     name: "ready".into(),
@@ -1490,7 +1317,27 @@ mod tests {
             ..source(Kind::Jira)
         };
         let names: Vec<String> = s.effective().into_iter().map(|f| f.name).collect();
-        assert_eq!(names, ["ready", "mine"], "filters replace the single query");
+        assert_eq!(names, ["ready", "mine"]);
+    }
+
+    /// The token is the one thing a webview is never handed: it learns there
+    /// is one, and that is all.
+    #[test]
+    fn a_webview_is_told_there_is_a_token_and_not_what_it_is() {
+        let stored = Stored {
+            source: source(Kind::Jira),
+            token: Some("s3cret-api-token".into()),
+        };
+        let shown = Configured::from(&stored);
+        assert!(shown.token_set);
+        let json = serde_json::to_string(&shown).unwrap();
+        assert!(!json.contains("s3cret"), "{json}");
+
+        let blank = Configured::from(&Stored {
+            source: source(Kind::Jira),
+            token: Some("  ".into()),
+        });
+        assert!(!blank.token_set, "whitespace is not a token");
     }
 
     #[test]

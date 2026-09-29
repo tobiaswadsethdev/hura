@@ -28,7 +28,6 @@ use crate::policy;
 use crate::session;
 use crate::skills;
 use crate::store::Store;
-use crate::tracker;
 
 /// A starter file, written by `hura config --init`.
 ///
@@ -94,10 +93,6 @@ pub struct Config {
     /// can reach, made once. A session records the servers it was created with,
     /// so changing the file changes the next session rather than this one.
     pub mcp: Vec<mcp::Entry>,
-    /// The trackers the task inbox reads. Server-side, like everything else
-    /// here: the credentials are in the server's store and the requests are
-    /// made from there, so a client shows a list rather than holding a token.
-    pub trackers: Vec<tracker::Source>,
     /// What a work branch is named under: `<prefix>/<name>`.
     ///
     /// `hura` by default, which is what every session has been called until now.
@@ -298,62 +293,6 @@ impl Config {
             mcp.push(resolved);
         }
 
-        // Same reasoning as the MCP tables: validated where the error can name
-        // the file and the entry, because a tracker that cannot work produces
-        // an inbox that is silently missing rows.
-        let mut trackers: Vec<tracker::Source> = Vec::new();
-        for entry in raw.tracker.into_iter().flatten() {
-            let kind = tracker::Kind::parse(&entry.kind)
-                .map_err(|e| invalid("tracker", format!("`{}`: {e}", entry.name_or_kind())))?;
-            let source = tracker::Source {
-                kind,
-                name: entry
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| kind.label().to_string()),
-                secret: entry.secret.clone(),
-                repo: entry.repo.clone(),
-                org: entry.org.clone(),
-                project: entry.project.clone(),
-                site: entry.site.clone(),
-                email: entry.email.clone(),
-                query: entry.query.clone(),
-                filters: entry
-                    .filters
-                    .iter()
-                    .flatten()
-                    .map(|f| tracker::Filter {
-                        name: f.name.clone(),
-                        query: f.query.clone(),
-                    })
-                    .collect(),
-                on_publish: entry.on_publish.clone(),
-            };
-            if let Some(problem) = source.problem() {
-                return Err(invalid("tracker", problem));
-            }
-            if source.secret.trim().is_empty() {
-                return Err(invalid(
-                    "tracker",
-                    format!(
-                        "`{}` names no secret; put the credential in the server's \
-                         store and name it here",
-                        source.name
-                    ),
-                ));
-            }
-            // The inbox groups by tracker name and a session records which one
-            // it came from, so two entries sharing a name is one of them being
-            // written back to the wrong tracker.
-            if trackers.iter().any(|t| t.name == source.name) {
-                return Err(invalid(
-                    "tracker",
-                    format!("`{}` is the name of two trackers", source.name),
-                ));
-            }
-            trackers.push(source);
-        }
-
         Ok(Config {
             path: path.to_path_buf(),
             present: true,
@@ -369,7 +308,6 @@ impl Config {
             auto_update: raw.auto_update,
             skills: resolved_skills,
             mcp,
-            trackers,
             branch_prefix: raw.branch_prefix,
         })
     }
@@ -391,11 +329,6 @@ impl Config {
             .map(str::trim)
             .filter(|p| !p.is_empty())
             .unwrap_or(session::DEFAULT_BRANCH_PREFIX)
-    }
-
-    /// The trackers the inbox reads.
-    pub fn trackers(&self) -> &[tracker::Source] {
-        &self.trackers
     }
 
     /// The MCP servers a new session's agent is given.
@@ -440,41 +373,12 @@ struct Raw {
     /// `[[mcp]]` tables. An `Option` so `deny_unknown_fields` still rejects a
     /// misspelled `[[mcps]]` rather than reading it as none configured.
     mcp: Option<Vec<RawMcp>>,
-    /// `[[tracker]]` tables, for the same reason.
-    tracker: Option<Vec<RawTracker>>,
+    /// `[[tracker]]` tables, from when the server read the trackers. They are
+    /// the desktop application's now, kept on the machine it runs on; still
+    /// accepted here so an existing file keeps loading.
+    #[allow(dead_code)]
+    tracker: Option<serde::de::IgnoredAny>,
     branch_prefix: Option<String>,
-}
-
-/// One `[[tracker]]` table, before it is checked.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawTracker {
-    kind: String,
-    name: Option<String>,
-    secret: String,
-    repo: Option<String>,
-    org: Option<String>,
-    project: Option<String>,
-    site: Option<String>,
-    email: Option<String>,
-    query: Option<String>,
-    filters: Option<Vec<RawFilter>>,
-    on_publish: Option<String>,
-}
-
-/// One entry of a tracker's `filters` array.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawFilter {
-    name: String,
-    query: String,
-}
-
-impl RawTracker {
-    /// What to call it in an error message before the kind has been validated.
-    fn name_or_kind(&self) -> String {
-        self.name.clone().unwrap_or_else(|| self.kind.clone())
-    }
 }
 
 /// One `[[mcp]]` table, before it is checked. Its own struct so a misspelled key

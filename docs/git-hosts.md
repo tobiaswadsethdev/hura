@@ -1,13 +1,13 @@
 # Git hosts
 
 GitHub and Azure DevOps, detected from the repo URL rather than configured.
-`hurad publish` pushes the work branch and opens a pull request from *inside* the
-sandbox, so the host never holds the credential:
+Cloning, and pushing the work branch -- the agent's own `git push`, or the push
+button in the window's git pane -- happen *inside* the sandbox, so the host
+never holds the credential:
 
 ```sh
 hurad new --repo 'https://dev.azure.com/org/project/_git/repo' \
         --task "..." --provider azure-pat --provider claude-oauth
-hurad publish <name>          # -> https://dev.azure.com/org/project/_git/repo/pullrequest/10
 ```
 
 Credentials come from OpenShell providers, and the sandbox never sees them: the
@@ -23,10 +23,11 @@ openshell provider create --name azure-pat --type azure-devops-pat \
         --credential AZURE_DEVOPS_PAT     # env lookup; the token stays out of your shell history
 ```
 
-Pull requests on Azure DevOps are created with a plain REST call rather than the
-Azure CLI, so the image stays as it is. `readonly-explore` reaches neither
+Pull requests are the agent's to open -- `gh` on GitHub, an MCP server or the
+REST API on Azure DevOps, both of which the `feature-work` policy grants -- or
+yours, from the host's own web UI. `readonly-explore` reaches neither
 `git-receive-pack` nor `_apis`, so a session under it can read a repository and
-provably cannot publish to it.
+provably cannot push to it.
 
 The image the agent runs in, and the settings baked into it, are
 [sandbox-image.md](sandbox-image.md).

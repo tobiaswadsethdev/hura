@@ -22,7 +22,7 @@ has the decisions and the increments that got here; this is the map.
                 +-+---------------------------------+-+
                 |             hura-core                |   nothing here draws
                 |  ops, sessions, policy, events,     |
-                |  seed, publish, git, files, projects|
+                |  seed, git, files, projects         |
                 +-----------------+-------------------+
                                   |
                     +-------------+-------------+
@@ -47,7 +47,7 @@ Five crates, and an application:
 | | |
 | --- | --- |
 | `crates/openshell-client` | everything the rest of the tool knows about OpenShell, behind one trait. OpenShell is a fast-moving `0.0.x` project, so version churn lands in one file -- and the trait is what lets the gRPC API replace the subprocess later without touching callers |
-| `crates/hura-core` | everything `hura` *does*: sessions, policy, events, seeding, publishing. No renderer may appear in it, which is what lets something other than a terminal sit on top |
+| `crates/hura-core` | everything `hura` *does*: sessions, policy, events, seeding. No renderer may appear in it, which is what lets something other than a terminal sit on top |
 | `crates/hura-proto` | one definition of every message on the wire, so a server and a client cannot drift. Built on `hura-core`, because the types it carries are the core's own rather than a second set kept in step by hand |
 | `crates/hurad` | the whole Linux side: the clap CLI, and the server behind TLS, one token check and `/rpc`. Async only where it has to be -- everything it calls is blocking and goes to `spawn_blocking`. `crates/hura` carried the CLI and a ratatui TUI beside it until v0.4.0, when two front ends onto one set of sessions stopped earning their keep |
 | `crates/hura-client` | the client half: paired servers, and one certificate-pinned connection to each. Its own crate because the CLI and the desktop application both need it, and a webview cannot pin a certificate for itself |
@@ -74,8 +74,7 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `endpoints.rs` | the global allow and block lists applied to every new session |
 | `events.rs` | the allow/deny feed, merged and kept on disk per session |
 | `forge.rs` | which git host a session works against, derived from the repo URL |
-| `tracker.rs` | the tickets: GitHub, Azure DevOps and Jira over REST, and the comment and transition a publish writes back. The parsers are pure and tested against captured answers, because reading somebody else's JSON is the part that is easy to get wrong quietly |
-| `publish.rs` | push and open a pull request, both from inside the sandbox |
+| `tracker.rs` | reading tickets from GitHub, Azure DevOps and Jira over REST, with a token handed in -- the desktop application calls it with its own, and the server never does. The parsers are pure and tested against captured answers, because reading somebody else's JSON is the part that is easy to get wrong quietly |
 | `image.rs` | the sandbox image, with its whole build context embedded in the binary |
 | `toolchain.rs` | the toolchains, their image variants, and the registry each one opens |
 | `skills.rs` | packing host skills into a session, and the server-side library a client pushes its own into |
@@ -94,6 +93,7 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `pane.rs` | the markup the text panes share, so styling stays in one place |
 | `attach.rs` | *(hurad)* raw mode, and handing this terminal to the agent |
 | `lib.rs` | *(hura-client)* the servers this machine is paired with, pairing with one, and one request against one. `pair` is shared: `hurad connect` and the desktop application's servers screen are both it |
+| `trackers.rs` | *(hura-client)* the trackers this machine reads tickets from, and their tokens, kept owner-only beside the paired servers and never sent to one |
 | `pin.rs` | *(hura-client)* judging a server by its certificate's fingerprint and nothing else |
 | `http.rs` | *(hura-client)* enough HTTP/1.1 to ask an `hurad` a question |
 | `state.rs` | where secrets live: keys, tokens, and saved connections |

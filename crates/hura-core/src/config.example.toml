@@ -93,39 +93,6 @@
 # convention a tracker's commit hooks and your reviewers already look for.
 # branch_prefix = "tobias"
 
-# The trackers the tickets screen reads, one table each. Read on this machine, over
-# REST, with the credential in this machine's secret store -- named here, never
-# written here. `hurad secret <NAME>` stores it; `hura doctor` says when one is
-# missing, because a tracker with no credential produces a list that is
-# silently missing its rows.
-#
-# `on_publish` is where to move a ticket when its session is published, which
-# also comments the pull request onto it. The default query is "assigned to me
-# and not done"; `filters` replaces it with named JQL or WIQL queries, each a
-# section of the tickets screen (`query`, a single unnamed one, still works). See
-# docs/tickets.md.
-# [[tracker]]
-# kind = "jira"
-# site = "https://your-org.atlassian.net"
-# email = "you@example.com"
-# secret = "JIRA_API_TOKEN"
-# on_publish = "Ready for Review"
-# filters = [
-#   { name = "ready to start", query = "status = \"Ready\" AND assignee is EMPTY" },
-#   { name = "assigned to me", query = "assignee = currentUser() AND statusCategory != Done" },
-# ]
-#
-# [[tracker]]
-# kind = "azure-devops"
-# org = "your-org"
-# project = "YourProject"
-# secret = "AZURE_DEVOPS_PAT"
-#
-# [[tracker]]
-# kind = "github"
-# repo = "owner/name"
-# secret = "GITHUB_TOKEN"
-
 # Skills copied into every new session, by name or by path. A name is one of
 # your own, under ~/.claude/skills; anything with a `/` in it is a path, so a
 # skill living in a repository can be pointed at where it is.

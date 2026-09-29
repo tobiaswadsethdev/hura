@@ -29,18 +29,15 @@ import {
   Start,
   Stop,
   Store,
-  Tracker as TrackerGlyph,
 } from "./icons";
 import { Screen } from "./Screen";
 
 export function IntegrationsScreen({
   server,
   onClose,
-  onOpenTickets,
 }: {
   server: string;
   onClose: () => void;
-  onOpenTickets: () => void;
 }) {
   const [view, setView] = useState<View | null>(null);
   const [mine, setMine] = useState<string[]>([]);
@@ -151,20 +148,6 @@ export function IntegrationsScreen({
                 void act(`secret:${name}`, () => api.secret(server, name, value))
               }
             />
-          </Section>
-
-          {/* Trackers used to be a section here. They live with the tickets
-              they produce now, where a missing token is found by the person
-              looking at an empty list. */}
-          <Section
-            title="trackers"
-            hint="Where tickets come from. Set up on the tickets screen, beside the tickets themselves — the connection, the token and the filters."
-          >
-            <p>
-              <button className="quiet" onClick={onOpenTickets}>
-                <TrackerGlyph /> open tickets
-              </button>
-            </p>
           </Section>
 
           <Section
