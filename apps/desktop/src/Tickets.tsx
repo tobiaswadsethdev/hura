@@ -37,6 +37,7 @@ import type { TrackerFilter } from "./gen/TrackerFilter";
 import type { TrackerKind } from "./gen/TrackerKind";
 import {
   Comments,
+  Copy,
   Edit,
   Elsewhere,
   Forget,
@@ -47,7 +48,9 @@ import {
   Store,
   Tracker as TrackerGlyph,
 } from "./icons";
+import { copy, useContextMenu } from "./ContextMenu";
 import { Screen } from "./Screen";
+import { ago, TicketPanel } from "./Ticket";
 import { onTickets } from "./ticketNotify";
 import { Select } from "./Select";
 
@@ -81,6 +84,10 @@ export function TicketsScreen({
   // Which half of the screen is showing, once somebody has chosen; until
   // then it follows from whether there are any trackers. See `view` below.
   const [chosen, setView] = useState<"board" | "trackers" | null>(null);
+  // The ticket open beside the board, by tracker and key: a card in two
+  // columns is one ticket, and opening either lights both.
+  const [reading, setReading] = useState<Task | null>(null);
+  const isOpen = (t: Task) => reading?.tracker === t.tracker && reading.key === t.key;
 
   // The tickets are re-read after every change to a tracker, because every
   // change to a tracker -- a token stored, a filter edited -- is a change to
@@ -228,33 +235,47 @@ export function TicketsScreen({
         <Empty size="page" icon={TrackerGlyph} note="no filters answered — see trackers" />
       )}
       {columns.length > 0 && (
-        <div className="board scrollbar-sleek">
-          {columns.map(({ tracker, filter }) => {
-            const cards = tickets!.tasks.filter(
-              (t) => t.tracker === tracker && t.filter === filter,
-            );
-            return (
-              <section key={`${tracker}:${filter}`} className="board-column">
-                <header>
-                  <span className="board-filter">{filter}</span>
-                  {many && <span className="board-tracker">{tracker}</span>}
-                  <span className="board-count">{cards.length}</span>
-                </header>
-                <div className="board-cards scrollbar-sleek">
-                  {cards.length === 0 && <p className="hint">nothing matches</p>}
-                  {cards.map((task) => (
-                    <Card
-                      key={`${task.tracker}:${task.filter}:${task.id}`}
-                      task={task}
-                      projects={projects}
-                      currentProject={currentProject}
-                      onStart={onStart}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
+        <div className="board-area">
+          <div className="board scrollbar-sleek">
+            {columns.map(({ tracker, filter }) => {
+              const cards = tickets!.tasks.filter(
+                (t) => t.tracker === tracker && t.filter === filter,
+              );
+              return (
+                <section key={`${tracker}:${filter}`} className="board-column">
+                  <header>
+                    <span className="board-filter">{filter}</span>
+                    {many && <span className="board-tracker">{tracker}</span>}
+                    <span className="board-count">{cards.length}</span>
+                  </header>
+                  <div className="board-cards scrollbar-sleek">
+                    {cards.length === 0 && <p className="hint">nothing matches</p>}
+                    {cards.map((task) => (
+                      <Card
+                        key={`${task.tracker}:${task.filter}:${task.id}`}
+                        task={task}
+                        projects={projects}
+                        currentProject={currentProject}
+                        onStart={onStart}
+                        on={isOpen(task)}
+                        onOpen={task.kind === "jira" ? () => setReading(task) : undefined}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+          {reading && (
+            <TicketPanel
+              key={`${reading.tracker}:${reading.key}`}
+              task={reading}
+              projects={projects}
+              currentProject={currentProject}
+              onStart={onStart}
+              onClose={() => setReading(null)}
+            />
+          )}
         </div>
       )}
     </Screen>
@@ -268,27 +289,65 @@ function Card({
   projects,
   currentProject,
   onStart,
+  on,
+  onOpen,
 }: {
   task: Task;
   projects: Project[];
   currentProject: string | null;
   onStart: (project: Project, task: Task) => void;
+  /// Whether this ticket is the one open beside the board.
+  on: boolean;
+  /// Read it in the window. Absent for a tracker that is only read in the
+  /// browser so far, whose key links out instead.
+  onOpen?: () => void;
 }) {
+  const menu = useContextMenu();
+  const menuProps = menu(() => [
+    ...(onOpen ? [{ label: "Open", run: onOpen }] : []),
+    {
+      label: "Open in the browser",
+      icon: Elsewhere,
+      run: () => window.open(task.url, "_blank", "noreferrer"),
+    },
+    "separator",
+    { label: "Copy key", icon: Copy, hint: task.key, run: () => copy(task.key) },
+    { label: "Copy link", icon: Copy, run: () => copy(task.url) },
+  ]);
   const [where, setWhere] = useState(currentProject ?? projects[0]?.name ?? "");
   const project = projects.find((p) => p.name === where);
   const updated = ago(task.updated);
   const comments = task.comments ?? 0;
 
   return (
-    <article className="ticket-card">
+    <article
+      className={`ticket-card${onOpen ? " opens" : ""}${on ? " on" : ""}`}
+      // The whole card opens it, except the controls on it.
+      tabIndex={onOpen ? 0 : undefined}
+      aria-current={on ? "true" : undefined}
+      onClick={(e) => {
+        if (!onOpen) return;
+        if ((e.target as HTMLElement).closest("button, a, input, .select-trigger")) return;
+        onOpen();
+      }}
+      onContextMenu={menuProps.onContextMenu}
+      onKeyDown={(e) => {
+        if (onOpen && e.key === "Enter" && e.target === e.currentTarget) onOpen();
+        else menuProps.onKeyDown(e);
+      }}
+    >
       <div className="ticket-top">
-        {/* The key, linked: reading the ticket is still a browser's job. The
-            glyph after it is the window's one mark for "this leaves the
-            window". */}
-        <a className="ticket-key" href={task.url} target="_blank" rel="noreferrer" title={task.url}>
-          {task.key}
-          <Elsewhere />
-        </a>
+        {/* A Jira ticket is read here, so its key is a name; anything else is
+            still read in the browser, and its key is the link there. The
+            glyph is the window's one mark for "this leaves the window". */}
+        {onOpen ? (
+          <span className="ticket-key">{task.key}</span>
+        ) : (
+          <a className="ticket-key" href={task.url} target="_blank" rel="noreferrer" title={task.url}>
+            {task.key}
+            <Elsewhere />
+          </a>
+        )}
         {task.item_type && <span className="ticket-type">{task.item_type}</span>}
         <span className="ticket-status" title="status">
           {task.status}
@@ -336,23 +395,6 @@ function Card({
       </div>
     </article>
   );
-}
-
-/// How long ago a tracker's timestamp was, in the fewest words: `5m ago`,
-/// `3h ago`, `2d ago`. Null for anything it cannot read, which is then left
-/// off the card rather than shown wrong.
-function ago(stamp: string | null): string | null {
-  if (!stamp) return null;
-  // Jira writes `+0000` where the format wants `+00:00`, and WebKit is strict
-  // about it.
-  const when = Date.parse(stamp.replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
-  if (Number.isNaN(when)) return null;
-  const secs = Math.max(0, (Date.now() - when) / 1000);
-  if (secs < 60) return "just now";
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  if (secs < 86400 * 60) return `${Math.floor(secs / 86400)}d ago`;
-  return `${Math.floor(secs / (86400 * 30))}mo ago`;
 }
 
 /// What a tracker is pointed at, in one line.
