@@ -41,6 +41,7 @@ import {
   Binary,
   ChevronDown,
   ChevronRight,
+  Check,
   CircleAlert,
   CircleCheck,
   CircleQuestionMark,
@@ -180,6 +181,8 @@ export const Find = Search;
 /// "this leaves the window".
 export const Elsewhere = ExternalLink;
 export const Forget = Trash;
+/// The current choice in a dropdown.
+export const Chosen = Check;
 /// Putting a name, a path or an endpoint on the clipboard, from a menu.
 export const Copy = CopyGlyph;
 /// Opening a file's diff, from the change list's menu.

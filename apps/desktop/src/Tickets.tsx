@@ -49,6 +49,7 @@ import {
 } from "./icons";
 import { Screen } from "./Screen";
 import { onTickets } from "./ticketNotify";
+import { Select } from "./Select";
 
 export function TicketsScreen({
   server,
@@ -314,13 +315,13 @@ function Card({
       )}
       <div className="ticket-actions">
         {projects.length > 1 ? (
-          <select value={where} onChange={(e) => setWhere(e.target.value)}>
-            {projects.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            className="ticket-project"
+            aria-label="project to start it in"
+            value={where}
+            onChange={setWhere}
+            options={projects.map((p) => ({ value: p.name, label: p.name }))}
+          />
         ) : (
           <span className="hint">{projects[0]?.name ?? "no project yet"}</span>
         )}
@@ -661,13 +662,11 @@ function NewTracker({
       <h4>add a tracker</h4>
       <label>
         <span>tracker</span>
-        <select value={kind} onChange={(e) => setKind(e.target.value as TrackerKind)}>
-          {KINDS.map((k) => (
-            <option key={k.value} value={k.value}>
-              {k.name}
-            </option>
-          ))}
-        </select>
+        <Select
+          value={kind}
+          onChange={(v) => setKind(v as TrackerKind)}
+          options={KINDS.map((k) => ({ value: k.value, label: k.name }))}
+        />
       </label>
 
       {kind === "jira" && (

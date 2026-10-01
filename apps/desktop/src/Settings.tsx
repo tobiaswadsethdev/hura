@@ -32,6 +32,7 @@ import type { SettingsView } from "./gen/SettingsView";
 import { Settings as SettingsGlyph } from "./icons";
 import { DEFAULTS, LIMITS, type Prefs } from "./prefs";
 import { Screen } from "./Screen";
+import { Select } from "./Select";
 
 export function SettingsScreen({
   server,
@@ -191,22 +192,29 @@ export function SettingsScreen({
 
             <label>
               <span>policy</span>
-              <select
+              {/* The built-in default is an option rather than a blank row:
+                  "whatever hura chooses" is a real answer here, and the one
+                  that survives the default changing. A policy set to a path
+                  is shown as itself, since no template is it. */}
+              <Select
                 value={draft.policy ?? ""}
-                onChange={(e) => edit({ policy: text(e.target.value) })}
-              >
-                {/* The built-in default is an option rather than a blank
-                    row: "whatever hura chooses" is a real answer here, and
-                    the one that survives the default changing. */}
-                <option value="">
-                  {options ? `${options.default_policy} — the built-in default` : "the default"}
-                </option>
-                {(options?.policies ?? []).map((p) => (
-                  <option key={p.spec} value={p.spec}>
-                    {p.spec} — {p.summary}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => edit({ policy: text(v) })}
+                options={[
+                  {
+                    value: "",
+                    label: options ? options.default_policy : "the default",
+                    hint: "the built-in default",
+                  },
+                  ...(options?.policies ?? []).map((p) => ({
+                    value: p.spec,
+                    label: p.spec,
+                    hint: p.summary,
+                  })),
+                  ...(draft.policy && !(options?.policies ?? []).some((p) => p.spec === draft.policy)
+                    ? [{ value: draft.policy, label: draft.policy, hint: "from the config file" }]
+                    : []),
+                ]}
+              />
             </label>
             {/* A policy set to a YAML path is a perfectly good answer and one
                 no chooser can offer, so it is shown rather than silently
