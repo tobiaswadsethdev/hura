@@ -22,6 +22,7 @@ import type { NewOptions } from "./gen/NewOptions";
 import type { Picked } from "./gen/Picked";
 import type { Project } from "./gen/Project";
 import type { Task } from "./gen/Task";
+import { Select } from "./Select";
 
 export function NewWorktreeDialog({
   server,
@@ -252,13 +253,11 @@ function Form({
 
       <label>
         <span>policy</span>
-        <select value={policy} onChange={(e) => setPolicy(e.target.value)}>
-          {options.policies.map((p) => (
-            <option key={p.spec} value={p.spec}>
-              {p.spec} — {p.summary}
-            </option>
-          ))}
-        </select>
+        <Select
+          value={policy}
+          onChange={setPolicy}
+          options={options.policies.map((p) => ({ value: p.spec, label: p.spec, hint: p.summary }))}
+        />
       </label>
 
       <fieldset>

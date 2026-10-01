@@ -50,6 +50,7 @@ import type { Against } from "./gen/Against";
 import { keyOf, Tabs, type Tab } from "./Tabs";
 import { group, Tree } from "./Tree";
 import { UpdateBar } from "./Update";
+import { Select } from "./Select";
 
 /// Where in the window you are.
 ///
@@ -456,13 +457,13 @@ export default function App() {
             session started from a terminal has no project, so a full list of
             them read "5 worktrees in 0 projects". */}
         {servers && servers.length > 1 && (
-          <select value={server ?? ""} onChange={(e) => setServer(e.target.value)}>
-            {servers.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            className="server-pick"
+            aria-label="server"
+            value={server ?? ""}
+            onChange={setServer}
+            options={servers.map((s) => ({ value: s.name, label: s.name, hint: s.address }))}
+          />
         )}
         {/* The rate-limit windows are the *account's*, not this session's --
             two sessions on one account report the same numbers -- so they sit

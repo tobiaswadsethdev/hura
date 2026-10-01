@@ -125,7 +125,7 @@ html.broken-font-metrics :is(
    what these need, and the two pixels it puts the baseline out by are absorbed
    by the padding they already have rather than shaved off, which is why the
    rule stops at controls and does not go back on the document. */
-html.broken-font-metrics :is(input, textarea, select) { line-height: 1.5; }
+html.broken-font-metrics :is(input, textarea, .select-trigger) { line-height: 1.5; }
 
 body, html, #root {
   margin: 0;
@@ -225,15 +225,6 @@ body { user-select: none; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.app > header select {
-  background: var(--sunken);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 3px 7px;
-  font: inherit;
-  font-size: 12px;
 }
 
 /* Where the window goes. Five icons, no words -- `App.tsx` argues the case.
@@ -1430,6 +1421,76 @@ main { display: flex; flex: 1; min-height: 0; }
 .traffic-log .change-panel, .ep .change-panel { margin-left: 0; }
 .ep .change-panel { margin-left: 18px; }
 
+/* A dropdown: the trigger looks like the inputs around it -- the dialogs and
+   screens give it their sunken field -- and the list is the context menu's
+   panel, opened under it. See `Select.tsx` for why it is not a `<select>`. */
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 7px 3px 8px;
+  background: var(--sunken);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms;
+}
+.select-trigger:hover:not(:disabled) { border-color: var(--line-strong); color: var(--text); }
+.select-trigger[aria-expanded="true"] { border-color: var(--ring); }
+.select-trigger:focus-visible { outline: none; border-color: var(--ring); }
+.select-trigger:disabled { color: var(--dimmer); cursor: default; }
+.select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-chevron { flex: none; color: var(--dim); width: 12px; height: 12px; }
+:is(.dialog, .screen) .select-trigger { display: flex; }
+.app > header .select-trigger { padding: 3px 7px; }
+
+.select-list {
+  position: fixed;
+  z-index: 1000;
+  max-width: min(520px, calc(100vw - 12px));
+  max-height: min(320px, calc(100vh - 12px));
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  outline: none;
+}
+.select-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 6px;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+.select-list li.active { background: var(--selected); }
+.select-tick { width: 14px; flex: none; display: inline-flex; color: var(--text); }
+.select-label { flex: none; white-space: nowrap; }
+.select-list li.chosen .select-label { font-weight: 600; }
+.select-hint {
+  flex: 1;
+  min-width: 0;
+  margin-left: 12px;
+  color: var(--dimmer);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
 /* The context menu: one for the window, at the pointer. A raised panel like
    a dialog, with rows the height of the change list's so it reads as part of
    the same interface rather than the platform's. */
@@ -1543,7 +1604,7 @@ main { display: flex; flex: 1; min-height: 0; }
 }
 :is(.dialog, .screen) .quiet:hover { background: var(--hover); color: var(--text); }
 
-:is(.dialog, .screen) input, :is(.dialog, .screen) textarea, :is(.dialog, .screen) select {
+:is(.dialog, .screen) input, :is(.dialog, .screen) textarea, :is(.dialog, .screen) .select-trigger {
   background: var(--sunken);
   color: var(--text);
   border: 1px solid var(--line-strong);
@@ -1555,8 +1616,8 @@ main { display: flex; flex: 1; min-height: 0; }
 }
 /* An identifier, so monospace -- a repository URL, a branch, a secret's name.
    The textareas are prose and stay in the UI font. */
-:is(.dialog, .screen) :is(input, select) { font-family: var(--font-mono); }
-:is(.dialog, .screen) :is(input, textarea, select):focus {
+:is(.dialog, .screen) :is(input, .select-trigger) { font-family: var(--font-mono); }
+:is(.dialog, .screen) :is(input, textarea, .select-trigger):focus {
   outline: none;
   border-color: var(--ring);
 }
@@ -1723,25 +1784,9 @@ main { display: flex; flex: 1; min-height: 0; }
 .ticket-comments { display: inline-flex; align-items: center; gap: 3px; }
 .ticket-comments .lucide { width: 11px; height: 11px; }
 .ticket-actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-/* Flat, not the native control: one of these is on every card, and WebKit's
-   own is the loudest thing on the board. The chevron is drawn here because
-   `appearance: none` takes the native one with it. */
-.ticket-actions select {
-  flex: 1;
-  min-width: 0;
-  height: 26px;
-  padding: 0 22px 0 8px;
-  appearance: none;
-  -webkit-appearance: none;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: transparent
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23a1a1a1' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
-    no-repeat right 7px center;
-  color: var(--dim);
-  font-size: 11.5px;
-}
-.ticket-actions select:hover { border-color: var(--line-strong); color: var(--text); }
+/* The project to start a ticket in. Flat and quiet: one of these is on every
+   card. */
+.ticket-actions .ticket-project { flex: 1; min-width: 0; height: 26px; background: transparent; color: var(--dim); font-size: 11.5px; }
 .ticket-actions > .hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ticket-actions .start { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
 .ticket-actions .start .lucide { width: 12px; height: 12px; }
