@@ -27,15 +27,24 @@ with comments that go back to the agent, and git on the right.
 ![The hura workspace: the Hello-World and Spoon-Knife projects and their worktrees on the left, the agent's terminal in the middle showing git status in the sandbox, and the git pane on the right listing the two changed files](docs/images/workspace.png)
 
 **The isolation is not a claim, it is a pane.** Every allow and deny the gateway
-made, newest first, each tagged with the rule that decided it. At the top, what
-`curl` gets when it reaches for the very host `git` is cloning from:
+made, folded by where it was going: how often each endpoint was refused or let
+through, by which binaries, and whether the policy opens it now. Here `git` has
+been fetching from github.com all along, while `curl` reaching for the same host
+over plain HTTP, `node` and `curl` going for docs.rs, and Python going for PyPI
+were all refused:
 
-![The events feed for a session: a denied GET to github.com from /usr/bin/curl at the top, and below it the allowed git requests to github.com:443 that cloned the repository, each tagged with the github_git rule](docs/images/events.png)
+![The events pane for a session, grouped by endpoint: docs.rs:443 denied three times to node and curl, pypi.org:443 denied to python3.13, github.com:80 denied to curl, each marked not in policy, and github.com:443 allowed six times to git-remote-http and marked open now](docs/images/events.png)
+
+A denial is something to act on, not only to read. Right-click it to open the
+endpoint to the binaries that were refused -- for this session, or for every
+new session too -- or right-click an open one to block it:
+
+![The context menu on the denied docs.rs:443 row: allow in this session, allow in every new session too, allow… to choose binaries, and copy endpoint](docs/images/events-menu.png)
 
 The rules behind those decisions are what the policy pane shows -- each one an
 endpoint, the binaries it is granted to, and how much of it they get:
 
-![The policy pane: the feature-work template's rules, each naming an endpoint such as github.com:443 and the specific binaries allowed to reach it](docs/images/policy.png)
+![The policy pane: the feature-work template's rules, each naming an endpoint such as dev.azure.com:443 or api.anthropic.com:443 and the specific binaries allowed to reach it, with the method and path rules under the ones that have them](docs/images/policy.png)
 
 ## What it does
 
@@ -43,10 +52,11 @@ endpoint, the binaries it is granted to, and how much of it they get:
   works on `hura/<name>`; your worktree is never handed over.
 - **Credentials the sandbox never sees.** OpenShell providers hold the tokens
   and the gateway substitutes them into outgoing requests.
-- **Isolation you can look at.** The two panes above are one click away in the
-  window, and `hurad policy` / `hurad events` on the command line. A rule can be
-  widened for a running session from either. This is the part an ADE built on
-  git worktrees has no equivalent for.
+- **Isolation you can look at, and change.** The panes above are one click away
+  in the window, and `hurad policy` / `hurad events` on the command line. A
+  denied endpoint is opened -- for one binary, for this session or every new one
+  -- from a right-click on the denial, and an open one is blocked the same way.
+  This is the part an ADE built on git worktrees has no equivalent for.
 - **Several agents at once, without babysitting.** A session blocked on a
   permission prompt says so in the list -- and the window sends an OS
   notification the moment it starts waiting, so watching costs nothing at all.
