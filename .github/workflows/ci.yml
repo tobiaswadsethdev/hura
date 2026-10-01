@@ -60,6 +60,13 @@ jobs:
       # repository root, found no `tsconfig.json` there, and printed its own
       # help -- which is a failure that looks nothing like a type error. This is
       # now the same two commands run by hand in `apps/desktop`.
+      # `tauri build` refuses an npm package and its crate on different
+      # major.minor releases, but only the release build runs it -- so a
+      # mismatch passed here and failed v0.13.1 after it was tagged. The same
+      # check, from the lockfiles.
+      - name: Tauri versions agree
+        run: ./scripts/check-tauri-versions.sh
+
       - name: Desktop types
         working-directory: apps/desktop
         run: |
