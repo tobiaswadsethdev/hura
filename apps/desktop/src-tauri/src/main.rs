@@ -36,7 +36,7 @@ use std::sync::Mutex;
 
 use hura_client::{Incoming, Remote, Remotes, Sink};
 use hura_core::comments::{Comment, NewComment};
-use hura_core::events::Event;
+use hura_core::events::FeedEvent;
 use hura_core::files::{Dir, FileText};
 use hura_core::git::{Against, FileDiff, Status as GitStatus};
 use hura_core::ops::{NewOptions, NewSession, Picked, Poll};
@@ -216,12 +216,66 @@ fn policy(server: String, name: String) -> Result<PolicyView, Failed> {
     expect_reply!(reply, Reply::Policy(view) => view, "a policy")
 }
 
+/// The feed, each event with the endpoint it was about.
+///
+/// The target is derived here, on this side of the bridge, rather than sent by
+/// the server: it is a reading of the subject, and reading it with this build's
+/// parser means an older `hurad` still gets the allow and block buttons.
 #[tauri::command(async)]
-fn events(server: String, name: String) -> Result<Vec<Event>, Failed> {
+fn events(server: String, name: String) -> Result<Vec<FeedEvent>, Failed> {
     let reply = remote(&server)?
         .call(Request::Events { name })
         .map_err(to_message)?;
-    expect_reply!(reply, Reply::Events { events } => events, "an event feed")
+    let events = expect_reply!(reply, Reply::Events { events } => events, "an event feed")?;
+    Ok(events.into_iter().map(FeedEvent::from).collect())
+}
+
+/// Open an endpoint to a session, and to every new one when `everywhere`.
+/// Answers with the policy re-read.
+#[tauri::command(async)]
+fn allow(
+    server: String,
+    name: String,
+    endpoint: String,
+    binaries: Vec<String>,
+    everywhere: bool,
+) -> Result<PolicyView, Failed> {
+    let reply = remote(&server)?
+        .call(Request::Allow {
+            name,
+            endpoint,
+            binaries,
+            everywhere,
+        })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Policy(view) => view, "a policy")
+}
+
+/// Close an endpoint to a session, and to every new one when `everywhere`.
+#[tauri::command(async)]
+fn block(
+    server: String,
+    name: String,
+    endpoint: String,
+    everywhere: bool,
+) -> Result<PolicyView, Failed> {
+    let reply = remote(&server)?
+        .call(Request::Block {
+            name,
+            endpoint,
+            everywhere,
+        })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Policy(view) => view, "a policy")
+}
+
+/// Take an endpoint off the global lists. Answers with this session's policy.
+#[tauri::command(async)]
+fn unlist(server: String, name: String, endpoint: String) -> Result<PolicyView, Failed> {
+    let reply = remote(&server)?
+        .call(Request::Unlist { name, endpoint })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Policy(view) => view, "a policy")
 }
 
 #[tauri::command(async)]
@@ -778,6 +832,9 @@ fn main() {
             poll,
             policy,
             events,
+            allow,
+            block,
+            unlist,
             diff,
             git_status,
             git,

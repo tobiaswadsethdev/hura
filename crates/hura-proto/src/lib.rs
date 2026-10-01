@@ -115,6 +115,30 @@ pub enum Request {
     Policy { name: String },
     /// The allow/deny feed, newest first.
     Events { name: String },
+    /// Open an endpoint to a running session for the named binaries -- what
+    /// the events pane offers beside a denial. `everywhere` puts it on the
+    /// global allow list as well, so every new session starts with it.
+    ///
+    /// Answers with [`Reply::Policy`], re-read: the gateway may have folded the
+    /// change into a rule of its own naming, and the pane should say what the
+    /// sandbox has rather than what was asked for.
+    Allow {
+        name: String,
+        endpoint: String,
+        binaries: Vec<String>,
+        everywhere: bool,
+    },
+    /// Remove an endpoint from a running session, for every binary.
+    /// `everywhere` puts it on the global block list as well. Answers with
+    /// [`Reply::Policy`].
+    Block {
+        name: String,
+        endpoint: String,
+        everywhere: bool,
+    },
+    /// Take an endpoint off the global lists. The session is named only so the
+    /// answer can be its [`Reply::Policy`]; its sandbox is not touched.
+    Unlist { name: String, endpoint: String },
     /// The projects on this server: the repositories someone has said they are
     /// working on, which is what the worktrees are grouped under.
     Projects,
@@ -296,6 +320,9 @@ impl Request {
             | Request::Diff { name }
             | Request::Policy { name }
             | Request::Events { name }
+            | Request::Allow { name, .. }
+            | Request::Block { name, .. }
+            | Request::Unlist { name, .. }
             | Request::GitStatus { name }
             | Request::GitDiff { name, .. }
             | Request::Git { name, .. }
@@ -565,6 +592,23 @@ mod tests {
             (Request::Diff { name: "a".into() }, "diff"),
             (Request::Policy { name: "a".into() }, "policy"),
             (Request::Events { name: "a".into() }, "events"),
+            (
+                Request::Allow {
+                    name: "a".into(),
+                    endpoint: "docs.rs:443".into(),
+                    binaries: vec!["/usr/bin/node".into()],
+                    everywhere: false,
+                },
+                "allow",
+            ),
+            (
+                Request::Block {
+                    name: "a".into(),
+                    endpoint: "docs.rs:443".into(),
+                    everywhere: true,
+                },
+                "block",
+            ),
             (Request::Integrations, "integrations"),
             (
                 Request::Mcp {

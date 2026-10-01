@@ -223,6 +223,56 @@ is the reason this is worth building rather than adopting an ADE built on git
 worktrees, and a denial you have to go looking for is one you will not find. It
 costs width the editor would otherwise have; that is the trade.
 
+## The traffic pane
+
+The dock's **events** view is the allow/deny feed, re-read on the window's
+refresh interval, in two readings:
+
+- **endpoints** folds it by destination -- `docs.rs:443`, how many times it was
+  denied and allowed, by which binaries, whether the policy opens it *now*, and
+  which global list it is on. Expanding a row shows its recent decisions.
+- **log** is the feed in order: time, verdict, what it was about, and why.
+
+The chips above both filter to all, denied or allowed.
+
+Right-click an endpoint (or a log line naming one) to change what the session
+may reach:
+
+- **Allow in this session** opens it, for full access, to the binaries that
+  were refused -- applied at once, and the row flips to *open now*.
+- **Allow in every new session too** does the same and puts it on the global
+  allow list.
+- **Allow…** is there when more than one binary was refused, to choose which.
+- **Block…** removes an endpoint the policy opens, for **every** binary in the
+  sandbox -- git included, if it is git's -- so it asks under the row first,
+  with the same *every new session too* option.
+
+The policy pane's own endpoints and list entries have menus as well: block an
+endpoint, take an entry off a list. See [policy.md](policy.md#acting-on-a-denial)
+for what each change means at the gateway.
+
+## Actions are in menus
+
+Anything you can do to a row that is not the reason you clicked it is in its
+**context menu**: right-click, or the Menu key or Shift+F10 on a focused row,
+then the arrows and Enter. A row of icons beside every row is a row you read
+past, and it put destroy, discard and block one stray click from the row you
+were only trying to select. The menu names each action in words, and the
+dangerous ones are red and last.
+
+| Row | Menu |
+|---|---|
+| project | new worktree, copy repository URL, forget project |
+| worktree | copy name, copy branch, destroy worktree |
+| changed file | open diff, stage or unstage, copy path, discard changes |
+| file | open or expand, copy path, copy name |
+| endpoint, log line | allow, block, copy endpoint, copy line |
+| policy endpoint, list entry | block, remove from the list, copy |
+
+Two actions stay on the row as well, shown on hover: **+** on a project, because
+starting a worktree has no other door, and stage/unstage on a changed file,
+because it is done forty times an hour.
+
 ## Where it goes, and why it is all icons
 
 The window has five destinations in the top-right of the header: new project,
@@ -499,21 +549,18 @@ been true for an hour.
 Two removals, deliberately not the same control and deliberately not next to
 each other.
 
-**Forget a project** -- the icon beside its name -- is bookkeeping. The project
+**Forget a project** -- in its context menu -- is bookkeeping. The project
 is a repository someone said they were working on; forgetting it takes the
 grouping away and **leaves every worktree in it alive**, which is why it is
 allowed to be one click with no question. They reappear grouped by their clone
 URL at the bottom of the tree, because a session is a real thing with an agent
 in it and no amount of bookkeeping removes one.
 
-**Destroy a worktree** -- the icon on the row, shown when the row is hovered or
-focused -- is the one that ends something. The sandbox goes, and with it
-anything the agent has not pushed. It asks first, and says so.
-
-The row's control is in a gutter the card reserves rather than floating over
-it. Over the card it would cover the age and the diff stat on exactly the rows
-worth acting on; taking width only on hover would reflow the row as the pointer
-arrived, which is how a destroy button gets pressed by accident.
+**Destroy a worktree** -- in the row's context menu, in red at the bottom -- is
+the one that ends something. The sandbox goes, and with it anything the agent
+has not pushed. It asks first, and says so. It used to be an icon on the card,
+revealed on hover; a menu is a deliberate gesture, and the card gets its width
+back.
 
 `hurad rm <name>` is the same operation from the command line, and it is the same
 function underneath -- so a record cannot be left behind by one that the other
@@ -630,7 +677,8 @@ opens its diff as a tab -- Monaco's side-by-side editor, `HEAD` against the
 index for something staged and the index against the working copy for something
 not, which is the distinction staging exists for.
 
-Staging, unstaging, discarding, commit, push, pull and fetch. `push` uses `-u`
+Staging, unstaging, discarding, commit, push, pull and fetch. Stage and unstage
+are on the row; discarding is in the row's context menu. `push` uses `-u`
 every time, not only the first: it is a no-op once set, and without it a branch
 that has never been pushed has no upstream to report ahead and behind against
 afterwards -- which is why the button says **publish** until there is one.

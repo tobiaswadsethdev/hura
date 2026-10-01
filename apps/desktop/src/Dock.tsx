@@ -54,6 +54,7 @@ export function Dock({
   server,
   session,
   usage,
+  refreshMs,
   onOpenFile,
   onOpenDiff,
 }: {
@@ -65,6 +66,8 @@ export function Dock({
   /// What this session has spent, from the status channel. `null` until its
   /// agent's status line has run once.
   usage: Usage | null;
+  /// The window's refresh interval, which the events feed re-reads on.
+  refreshMs: number;
   onOpenFile: (path: string) => void;
   onOpenDiff: (path: string, against: Against) => void;
 }) {
@@ -107,7 +110,14 @@ export function Dock({
         )}
         {view === "facts" && <Facts session={session} usage={usage} />}
         {view === "policy" && <PolicyPane server={server} name={session.name} />}
-        {view === "events" && <EventsPane server={server} name={session.name} />}
+        {view === "events" && (
+          <EventsPane
+            key={session.name}
+            server={server}
+            name={session.name}
+            refreshMs={refreshMs}
+          />
+        )}
       </div>
     </aside>
   );

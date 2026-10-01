@@ -12,9 +12,10 @@
 import { useEffect, useState } from "react";
 
 import { api, messageOf } from "./api";
+import { copy, useContextMenu } from "./ContextMenu";
 import type { Entry } from "./gen/Entry";
 import { Empty, Waiting } from "./Empty";
-import { Chevron, FileIcon, Folder, NoFiles } from "./icons";
+import { Chevron, Copy, FileIcon, Folder, NoFiles } from "./icons";
 
 export function FileTree({
   server,
@@ -54,6 +55,7 @@ function Level({
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const menu = useContextMenu();
 
   useEffect(() => {
     let live = true;
@@ -66,6 +68,18 @@ function Level({
       live = false;
     };
   }, [server, name, path]);
+
+  const activate = (dir: boolean, full: string) => {
+    if (!dir) return onOpen(full);
+    setOpen((s) => {
+      const next = new Set(s);
+      // Collapsing forgets the level, so reopening re-reads it -- the agent is
+      // still editing, and a tree that cached what was there an hour ago would
+      // be a tree of what used to be.
+      next.has(full) ? next.delete(full) : next.add(full);
+      return next;
+    });
+  };
 
   if (error) return <p className="error">{error}</p>;
   // Indented to the level being read, so the wait appears where the
@@ -87,17 +101,16 @@ function Level({
             <button
               className={`entry${e.dir ? " dir" : ""}`}
               style={{ paddingLeft: depth * 12 + 8 }}
-              onClick={() => {
-                if (!e.dir) return onOpen(full);
-                setOpen((s) => {
-                  const next = new Set(s);
-                  // Collapsing forgets the level, so reopening re-reads it --
-                  // the agent is still editing, and a tree that cached what was
-                  // there an hour ago would be a tree of what used to be.
-                  next.has(full) ? next.delete(full) : next.add(full);
-                  return next;
-                });
-              }}
+              onClick={() => activate(e.dir, full)}
+              {...menu(() => [
+                {
+                  label: e.dir ? (isOpen ? "Collapse" : "Expand") : "Open",
+                  run: () => activate(e.dir, full),
+                },
+                "separator",
+                { label: "Copy path", icon: Copy, hint: full, run: () => copy(full) },
+                { label: "Copy name", icon: Copy, run: () => copy(e.name) },
+              ])}
             >
               <span className="twist">{e.dir && <Chevron open={isOpen} />}</span>
               {e.dir ? <Folder open={isOpen} /> : <FileIcon name={e.name} />}

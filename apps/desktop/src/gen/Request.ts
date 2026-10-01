@@ -14,7 +14,7 @@ import type { SkillUpload } from "./SkillUpload";
  * Tagged by `op` rather than positionally, so a message stays readable in a log
  * and an unknown variant is a name rather than an index.
  */
-export type Request = { "op": "ls" } | { "op": "poll", name: string, } | { "op": "diff", name: string, } | { "op": "policy", name: string, } | { "op": "events", name: string, } | { "op": "projects" } | { "op": "new-project" } & NewProject | { "op": "forget-project", name: string, } | { "op": "repos" } | { "op": "inspect", path: string, 
+export type Request = { "op": "ls" } | { "op": "poll", name: string, } | { "op": "diff", name: string, } | { "op": "policy", name: string, } | { "op": "events", name: string, } | { "op": "allow", name: string, endpoint: string, binaries: Array<string>, everywhere: boolean, } | { "op": "block", name: string, endpoint: string, everywhere: boolean, } | { "op": "unlist", name: string, endpoint: string, } | { "op": "projects" } | { "op": "new-project" } & NewProject | { "op": "forget-project", name: string, } | { "op": "repos" } | { "op": "inspect", path: string, 
 /**
  * The branch to measure against; `None` means the checkout's own.
  */

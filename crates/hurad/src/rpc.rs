@@ -37,6 +37,31 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
         }),
         Request::Policy { name } => with_session(&name, |s| policy(backends.for_session(s), s)),
         Request::Events { name } => with_session(&name, |s| events(backends.for_session(s), s)),
+        Request::Allow {
+            name,
+            endpoint,
+            binaries,
+            everywhere,
+        } => with_session(&name, |s| {
+            let backend = backends.for_session(s);
+            let revision = ops::allow(backend, s, &endpoint, &binaries, everywhere)
+                .map_err(Failure::failed)?;
+            Ok(policy_view(&revision, s))
+        }),
+        Request::Block {
+            name,
+            endpoint,
+            everywhere,
+        } => with_session(&name, |s| {
+            let backend = backends.for_session(s);
+            let revision =
+                ops::block(backend, s, &endpoint, everywhere).map_err(Failure::failed)?;
+            Ok(policy_view(&revision, s))
+        }),
+        Request::Unlist { name, endpoint } => with_session(&name, |s| {
+            ops::unlist(&endpoint).map_err(Failure::failed)?;
+            policy(backends.for_session(s), s)
+        }),
         Request::GitStatus { name } => with_session(&name, |s| {
             git::status(backends.for_session(s), s)
                 .map(|status| Reply::Git {
@@ -413,11 +438,15 @@ fn ls(backends: &Backends) -> Outcome {
 /// The policy pane's contents.
 fn policy(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
     let revision = ops::policy(backend, session).map_err(Failure::gateway)?;
-    Ok(Reply::Policy(policy::View::of(
-        &revision,
+    Ok(policy_view(&revision, session))
+}
+
+fn policy_view(revision: &openshell_client::PolicyRevision, session: &Session) -> Reply {
+    Reply::Policy(policy::View::of(
+        revision,
         session.policy.as_deref(),
         &lists(),
-    )))
+    ))
 }
 
 fn events(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {

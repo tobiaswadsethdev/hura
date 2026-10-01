@@ -53,6 +53,12 @@ where the *specific* answer lives -- `hurad events <name>` names the endpoint an
 the binary of each denial, and the global lists are what turn one into a
 standing rule.
 
+**From the desktop**, right-click an endpoint in the events pane: *allow in this
+session*, *allow in every new session too*, or *block…*. Each is the live
+`policy update` below, followed -- only once it has landed -- by a write to the
+global list when every new session is asked for, and each answers with the
+policy re-read. See [desktop.md](desktop.md#the-traffic-pane).
+
 A session-level change goes through the same live `policy update` that
 `--widen` uses. Recording the endpoint in a global list applies it to every
 `hurad new` from then on:
@@ -68,10 +74,13 @@ from then on rather than to one already running.
 
 An allow binds the endpoint to **the binary the event named**, not to the
 sandbox: allowing `github.com:443` off a denied `curl` grants it to curl and
-leaves git's own rule alone. That is also why an event decided by an L7 rule --
-`GET httpbin.org:443/ip`, which names a method and a path and no binary -- can be
-blocked but not allowed: an endpoint rule with no binaries grants nothing, and
-issuing one would report a change that did nothing.
+leaves git's own rule alone. An event decided by an L7 rule --
+`GET httpbin.org:443/ip`, which names a method and a path and no binary -- has
+no binary of its own to bind to, so the desktop offers the binaries the rules
+already sending there name: full access for them is what lifts a path
+restriction, since access and rules together grant the union. With no rule
+naming the endpoint there is nothing to offer, and no allow is issued: an
+endpoint rule with no binaries grants nothing.
 
 **A block is a removal, not a veto.** OpenShell denies by default and has no
 deny-that-outranks-an-allow at L4, so blocking `pastebin.com` is a no-op -- it was

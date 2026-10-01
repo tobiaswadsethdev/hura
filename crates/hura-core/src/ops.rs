@@ -11,6 +11,7 @@ use openshell_client::{PolicyRevision, PolicyUpdate};
 
 use crate::backend::{Backend, Backends, Torn};
 use crate::comments;
+use crate::endpoints;
 use crate::events;
 use crate::forge;
 use crate::mcp;
@@ -1067,6 +1068,75 @@ pub fn repolicy(
         .policy_update(session, update)
         .map_err(|e| format!("policy update failed: {e}"))?;
     policy(backend, session)
+}
+
+/// Open an endpoint to a running session for the named binaries, and put it
+/// on the global allow list too when `everywhere`.
+///
+/// The live change first, and the list only once it has landed: an entry that
+/// promised every new session something this one was just refused would be a
+/// list the next create fails on.
+pub fn allow(
+    backend: &dyn Backend,
+    session: &Session,
+    endpoint: &str,
+    binaries: &[String],
+    everywhere: bool,
+) -> Result<PolicyRevision, String> {
+    let endpoint = checked_endpoint(endpoint)?;
+    // An endpoint rule with no binaries grants nothing, so it is refused here
+    // rather than issued and reported as done.
+    if binaries.is_empty() {
+        return Err(format!("nothing named to allow {endpoint} for"));
+    }
+    if let Some(b) = binaries.iter().find(|b| !b.starts_with('/')) {
+        return Err(format!(
+            "`{b}` is not an absolute path, which is what the gateway matches"
+        ));
+    }
+    let rev = repolicy(
+        backend,
+        session,
+        &endpoints::allow_update(&endpoint, binaries),
+    )?;
+    if everywhere {
+        edit_lists(|l| l.allow(&endpoint, binaries.to_vec()))?;
+    }
+    Ok(rev)
+}
+
+/// Remove an endpoint from a running session, for every binary, and put it on
+/// the global block list too when `everywhere`.
+pub fn block(
+    backend: &dyn Backend,
+    session: &Session,
+    endpoint: &str,
+    everywhere: bool,
+) -> Result<PolicyRevision, String> {
+    let endpoint = checked_endpoint(endpoint)?;
+    let rev = repolicy(backend, session, &endpoints::block_update(&endpoint))?;
+    if everywhere {
+        edit_lists(|l| l.block(&endpoint))?;
+    }
+    Ok(rev)
+}
+
+/// Take an endpoint off the global lists. No sandbox is touched.
+pub fn unlist(endpoint: &str) -> Result<(), String> {
+    edit_lists(|l| {
+        l.forget(endpoint);
+    })
+}
+
+/// The one shape an endpoint may take on its way into a policy change.
+fn checked_endpoint(endpoint: &str) -> Result<String, String> {
+    events::endpoint(endpoint).ok_or_else(|| format!("`{endpoint}` is not a host:port"))
+}
+
+fn edit_lists(f: impl FnOnce(&mut endpoints::Lists)) -> Result<(), String> {
+    let path = endpoints::Lists::default_path();
+    endpoints::update_at(&path, path.with_extension("lock"), f)
+        .map_err(|e| format!("could not write the endpoint lists: {e}"))
 }
 
 /// The shell that attaches to a session's agent, for both `hura attach` and the
