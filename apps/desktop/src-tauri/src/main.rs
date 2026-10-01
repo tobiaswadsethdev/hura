@@ -808,7 +808,12 @@ fn main() {
         // at is a badge nobody sees. The window decides *when* -- see
         // `App.tsx` -- because it is the thing that knows which states it has
         // already seen.
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_notification::init())
+        // Links. A webview's `target="_blank"` goes nowhere in a Tauri window:
+        // there is no browser behind it to hand a new tab to. This is what
+        // gives one to the system's -- see `src/open.ts`, and the capability,
+        // which lets it open web and mail addresses and nothing else.
+        .plugin(tauri_plugin_opener::init());
 
     // Replacing itself, on the one platform that ships an installer to replace.
     // Checking and asking are the window's job -- see `src/Update.tsx`; these
