@@ -186,14 +186,15 @@ pub fn forget_kept(session: &str) {
 /// names a host, a port and usually the binary that reached for it, which is
 /// exactly the shape `policy update` takes. Everything else in the pane is
 /// prose.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Target {
     /// `pastebin.com:443`. The unit `--add-endpoint` and `--remove-endpoint`
     /// both address, so the whole feature is expressed in these.
     pub endpoint: String,
-    /// The kernel-resolved path the connection came from, when the decision was
-    /// an L4 one. Absent for an L7 rule, which judges a method and a path and
-    /// never names a binary -- and absent is load-bearing: an endpoint rule with
+    /// The kernel-resolved path the connection came from, when the line names
+    /// one. Absent for a bare L7 decision, which judges a method and a path --
+    /// and absent is load-bearing: an endpoint rule with
     /// no binaries grants nothing, so an allow with nothing to bind to is
     /// refused rather than issued.
     pub binary: Option<String>,
@@ -218,23 +219,20 @@ impl Event {
     pub fn target(&self) -> Option<Target> {
         let subject = self.subject.trim();
 
-        // `/usr/bin/curl(79) -> pastebin.com:443`
+        // `/usr/bin/curl(79) -> pastebin.com:443`, and the L7 decision with a
+        // binary in front of it, `/usr/bin/curl(5180) -> GET github.com/`.
         if let Some((left, right)) = subject.split_once(" -> ") {
+            let right = request(right).unwrap_or(right);
             return Some(Target {
-                endpoint: host_port(right)?,
+                endpoint: self.endpoint_of(right)?,
                 binary: binary_path(left),
             });
         }
 
         // `GET httpbin.org:443/ip`
-        let mut words = subject.split_whitespace();
-        if let (Some(method), Some(rest), None) = (words.next(), words.next(), words.next())
-            && !method.is_empty()
-            && method.chars().all(|c| c.is_ascii_uppercase())
-        {
-            let authority = rest.split('/').next().unwrap_or(rest);
+        if let Some(authority) = request(subject) {
             return Some(Target {
-                endpoint: host_port(authority)?,
+                endpoint: self.endpoint_of(authority)?,
                 binary: None,
             });
         }
@@ -243,6 +241,28 @@ impl Event {
             endpoint: host_port(subject)?,
             binary: None,
         })
+    }
+
+    /// `host:port` from an authority, or from the reason when the authority
+    /// left the port out.
+    ///
+    /// A plain-HTTP request is logged as `GET github.com/`, with the port only
+    /// in the reason -- `endpoint github.com:80 is not allowed by any policy`.
+    /// The reason is only believed when it names the same host, so a sentence
+    /// about some other endpoint cannot redirect the change.
+    fn endpoint_of(&self, authority: &str) -> Option<String> {
+        if let Some(endpoint) = host_port(authority) {
+            return Some(endpoint);
+        }
+        let named = self
+            .reason
+            .as_deref()?
+            .split_whitespace()
+            .skip_while(|w| *w != "endpoint")
+            .nth(1)?;
+        let endpoint = host_port(named)?;
+        let host = endpoint.rsplit_once(':')?.0;
+        (host == authority).then_some(endpoint)
     }
 
     /// What makes two events the same event, for anything that has to keep hold
@@ -254,6 +274,45 @@ impl Event {
     pub fn key(&self) -> (u64, String, String) {
         (self.at, self.class.clone(), self.subject.clone())
     }
+}
+
+/// The authority of `GET httpbin.org:443/ip`: exactly two words, an uppercase
+/// method first, and the path dropped. Anything else is prose.
+fn request(s: &str) -> Option<&str> {
+    let mut words = s.split_whitespace();
+    match (words.next(), words.next(), words.next()) {
+        (Some(method), Some(rest), None) if method.chars().all(|c| c.is_ascii_uppercase()) => {
+            Some(rest.split('/').next().unwrap_or(rest))
+        }
+        _ => None,
+    }
+}
+
+/// An event and the endpoint it was about, which is what a client needs to
+/// offer an allow or a block beside it.
+///
+/// A wrapper rather than a field on [`Event`], because events are persisted
+/// and the target is derived: kept on disk it would be a second copy of the
+/// subject that a better parser could never correct.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FeedEvent {
+    #[serde(flatten)]
+    pub event: Event,
+    pub target: Option<Target>,
+}
+
+impl From<Event> for FeedEvent {
+    fn from(event: Event) -> Self {
+        let target = event.target();
+        FeedEvent { event, target }
+    }
+}
+
+/// `host:port`, normalised, or nothing. What an endpoint from a client has to
+/// pass before it becomes a policy change.
+pub fn endpoint(s: &str) -> Option<String> {
+    host_port(s)
 }
 
 /// `host:port`, or nothing.
@@ -805,6 +864,30 @@ mod tests {
                 binary: None,
             })
         );
+    }
+
+    /// A plain-HTTP request carries the binary on the left and no port on the
+    /// right; the port is in the reason. Seen on 0.0.110 as `curl
+    /// http://github.com/`.
+    #[test]
+    fn a_request_with_a_binary_takes_its_port_from_the_reason() {
+        let mut e = ev(1, "/usr/bin/curl(5180) -> GET github.com/");
+        e.reason = Some("endpoint github.com:80 is not allowed by any policy".into());
+        assert_eq!(
+            e.target(),
+            Some(Target {
+                endpoint: "github.com:80".into(),
+                binary: Some("/usr/bin/curl".into()),
+            })
+        );
+
+        // A reason about another host is not believed.
+        e.reason = Some("endpoint pastebin.com:80 is not allowed by any policy".into());
+        assert_eq!(e.target(), None);
+
+        // With the port in the authority, the reason is not needed.
+        let e = ev(1, "/usr/bin/node(7) -> GET docs.rs:443/tokio");
+        assert_eq!(e.target().unwrap().endpoint, "docs.rs:443");
     }
 
     /// A bare authority is how the supervisor's own connections are logged, and

@@ -13,12 +13,15 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api, messageOf, type GitAnswer } from "./api";
 import { useConfirm } from "./Confirm";
+import { copy, useContextMenu } from "./ContextMenu";
 import type { Against } from "./gen/Against";
 import type { Change } from "./gen/Change";
 import type { ChangedFile } from "./gen/ChangedFile";
 import { Empty, Waiting } from "./Empty";
 import {
   Clean,
+  Copy,
+  Diff,
   Fetch,
   FileIcon,
   Minus,
@@ -229,6 +232,7 @@ function Section({
   action: { icon: React.ReactNode; title: string; run: (path: string) => void };
   discard?: (path: string) => void;
 }) {
+  const menu = useContextMenu();
   if (entries.length === 0) return null;
   return (
     <section className="changes">
@@ -236,17 +240,41 @@ function Section({
         {title} <span className="count">{entries.length}</span>
       </h3>
       {entries.map((e) => (
-        <div className="change" key={`${title}:${e.path}`}>
+        <div
+          className="change"
+          key={`${title}:${e.path}`}
+          // Everything about the file, in words. The one action that stays on
+          // the row is the one you do forty times an hour; discarding throws
+          // work away and lives here, behind a deliberate gesture.
+          {...menu(() => [
+            { label: "Open diff", icon: Diff, run: () => onOpen(e.path) },
+            {
+              label: action.title === "stage" ? "Stage" : "Unstage",
+              icon: action.title === "stage" ? Plus : Minus,
+              disabled: busy,
+              run: () => action.run(e.path),
+            },
+            "separator",
+            { label: "Copy path", icon: Copy, hint: e.path, run: () => copy(e.path) },
+            ...(discard
+              ? [
+                  "separator" as const,
+                  {
+                    label: "Discard changes…",
+                    icon: Revert,
+                    danger: true,
+                    disabled: busy,
+                    run: () => discard(e.path),
+                  },
+                ]
+              : []),
+          ])}
+        >
           <button className="open" onClick={() => onOpen(e.path)} title={e.path}>
             <span className={`mark ${e.change}`}>{MARK[e.change]}</span>
             <FileIcon name={e.path} />
             <span className="path">{e.path}</span>
           </button>
-          {discard && (
-            <button className="act" disabled={busy} title="discard" onClick={() => discard(e.path)}>
-              <Revert aria-label="discard" />
-            </button>
-          )}
           <button className="act" disabled={busy} title={action.title} onClick={() => action.run(e.path)}>
             {action.icon}
           </button>

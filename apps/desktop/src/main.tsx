@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { LucideProvider } from "lucide-react";
 
 import App from "./App";
+import { MenuProvider } from "./ContextMenu";
 import { markUntrustedMetrics } from "./charSize";
 import { ICON_SIZE, ICON_STROKE } from "./icons";
 import "./style.css";
@@ -20,7 +21,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         stroke a pixel count rather than a ratio, so the handful of icons that
         pass their own `size` stay the same weight as the rest. */}
     <LucideProvider size={ICON_SIZE} strokeWidth={ICON_STROKE} absoluteStrokeWidth>
-      <App />
+      <MenuProvider>
+        <App />
+      </MenuProvider>
     </LucideProvider>
   </React.StrictMode>,
 );

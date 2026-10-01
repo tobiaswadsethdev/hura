@@ -135,6 +135,17 @@ impl Lists {
         }
     }
 
+    /// Take an endpoint off whichever list it is on. Whether it was on one.
+    ///
+    /// Only the lists change: a live sandbox keeps what the entry gave it, the
+    /// same way a new entry does not reach back into sessions already running.
+    pub fn forget(&mut self, endpoint: &str) -> bool {
+        let before = self.allow.len() + self.block.len();
+        self.allow.retain(|a| a.endpoint != endpoint);
+        self.block.retain(|e| e != endpoint);
+        before != self.allow.len() + self.block.len()
+    }
+
     /// The policy updates that impose these lists on a fresh sandbox.
     ///
     /// Usually one. More only when the allow list names endpoints with
@@ -393,6 +404,18 @@ mod tests {
             updates[0].remove_endpoints,
             ["api.github.com:443", "platform.claude.com:443"]
         );
+    }
+
+    #[test]
+    fn forgetting_takes_an_endpoint_off_either_list() {
+        let mut l = lists(
+            &[("pypi.org:443", &["/usr/local/bin/uv"])],
+            &["x.example.com:443"],
+        );
+        assert!(l.forget("pypi.org:443"));
+        assert!(l.forget("x.example.com:443"));
+        assert!(l.is_empty());
+        assert!(!l.forget("pypi.org:443"), "nothing left to forget");
     }
 
     #[test]

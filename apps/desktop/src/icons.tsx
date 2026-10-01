@@ -46,7 +46,9 @@ import {
   CircleQuestionMark,
   CloudDownload,
   CloudUpload,
+  Copy as CopyGlyph,
   ExternalLink,
+  FileDiff,
   Folder as FolderClosed,
   FolderOpen,
   FolderPlus,
@@ -70,6 +72,8 @@ import {
   ServerOff,
   Settings as SettingsGlyph,
   Shield,
+  ShieldBan,
+  ShieldCheck,
   Sparkles,
   Square,
   Ticket,
@@ -126,6 +130,12 @@ export const Policy = Shield;
 /// `Info` and not a document: it is a read-out, not a file.
 export const Record = Info;
 
+// The traffic feed, where an endpoint is opened or closed. Both are the
+// policy pane's shield with a verdict on it: the change is to the rules, made
+// from beside the evidence.
+export const Grant = ShieldCheck;
+export const Revoke = ShieldBan;
+
 // git, where the four operations are four different arrows on purpose.
 //
 // `Fetch` and `Pull` are the distinction worth drawing: both bring refs down
@@ -170,6 +180,10 @@ export const Find = Search;
 /// "this leaves the window".
 export const Elsewhere = ExternalLink;
 export const Forget = Trash;
+/// Putting a name, a path or an endpoint on the clipboard, from a menu.
+export const Copy = CopyGlyph;
+/// Opening a file's diff, from the change list's menu.
+export const Diff = FileDiff;
 
 // ---------------------------------------------------------------------------
 // The absences. One glyph per kind of nothing, and they are a vocabulary in

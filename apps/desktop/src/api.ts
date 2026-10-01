@@ -15,7 +15,7 @@ import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Tracker } from "./gen/Tracker";
 import type { McpOp } from "./gen/McpOp";
 import type { Dir } from "./gen/Dir";
-import type { Event } from "./gen/Event";
+import type { FeedEvent } from "./gen/FeedEvent";
 import type { Against } from "./gen/Against";
 import type { FileDiff } from "./gen/FileDiff";
 import type { FileText } from "./gen/FileText";
@@ -57,7 +57,17 @@ export const api = {
     invoke<Session[]>("destroy", { server, name }),
   poll: (server: string, name: string) => invoke<Poll>("poll", { server, name }),
   policy: (server: string, name: string) => invoke<PolicyView>("policy", { server, name }),
-  events: (server: string, name: string) => invoke<Event[]>("events", { server, name }),
+  events: (server: string, name: string) => invoke<FeedEvent[]>("events", { server, name }),
+  // Changing what a running session may reach. Each answers with the policy
+  // re-read, so the panes say what the sandbox has rather than what was asked.
+  // `everywhere` also writes the global list every new session starts from.
+  allow: (server: string, name: string, endpoint: string, binaries: string[], everywhere: boolean) =>
+    invoke<PolicyView>("allow", { server, name, endpoint, binaries, everywhere }),
+  block: (server: string, name: string, endpoint: string, everywhere: boolean) =>
+    invoke<PolicyView>("block", { server, name, endpoint, everywhere }),
+  // Off the global lists only; no sandbox is touched.
+  unlist: (server: string, name: string, endpoint: string) =>
+    invoke<PolicyView>("unlist", { server, name, endpoint }),
   diff: (server: string, name: string) => invoke<string>("diff", { server, name }),
 
   // The working copy, read-only: the agent owns it. One directory at a time,

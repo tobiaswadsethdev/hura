@@ -26,8 +26,9 @@ import { useState } from "react";
 import type { DiffStat } from "./gen/DiffStat";
 import type { Project } from "./gen/Project";
 import type { Session } from "./gen/Session";
+import { copy, useContextMenu } from "./ContextMenu";
 import { Empty } from "./Empty";
-import { Branch, Chevron, Forget, Plus, StateDot } from "./icons";
+import { Branch, Chevron, Copy, Forget, Plus, StateDot } from "./icons";
 
 export type Group = {
   /// The project, or `null` for the by-repository groups at the bottom.
@@ -106,6 +107,7 @@ export function Tree({
   // someone else against the same server -- comes in expanded: the reason it
   // just appeared is usually that you asked for it.
   const [shut, setShut] = useState<ReadonlySet<string>>(new Set());
+  const menu = useContextMenu();
   const toggle = (key: string) =>
     setShut((all) => {
       const next = new Set(all);
@@ -128,7 +130,37 @@ export function Tree({
                 button inside a button is not markup a browser will honour, and
                 the alternative -- a div with a click handler -- gives up the
                 keyboard and the focus ring that make the reveal below safe. */}
-            <header className="group-head">
+            {/* Everything you can do to a project is in its menu; the `+`
+                stays on the row as well, because starting a worktree is the
+                reason to be pointing at a project and it has no other door. */}
+            <header
+              className="group-head"
+              {...menu(() => [
+                ...(g.project
+                  ? [
+                      {
+                        label: "New worktree",
+                        icon: Plus,
+                        run: () => onNewWorktree(g.project!),
+                      },
+                      "separator" as const,
+                    ]
+                  : []),
+                { label: "Copy repository URL", icon: Copy, hint: g.hint, run: () => copy(g.hint) },
+                ...(g.project
+                  ? [
+                      "separator" as const,
+                      {
+                        label: "Forget project",
+                        icon: Forget,
+                        hint: "worktrees stay",
+                        danger: true,
+                        run: () => onForget(g.project!),
+                      },
+                    ]
+                  : []),
+              ])}
+            >
               <button
                 className="group-toggle"
                 aria-expanded={open}
@@ -166,13 +198,6 @@ export function Tree({
                     onClick={() => onNewWorktree(g.project!)}
                   >
                     <Plus aria-label="new worktree" />
-                  </button>
-                  <button
-                    className="quiet-icon danger"
-                    title="forget this project (its worktrees stay)"
-                    onClick={() => onForget(g.project!)}
-                  >
-                    <Forget aria-label="forget project" />
                   </button>
                 </span>
               )}
@@ -227,11 +252,25 @@ function Worktree({
   onSelect: (name: string) => void;
   onDestroy: (session: Session) => void;
 }) {
+  const menu = useContextMenu();
   return (
-    // A row rather than a button, because it holds two: selecting is the whole
-    // card and destroying is one icon inside it, and a button inside a button
-    // is not something a browser will render.
-    <div className={`worktree-row${on ? " on" : ""}`}>
+    // Destroying is in the menu rather than an icon on the card: an X on every
+    // row is an X you stop seeing, and this one ends an agent.
+    <div
+      className={`worktree-row${on ? " on" : ""}`}
+      {...menu(() => [
+        { label: "Copy name", icon: Copy, hint: s.name, run: () => copy(s.name) },
+        { label: "Copy branch", icon: Branch, hint: s.work_branch, run: () => copy(s.work_branch) },
+        "separator",
+        {
+          label: "Destroy worktree",
+          icon: Forget,
+          hint: "and its sandbox",
+          danger: true,
+          run: () => onDestroy(s),
+        },
+      ])}
+    >
     <button
       className={`worktree${on ? " on" : ""}`}
       // `aria-current` rather than `aria-pressed`: this is which of several
@@ -258,19 +297,6 @@ function Worktree({
         </span>
       </span>
     </button>
-
-      {/* Hidden until the row is hovered or something in it has focus, like
-          the project's controls above -- an X on every row is an X you stop
-          seeing, and this one ends an agent. */}
-      <span className="wt-actions">
-        <button
-          className="quiet-icon danger"
-          title="destroy this session and its sandbox"
-          onClick={() => onDestroy(s)}
-        >
-          <Forget aria-label={`destroy ${s.name}`} />
-        </button>
-      </span>
     </div>
   );
 }

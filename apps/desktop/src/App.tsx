@@ -685,6 +685,7 @@ export default function App() {
                 server={server}
                 session={session}
                 usage={(selected ? polls[selected]?.usage : undefined) ?? null}
+                refreshMs={prefs.refreshMs}
                 onOpenFile={(path) => openTab(session.name, { kind: "file", path })}
                 onOpenDiff={(path, against: Against) =>
                   openTab(session.name, { kind: "filediff", path, against })
