@@ -49,6 +49,7 @@ import {
   Tracker as TrackerGlyph,
 } from "./icons";
 import { copy, useContextMenu } from "./ContextMenu";
+import { openExternal } from "./open";
 import { Screen } from "./Screen";
 import { ago, TicketPanel } from "./Ticket";
 import { onTickets } from "./ticketNotify";
@@ -308,7 +309,7 @@ function Card({
     {
       label: "Open in the browser",
       icon: Elsewhere,
-      run: () => window.open(task.url, "_blank", "noreferrer"),
+      run: () => openExternal(task.url),
     },
     "separator",
     { label: "Copy key", icon: Copy, hint: task.key, run: () => copy(task.key) },
