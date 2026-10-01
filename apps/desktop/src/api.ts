@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Comment } from "./gen/Comment";
 import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
+import type { Issue } from "./gen/Issue";
 import type { Integrations } from "./gen/Integrations";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Tracker } from "./gen/Tracker";
@@ -153,6 +154,8 @@ export const api = {
   // The tickets, read from this machine. The server is asked only for its
   // branch prefix, so a ticket suggests the branch its session will get.
   tickets: (server: string | null) => invoke<Inbox>("tickets", { server }),
+  // One of them in full, from the same place with the same token.
+  ticket: (tracker: string, key: string) => invoke<Issue>("ticket", { tracker, key }),
 
   // The editable defaults in the server's config file. The server's, because
   // `branch_prefix` names the branch of every session on that machine and a

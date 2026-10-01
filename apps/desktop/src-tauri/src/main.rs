@@ -640,6 +640,19 @@ fn tickets(server: Option<String>) -> Result<Inbox, Failed> {
     Ok(inbox)
 }
 
+/// One ticket in full -- description, comments, the people on it -- read
+/// from this machine with the tracker's stored token, like the board.
+#[tauri::command(async)]
+fn ticket(tracker: String, key: String) -> Result<hura_core::tracker::Issue, Failed> {
+    let trackers = load_trackers()?;
+    let stored = trackers
+        .list()
+        .iter()
+        .find(|t| t.source.name == tracker)
+        .ok_or_else(|| failed(format!("no tracker called `{tracker}`")))?;
+    hura_core::tracker::issue(stored, &key).map_err(failed)
+}
+
 /// The editable defaults in the server's config file.
 ///
 /// The server's own file, not a preference of this window's, and the split is
@@ -867,6 +880,7 @@ fn main() {
             forget_skill,
             my_skills,
             tickets,
+            ticket,
             settings,
             set_settings,
             watch,

@@ -178,9 +178,14 @@ export default function App() {
   // them. Four copies of this listener is how two of them end up disagreeing
   // about what Escape does -- and the dialogs keep their own, because a dialog
   // can be open *over* a screen and has to be the one that closes.
+  //
+  // An Escape something inside has already answered -- a context menu, a
+  // dropdown, the ticket beside the board -- is marked `defaultPrevented` and
+  // left alone: closing a menu must not also close the screen under it.
   useEffect(() => {
     if (screen === null) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setScreen(null);
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && !e.defaultPrevented && setScreen(null);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [screen]);

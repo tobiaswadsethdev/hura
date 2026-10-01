@@ -25,6 +25,12 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod doc;
+mod issue;
+pub use issue::{
+    Issue, IssueComment, Parent as IssueParent, Person as IssuePerson, Stage as IssueStage, issue,
+};
+
 /// A tracker this knows how to read.
 // `TrackerKind` on the wire: `session::Kind` is already `Kind` in the one flat
 // directory the bindings land in. Caught by the count check in

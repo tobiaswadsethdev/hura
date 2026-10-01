@@ -15,9 +15,31 @@ tracker is set up — where it points, its token and its filters — and back.
 ```
 
 Columns sit side by side and each scrolls on its own, so another filter costs
-width rather than a page of scrolling. A card shows the key (a link to the
-ticket), its type and status, the title, how long since it last changed, and
-how many comments it has and who wrote the newest one.
+width rather than a page of scrolling. A card shows the key, its type and
+status, the title, how long since it last changed, and how many comments it has
+and who wrote the newest one.
+
+## Reading a ticket
+
+**Click a Jira card** (or focus it and press Enter) and the ticket opens beside
+the board: its status, assignee, reporter, priority, parent, labels and dates,
+the description, and the comments oldest first. The board stays where it was,
+so picking the next card does not mean closing this one first, and the start
+button is at the bottom of the panel as well as on the card. Escape closes the
+panel; a second Escape closes the screen. The ↗ in the panel's header, and
+*Open in the browser* in a card's right-click menu, still go to Jira -- for the
+things only Jira does: editing, moving, attaching.
+
+It is one `GET /rest/api/3/issue/{key}` with the same token as the board. The
+description and comments arrive in Jira's document format and are drawn from
+that rather than from Jira's HTML: a comment is something anyone on the project
+can write, and markup from it is never put into the window. A link is a link
+only when it is `http`, `https` or `mailto`; an image or attachment is shown by
+name, since fetching it would need the token in a request the window does not
+make; and people are their initials rather than their avatars, for the same
+reason.
+
+GitHub and Azure DevOps cards still link out to the browser from their key.
 
 GitHub, Azure DevOps and Jira, read over REST **by the desktop application,
 with tokens kept on the computer it runs on**. The server is not involved: it
