@@ -49,6 +49,26 @@ const Ctx = createContext<(open: Open) => void>(() => {});
 
 export function MenuProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState<Open | null>(null);
+
+  // No webview menu anywhere else. Its Reload, Back and Inspect Element are a
+  // browser's, not this window's, and a right-click that offers them on a row
+  // with no menu of its own reads as a page rather than an application.
+  //
+  // Two exceptions. Text fields keep theirs, because it is where paste lives
+  // and nothing here replaces it. And a development build keeps it behind
+  // Shift, because Inspect Element is how this window gets debugged.
+  useEffect(() => {
+    const native = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      if (import.meta.env.DEV && e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable=''], [contenteditable='true']")) return;
+      e.preventDefault();
+    };
+    window.addEventListener("contextmenu", native);
+    return () => window.removeEventListener("contextmenu", native);
+  }, []);
+
   return (
     <Ctx.Provider value={setOpen}>
       {children}
