@@ -60,6 +60,8 @@ import {
   FolderPlus,
   FolderSearch,
   FolderTree,
+  Globe,
+  GlobeLock,
   GitBranch,
   Info,
   LoaderCircle,
@@ -143,6 +145,8 @@ export const Policy = Shield;
 /// The session record -- what it was created with, and what it has spent.
 /// `Info` and not a document: it is a read-out, not a file.
 export const Record = Info;
+/// What is listening in the sandbox, and the previews of it.
+export const Ports = Globe;
 
 // The traffic feed, where an endpoint is opened or closed. Both are the
 // policy pane's shield with a verdict on it: the change is to the rules, made
@@ -246,6 +250,8 @@ export const NoFiles = FolderOpen;
 export const Clean = CircleCheck;
 /// No MCP servers configured. The integrations glyph with the plug pulled.
 export const NoIntegrations = Unplug;
+/// Nothing listening in the sandbox. The ports glyph, closed.
+export const NoPorts = GlobeLock;
 /// A file Monaco will not be shown.
 export const NotText = Binary;
 

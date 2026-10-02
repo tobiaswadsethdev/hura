@@ -123,6 +123,15 @@ pub trait Backend {
     /// The argv a terminal emulator spawns to attach to this session.
     fn interactive_argv(&self, session: &Session, argv: &[&str]) -> Result<Vec<String>>;
 
+    /// The long-running argv that forwards a loopback port on the server to
+    /// `port` inside this session. See [`OpenShell::forward_argv`].
+    fn forward_argv(
+        &self,
+        session: &Session,
+        port: u16,
+        host: crate::ports::Loopback,
+    ) -> Result<Vec<String>>;
+
     /// How to invoke tmux where this session's agent runs.
     ///
     /// The image ships a config and a sandbox exec inherits no locale, so this
@@ -279,6 +288,9 @@ pub(crate) mod testing {
             out.extend(["sandbox", "exec", "-n", name, "--tty", "--"].map(String::from));
             out.extend(argv.iter().map(|a| (*a).to_string()));
             out
+        }
+        fn forward_argv(&self, _: &str, _: u16, _: &str) -> Vec<String> {
+            unreachable!("no gateway in a script test")
         }
     }
 }

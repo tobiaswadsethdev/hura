@@ -51,6 +51,9 @@ use crate::session::State;
 pub const STATUS_MARKER: &str = "===hura-status===";
 pub const USAGE_MARKER: &str = "===hura-usage===";
 pub const PANE_MARKER: &str = "===hura-pane===";
+/// Before the pane, like the usage: the pane is arbitrary text and has to be
+/// the last section, so nothing after it can be mistaken for part of it.
+pub const PORTS_MARKER: &str = "===hura-ports===";
 
 /// How long the hook file is trusted when there is no pane to read, in seconds.
 ///

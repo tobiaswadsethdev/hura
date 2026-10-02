@@ -1189,6 +1189,69 @@ pub fn attach_argv(
         .map_err(|e| e.to_string())
 }
 
+/// What is listening in a session's sandbox, who holds each port when that
+/// can be told, and the processes a person might want to stop.
+///
+/// On demand rather than on the poll, because it walks `/proc` -- see
+/// [`crate::ports::sandbox_script`].
+pub fn sandbox_ports(
+    backend: &dyn Backend,
+    session: &Session,
+) -> Result<crate::ports::Found, String> {
+    let script = crate::ports::sandbox_script();
+    let out = backend
+        .exec(session, &["sh", "-c", &script])
+        .map_err(|e| e.to_string())?;
+    Ok(crate::ports::parse_sandbox(&out.stdout))
+}
+
+/// Stop whatever is listening on `port` in a session's sandbox.
+///
+/// The process is looked up here, at the moment of killing, rather than taken
+/// from the client: a pid the window saw a minute ago may belong to something
+/// else by now, and killing by port is what was actually asked for. Refused
+/// when the owner cannot be told -- the sandbox hides it, and no single
+/// process names the port -- because a guess between two is not a kill.
+pub fn kill_port(backend: &dyn Backend, session: &Session, port: u16) -> Result<(), String> {
+    let found = sandbox_ports(backend, session)?;
+    let owner = found
+        .listening
+        .into_iter()
+        .find(|l| l.port == port)
+        .ok_or_else(|| format!("nothing is listening on {port}"))?
+        .owner
+        .ok_or_else(|| {
+            format!(
+                "which process holds {port} cannot be told from here; stop it from the process list"
+            )
+        })?;
+    kill_process(backend, session, owner.pid)
+}
+
+/// Stop one process in a session's sandbox, by pid.
+///
+/// Only one the sandbox lists as stoppable right now: not the agent or its
+/// tmux, which is ending the session and has its own button, and not a pid
+/// that has gone or was never this user's.
+pub fn kill_process(backend: &dyn Backend, session: &Session, pid: u32) -> Result<(), String> {
+    let found = sandbox_ports(backend, session)?;
+    let process = found
+        .processes
+        .iter()
+        .find(|p| p.pid == pid)
+        .ok_or_else(|| format!("no process {pid} that can be stopped from here"))?;
+    if process.protected {
+        return Err(format!(
+            "{pid} is the agent or its terminal; destroy the worktree to end it"
+        ));
+    }
+    let script = crate::ports::kill_script(pid);
+    backend
+        .exec(session, &["sh", "-c", &script])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// The shells beside the agent, by tmux session name.
 ///
 /// Asked of tmux rather than kept in a list, because what shells exist is a
@@ -1370,6 +1433,12 @@ pub struct Poll {
     /// the most expensive way to display anything. `None` until the agent's
     /// status line has run once -- see [`crate::usage`].
     pub usage: Option<crate::usage::Usage>,
+    /// What is listening inside the sandbox that a preview could reach.
+    ///
+    /// Defaulted so a reply from an older server, which has no such field, is
+    /// a session with nothing listening rather than an unreadable poll.
+    #[serde(default)]
+    pub ports: Vec<crate::ports::Listening>,
 }
 
 /// Read a session's diff stat and agent state in a single exec.
@@ -1418,6 +1487,10 @@ printf '
 cat {usage_path} 2>/dev/null
 printf '
 %s
+' {ports_marker}
+{ports}
+printf '
+%s
 ' {pane_marker}
 {tmux_bin} capture-pane -pe -t {tmux} 2>/dev/null | tail -n {pane_lines}
 "#,
@@ -1429,6 +1502,8 @@ printf '
         usage_path = seed::sh_quote(&paths.usage()),
         tmux_bin = backend.tmux(),
         pane_marker = seed::sh_quote(status::PANE_MARKER),
+        ports_marker = seed::sh_quote(status::PORTS_MARKER),
+        ports = crate::ports::SCRIPT,
         tmux = seed::sh_quote(&session.tmux),
         pane_lines = PANE_LINES,
     )
@@ -1451,7 +1526,8 @@ fn parse_poll(stdout: &str, now: u64) -> Poll {
     // part rather than a hook part with the rest of the output in it, which is
     // how this read as an agent with no status at all for one iteration.
     let (head, pane_part) = rest.split_once(status::PANE_MARKER).unwrap_or((rest, ""));
-    let (hook_part, usage_part) = head.split_once(status::USAGE_MARKER).unwrap_or((head, ""));
+    let (hook_part, rest) = head.split_once(status::USAGE_MARKER).unwrap_or((head, ""));
+    let (usage_part, ports_part) = rest.split_once(status::PORTS_MARKER).unwrap_or((rest, ""));
 
     // The capture carries the colour it was drawn in, which the pane that shows
     // it wants and the marker search must not see: a phrase with a colour change
@@ -1470,6 +1546,7 @@ fn parse_poll(stdout: &str, now: u64) -> Poll {
         // screen of nothing but colour changes is a blank screen.
         pane: (!plain.trim().is_empty()).then_some(pane_part.trim_end().to_string()),
         usage: crate::usage::parse(usage_part).filter(|u| !u.is_empty()),
+        ports: crate::ports::parse(ports_part),
     }
 }
 
@@ -1637,6 +1714,37 @@ mod tests {
         let status = p.status.expect("a status");
         assert_eq!(status.state, crate::session::State::Running);
         assert_eq!(status.detail.as_deref(), Some("Bash"));
+    }
+
+    /// The ports sit between the usage and the pane, and a listener named in
+    /// the pane -- an agent printing `ss` output -- is not one.
+    #[test]
+    fn the_ports_part_is_read_and_the_pane_cannot_add_to_it() {
+        let stdout = format!(
+            "1 0 0\n{}\n{{\"state\":\"idle\",\"at\":1000}}\n{}\n{{}}\n{}\n\
+             0100007F:1435\n{}\n0100007F:1F40\n",
+            status::STATUS_MARKER,
+            status::USAGE_MARKER,
+            status::PORTS_MARKER,
+            status::PANE_MARKER,
+        );
+        let p = parse_poll(&stdout, 1010);
+        assert_eq!(
+            p.ports,
+            vec![crate::ports::Listening {
+                port: 5173,
+                host: crate::ports::Loopback::V4,
+            }]
+        );
+        assert!(p.status.is_some());
+
+        // An older image's poll, with no ports section: nothing listening.
+        let old = format!(
+            "1 0 0\n{}\n{{}}\n{}\npane\n",
+            status::STATUS_MARKER,
+            status::PANE_MARKER
+        );
+        assert!(parse_poll(&old, 1010).ports.is_empty());
     }
 
     /// The parts arrive in one stream and each is optional. Ordered so the pane

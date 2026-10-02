@@ -143,6 +143,10 @@ pub async fn run(socket: WebSocket) {
 struct ChannelHandle {
     task: tokio::task::JoinHandle<()>,
     to_terminal: Option<mpsc::Sender<ToTerminal>>,
+    /// Whether ending this channel means typing tmux's detach into it first.
+    /// A terminal's does; a port's must not, since those two bytes would be
+    /// written into somebody's HTTP request.
+    detach: bool,
 }
 
 impl ChannelHandle {
@@ -157,7 +161,7 @@ impl ChannelHandle {
     /// A terminal is asked to detach and given a moment to do it; everything
     /// else is simply dropped. See `terminal` for why the difference matters.
     async fn shutdown(self) {
-        if let Some(tx) = &self.to_terminal {
+        if let Some(tx) = self.to_terminal.as_ref().filter(|_| self.detach) {
             let _ = tx.send(ToTerminal::Input(DETACH.to_vec())).await;
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
@@ -195,10 +199,12 @@ async fn open(
         Channel::Events { .. } => ChannelHandle {
             task: tokio::spawn(events(id, session, out)),
             to_terminal: None,
+            detach: false,
         },
         Channel::Status { .. } => ChannelHandle {
             task: tokio::spawn(status(id, session, out)),
             to_terminal: None,
+            detach: false,
         },
         Channel::Terminal { tmux, .. } => {
             let (tx, rx) = mpsc::channel(64);
@@ -209,9 +215,82 @@ async fn open(
             ChannelHandle {
                 task: tokio::spawn(terminal(id, session, target, out, rx)),
                 to_terminal: Some(tx),
+                detach: true,
+            }
+        }
+        Channel::Port { port, host, .. } => {
+            let (tx, rx) = mpsc::channel(BACKLOG);
+            ChannelHandle {
+                task: tokio::spawn(port_channel(id, session, port, host, out, rx)),
+                to_terminal: Some(tx),
+                detach: false,
             }
         }
     })
+}
+
+/// One connection to a port in the sandbox, through the forward for it.
+///
+/// What arrives as `Input` is written to the service and what the service
+/// answers goes back as `Output`, until either side closes. Input sent before
+/// the forward is up waits in the channel rather than being lost: the client
+/// writes the request as soon as it has opened, and the first connection to a
+/// port is the one that starts its forward.
+async fn port_channel(
+    id: ChannelId,
+    session: Session,
+    port: u16,
+    host: hura_core::ports::Loopback,
+    out: mpsc::Sender<ServerFrame>,
+    mut input: mpsc::Receiver<ToTerminal>,
+) {
+    let reason = match crate::forward::acquire(&session, port, host).await {
+        Err(reason) => Some(reason),
+        Ok(lease) => pipe(id, lease.local, &out, &mut input).await,
+    };
+    let _ = out.send(ServerFrame::Closed { id, reason }).await;
+}
+
+async fn pipe(
+    id: ChannelId,
+    local: u16,
+    out: &mpsc::Sender<ServerFrame>,
+    input: &mut mpsc::Receiver<ToTerminal>,
+) -> Option<String> {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let stream = match tokio::net::TcpStream::connect(("127.0.0.1", local)).await {
+        Ok(stream) => stream,
+        Err(e) => return Some(format!("could not reach the forward: {e}")),
+    };
+    let _ = stream.set_nodelay(true);
+    let (mut from_service, mut to_service) = stream.into_split();
+    let mut buf = vec![0u8; 32 * 1024];
+
+    loop {
+        tokio::select! {
+            message = input.recv() => match message {
+                Some(ToTerminal::Input(raw)) => {
+                    if let Err(e) = to_service.write_all(&raw).await {
+                        return Some(e.to_string());
+                    }
+                }
+                Some(ToTerminal::Resize { .. }) => {}
+                // The client closed its end.
+                None => return None,
+            },
+            read = from_service.read(&mut buf) => match read {
+                Ok(0) => return None,
+                Ok(n) => {
+                    let frame = ServerFrame::Output { id, data: bytes::encode(&buf[..n]) };
+                    if out.send(frame).await.is_err() {
+                        return None;
+                    }
+                }
+                Err(e) => return Some(e.to_string()),
+            },
+        }
+    }
 }
 
 /// The allow/deny feed, as decisions are made.
@@ -280,7 +359,14 @@ async fn status(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>)
 
         if last.as_ref() != Some(&poll) {
             last = Some(poll.clone());
-            if out.send(ServerFrame::Status { id, poll }).await.is_err() {
+            if out
+                .send(ServerFrame::Status {
+                    id,
+                    poll: Box::new(poll),
+                })
+                .await
+                .is_err()
+            {
                 return;
             }
         }

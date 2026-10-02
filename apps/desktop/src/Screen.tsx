@@ -37,6 +37,7 @@ export function Screen({
   onClose,
   actions,
   wide = false,
+  narrow = false,
 }: {
   /// The same glyph as the header button that opens this screen. The pairing is
   /// the whole navigation model: the icon in the strip is lit, and the icon on
@@ -50,6 +51,10 @@ export function Screen({
   /// The whole width and height, for a screen that lays itself out -- the
   /// ticket board's columns -- rather than a measured column of sentences.
   wide?: boolean;
+  /// A column the width of its fields rather than of the screen's measure,
+  /// for a screen that is one form. Without it the settings sat against the
+  /// left edge of a 940-pixel column with a third of it empty beside them.
+  narrow?: boolean;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -76,7 +81,7 @@ export function Screen({
         <div className="screen-body wide">{children}</div>
       ) : (
         <div className="screen-body scrollbar-sleek">
-          <div className="screen-inner">{children}</div>
+          <div className={`screen-inner${narrow ? " narrow" : ""}`}>{children}</div>
         </div>
       )}
     </section>

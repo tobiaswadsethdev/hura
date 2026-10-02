@@ -388,6 +388,19 @@ pub trait OpenShell {
     /// as a trait object. An argv rather than a `Command` because it is spawned
     /// under a pty, which needs the program and its arguments apart.
     fn interactive_argv(&self, name: &str, argv: &[&str]) -> Vec<String>;
+    /// The invocation that forwards a loopback port on this machine to one
+    /// inside a sandbox, as an argv. Long-running: it prints the address it
+    /// bound and then serves until it is killed.
+    ///
+    /// `forward service`, which travels over the gateway's gRPC path rather
+    /// than the exec path -- so a preview does not queue behind the polls, and
+    /// killing one does not wedge anything, unlike an `exec --tty`. Port 0 on
+    /// the local side lets the kernel choose, and the CLI says which:
+    ///
+    /// ```text
+    /// ✓ Forwarding 127.0.0.1:38076 -> 127.0.0.1:8000 in sandbox s via gRPC
+    /// ```
+    fn forward_argv(&self, name: &str, port: u16, target_host: &str) -> Vec<String>;
 }
 
 /// [`OpenShell`] backed by the `openshell` CLI.
@@ -528,6 +541,15 @@ impl CliClient {
     /// Inherent as well as on the trait, because [`Self::interactive_exec`]
     /// returns a `Command` and both of them are this one function.
     pub fn interactive_exec_argv(&self, sandbox: &str, argv: &[&str]) -> Vec<String> {
+        let mut out = self.argv_prefix();
+        out.extend(["sandbox", "exec", "-n", sandbox, "--tty", "--"].map(String::from));
+        out.extend(argv.iter().map(|a| (*a).to_string()));
+        out
+    }
+
+    /// The binary and the flags that say which gateway, shared by every argv
+    /// this hands out rather than runs.
+    fn argv_prefix(&self) -> Vec<String> {
         let mut out = vec![self.bin.display().to_string()];
         if let Some(g) = &self.gateway {
             out.push("--gateway".into());
@@ -537,8 +559,6 @@ impl CliClient {
             out.push("--workspace".into());
             out.push(w.clone());
         }
-        out.extend(["sandbox", "exec", "-n", sandbox, "--tty", "--"].map(String::from));
-        out.extend(argv.iter().map(|a| (*a).to_string()));
         out
     }
 }
@@ -688,6 +708,29 @@ impl OpenShell for CliClient {
 
     fn interactive_argv(&self, name: &str, argv: &[&str]) -> Vec<String> {
         self.interactive_exec_argv(name, argv)
+    }
+
+    fn forward_argv(&self, name: &str, port: u16, target_host: &str) -> Vec<String> {
+        let mut out = self.argv_prefix();
+        let port = port.to_string();
+        out.extend(
+            [
+                "forward",
+                "service",
+                name,
+                "--target-port",
+                &port,
+                "--target-host",
+                target_host,
+                // Loopback only on this side too: the server is not the
+                // thing a preview is for, and the client reaches it through
+                // `hurad` rather than over the network.
+                "--local",
+                "127.0.0.1:0",
+            ]
+            .map(String::from),
+        );
+        out
     }
 }
 

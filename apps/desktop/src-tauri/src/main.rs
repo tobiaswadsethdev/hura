@@ -34,21 +34,23 @@
 
 use std::sync::Mutex;
 
+mod previews;
+
+use hura_client::trackers::Trackers;
 use hura_client::{Incoming, Remote, Remotes, Sink};
 use hura_core::comments::{Comment, NewComment};
 use hura_core::events::FeedEvent;
 use hura_core::files::{Dir, FileText};
 use hura_core::git::{Against, FileDiff, Status as GitStatus};
+use hura_core::integrations::View as IntegrationsView;
 use hura_core::ops::{NewOptions, NewSession, Picked, Poll};
 use hura_core::policy::View as PolicyView;
 use hura_core::projects::{NewProject, Project};
 use hura_core::repos::Listing;
 use hura_core::session::Session;
 use hura_core::settings::{Settings, SettingsView};
-use hura_proto::stream::{Channel, ChannelId, ClientFrame, ServerFrame};
-use hura_core::integrations::View as IntegrationsView;
-use hura_client::trackers::Trackers;
 use hura_core::tracker::{Configured, Inbox, Source as TrackerSource};
+use hura_proto::stream::{Channel, ChannelId, ClientFrame, ServerFrame};
 use hura_proto::{FailureKind, GitOp, McpOp, Reply, Request};
 use serde::Serialize;
 use tauri::{Emitter as _, Manager as _};
@@ -437,7 +439,9 @@ fn send_comments(server: String, name: String) -> Result<String, Failed> {
 /// The projects on the server: what the tree is grouped under.
 #[tauri::command(async)]
 fn projects(server: String) -> Result<Vec<Project>, Failed> {
-    let reply = remote(&server)?.call(Request::Projects).map_err(to_message)?;
+    let reply = remote(&server)?
+        .call(Request::Projects)
+        .map_err(to_message)?;
     expect_reply!(reply, Reply::Projects { projects } => projects, "a project list")
 }
 
@@ -651,9 +655,10 @@ fn my_skills() -> Vec<String> {
 fn tickets(server: Option<String>) -> Result<Inbox, Failed> {
     let trackers = load_trackers()?;
     let mut warnings = Vec::new();
-    let prefix = match server.as_deref().map(|s| {
-        remote(s).and_then(|r| r.call(Request::Settings).map_err(to_message))
-    }) {
+    let prefix = match server
+        .as_deref()
+        .map(|s| remote(s).and_then(|r| r.call(Request::Settings).map_err(to_message)))
+    {
         Some(Ok(Reply::Settings(view))) => view
             .settings
             .branch_prefix
@@ -695,7 +700,9 @@ fn ticket(tracker: String, key: String) -> Result<hura_core::tracker::Issue, Fai
 /// re-read -- never leaves it. See `prefs.ts`.
 #[tauri::command(async)]
 fn settings(server: String) -> Result<SettingsView, Failed> {
-    let reply = remote(&server)?.call(Request::Settings).map_err(to_message)?;
+    let reply = remote(&server)?
+        .call(Request::Settings)
+        .map_err(to_message)?;
     expect_reply!(reply, Reply::Settings(view) => view, "the settings view")
 }
 
@@ -748,11 +755,17 @@ fn connected(app: &tauri::AppHandle, server: &str) -> Result<(), Failed> {
     }
 
     let (sink, frames) = remote(server)?.stream().map_err(to_message)?.split();
+    // Previews of another server's sessions would go down this connection to
+    // the wrong machine.
+    app.state::<previews::Previews>().keep_only(server);
 
     let handle = app.clone();
     std::thread::spawn(move || {
         for message in frames {
             match message {
+                // A preview's connections are this side's to carry, not the
+                // window's: they are bytes for a socket, not something to draw.
+                Incoming::Frame(frame) if handle.state::<previews::Previews>().route(&frame) => {}
                 Incoming::Frame(frame) => {
                     let _ = handle.emit(FRAME, *frame);
                 }
@@ -760,6 +773,7 @@ fn connected(app: &tauri::AppHandle, server: &str) -> Result<(), Failed> {
                 // so each is told rather than left waiting for output that will
                 // not come.
                 Incoming::Ended(reason) => {
+                    handle.state::<previews::Previews>().connection_ended();
                     let _ = handle.emit(
                         FRAME,
                         ServerFrame::Closed {
@@ -833,6 +847,7 @@ fn main() {
     // tooling see the surface, not a way to run.
     let builder = tauri::Builder::default()
         .manage(Streaming::default())
+        .manage(previews::Previews::default())
         // An OS notification when a session starts waiting on a permission
         // prompt is the single largest quality-of-life gain this window has
         // over the terminal: watching four agents is exactly the case where a
@@ -876,6 +891,12 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             servers,
             about,
+            previews::previews,
+            previews::preview_open,
+            previews::preview_stop,
+            previews::kill_port,
+            previews::kill_process,
+            previews::ports,
             connect,
             forget,
             sessions,

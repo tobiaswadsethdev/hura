@@ -123,6 +123,23 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 .map(|shells| Reply::Shells { shells })
                 .map_err(Failure::gateway)
         }),
+        Request::Ports { name } => with_session(&name, |s| ports(backends.for_session(s), s)),
+        Request::StopForward { name, port } => with_session(&name, |s| {
+            crate::forward::stop_now(&s.sandbox, port);
+            ports(backends.for_session(s), s)
+        }),
+        // The forward goes too: it would only ever answer with a refusal now.
+        Request::KillPort { name, port } => with_session(&name, |s| {
+            let backend = backends.for_session(s);
+            ops::kill_port(backend, s, port).map_err(Failure::failed)?;
+            crate::forward::stop_now(&s.sandbox, port);
+            ports(backend, s)
+        }),
+        Request::KillProcess { name, pid } => with_session(&name, |s| {
+            let backend = backends.for_session(s);
+            ops::kill_process(backend, s, pid).map_err(Failure::failed)?;
+            ports(backend, s)
+        }),
         Request::KillShell { name, tmux } => with_session(&name, |s| {
             ops::kill_shell(backends.for_session(s), s, &tmux).map_err(Failure::failed)?;
             ops::shells(backends.for_session(s), s)
@@ -494,6 +511,17 @@ fn with_session(name: &str, f: impl FnOnce(&Session) -> Result<Reply, Failure>) 
 /// an unreadable convenience file is the wrong trade.
 fn lists() -> endpoints::Lists {
     endpoints::Lists::load().unwrap_or_default()
+}
+
+/// A sandbox's ports: what is listening and who holds it, from the sandbox;
+/// what is being forwarded into it, from this process.
+fn ports(backend: &dyn Backend, s: &Session) -> Result<Reply, Failure> {
+    let found = ops::sandbox_ports(backend, s).map_err(Failure::failed)?;
+    Ok(Reply::Ports(hura_core::ports::PortsView {
+        listening: found.listening,
+        processes: found.processes,
+        forwards: crate::forward::list(&s.sandbox),
+    }))
 }
 
 #[cfg(test)]

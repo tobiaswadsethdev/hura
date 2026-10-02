@@ -146,3 +146,133 @@ fn the_events_channel_does_not_repeat_itself() {
     }
     assert!(!keys.is_empty(), "the feed said nothing at all");
 }
+
+/// A preview's channel: one TCP connection to a port inside the sandbox,
+/// through the server's forward, as `Input` and `Output` frames.
+///
+/// Needs something listening in the session's sandbox -- `python3 -m
+/// http.server 8000 --bind 127.0.0.1` is enough -- and `HURA_LIVE_PORT` if it
+/// is not 8000. Two connections, one after the other, so the second one
+/// reuses the forward the first started.
+#[test]
+#[ignore = "needs a paired server and a live session with a port open"]
+fn a_port_channel_reaches_a_service_in_the_sandbox() {
+    let port: u16 = std::env::var("HURA_LIVE_PORT").map_or(8000, |p| p.parse().unwrap());
+    let stream = stream();
+
+    for id in [41, 42] {
+        stream.send(ClientFrame::Open {
+            id,
+            channel: Channel::Port {
+                session: session(),
+                port,
+                host: Default::default(),
+            },
+        });
+        stream.send(ClientFrame::Input {
+            id,
+            data: bytes::encode(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"),
+        });
+
+        let mut reply = Vec::new();
+        let got = wait_for(&stream, Duration::from_secs(30), |frame| match frame {
+            ServerFrame::Output { id: i, data } if *i == id => {
+                reply.extend(bytes::decode(data).unwrap());
+                String::from_utf8_lossy(&reply)
+                    .starts_with("HTTP/1.")
+                    .then(|| String::from_utf8_lossy(&reply).into_owned())
+            }
+            ServerFrame::Closed { id: i, reason } if *i == id => {
+                panic!("the channel closed before answering: {reason:?}")
+            }
+            _ => None,
+        });
+        let got = got.expect("an HTTP reply within thirty seconds");
+        assert!(got.starts_with("HTTP/1."), "{got}");
+        stream.send(ClientFrame::Close { id });
+    }
+}
+
+/// The ports pane's three requests against a real sandbox: who holds a port,
+/// a forward that shows its connection, stopping it, and killing the holder.
+///
+/// Destructive: the process listening on `HURA_LIVE_PORT` is killed at the
+/// end. Run it against a throwaway server, such as `python3 -m http.server`.
+#[test]
+#[ignore = "needs a paired server and a live session with a port open; kills the process"]
+fn a_port_can_be_seen_stopped_and_killed() {
+    use hura_proto::{Reply, Request};
+
+    let port: u16 = std::env::var("HURA_LIVE_PORT").map_or(8000, |p| p.parse().unwrap());
+    let remotes = Remotes::load().expect("remotes");
+    let remote = remotes.select(None).expect("one paired server");
+    let ports = |request: Request| match remote.call(request).expect("a reply") {
+        Reply::Ports(view) => view,
+        other => panic!("not a ports reply: {other:?}"),
+    };
+
+    let view = ports(Request::Ports { name: session() });
+    let listener = view
+        .listening
+        .iter()
+        .find(|l| l.port == port)
+        .expect("the port is listed");
+    let owner = listener.owner.as_ref().expect("its owner is visible");
+    assert!(
+        owner.command.contains("python") || !owner.command.is_empty(),
+        "{owner:?}"
+    );
+
+    // One connection held open through the forward.
+    let stream = stream();
+    stream.send(ClientFrame::Open {
+        id: 51,
+        channel: Channel::Port {
+            session: session(),
+            port,
+            host: Default::default(),
+        },
+    });
+    stream.send(ClientFrame::Input {
+        id: 51,
+        data: bytes::encode(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"),
+    });
+    wait_for(&stream, Duration::from_secs(30), |f| {
+        matches!(f, ServerFrame::Output { id: 51, .. }).then_some(())
+    })
+    .expect("an answer through the forward");
+
+    let view = ports(Request::Ports { name: session() });
+    let forward = view
+        .forwards
+        .iter()
+        .find(|f| f.port == port)
+        .expect("the forward is listed");
+    assert_eq!(forward.connections, 1, "{forward:?}");
+
+    // Stopping it ends the connection that was holding it open.
+    let view = ports(Request::StopForward {
+        name: session(),
+        port,
+    });
+    assert!(
+        view.forwards.iter().all(|f| f.port != port),
+        "{:?}",
+        view.forwards
+    );
+    wait_for(&stream, Duration::from_secs(10), |f| {
+        matches!(f, ServerFrame::Closed { id: 51, .. }).then_some(())
+    })
+    .expect("the held connection closed with the forward");
+
+    // And killing the holder takes the port away.
+    let view = ports(Request::KillPort {
+        name: session(),
+        port,
+    });
+    assert!(
+        view.listening.iter().all(|l| l.port != port),
+        "{:?}",
+        view.listening
+    );
+}

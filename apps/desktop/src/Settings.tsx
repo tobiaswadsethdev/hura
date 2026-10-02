@@ -141,7 +141,7 @@ export function SettingsScreen({
     });
 
   return (
-    <Screen icon={SettingsGlyph} title="settings" onClose={onClose}>
+    <Screen icon={SettingsGlyph} title="settings" narrow onClose={onClose}>
       {error && <p className="error">{error}</p>}
       {!view && !error && <Waiting />}
 

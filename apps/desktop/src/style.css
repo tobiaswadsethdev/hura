@@ -2614,3 +2614,109 @@ main { display: flex; flex: 1; min-height: 0; }
 .drift .lucide { flex: none; }
 .new-session-foot .keys { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--dimmer); padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; }
 .pill:focus-visible, .update-badge:focus-visible, .app > header .mark:focus-visible { outline: 1px solid var(--ring); outline-offset: 1px; }
+
+/* ------------------------------------------------------------------------- */
+/* the ports pane                                                            */
+/* ------------------------------------------------------------------------- */
+
+.dock-tabs button { position: relative; }
+/* How many ports are listening, on the tab itself: a dev server the agent has
+   just started is worth noticing without opening the pane. */
+.tab-count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  line-height: 10px;
+  text-align: center;
+}
+.ports ul { list-style: none; margin: 0; padding: 0; }
+.ports li:hover { background: var(--hover); }
+.ports .port { font-family: var(--font-mono); color: var(--text); min-width: 40px; }
+.ports .port-tools { display: inline-flex; gap: 2px; margin-left: auto; }
+.port-add { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.port-add input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.port-add input:focus { outline: none; border-color: var(--ring); }
+.port-add .quiet { background: none; border: 1px solid var(--line-strong); border-radius: var(--r-sm); color: var(--dim); font: inherit; font-size: 12px; padding: 0 10px; cursor: pointer; }
+.port-add .quiet:hover:not(:disabled) { color: var(--text); border-color: var(--ring); }
+.port-add .quiet:disabled { opacity: 0.5; cursor: default; }
+.ports .error { margin-top: 8px; }
+
+/* ------------------------------------------------------------------------- */
+/* what each session is spending, and the total                              */
+/* ------------------------------------------------------------------------- */
+
+.wt-signals { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.wt-cost { font-family: var(--font-mono); font-size: 10.5px; color: var(--dimmer); font-variant-numeric: tabular-nums; }
+.worktree.on .wt-cost { color: var(--dim); }
+.wt-ports { display: inline-flex; color: var(--dim); }
+.wt-ports .lucide { width: 11px; height: 11px; }
+.wt-context { display: inline-flex; }
+.wt-context .track { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
+.wt-context .fill { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-linecap: round; }
+/* Near the top is where the agent compacts. `--warn`, like the rate-limit
+   reading in the header that means the same thing about the account. */
+.wt-context.high .fill { stroke: var(--warn); }
+
+/* Pinned to the bottom of the sidebar, under however many projects. */
+.tree { display: flex; flex-direction: column; }
+.spend {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 11px;
+  cursor: help;
+}
+.spend-total { font-family: var(--font-mono); font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
+.spend .hint { color: var(--dimmer); }
+
+/* One form, centred: the 568 pixels a field row measures, plus the padding. */
+.screen-inner.narrow { max-width: 612px; }
+.tree:has(.spend) { padding-bottom: 0; }
+.wt-ports.on { color: var(--ok); }
+
+/* Two lines once a port is forwarded: what it is, then where it goes. */
+.ports li { display: flex; flex-direction: column; padding: 4px 4px 4px 6px; gap: 2px; border-radius: var(--r-sm); font-size: 12px; }
+.ports li.busy { opacity: 0.6; }
+.port-line { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.port-line > .lucide { color: var(--dimmer); flex: none; }
+.ports li.on .port-line > .lucide { color: var(--ok); }
+.ports .owner { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.port-forward { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 22px; font-size: 11px; color: var(--dimmer); }
+.port-forward .local { font-family: var(--font-mono); color: var(--dim); }
+.port-forward .dot { color: var(--line-strong); }
+.ports .owner.guessed::after { content: " ?"; color: var(--dimmer); }
+.procs { margin-top: 12px; }
+.procs h4 { margin: 0 0 4px 6px; font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dimmer); }
+.procs ul { list-style: none; margin: 0; padding: 0; }
+.procs li { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 26px; padding: 0 4px 0 6px; border-radius: var(--r-sm); font-size: 11.5px; }
+.procs li:hover { background: var(--hover); }
+.procs li.busy { opacity: 0.6; }
+.procs .pid { font-family: var(--font-mono); color: var(--dimmer); min-width: 36px; font-variant-numeric: tabular-nums; }
+.procs .cmd { flex: 1; min-width: 0; font-family: var(--font-mono); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.procs .hint { font-size: 11px; color: var(--dimmer); padding: 0 6px; }

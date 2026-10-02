@@ -25,6 +25,8 @@ import type { Status as GitStatus } from "./gen/Status";
 import type { NewComment } from "./gen/NewComment";
 import type { Picked } from "./gen/Picked";
 import type { Listing } from "./gen/Listing";
+import type { Loopback } from "./gen/Loopback";
+import type { PortsView } from "./gen/PortsView";
 import type { NewOptions } from "./gen/NewOptions";
 import type { NewProject } from "./gen/NewProject";
 import type { Project } from "./gen/Project";
@@ -54,7 +56,32 @@ export type About = {
   server_error: string | null;
 };
 
+/// A port inside a sandbox, on this machine's loopback. See `previews.rs`.
+export type Preview = {
+  session: string;
+  port: number;
+  local: number;
+  url: string;
+  /// Connections open through it from this machine.
+  connections: number;
+};
+
 export const api = {
+  previews: (server: string) => invoke<Preview[]>("previews", { server }),
+  previewOpen: (server: string, session: string, port: number, host: Loopback) =>
+    invoke<Preview>("preview_open", { server, session, port, host }),
+  /// The sandbox's ports as the server sees them: who holds each, and the
+  /// forwards it is running for previews.
+  ports: (server: string, session: string) => invoke<PortsView>("ports", { server, session }),
+  /// Stop a preview here and the server's forward behind it.
+  previewStop: (server: string, session: string, port: number) =>
+    invoke<PortsView>("preview_stop", { server, session, port }),
+  /// Stop the process listening on the port, inside the sandbox.
+  killPort: (server: string, session: string, port: number) =>
+    invoke<PortsView>("kill_port", { server, session, port }),
+  /// Stop one process inside the sandbox, by pid.
+  killProcess: (server: string, session: string, pid: number) =>
+    invoke<PortsView>("kill_process", { server, session, pid }),
   about: (server: string | null) => invoke<About>("about", { server }),
   servers: () => invoke<ServerSummary[]>("servers"),
   // Pairing, which the CLI spells `hura connect` and `hura remotes --forget`.

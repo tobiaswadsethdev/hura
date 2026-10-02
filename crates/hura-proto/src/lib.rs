@@ -199,6 +199,18 @@ pub enum Request {
     /// Close one, killing whatever is running in it. The agent's own is not a
     /// shell and is refused.
     KillShell { name: String, tmux: String },
+    /// What is listening in a session's sandbox, which process holds each
+    /// port, and the forwards this server is running into it for previews.
+    Ports { name: String },
+    /// Stop this server's forward to a port, dropping every connection
+    /// through it -- from this client and any other. Answers with the ports.
+    StopForward { name: String, port: u16 },
+    /// Stop the process listening on a port inside the sandbox, and the
+    /// forward to it. Answers with the ports.
+    KillPort { name: String, port: u16 },
+    /// Stop one process in the sandbox, by pid -- for a dev server whose
+    /// port cannot be traced to it. Answers with the ports.
+    KillProcess { name: String, pid: u32 },
     /// A session's unsent review.
     Comments { name: String },
     /// Add one remark to it. Answers with the review as it now stands, so a
@@ -331,6 +343,10 @@ impl Request {
             | Request::Shells { name }
             | Request::NewShell { name }
             | Request::KillShell { name, .. }
+            | Request::Ports { name }
+            | Request::StopForward { name, .. }
+            | Request::KillPort { name, .. }
+            | Request::KillProcess { name, .. }
             | Request::Comments { name }
             | Request::Comment { name, .. }
             | Request::Uncomment { name, .. }
@@ -406,6 +422,7 @@ pub enum Reply {
     Shells {
         shells: Vec<String>,
     },
+    Ports(hura_core::ports::PortsView),
     Files(Dir),
     File(FileText),
     /// The status after whatever was asked for, and what git said while doing
@@ -609,6 +626,28 @@ mod tests {
                 },
                 "block",
             ),
+            (Request::Ports { name: "a".into() }, "ports"),
+            (
+                Request::StopForward {
+                    name: "a".into(),
+                    port: 5173,
+                },
+                "stop-forward",
+            ),
+            (
+                Request::KillPort {
+                    name: "a".into(),
+                    port: 5173,
+                },
+                "kill-port",
+            ),
+            (
+                Request::KillProcess {
+                    name: "a".into(),
+                    pid: 71,
+                },
+                "kill-process",
+            ),
             (Request::Integrations, "integrations"),
             (
                 Request::Mcp {
@@ -713,6 +752,10 @@ mod tests {
             status: None,
             pane: Some("? for shortcuts".into()),
             usage: None,
+            ports: vec![hura_core::ports::Listening {
+                port: 5173,
+                host: hura_core::ports::Loopback::V6,
+            }],
         })
         .into();
 
