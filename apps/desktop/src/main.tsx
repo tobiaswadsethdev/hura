@@ -7,12 +7,14 @@ import { MenuProvider } from "./ContextMenu";
 import { routeLinks } from "./open";
 import { markUntrustedMetrics } from "./charSize";
 import { ICON_SIZE, ICON_STROKE } from "./icons";
+import { watchForUpdates } from "./Update";
 import "./style.css";
 
 // Before the first render: the correction is a stylesheet rule keyed on a class
 // on <html>, and adding it afterwards would paint the window wrong once.
 markUntrustedMetrics();
 routeLinks();
+watchForUpdates();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

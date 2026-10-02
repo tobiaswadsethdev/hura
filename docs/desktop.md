@@ -415,9 +415,17 @@ being measured.
 
 ## Keeping it current
 
-At launch the window asks github whether there is a newer release, and puts a
-bar above the header when there is. *Install and restart* downloads it, checks
-it, runs the installer and relaunches; *later* dismisses the bar for this run.
+The wordmark in the top-left corner carries the window's version, and opens
+the **about** screen: this window's version, the paired `hurad`'s (flagged when
+the two differ, which is the usual reason a new button does nothing), the
+agent's, and links to the releases, the docs and the issue tracker.
+
+The window asks github whether there is a newer release at launch, again when
+it comes back into focus after six hours, and whenever *check* is pressed on the
+about screen -- so learning about a release never needs a restart. When there
+is one, a badge with the new version appears beside the wordmark; it opens the
+about screen, which shows the release notes and *install & restart*. That
+downloads it, checks it, runs the installer and relaunches.
 
 **It asks rather than acting.** What arrives is verified against a signature
 made when the release was built, so the risk was never what gets installed --
@@ -427,14 +435,11 @@ own binary](install.md#updating-without-being-asked). The difference between
 the two is only that a window has somebody in front of it to ask, and a server
 does not.
 
-One request, at launch, and never again. A window left open for a week is not
-something to poll github about, and the next launch is soon enough for a
-release that has been out for hours.
-
 Windows only, and not an oversight: the release page carries a Windows
 installer and no Linux one, because a Tauri bundle links against the webkit2gtk
 of the distribution that built it. On Linux the window is built from the tree,
-so there is nothing for an updater to fetch and no bar ever appears.
+so there is nothing for an updater to fetch: the about screen says the build is
+from source, and no badge ever appears.
 
 ## Tickets
 

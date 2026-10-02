@@ -219,7 +219,8 @@ Linux. Only the client half of this repository compiles for Windows, which CI
 checks on every change; `hurad` does not, and is not asked to.
 
 **The window updates itself, once you say so.** It checks for a newer release
-at launch and puts a bar across the top when there is one; *install and
+at launch, on focus after a few hours, and from *check* on the about screen
+(the wordmark in the corner), and shows a badge when there is one; *install &
 restart* downloads it, checks it against a signature made when the release was
 built, runs the installer and relaunches. It never does that without being
 clicked -- see [desktop.md](desktop.md#keeping-it-current).

@@ -158,6 +158,38 @@ fn forget(name: String) -> Result<Vec<ServerSummary>, Failed> {
     servers()
 }
 
+/// What the about screen says: this window's version, and the server's.
+///
+/// The server half is asked fresh rather than remembered from pairing, because
+/// `hurad` updates itself and the version it paired at is a fact about last
+/// month. Unauthenticated -- it is `GET /version` -- so a revoked token still
+/// gets an answer here, which is the moment somebody wants one.
+#[derive(Debug, Clone, Serialize)]
+struct About {
+    desktop: String,
+    /// Whether this build can replace itself. The plugin is compiled in on
+    /// Windows only; see `Update.tsx`.
+    updater: bool,
+    server_version: Option<String>,
+    server_error: Option<String>,
+}
+
+#[tauri::command(async)]
+fn about(server: Option<String>) -> About {
+    let hello = server.map(|name| remote(&name).and_then(|r| r.hello().map_err(to_message)));
+    let (server_version, server_error) = match hello {
+        Some(Ok(h)) => (Some(h.version), None),
+        Some(Err(e)) => (None, Some(e.message)),
+        None => (None, None),
+    };
+    About {
+        desktop: env!("CARGO_PKG_VERSION").into(),
+        updater: cfg!(windows),
+        server_version,
+        server_error,
+    }
+}
+
 fn remote(name: &str) -> Result<Remote, Failed> {
     let remotes = Remotes::load().map_err(failed)?;
     remotes.select(Some(name)).cloned().map_err(failed)
@@ -843,6 +875,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             servers,
+            about,
             connect,
             forget,
             sessions,

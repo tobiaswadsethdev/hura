@@ -49,7 +49,8 @@ import { Split } from "./Split";
 import type { Against } from "./gen/Against";
 import { keyOf, Tabs, type Tab } from "./Tabs";
 import { group, Tree } from "./Tree";
-import { UpdateBar } from "./Update";
+import { UpdateBadge } from "./Update";
+import { AboutScreen } from "./About";
 import { Select } from "./Select";
 
 /// Where in the window you are.
@@ -59,7 +60,7 @@ import { Select } from "./Select";
 /// is what the window *is* when nothing is over it. Writing it as one of five
 /// equal names would invite code that tears it down to show another, which is
 /// the one thing that must not happen -- the terminals live in it.
-type Screen = "tickets" | "integrations" | "servers" | "settings";
+type Screen = "tickets" | "integrations" | "servers" | "settings" | "about";
 
 /// How often the tickets are read for changes. See the effect that uses it.
 const TICKET_POLL_MS = 3 * 60_000;
@@ -138,6 +139,12 @@ export default function App() {
   /// together, and nothing enforced it -- opening the tickets from the settings
   /// screen put both on screen at once, each with its own scrim.
   const [screen, setScreen] = useState<Screen | null>(null);
+  /// This window's own version, for the wordmark. Asked once: it cannot change
+  /// without a restart.
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    api.about(null).then((a) => setVersion(a.desktop), () => {});
+  }, []);
   const [creatingProject, setCreatingProject] = useState(false);
   const [creatingIn, setCreatingIn] = useState<Project | null>(null);
   /// The ticket a create was started from, carried from the tickets screen to the form.
@@ -442,9 +449,18 @@ export default function App() {
 
   return (
     <div className="app">
-      <UpdateBar />
       <header>
-        <span className="mark">hura</span>
+        {/* The wordmark is the way to the about screen, and carries the
+            version so "which build is this" is never more than a glance. */}
+        <button
+          className={`mark${screen === "about" ? " on" : ""}`}
+          title="about hura"
+          onClick={() => setScreen(screen === "about" ? null : "about")}
+        >
+          hura
+          {version && <span className="mark-version">{version}</span>}
+        </button>
+        <UpdateBadge onOpen={() => setScreen("about")} />
         {/* The chooser only when there is a choice, and nothing at all when
             there is not: with one paired server there is nothing to
             disambiguate, and the servers screen names it.
@@ -746,6 +762,14 @@ export default function App() {
             onClose={() => setScreen(null)}
             onPaired={paired}
             onForgot={forgot}
+          />
+        )}
+
+        {screen === "about" && (
+          <AboutScreen
+            server={server}
+            agent={(selected ? polls[selected]?.usage : null) ?? null}
+            onClose={() => setScreen(null)}
           />
         )}
 

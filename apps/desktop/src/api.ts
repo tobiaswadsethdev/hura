@@ -45,7 +45,17 @@ export type Paired = { server: ServerSummary; servers: ServerSummary[]; version:
 /// `GitAnswer` in main.rs. Both halves are generated types.
 export type GitAnswer = { said: string; status: GitStatus };
 
+/// This window's version and, when a server is named, that server's. See
+/// `About` in main.rs.
+export type About = {
+  desktop: string;
+  updater: boolean;
+  server_version: string | null;
+  server_error: string | null;
+};
+
 export const api = {
+  about: (server: string | null) => invoke<About>("about", { server }),
   servers: () => invoke<ServerSummary[]>("servers"),
   // Pairing, which the CLI spells `hura connect` and `hura remotes --forget`.
   // Same checks either way: both call `hura_client::pair`.
