@@ -63,7 +63,7 @@ export function AboutScreen({
     about?.server_version != null && about.server_version !== about.desktop;
 
   return (
-    <Screen icon={AboutGlyph} title="about" onClose={onClose}>
+    <Screen icon={AboutGlyph} title="about" narrow onClose={onClose}>
       <div className="about-hero">
         <span className="about-mark">hura</span>
         {about && <span className="version-chip">{about.desktop}</span>}

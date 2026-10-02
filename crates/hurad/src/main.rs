@@ -13,6 +13,7 @@
 
 mod attach;
 mod auth;
+mod forward;
 mod rpc;
 mod serve;
 mod stream;

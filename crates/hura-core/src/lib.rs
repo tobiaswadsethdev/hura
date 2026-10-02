@@ -35,6 +35,7 @@ pub mod mcp;
 pub mod ops;
 pub mod pane;
 pub mod policy;
+pub mod ports;
 pub mod projects;
 pub mod removed;
 pub mod repos;

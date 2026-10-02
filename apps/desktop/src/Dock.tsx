@@ -19,10 +19,12 @@ import type { Against } from "./gen/Against";
 import type { Session } from "./gen/Session";
 import type { Usage } from "./gen/Usage";
 import { GitView } from "./GitView";
-import { Branch, Events, Files, Policy, Record } from "./icons";
+import { Branch, Events, Files, Policy, Ports, Record } from "./icons";
 import { Facts } from "./panes/Facts";
 import { PolicyPane } from "./panes/Policy";
 import { EventsPane } from "./panes/Events";
+import { PortsPane } from "./panes/Ports";
+import type { Listening } from "./gen/Listening";
 
 /// The five panes, in the order the strip shows them.
 ///
@@ -45,6 +47,7 @@ const VIEWS = [
   { key: "git", label: "git", icon: Branch },
   { key: "events", label: "events", icon: Events },
   { key: "policy", label: "policy", icon: Policy },
+  { key: "ports", label: "ports", icon: Ports },
   { key: "facts", label: "facts", icon: Record },
 ] as const;
 type View = (typeof VIEWS)[number]["key"];
@@ -54,6 +57,7 @@ export function Dock({
   server,
   session,
   usage,
+  listening,
   refreshMs,
   onOpenFile,
   onOpenDiff,
@@ -66,6 +70,8 @@ export function Dock({
   /// What this session has spent, from the status channel. `null` until its
   /// agent's status line has run once.
   usage: Usage | null;
+  /// What the sandbox is listening on, from the status poll.
+  listening: Listening[];
   /// The window's refresh interval, which the events feed re-reads on.
   refreshMs: number;
   onOpenFile: (path: string) => void;
@@ -90,6 +96,9 @@ export function Dock({
             onClick={() => setView(key)}
           >
             <Mark />
+            {key === "ports" && listening.length > 0 && (
+              <span className="tab-count">{listening.length}</span>
+            )}
           </button>
         ))}
       </nav>
@@ -110,6 +119,9 @@ export function Dock({
         )}
         {view === "facts" && <Facts session={session} usage={usage} />}
         {view === "policy" && <PolicyPane server={server} name={session.name} />}
+        {view === "ports" && (
+          <PortsPane key={session.name} server={server} name={session.name} listening={listening} />
+        )}
         {view === "events" && (
           <EventsPane
             key={session.name}

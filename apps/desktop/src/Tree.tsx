@@ -24,11 +24,14 @@
 import { useState } from "react";
 
 import type { DiffStat } from "./gen/DiffStat";
+import type { Poll } from "./gen/Poll";
+import type { Usage } from "./gen/Usage";
 import type { Project } from "./gen/Project";
 import type { Session } from "./gen/Session";
 import { copy, useContextMenu } from "./ContextMenu";
+import { usePreviews } from "./previews";
 import { Empty } from "./Empty";
-import { Branch, Chevron, Copy, Forget, Plus, StateDot } from "./icons";
+import { Branch, Chevron, Copy, Forget, Plus, Ports, StateDot } from "./icons";
 
 export type Group = {
   /// The project, or `null` for the by-repository groups at the bottom.
@@ -80,7 +83,7 @@ function keyOf(g: Group): string {
 export function Tree({
   width,
   groups,
-  stats,
+  polls,
   selected,
   onSelect,
   onNewWorktree,
@@ -95,7 +98,10 @@ export function Tree({
   /// reported it. Absent for a session that has not been polled yet, which is
   /// a different thing from a session with no changes and is why the row shows
   /// nothing rather than `+0/-0`.
-  stats: Record<string, DiffStat | null>;
+  ///
+  /// The rest of the poll comes too: what each session has spent, how full
+  /// its context is, and whether anything in it is listening.
+  polls: Record<string, Poll>;
   selected: string | null;
   onSelect: (name: string) => void;
   onNewWorktree: (project: Project) => void;
@@ -223,7 +229,9 @@ export function Tree({
                     <Worktree
                       key={s.name}
                       session={s}
-                      stat={stats[s.name] ?? null}
+                      stat={polls[s.name]?.stat ?? null}
+                      usage={polls[s.name]?.usage ?? null}
+                      listening={polls[s.name]?.ports.map((l) => l.port) ?? []}
                       on={s.name === selected}
                       onSelect={onSelect}
                       onDestroy={onDestroy}
@@ -235,24 +243,93 @@ export function Tree({
           </section>
         );
       })}
+      <Spend groups={groups} polls={polls} />
     </nav>
+  );
+}
+
+/// What every session in the list has spent, together.
+///
+/// The per-session cost is in each row, and a row is where you look to decide
+/// about *that* session; the total is the question nobody can answer by
+/// adding up eleven rows in their head. Sessions that have not reported yet
+/// are left out rather than counted as zero, and the footer says how many
+/// that left in.
+function Spend({ groups, polls }: { groups: Group[]; polls: Record<string, Poll> }) {
+  const reported = groups
+    .flatMap((g) => g.worktrees)
+    .map((s) => ({ name: s.name, usage: polls[s.name]?.usage }))
+    .filter((r): r is { name: string; usage: Usage } => r.usage?.cost_usd != null);
+  if (reported.length === 0) return null;
+  const total = reported.reduce((sum, r) => sum + (r.usage.cost_usd ?? 0), 0);
+  const breakdown = [...reported]
+    .sort((a, b) => (b.usage.cost_usd ?? 0) - (a.usage.cost_usd ?? 0))
+    .map((r) => `${r.name}  ${money(r.usage.cost_usd)}`)
+    .join("\n");
+  return (
+    <footer className="spend" title={breakdown}>
+      <span className="spend-total">{money(total)}</span>
+      <span className="hint">
+        across {reported.length} session{reported.length === 1 ? "" : "s"}
+      </span>
+    </footer>
+  );
+}
+
+function money(usd: number | null): string {
+  if (usd === null) return "";
+  return usd >= 100 ? `$${Math.round(usd)}` : `$${usd.toFixed(2)}`;
+}
+
+/// How full the context is, as a ring: a percentage is the one number on the
+/// row that is about to *matter* -- near the top of it the agent compacts and
+/// forgets -- and a ring says "nearly full" without being read.
+function Context({ usage }: { usage: Usage }) {
+  const pct = usage.context_used_percentage;
+  if (pct === null) return null;
+  const r = 5;
+  const c = 2 * Math.PI * r;
+  const filled = Math.max(0, Math.min(100, pct)) / 100;
+  const of = usage.context_size ? ` of ${Math.round(usage.context_size / 1000)}k` : "";
+  return (
+    <span className={`wt-context${pct >= 80 ? " high" : ""}`} title={`context ${Math.round(pct)}%${of}`}>
+      <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+        <circle cx="6" cy="6" r={r} className="track" />
+        <circle
+          cx="6"
+          cy="6"
+          r={r}
+          className="fill"
+          strokeDasharray={`${c * filled} ${c}`}
+          transform="rotate(-90 6 6)"
+        />
+      </svg>
+    </span>
   );
 }
 
 function Worktree({
   session: s,
   stat,
+  usage,
+  listening,
   on,
   onSelect,
   onDestroy,
 }: {
   session: Session;
   stat: DiffStat | null;
+  usage: Usage | null;
+  listening: number[];
   on: boolean;
   onSelect: (name: string) => void;
   onDestroy: (session: Session) => void;
 }) {
   const menu = useContextMenu();
+  // Previewed, not merely listening: the globe lights up while this machine
+  // is forwarding one of the session's ports, so which sessions have
+  // something open is readable from the tree without opening each one.
+  const previewed = usePreviews().filter((p) => p.session === s.name);
   return (
     // Destroying is in the menu rather than an icon on the card: an X on every
     // row is an X you stop seeing, and this one ends an agent.
@@ -285,6 +362,26 @@ function Worktree({
       <span className="wt-body">
         <span className="wt-head">
           <span className="wt-name">{s.name}</span>
+          <span className="wt-signals">
+            {(listening.length > 0 || previewed.length > 0) && (
+              <span
+                className={`wt-ports${previewed.length > 0 ? " on" : ""}`}
+                title={
+                  previewed.length > 0
+                    ? `previewing ${previewed.map((p) => `${p.port} → localhost:${p.local}`).join(", ")}`
+                    : `listening on ${listening.join(", ")}`
+                }
+              >
+                <Ports />
+              </span>
+            )}
+            {usage?.cost_usd != null && (
+              <span className="wt-cost" title="spent by this session">
+                {money(usage.cost_usd)}
+              </span>
+            )}
+            {usage && <Context usage={usage} />}
+          </span>
         </span>
 
         <span className="wt-meta">

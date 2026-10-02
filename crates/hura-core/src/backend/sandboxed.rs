@@ -233,6 +233,17 @@ impl Backend for Sandboxed {
         Ok(self.client.interactive_argv(&session.sandbox, argv))
     }
 
+    fn forward_argv(
+        &self,
+        session: &Session,
+        port: u16,
+        host: crate::ports::Loopback,
+    ) -> Result<Vec<String>> {
+        Ok(self
+            .client
+            .forward_argv(&session.sandbox, port, host.address()))
+    }
+
     /// The gateway does not pass the image's environment through to an exec, so
     /// a tmux client started this way inherits no locale: tmux then assumes a
     /// terminal that is not UTF-8, draws box rules with the DEC line-drawing set
@@ -416,6 +427,9 @@ mod tests {
             unreachable!()
         }
         fn interactive_argv(&self, _: &str, _: &[&str]) -> Vec<String> {
+            unreachable!()
+        }
+        fn forward_argv(&self, _: &str, _: u16, _: &str) -> Vec<String> {
             unreachable!()
         }
     }

@@ -51,6 +51,7 @@ import { keyOf, Tabs, type Tab } from "./Tabs";
 import { group, Tree } from "./Tree";
 import { UpdateBadge } from "./Update";
 import { AboutScreen } from "./About";
+import { refreshPreviews } from "./previews";
 import { Select } from "./Select";
 
 /// Where in the window you are.
@@ -145,6 +146,15 @@ export default function App() {
   useEffect(() => {
     api.about(null).then((a) => setVersion(a.desktop), () => {});
   }, []);
+  // The previews this window is running, for the tree's globes. Re-read on
+  // a slow timer as well, since one ends on its own when the connection to
+  // the server does.
+  useEffect(() => {
+    if (!server) return;
+    void refreshPreviews(server).catch(() => {});
+    const id = setInterval(() => void refreshPreviews(server).catch(() => {}), 10_000);
+    return () => clearInterval(id);
+  }, [server]);
   const [creatingProject, setCreatingProject] = useState(false);
   const [creatingIn, setCreatingIn] = useState<Project | null>(null);
   /// The ticket a create was started from, carried from the tickets screen to the form.
@@ -366,10 +376,6 @@ export default function App() {
   // the tree's own types claim it might. `polls` is a new object on every
   // status frame, so this recomputes about as often either way -- the point is
   // the narrower prop, not a saved comparison.
-  const stats = useMemo(
-    () => Object.fromEntries(Object.entries(polls).map(([name, poll]) => [name, poll.stat])),
-    [polls],
-  );
   const session = sessions.find((s) => s.name === selected) ?? null;
 
   // Asked once per worktree as it is selected. Not polled: a shell appears
@@ -591,7 +597,7 @@ export default function App() {
           <Tree
             width={prefs.treeWidth}
             groups={groups}
-            stats={stats}
+            polls={polls}
             selected={selected}
             onSelect={setSelected}
             onNewWorktree={setCreatingIn}
@@ -707,6 +713,7 @@ export default function App() {
                 server={server}
                 session={session}
                 usage={(selected ? polls[selected]?.usage : undefined) ?? null}
+                listening={(selected ? polls[selected]?.ports : undefined) ?? []}
                 refreshMs={prefs.refreshMs}
                 onOpenFile={(path) => openTab(session.name, { kind: "file", path })}
                 onOpenDiff={(path, against: Against) =>

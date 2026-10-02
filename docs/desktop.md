@@ -251,6 +251,68 @@ The policy pane's own endpoints and list entries have menus as well: block an
 endpoint, take an entry off a list. See [policy.md](policy.md#acting-on-a-denial)
 for what each change means at the gateway.
 
+## Previews
+
+When something in a sandbox starts listening -- `npm run dev`, a Python
+server, anything on loopback or on every address -- the globe on the dock's
+**ports** tab counts it, and the session's row in the tree shows a globe too.
+The pane lists each port. *Preview* opens it in your browser at
+`localhost:<the same port>`, or another number when this machine already uses
+that one. A port the list does not show can be typed in.
+
+It goes through the paired connection, not around it. The window listens on
+this machine's loopback and carries each connection to `hurad` as a channel on
+the websocket it already has open; `hurad` runs one `openshell forward
+service` per port, shared by every connection to it and stopped after two idle
+minutes. So a preview works wherever the window can reach the server -- WSL on
+NAT networking, a server across a VPN -- and the dev server is reachable from
+this machine alone, never from the network.
+
+The status poll is what finds the ports: it reads the sandbox's listening
+sockets from `/proc/net/tcp` in the same exec that reads the agent's state, so
+noticing a new server costs nothing. A server bound to `localhost` under a
+recent Node listens on `::1` only, and the preview targets that rather than
+`127.0.0.1`, where it would find nothing.
+
+**Seeing and stopping it.** A port being previewed has a green globe, in the
+pane and on the session's row in the tree, and a second line saying where it is
+on this machine and how many connections are open through it -- here and on
+the server. Its square button stops it: this machine stops listening, every
+open connection is closed (a tab's live-reload socket included), and the
+server's forward is stopped too rather than left for its idle minutes. A
+forward another client paired with the same server started shows up as well,
+and stops the same way.
+
+**Killing the process.** The trash button on a port, or on a row of the
+**processes** list under the ports, stops a process inside the sandbox: `TERM`,
+then `KILL` two seconds later, after asking. The agent and its tmux are listed
+and cannot be killed from here -- that is ending the session, which is what
+destroying the worktree is for.
+
+Which process holds a port is usually a guess, and the pane marks it with a
+`?`. The sandbox lets one process read another's descriptors only if it is
+that process's ancestor (`ptrace_scope=1`), and the exec asking never is, so a
+socket cannot be traced to its owner -- measured: `readlink` on another
+process's descriptor and `ss -p` are both refused. The owner shown is the one
+process whose command line names the port, when exactly one does. A server
+that does not name its port, such as `vite`, has no owner shown; stop it from
+the process list.
+
+One limit, which belongs to the forward rather than to hura: a service closing
+its end of a connection is not passed on (measured against openshell 0.0.110 --
+the reply arrives whole and the socket stays open). A browser never notices,
+because a dev server says how long its answer is. A client that reads until
+the server hangs up -- an HTTP/1.0 request with no length in the reply -- waits
+until it gives up.
+
+## What it is spending
+
+Every worktree's row carries what its session has spent and a ring for how
+full its context is; the ring turns amber past 80%, which is about where the
+agent compacts and forgets. The foot of the tree is the total across every
+session that has reported, with the breakdown on hover. All of it is the status
+line's own numbers, arriving with the poll the row already gets.
+
 ## Actions are in menus
 
 Anything you can do to a row that is not the reason you clicked it is in its

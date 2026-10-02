@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use hura_core::events::Event;
 use hura_core::ops::Poll;
+pub use hura_core::ports::Loopback;
 
 /// A channel within one connection, chosen by the client.
 ///
@@ -49,6 +50,27 @@ pub enum Channel {
     Events { session: String },
     /// What the agent is doing, and how far the working copy has moved.
     Status { session: String },
+    /// One TCP connection to a port inside the sandbox: bytes in, bytes out,
+    /// in the same `Input` and `Output` frames a terminal uses.
+    ///
+    /// One channel per connection rather than one per port, because a channel
+    /// is already a byte pipe with an open and a close -- which is exactly
+    /// what a connection is. A browser loading a dev server opens a handful of
+    /// them at once, and each one ending is its own `Close`.
+    ///
+    /// The client is the one listening: it binds a port on its own loopback
+    /// and turns every connection it accepts into one of these, so the
+    /// service is reached over the paired, authenticated connection and is
+    /// never exposed on any network.
+    Port {
+        session: String,
+        port: u16,
+        /// Which loopback the service listens on. A dev server bound to
+        /// `localhost` under a recent Node listens on `::1` alone, and is
+        /// unreachable at `127.0.0.1`.
+        #[serde(default)]
+        host: Loopback,
+    },
 }
 
 impl Channel {
@@ -56,7 +78,8 @@ impl Channel {
         match self {
             Channel::Terminal { session, .. }
             | Channel::Events { session }
-            | Channel::Status { session } => session,
+            | Channel::Status { session }
+            | Channel::Port { session, .. } => session,
         }
     }
 }
@@ -73,7 +96,8 @@ pub enum ClientFrame {
     Close {
         id: ChannelId,
     },
-    /// Keystrokes, base64 of the raw bytes.
+    /// Keystrokes, base64 of the raw bytes -- or, on a port channel, what the
+    /// client's connection sent.
     Input {
         id: ChannelId,
         data: String,
@@ -95,7 +119,8 @@ pub enum ClientFrame {
 pub enum ServerFrame {
     /// The channel is live. Nothing before this belongs to it.
     Opened { id: ChannelId },
-    /// Terminal output, base64 of the raw bytes.
+    /// Terminal output, base64 of the raw bytes -- or, on a port channel, what
+    /// the service answered.
     Output { id: ChannelId, data: String },
     /// Decisions the gateway has made since the last of these.
     ///
@@ -104,7 +129,11 @@ pub enum ServerFrame {
     /// that carries the difference.
     Events { id: ChannelId, events: Vec<Event> },
     /// The agent's state, when it has changed.
-    Status { id: ChannelId, poll: Poll },
+    ///
+    /// Boxed because it is by far the largest frame -- a pane capture, the
+    /// usage, the listening ports -- and every other frame would otherwise be
+    /// allocated at its size. Invisible on the wire.
+    Status { id: ChannelId, poll: Box<Poll> },
     /// The channel has ended, for a reason worth showing when there is one.
     Closed {
         id: ChannelId,
@@ -200,6 +229,33 @@ mod tests {
         ] {
             assert_eq!(c.session(), "a");
         }
+    }
+
+    /// A port channel says which loopback it means, and one that does not
+    /// means IPv4 -- what a dev server bound to `127.0.0.1` or `0.0.0.0` is on.
+    #[test]
+    fn a_port_channel_names_its_loopback() {
+        let c = Channel::Port {
+            session: "s".into(),
+            port: 5173,
+            host: Loopback::V6,
+        };
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["kind"], "port");
+        assert_eq!(v["host"], "v6");
+        assert_eq!(serde_json::from_value::<Channel>(v).unwrap(), c);
+
+        let bare: Channel =
+            serde_json::from_str(r#"{"kind":"port","session":"s","port":3000}"#).unwrap();
+        assert_eq!(
+            bare,
+            Channel::Port {
+                session: "s".into(),
+                port: 3000,
+                host: Loopback::V4,
+            }
+        );
+        assert_eq!(Loopback::V6.address(), "::1");
     }
 
     /// The reason terminal bytes are encoded at all: a PTY read can end in the
