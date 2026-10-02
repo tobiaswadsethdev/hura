@@ -38,11 +38,16 @@ import {
   ArrowDownToLine,
   ArrowLeft,
   ArrowUpFromLine,
+  BadgeInfo,
   Binary,
+  BookOpen,
+  Bot,
+  Bug,
   ChevronDown,
   ChevronRight,
   Check,
   CircleAlert,
+  CircleArrowUp,
   CircleCheck,
   CircleQuestionMark,
   CloudDownload,
@@ -57,6 +62,9 @@ import {
   FolderTree,
   GitBranch,
   Info,
+  LoaderCircle,
+  Monitor,
+  Package,
   KeyRound,
   MessageSquare,
   Pencil,
@@ -66,6 +74,7 @@ import {
   Minus as MinusGlyph,
   RefreshCw,
   RotateCw,
+  ScrollText,
   Save,
   Search,
   SlidersHorizontal,
@@ -78,6 +87,7 @@ import {
   Sparkles,
   Square,
   Ticket,
+  TriangleAlert,
   Trash,
   Undo2,
   Unplug,
@@ -121,6 +131,9 @@ export const NewProject = FolderPlus;
 export const Integrations = Plug;
 export const Servers = ServerGlyph;
 export const Settings = SettingsGlyph;
+/// Versions, updates and links. Opened from the wordmark rather than the
+/// strip, but headed by this glyph like every other screen.
+export const About = BadgeInfo;
 
 // The dock's five panes, in the order the strip shows them.
 export const Files = FolderTree;
@@ -170,6 +183,27 @@ export const Comments = MessageSquare;
 /// the settings gear, which is the header's own destination.
 export const Setup = SlidersHorizontal;
 export const Skill = Sparkles;
+
+// The create form's chips: each field is its glyph and its value, and the
+// label is the tooltip. `Branch`, `Policy`, `Secret` and `Skill` above are
+// reused rather than redrawn -- a policy is the same shield here as in the dock.
+/// A toolchain in the sandbox image.
+export const Toolchain = Package;
+/// The agent the session runs, and the version of it.
+export const Agent = Bot;
+/// This window, as opposed to the server it talks to.
+export const Desktop = Monitor;
+
+// The about screen.
+/// A newer release is on offer. The header's badge and the screen's button.
+export const Upgrade = CircleArrowUp;
+export const Notes = ScrollText;
+export const Docs = BookOpen;
+export const Report = Bug;
+/// Something in progress that has no other picture: a check, a download.
+export const Busy = LoaderCircle;
+/// Worth reading before going ahead -- work that stays behind on the host.
+export const Heads = TriangleAlert;
 
 // The chrome.
 export const Plus = PlusGlyph;

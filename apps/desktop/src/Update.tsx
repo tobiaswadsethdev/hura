@@ -11,28 +11,47 @@
 // built with, so the risk is not what arrives; it is *when*. A window watching
 // four agents is a window somebody is using, and replacing it out from under
 // them mid-session is the same mistake `hurad` refuses to make with its own
-// binary. So: a bar, a button, and it waits.
+// binary. So: a badge in the header, a button on the about screen, and it
+// waits.
 //
-// The check is one request at launch and never again. A window left open for a
-// week is not a thing to poll github about, and the next launch is soon enough
-// for a release that has been out for hours.
+// **It checks more than once.** At launch, whenever the about screen's button
+// is pressed, and when the window comes back into focus after a long time
+// away. A window left open for a week used to need a restart just to *learn*
+// there was something to install; one request every few hours, and only when
+// somebody is looking, is not polling github.
+//
+// The state is one store for the window rather than a component's own,
+// because two places read it -- the header badge and the about screen -- and
+// they have to agree about which version is on offer.
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
-/// What was found, once the check has come back with something.
+import { Upgrade } from "./icons";
+
+/// Re-checked on focus once this much has passed since the last check.
+const STALE_MS = 6 * 60 * 60_000;
+
+/// What was found, once a check has come back with something.
 type Found = {
   version: string;
+  /// The release's own notes, from `latest.json`. Absent for a release cut
+  /// without any.
+  notes: string | null;
+  date: string | null;
   /// Kept so the install uses the very object the check returned. Re-checking
   /// on click would be a second request with a second answer, and the version
-  /// in the bar has to be the version that installs.
-  install: () => Promise<void>;
+  /// on the button has to be the version that installs.
+  install: (onProgress: (got: number, total: number | null) => void) => Promise<void>;
 };
 
-type Phase =
+export type Phase =
+  | { at: "unsupported" }
   | { at: "idle" }
-  | { at: "found"; found: Found }
-  | { at: "installing"; version: string }
-  | { at: "failed"; version: string; why: string };
+  | { at: "checking" }
+  | { at: "current"; checkedAt: number }
+  | { at: "found"; found: Found; checkedAt: number }
+  | { at: "installing"; version: string; got: number; total: number | null }
+  | { at: "failed"; version: string | null; why: string; checkedAt: number };
 
 /// Whether this build has an updater behind it at all.
 ///
@@ -44,97 +63,133 @@ function onWindows(): boolean {
   return /windows/i.test(navigator.userAgent);
 }
 
-export function UpdateBar() {
-  const [phase, setPhase] = useState<Phase>({ at: "idle" });
-  const [dismissed, setDismissed] = useState(false);
+let phase: Phase = onWindows() ? { at: "idle" } : { at: "unsupported" };
+const listeners = new Set<() => void>();
 
-  useEffect(() => {
-    if (!onWindows()) return;
-    let live = true;
+function set(next: Phase) {
+  phase = next;
+  listeners.forEach((l) => l());
+}
 
-    (async () => {
-      try {
-        // Imported here rather than at the top of the file so a Linux build
-        // never loads the plugin's JS at all -- and so a browser opening the
-        // dev server, which has no Tauri host, does not throw on import.
-        const { check } = await import("@tauri-apps/plugin-updater");
-        const update = await check();
-        if (!live || !update) return;
-        setPhase({
-          at: "found",
-          found: {
-            version: update.version,
-            install: () => update.downloadAndInstall(),
-          },
-        });
-      } catch {
-        // Silence is right here. Nothing is broken, the window works, and
-        // "could not reach github" is not worth a bar across the top of it.
-        // `hurad doctor` is where a version question gets a real answer.
-      }
-    })();
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 
-    return () => {
-      live = false;
-    };
-  }, []);
+export function useUpdate(): Phase {
+  return useSyncExternalStore(subscribe, () => phase);
+}
 
-  if (dismissed || phase.at === "idle") return null;
-
-  if (phase.at === "installing") {
-    return (
-      <div className="update">
-        <span className="what">installing {phase.version}…</span>
-        <span className="note">the window restarts on its own</span>
-      </div>
-    );
+/// Ask github whether there is something newer. Safe to call at any time:
+/// it does nothing while a check or an install is already under way.
+export async function checkForUpdate(): Promise<void> {
+  if (phase.at === "unsupported" || phase.at === "checking" || phase.at === "installing") return;
+  set({ at: "checking" });
+  try {
+    // Imported here rather than at the top of the file so a Linux build
+    // never loads the plugin's JS at all -- and so a browser opening the
+    // dev server, which has no Tauri host, does not throw on import.
+    const { check } = await import("@tauri-apps/plugin-updater");
+    const update = await check();
+    const checkedAt = Date.now();
+    if (!update) {
+      set({ at: "current", checkedAt });
+      return;
+    }
+    set({
+      at: "found",
+      checkedAt,
+      found: {
+        version: update.version,
+        notes: update.body?.trim() || null,
+        date: update.date ?? null,
+        install: (onProgress) => {
+          let got = 0;
+          let total: number | null = null;
+          return update.downloadAndInstall((event) => {
+            if (event.event === "Started") total = event.data.contentLength ?? null;
+            if (event.event === "Progress") got += event.data.chunkLength;
+            onProgress(got, total);
+          });
+        },
+      },
+    });
+  } catch (e) {
+    set({ at: "failed", version: null, why: messageOf(e), checkedAt: Date.now() });
   }
+}
 
-  if (phase.at === "failed") {
-    return (
-      <div className="update">
-        <span className="what">could not install {phase.version}</span>
-        <span className="note">{phase.why}</span>
-        <a
-          href={`https://github.com/tobiaswadsethdev/hura/releases/tag/v${phase.version}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          download it instead
-        </a>
-        <button onClick={() => setDismissed(true)}>dismiss</button>
-      </div>
+/// Download, verify, install, relaunch. Only from a button press.
+export async function installUpdate(): Promise<void> {
+  if (phase.at !== "found") return;
+  const { found, checkedAt } = phase;
+  set({ at: "installing", version: found.version, got: 0, total: null });
+  try {
+    await found.install((got, total) =>
+      set({ at: "installing", version: found.version, got, total }),
     );
+    // The installer replaced the files; the process still running is the old
+    // one, so it has to go. `relaunch` is the process plugin rather than
+    // `window.location.reload()`, which would reload the web view and leave
+    // the same binary behind it.
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  } catch (e) {
+    set({ at: "failed", version: found.version, why: messageOf(e), checkedAt });
   }
+}
 
-  const { found } = phase;
-  return (
-    <div className="update">
-      <span className="what">hura {found.version} is available</span>
-      <button
-        className="take"
-        onClick={async () => {
-          setPhase({ at: "installing", version: found.version });
-          try {
-            await found.install();
-            // The installer replaced the files; the process still running is
-            // the old one, so it has to go. `relaunch` is the process plugin
-            // rather than `window.location.reload()`, which would reload the
-            // web view and leave the same binary behind it.
-            const { relaunch } = await import("@tauri-apps/plugin-process");
-            await relaunch();
-          } catch (e) {
-            setPhase({
-              at: "failed",
-              version: found.version,
-              why: e instanceof Error ? e.message : String(e),
-            });
-          }
-        }}
-      >
-        install and restart
+function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/// The checks nobody asks for: one at launch, and one on focus once the last
+/// is stale. Called once, from `main.tsx`.
+export function watchForUpdates() {
+  if (phase.at === "unsupported") return;
+  void checkForUpdate();
+  window.addEventListener("focus", () => {
+    const last = "checkedAt" in phase ? phase.checkedAt : 0;
+    if (Date.now() - last > STALE_MS) void checkForUpdate();
+  });
+}
+
+/// The header's half: nothing until there is something to install, then the
+/// version on offer, which opens the about screen where the button is.
+///
+/// Silent about a failed *check* -- "could not reach github" is not worth a
+/// mark in the header, and the about screen says it where somebody asked. A
+/// failed *install* is shown, because somebody pressed a button and is owed
+/// an answer.
+export function UpdateBadge({ onOpen }: { onOpen: () => void }) {
+  const p = useUpdate();
+  if (p.at === "found") {
+    return (
+      <button className="update-badge" title={`hura ${p.found.version} is available`} onClick={onOpen}>
+        <Upgrade />
+        {p.found.version}
       </button>
-      <button onClick={() => setDismissed(true)}>later</button>
-    </div>
-  );
+    );
+  }
+  if (p.at === "installing") {
+    return (
+      <button className="update-badge" title="installing" onClick={onOpen}>
+        <Upgrade />
+        {percent(p.got, p.total) ?? "…"}
+      </button>
+    );
+  }
+  if (p.at === "failed" && p.version) {
+    return (
+      <button className="update-badge bad" title={`could not install ${p.version}`} onClick={onOpen}>
+        <Upgrade />
+        {p.version}
+      </button>
+    );
+  }
+  return null;
+}
+
+export function percent(got: number, total: number | null): string | null {
+  return total ? `${Math.min(100, Math.round((got / total) * 100))}%` : null;
 }

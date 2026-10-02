@@ -16,12 +16,27 @@ import { useEffect, useState } from "react";
 
 import { api, messageOf } from "./api";
 import { Waiting } from "./Empty";
-import { Close } from "./icons";
+import {
+  Branch,
+  Busy,
+  Close,
+  Edit,
+  Heads,
+  Integrations,
+  Policy,
+  Publish,
+  Secret,
+  Skill,
+  Start,
+  Toolchain,
+  Tracker,
+} from "./icons";
 import type { Facts } from "./gen/Facts";
 import type { NewOptions } from "./gen/NewOptions";
 import type { Picked } from "./gen/Picked";
 import type { Project } from "./gen/Project";
 import type { Task } from "./gen/Task";
+import { Pill } from "./Pill";
 import { Select } from "./Select";
 
 export function NewWorktreeDialog({
@@ -63,7 +78,7 @@ export function NewWorktreeDialog({
 
   return (
     <div className="scrim" onMouseDown={onClose}>
-      <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="dialog new" onMouseDown={(e) => e.stopPropagation()}>
         {error && <p className="error">{error}</p>}
         {!options && !error && <Waiting />}
         {options && (
@@ -202,132 +217,186 @@ function Form({
     }
   };
 
+  // Skills this machine pushes, beside the ones the server already has. One
+  // list, because to the agent they are one list.
+  const skills = [...new Set([...options.skills, ...mine])];
+
   return (
-    <>
+    <div
+      className="new-session"
+      onKeyDown={(e) => {
+        // The textarea owns Enter, so the shortcut has to be a chord.
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !busy) {
+          e.preventDefault();
+          void submit();
+        }
+      }}
+    >
       <header className="dialog-head">
-        <h2>{project.name}</h2>
+        <h2>
+          <Start className="head-mark" />
+          new session <span className="in">in</span> {project.name}
+        </h2>
         <button className="quiet-icon" title="close" onClick={onClose}>
           <Close aria-label="close" />
         </button>
       </header>
+      <p className="origin" title="cloned from">
+        {project.repo}
+      </p>
 
-      <p className="origin">{project.repo}</p>
       {from && (
-        <p className="hint">
+        <p className="from-ticket">
+          <Tracker />
           <a href={from.url} target="_blank" rel="noreferrer">
             {from.key}
-          </a>{" "}
-          → <code>{from.branch}</code>
-        </p>
-      )}
-      {facts && <Drift facts={facts} />}
-
-      <label>
-        <span>task</span>
-        <textarea
-          autoFocus
-          rows={3}
-          value={task}
-          placeholder="what the agent should do"
-          onChange={(e) => setTask(e.target.value)}
-        />
-      </label>
-
-      <label>
-        <span>name</span>
-        <input
-          value={name}
-          placeholder="derived from the task"
-          onChange={(e) => setName(e.target.value)}
-        />
-      </label>
-
-      <label>
-        <span>base</span>
-        <input
-          value={base}
-          placeholder="the remote's default branch"
-          onChange={(e) => setBase(e.target.value)}
-        />
-      </label>
-
-      <label>
-        <span>policy</span>
-        <Select
-          value={policy}
-          onChange={setPolicy}
-          options={options.policies.map((p) => ({ value: p.spec, label: p.spec, hint: p.summary }))}
-        />
-      </label>
-
-      <fieldset>
-        <legend>toolchains</legend>
-        {options.toolchains.map((t) => (
-          <label key={t.name} className="tick">
-            <input
-              type="checkbox"
-              checked={toolchains.includes(t.name)}
-              onChange={() => toggle(toolchains, setToolchains, t.name)}
-            />
-            <span>{t.name}</span>
-            <span className="hint">{t.summary}</span>
-          </label>
-        ))}
-      </fieldset>
-
-      <fieldset>
-        <legend>providers</legend>
-        {options.providers_error && <p className="error">{options.providers_error}</p>}
-        {options.providers.length === 0 && !options.providers_error && (
-          <p className="hint">the gateway has no credential providers</p>
-        )}
-        {options.providers.map((p) => (
-          <label key={p.name} className="tick">
-            <input
-              type="checkbox"
-              checked={providers.includes(p.name)}
-              onChange={() => toggle(providers, setProviders, p.name)}
-            />
-            <span>{p.name}</span>
-            <span className="hint">{p.kind}</span>
-          </label>
-        ))}
-      </fieldset>
-
-      {/* Named, not offered: skills and MCP servers are one decision about
-          what your agents can reach, made in the server's config file.
-          Shown so a session's tools are not a surprise. */}
-      <dl className="carried">
-        <dt>skills</dt>
-        <dd>{options.skills.join(", ") || <span className="hint">none</span>}</dd>
-        <dt>mcp</dt>
-        <dd>{options.mcp.join(", ") || <span className="hint">none</span>}</dd>
-      </dl>
-      {options.mcp.length > 0 && (
-        // The cost of an MCP server, said where a session is about to be
-        // given one rather than only in a document. Everything that server
-        // can do is now something this agent can do with your credentials,
-        // and the gateway sees every call as the same `POST /mcp`.
-        <p className="hint">
-          Each of those is something the agent can do with the server's credentials — see{" "}
-          <b>integrations</b>.
+          </a>
+          <span className="hint">→</span>
+          <code>{from.branch}</code>
         </p>
       )}
 
-      {mine.length > 0 && (
-        <p className="hint">
-          pushed from this machine first: {mine.join(", ")}
-        </p>
-      )}
+      <textarea
+        className="task"
+        autoFocus
+        rows={4}
+        value={task}
+        placeholder="What should the agent do?"
+        onChange={(e) => setTask(e.target.value)}
+      />
+
+      <div className="chips">
+        <label className="chip-field" title="session name — derived from the task when blank">
+          <Edit />
+          <input
+            value={name}
+            placeholder="auto name"
+            spellCheck={false}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </label>
+        <label className="chip-field" title="base branch — the remote's default when blank">
+          <Branch />
+          <input
+            value={base}
+            placeholder="default branch"
+            spellCheck={false}
+            onChange={(e) => setBase(e.target.value)}
+          />
+        </label>
+        <label className="chip-field" title="network policy">
+          <Policy />
+          <Select
+            value={policy}
+            onChange={setPolicy}
+            aria-label="policy"
+            options={options.policies.map((p) => ({ value: p.spec, label: p.spec, hint: p.summary }))}
+          />
+        </label>
+      </div>
+
+      <div className="pick-rows">
+        <PickRow icon={Toolchain} label="toolchains">
+          {options.toolchains.map((t) => (
+            <Pill
+              key={t.name}
+              on={toolchains.includes(t.name)}
+              title={t.summary}
+              onClick={() => toggle(toolchains, setToolchains, t.name)}
+            >
+              {t.name}
+            </Pill>
+          ))}
+        </PickRow>
+
+        <PickRow icon={Secret} label="credentials">
+          {options.providers.map((p) => (
+            <Pill
+              key={p.name}
+              on={providers.includes(p.name)}
+              title={p.kind}
+              onClick={() => toggle(providers, setProviders, p.name)}
+            >
+              {p.name}
+            </Pill>
+          ))}
+          {options.providers_error && (
+            <span className="error" title={options.providers_error}>
+              gateway unreachable
+            </span>
+          )}
+          {options.providers.length === 0 && !options.providers_error && (
+            <span className="hint">none on the gateway</span>
+          )}
+        </PickRow>
+
+        {/* Named, not offered: skills and MCP servers are one decision about
+            what your agents can reach, made in the server's config file.
+            Shown so a session's tools are not a surprise. */}
+        <PickRow icon={Skill} label="skills — set in the server's config">
+          {skills.length === 0 && <span className="hint">none</span>}
+          {skills.map((s) => (
+            <span
+              key={s}
+              className="pill fixed"
+              title={mine.includes(s) ? "pushed from this machine first" : undefined}
+            >
+              {s}
+              {mine.includes(s) && <Publish className="local" />}
+            </span>
+          ))}
+        </PickRow>
+
+        {/* The cost of an MCP server, said where a session is about to be
+            given one: everything that server can do is now something this
+            agent can do with the server's credentials. */}
+        <PickRow
+          icon={Integrations}
+          label="MCP servers — the agent acts with the server's credentials through these"
+        >
+          {options.mcp.length === 0 && <span className="hint">none</span>}
+          {options.mcp.map((m) => (
+            <span key={m} className="pill fixed">
+              {m}
+            </span>
+          ))}
+        </PickRow>
+      </div>
 
       {error && <p className="error">{error}</p>}
 
-      <div className="actions">
+      <footer className="new-session-foot">
+        {facts && <Drift facts={facts} />}
+        <span className="keys" title="start with the keyboard">
+          ctrl ↵
+        </span>
         <button className="go" disabled={busy} onClick={() => void submit()}>
-          {busy ? "starting…" : "start session"}
+          {busy ? <Busy className="turning" /> : <Start />}
+          {busy ? "starting…" : "start"}
         </button>
-      </div>
-    </>
+      </footer>
+    </div>
+  );
+}
+
+/// One line of choices: the icon says what they are, the tooltip says it in
+/// words.
+function PickRow({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: React.ComponentType;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="pick-row">
+      <span className="pick-mark" title={label} aria-label={label}>
+        <Icon />
+      </span>
+      <div className="pills">{children}</div>
+    </div>
   );
 }
 
@@ -356,11 +425,12 @@ function Drift({ facts }: { facts: Facts }) {
   const bits: string[] = [];
   if (facts.uncommitted > 0) bits.push(`${facts.uncommitted} uncommitted`);
   if (facts.unpushed) bits.push(`${facts.unpushed} unpushed`);
-  if (!facts.base_on_remote) bits.push("this branch is not on the remote");
+  if (!facts.base_on_remote) bits.push("branch not on remote");
   if (bits.length === 0) return null;
   return (
-    <p className="notice">
-      {bits.join(", ")} — the sandbox clones the remote
-    </p>
+    <span className="drift" title="the sandbox clones the remote, so this stays behind on the server's checkout">
+      <Heads />
+      {bits.join(" · ")}
+    </span>
   );
 }

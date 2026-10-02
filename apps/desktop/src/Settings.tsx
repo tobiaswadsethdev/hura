@@ -32,6 +32,7 @@ import type { SettingsView } from "./gen/SettingsView";
 import { Settings as SettingsGlyph } from "./icons";
 import { DEFAULTS, LIMITS, type Prefs } from "./prefs";
 import { Screen } from "./Screen";
+import { Pill } from "./Pill";
 import { Select } from "./Select";
 
 export function SettingsScreen({
@@ -149,9 +150,7 @@ export function SettingsScreen({
           <section className="setting-group">
             <h3>new sessions</h3>
             <p className="hint">
-              Defaults on the server, so they hold for a session started from a terminal with{" "}
-              <code>hura new</code> as well as one started here. A choice in the create form still
-              wins over any of them.
+              Server defaults, shared with <code>hura new</code>. The create form can override them.
             </p>
 
             <label>
@@ -167,13 +166,11 @@ export function SettingsScreen({
                 is a sentence somebody has to decode; `tobias/add-auth` is
                 the branch they are about to have. */}
             <p className="hint indent">
-              a work branch is{" "}
+              e.g.{" "}
               <code>
                 {(draft.branch_prefix?.trim() || view.default_branch_prefix).replace(/\/+$/, "")}
                 /add-auth
               </code>
-              . Set it to your own name and a ticket-started session lands on the
-              convention your reviewers already look for.
             </p>
 
             <label>
@@ -185,10 +182,6 @@ export function SettingsScreen({
                 onChange={(e) => edit({ base: text(e.target.value) })}
               />
             </label>
-            <p className="hint indent">
-              What a new session clones from. Leave it empty unless the repository develops off
-              something other than its default branch.
-            </p>
 
             <label>
               <span>policy</span>
@@ -221,33 +214,30 @@ export function SettingsScreen({
                 replaced by the first template in the list. */}
             {draft.policy && !(options?.policies ?? []).some((p) => p.spec === draft.policy) && (
               <p className="hint indent">
-                <code>{draft.policy}</code> is not one of this server's templates — a path to a
-                YAML file, most likely. Picking anything above replaces it.
+                <code>{draft.policy}</code> is a file, not a template.
               </p>
             )}
 
             <fieldset>
-              <legend>providers</legend>
+              <legend>credentials</legend>
               {!options && <p className="hint">asking the gateway…</p>}
               {options?.providers_error && <p className="error">{options.providers_error}</p>}
               {options && options.providers.length === 0 && !options.providers_error && (
                 <p className="hint">the gateway has no credential providers</p>
               )}
-              {(options?.providers ?? []).map((p) => (
-                <label key={p.name} className="tick">
-                  <input
-                    type="checkbox"
-                    checked={providers.includes(p.name)}
-                    onChange={() => toggleProvider(p.name)}
-                  />
-                  <span>{p.name}</span>
-                  <span className="hint">{p.kind}</span>
-                </label>
-              ))}
-              <p className="hint">
-                Ticking any of these replaces the create form's guesswork with your
-                answer. Ticking none leaves it guessing, which is the default.
-              </p>
+              <div className="pills">
+                {(options?.providers ?? []).map((p) => (
+                  <Pill
+                    key={p.name}
+                    on={providers.includes(p.name)}
+                    title={p.kind}
+                    onClick={() => toggleProvider(p.name)}
+                  >
+                    {p.name}
+                  </Pill>
+                ))}
+              </div>
+              <p className="hint">None picked: each repository gets its own guess.</p>
             </fieldset>
           </section>
 
@@ -262,12 +252,10 @@ export function SettingsScreen({
                 checked={draft.auto_update ?? true}
                 onChange={(e) => edit({ auto_update: e.target.checked })}
               />
-              <span>fetch new releases in the background</span>
+              <span>auto-update the server</span>
             </label>
             <p className="hint indent">
-              It never replaces a running binary: the download is verified and left beside the
-              current one, and the swap happens the next time <code>hurad</code> starts. Turn it
-              off for a machine that would rather not reach github at all.
+              Verified, then applied the next time <code>hurad</code> starts.
             </p>
           </section>
 
@@ -287,10 +275,7 @@ export function SettingsScreen({
 
       <section className="setting-group">
         <h3>this window</h3>
-        <p className="hint">
-          Kept on this machine. Nothing here is sent to the server, and another window on the
-          same sessions has its own answers.
-        </p>
+        <p className="hint">Stored on this machine only.</p>
 
         <label>
           <span>projects width</span>
@@ -309,9 +294,7 @@ export function SettingsScreen({
             onChange={(dockWidth) => onPrefs({ dockWidth })}
           />
         </label>
-        <p className="hint indent">
-          Or drag either sidebar's inner edge. Double-click one to put it back.
-        </p>
+        <p className="hint indent">Or drag a sidebar's edge; double-click to reset.</p>
 
         <label>
           <span>refresh</span>
@@ -323,11 +306,7 @@ export function SettingsScreen({
             onChange={(refreshMs) => onPrefs({ refreshMs })}
           />
         </label>
-        <p className="hint indent">
-          How often the worktree list is re-read — a round trip, so raise it for a server
-          across a VPN. What each agent is <em>doing</em> arrives on its own channel and
-          is not affected.
-        </p>
+        <p className="hint indent">How often the worktree list is re-read. Raise it over a VPN.</p>
 
         <label className="tick">
           <input
@@ -335,12 +314,8 @@ export function SettingsScreen({
             checked={prefs.notify}
             onChange={(e) => onPrefs({ notify: e.target.checked })}
           />
-          <span>notify me when an agent starts waiting</span>
+          <span>notify when an agent needs me</span>
         </label>
-        <p className="hint indent">
-          An OS notification the moment a session needs an answer, and only on the
-          transition — never for one that has been waiting a while.
-        </p>
 
         <label className="tick">
           <input
@@ -348,12 +323,9 @@ export function SettingsScreen({
             checked={prefs.notifyTickets}
             onChange={(e) => onPrefs({ notifyTickets: e.target.checked })}
           />
-          <span>notify me when a ticket in my filters changes</span>
+          <span>notify when my tickets change</span>
         </label>
-        <p className="hint indent">
-          Your tickets are read every few minutes. A status change, somebody else's comment, or a
-          ticket turning up in a filter — never your own comments, and not every edit.
-        </p>
+        <p className="hint indent">Status changes and other people's comments, checked every few minutes.</p>
 
         <div className="setting-actions">
           <button className="quiet" onClick={() => onPrefs(DEFAULTS)}>
