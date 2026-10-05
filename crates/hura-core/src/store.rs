@@ -78,6 +78,12 @@ impl Store {
         self.sessions.get(name)
     }
 
+    /// Every name a record holds, which is every name a new session may not
+    /// take.
+    pub fn names(&self) -> Vec<String> {
+        self.sessions.keys().cloned().collect()
+    }
+
     pub fn contains(&self, name: &str) -> bool {
         self.sessions.contains_key(name)
     }

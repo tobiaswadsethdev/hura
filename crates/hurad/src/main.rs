@@ -714,11 +714,15 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
         )
     })?;
 
-    // A name from --name, else the task, else the repo's last path segment.
+    // A name from --name, else the task, else the repo's last path segment --
+    // with a counter on a derived one that is taken, as the window's has.
     let name = match args.name {
         Some(n) => n,
-        None => session::derive_name(&args.task, &repo)
-            .ok_or("could not derive a session name; pass --name")?,
+        None => {
+            let derived = session::derive_name(&args.task, &repo)
+                .ok_or("could not derive a session name; pass --name")?;
+            session::unique_name(&derived, &Store::load()?.names())
+        }
     };
 
     let draft = ops::Draft {
