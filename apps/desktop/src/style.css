@@ -1834,6 +1834,15 @@ main { display: flex; flex: 1; min-height: 0; }
 .ticket-card.on { border-color: var(--selected-line); background: var(--selected); }
 .ticket-card.on:hover { border-color: var(--selected-line); }
 
+/* A column over its work-in-progress limit says so in the one place that
+   counts, and nowhere louder: the board is Jira's to rearrange. */
+.board-count.off-limit { color: var(--warn); font-weight: 600; }
+.board-notes > .board-sprint { color: var(--dim); font-weight: 600; }
+
+/* Which board, in the screen's header beside the toggle: the one control the
+   board view adds. As wide as a board's name, and no wider than a column. */
+.screen-head .board-picker { display: inline-flex; max-width: 280px; height: 26px; font-size: 12px; }
+
 /* The board and the ticket beside it. The board keeps scrolling on its own
    and gives up width, not height. */
 .board-area { flex: 1; min-height: 0; display: flex; }

@@ -1,9 +1,11 @@
 # Tickets
 
-What your trackers' filters say, in the window, as a board: one column per
-filter, one card per ticket, and a button on each card that turns it into a
-session. The **trackers** button in the screen's header switches to where each
-tracker is set up — where it points, its token and its filters — and back.
+What your trackers hold, in the window, read two ways: **filters**, one column
+per filter, and **board**, one Jira board as Jira draws it. Either way it is one
+card per ticket, with a button on each card that turns it into a session. The
+toggle in the screen's header switches between the two; the **trackers** button
+beside it switches to where each tracker is set up — where it points, its token
+and its filters — and back.
 
 ```
  ┌ ready to start      3 ┐ ┌ assigned to me      2 ┐ ┌ needs my review     1 ┐
@@ -18,6 +20,39 @@ Columns sit side by side and each scrolls on its own, so another filter costs
 width rather than a page of scrolling. A card shows the key, its type and
 status, the title, how long since it last changed, and how many comments it has
 and who wrote the newest one.
+
+## Boards
+
+**board** in the header shows one Jira board at a time: its columns in the
+board's order, each with the tickets whose status that column holds, in the
+board's rank order. The picker beside the toggle lists every board the Jira
+trackers' accounts can see, by project; the board you pick, and whether you were
+on filters or a board, is where the screen opens next time.
+
+```
+ [CODE board        ▾]  [filters|board]  ↗  ⟳  trackers
+ ┌ ToDo        2 / 19 ┐ ┌ Doing        3 / 2 ┐ ┌ Ready for Review  1 / 3 ┐
+ │ CODE-101 Story  …  │ │ CODE-88 Task   …   │ │ CODE-77 Story   …       │
+```
+
+* A **scrum** board is its running sprint, named above the columns. With no
+  sprint running it is empty, and says so.
+* A **kanban** board is everything its filter and sub-filter match that is not
+  done, plus what was done in the last two weeks — the same cut Jira's own
+  board makes, without which the last column is every ticket ever closed.
+* A column's **work-in-progress limit** is shown beside its count when the
+  board enforces one, and the count turns amber past it.
+* A board is read 250 tickets at most; past that it says how many there were,
+  and ↗ opens the board in Jira.
+
+The cards are the filters' cards: click one to read it, start a session from
+it. Moving a card between columns is still Jira's — this screen only reads.
+
+It is `GET /rest/agile/1.0/board` for the picker, and
+`/board/{id}/configuration`, `/board/{id}/sprint?state=active` (scrum only)
+and `/board/{id}/issue` for a board, with the tracker's own token. Boards are
+Jira's only, for now: Azure DevOps and GitHub trackers still show under
+filters.
 
 ## Reading a ticket
 

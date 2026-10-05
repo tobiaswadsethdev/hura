@@ -743,6 +743,8 @@ export default function App() {
           <TicketsScreen
             server={server}
             notify={prefs.notifyTickets}
+            prefs={prefs}
+            onPrefs={setPrefs}
             projects={projects}
             currentProject={sessions.find((s) => s.name === selected)?.project ?? null}
             onClose={() => setScreen(null)}

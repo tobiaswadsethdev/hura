@@ -16,11 +16,14 @@
 // URL. So a card carries a project chooser: the tracker says what to do and you
 // say where.
 //
-// **A board, one column per filter**, side by side and each scrolling on its
-// own, so a fourth filter costs width rather than a page of scrolling; a
-// ticket two filters match is in both. The setup is the screen's other half,
-// behind the `trackers` toggle in its header -- it used to sit above the
-// tickets and push them off the screen.
+// **Two readings, one toggle.** *Filters* is one column per filter, side by
+// side and each scrolling on its own, so a fourth filter costs width rather
+// than a page of scrolling; a ticket two filters match is in both. *Board* is
+// one Jira board as Jira draws it -- its columns, its sprint, its limits --
+// picked from every board the trackers can see, one at a time. Both are the
+// same cards. The setup is the screen's third half, behind the `trackers`
+// toggle in its header -- it used to sit above the tickets and push them off
+// the screen.
 // What is worth interrupting for -- a ticket changing -- is `ticketNotify.ts`,
 // fed from here and from the window's own timer.
 
@@ -28,6 +31,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, messageOf } from "./api";
 import { Empty, Waiting } from "./Empty";
+import type { Boards } from "./gen/Boards";
+import type { BoardView } from "./gen/BoardView";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Inbox as Tickets } from "./gen/Inbox";
 import type { Project } from "./gen/Project";
@@ -52,6 +57,7 @@ import { copy, useContextMenu } from "./ContextMenu";
 import { openExternal } from "./open";
 import { Screen } from "./Screen";
 import { ago, TicketPanel } from "./Ticket";
+import type { Prefs } from "./prefs";
 import { onTickets } from "./ticketNotify";
 import { Select } from "./Select";
 
@@ -60,6 +66,8 @@ export function TicketsScreen({
   projects,
   currentProject,
   notify,
+  prefs,
+  onPrefs,
   onClose,
   onStart,
 }: {
@@ -71,6 +79,10 @@ export function TicketsScreen({
   /// Whether a change found by opening this screen is announced. Recorded
   /// either way, so the next poll does not announce it again.
   notify: boolean;
+  /// Where this screen was left -- filters or a board, and which board -- so
+  /// it opens there again.
+  prefs: Prefs;
+  onPrefs: (change: Partial<Prefs>) => void;
   onClose: () => void;
   onStart: (project: Project, task: Task) => void;
 }) {
@@ -82,13 +94,23 @@ export function TicketsScreen({
   // tracker again, which a dependency would make it.
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
-  // Which half of the screen is showing, once somebody has chosen; until
-  // then it follows from whether there are any trackers. See `view` below.
-  const [chosen, setView] = useState<"board" | "trackers" | null>(null);
+  // Whether the setup is showing, once somebody has chosen; until then it
+  // follows from whether there are any trackers. See `view` below.
+  const [setup, setSetup] = useState<boolean | null>(null);
   // The ticket open beside the board, by tracker and key: a card in two
   // columns is one ticket, and opening either lights both.
   const [reading, setReading] = useState<Task | null>(null);
   const isOpen = (t: Task) => reading?.tracker === t.tracker && reading.key === t.key;
+
+  // The boards there are to pick from, read the first time the board view is
+  // shown rather than on every visit to the filters.
+  const [boards, setBoards] = useState<Boards | null>(null);
+  const [boardsError, setBoardsError] = useState<string | null>(null);
+  const [shown, setShown] = useState<BoardView | null>(null);
+  const [boardError, setBoardError] = useState<string | null>(null);
+  // Which read of a board is the latest: switching boards twice quickly is
+  // two answers, and only the second is the board somebody is looking at.
+  const boardRead = useRef(0);
 
   // The tickets are re-read after every change to a tracker, because every
   // change to a tracker -- a token stored, a filter edited -- is a change to
@@ -103,6 +125,14 @@ export function TicketsScreen({
       })
       .catch((e) => setError(messageOf(e)));
   }, [server]);
+
+  const readBoards = useCallback(() => {
+    setBoardsError(null);
+    return api
+      .boards()
+      .then(setBoards)
+      .catch((e) => setBoardsError(messageOf(e)));
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -126,6 +156,9 @@ export function TicketsScreen({
     try {
       setTrackers(await run());
       void readTickets();
+      // A tracker added or forgotten is boards gained or lost; asked again
+      // the next time the board view is shown.
+      setBoards(null);
       return true;
     } catch (e) {
       setError(messageOf(e));
@@ -144,21 +177,107 @@ export function TicketsScreen({
     }
   }
 
-  // The board unless there is nothing to put on it: with no trackers, the
-  // only useful thing this screen can show is how to add one.
-  const view = chosen ?? (trackers !== null && trackers.length === 0 ? "trackers" : "board");
+  // The tickets unless there is nothing to put on them: with no trackers,
+  // the only useful thing this screen can show is how to add one.
+  const showSetup = setup ?? (trackers !== null && trackers.length === 0);
+  const mode = prefs.ticketsView;
+  const view = showSetup ? "trackers" : mode;
   // The tracker's name on a column only when there is more than one tracker;
   // with one, it would say the same word on every column.
   const many = new Set(columns.map((c) => c.tracker)).size > 1;
 
+  // The board on show: the one last picked while it is still on the list,
+  // and the first on the list otherwise -- a board deleted in Jira, or a
+  // tracker forgotten, is not a reason for an empty screen.
+  const picked =
+    boards?.boards.find((b) => b.tracker === prefs.board?.tracker && b.id === prefs.board?.id) ??
+    boards?.boards[0] ??
+    null;
+  const manyBoardTrackers = new Set(boards?.boards.map((b) => b.tracker)).size > 1;
+
+  useEffect(() => {
+    if (view === "board" && boards === null) void readBoards();
+  }, [view, boards, readBoards]);
+
+  const readBoard = useCallback(
+    (tracker: string, id: string) => {
+      const read = ++boardRead.current;
+      setShown(null);
+      setBoardError(null);
+      api
+        .board(server, tracker, id)
+        .then((v) => read === boardRead.current && setShown(v))
+        .catch((e) => read === boardRead.current && setBoardError(messageOf(e)));
+    },
+    [server],
+  );
+
+  useEffect(() => {
+    if (view === "board" && picked) readBoard(picked.tracker, picked.id);
+    // By identity rather than by the object: a re-read list with the same
+    // board in it is not a reason to read the board again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, picked?.tracker, picked?.id, readBoard]);
+
+  const boardLoading = view === "board" && (boards === null || (picked !== null && shown === null)) && !boardsError && !boardError;
+
   const actions = (
     <>
-      {view === "board" && (
+      {view === "board" && picked && (
+        <Select
+          className="board-picker"
+          aria-label="which board"
+          value={`${picked.tracker}\n${picked.id}`}
+          onChange={(v) => {
+            const [tracker, id] = v.split("\n");
+            onPrefs({ board: { tracker, id } });
+          }}
+          options={boards!.boards.map((b) => ({
+            value: `${b.tracker}\n${b.id}`,
+            label: b.name,
+            hint: [b.project, manyBoardTrackers ? b.tracker : null].filter(Boolean).join(" · "),
+          }))}
+        />
+      )}
+      {/* Two readings of the same tickets, and a toggle between them rather
+          than two destinations: the filters are the questions you wrote, a
+          board is the process the team runs. */}
+      <div className="segmented" role="tablist" aria-label="how the tickets are shown">
+        {(["filters", "board"] as const).map((m) => (
+          <button
+            key={m}
+            role="tab"
+            aria-selected={view === m}
+            className={view === m ? "on" : ""}
+            title={m === "filters" ? "one column per filter" : "a Jira board, as its columns"}
+            onClick={() => {
+              setSetup(false);
+              onPrefs({ ticketsView: m });
+            }}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+      {view === "board" && shown && (
         <button
           className="quiet-icon"
-          title="read the tickets again"
-          disabled={tickets === null && !error}
-          onClick={() => void readTickets()}
+          title="open this board in Jira"
+          onClick={() => openExternal(shown.url)}
+        >
+          <Elsewhere aria-label="open in Jira" />
+        </button>
+      )}
+      {view !== "trackers" && (
+        <button
+          className="quiet-icon"
+          title={view === "board" ? "read the board again" : "read the tickets again"}
+          disabled={view === "board" ? boardLoading : tickets === null && !error}
+          onClick={() => {
+            if (view === "filters") void readTickets();
+            else if (boardsError || boards === null) void readBoards();
+            else if (picked) readBoard(picked.tracker, picked.id);
+          }}
         >
           <Refresh aria-label="refresh" />
         </button>
@@ -166,11 +285,77 @@ export function TicketsScreen({
       <button
         className={view === "trackers" ? "quiet on" : "quiet"}
         title={view === "trackers" ? "back to the tickets" : "set up trackers, tokens and filters"}
-        onClick={() => setView(view === "trackers" ? "board" : "trackers")}
+        onClick={() => setSetup(view !== "trackers")}
       >
         <Setup /> trackers
       </button>
     </>
+  );
+
+  /// One column of cards, whichever reading it is a column of.
+  const column = (
+    key: string,
+    title: string,
+    cards: Task[],
+    extra: { empty: string; sub?: string; max?: number | null; min?: number | null },
+  ) => {
+    const over = extra.max != null && cards.length > extra.max;
+    const under = extra.min != null && cards.length < extra.min;
+    return (
+      <section key={key} className="board-column">
+        <header>
+          <span className="board-filter">{title}</span>
+          {extra.sub && <span className="board-tracker">{extra.sub}</span>}
+          <span
+            className={`board-count${over || under ? " off-limit" : ""}`}
+            title={
+              extra.max != null || extra.min != null
+                ? [
+                    extra.min != null ? `at least ${extra.min}` : null,
+                    extra.max != null ? `at most ${extra.max}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")
+                : undefined
+            }
+          >
+            {cards.length}
+            {extra.max != null && ` / ${extra.max}`}
+          </span>
+        </header>
+        <div className="board-cards scrollbar-sleek">
+          {cards.length === 0 && <p className="hint">{extra.empty}</p>}
+          {cards.map((task) => (
+            <Card
+              key={`${task.tracker}:${task.filter}:${task.id}`}
+              task={task}
+              projects={projects}
+              currentProject={currentProject}
+              onStart={onStart}
+              on={isOpen(task)}
+              onOpen={task.kind === "jira" ? () => setReading(task) : undefined}
+            />
+          ))}
+        </div>
+      </section>
+    );
+  };
+
+  /// The columns, and the ticket open beside them.
+  const area = (body: React.ReactNode) => (
+    <div className="board-area">
+      <div className="board scrollbar-sleek">{body}</div>
+      {reading && (
+        <TicketPanel
+          key={`${reading.tracker}:${reading.key}`}
+          task={reading}
+          projects={projects}
+          currentProject={currentProject}
+          onStart={onStart}
+          onClose={() => setReading(null)}
+        />
+      )}
+    </div>
   );
 
   if (view === "trackers") {
@@ -216,6 +401,64 @@ export function TicketsScreen({
     );
   }
 
+  if (view === "board") {
+    const noJira = trackers !== null && !trackers.some((t) => t.source.kind === "jira");
+    // Why the columns hold what they do, or nothing: which sprint, and where
+    // reading stopped.
+    const notes = [
+      ...(boards?.warnings ?? []).map((w) => ({ text: w, tone: "warn" })),
+      ...(shown?.note ? [{ text: shown.note, tone: "hint" }] : []),
+      ...(shown && shown.sprints.length > 0
+        ? [{ text: shown.sprints.join(" · "), tone: "hint board-sprint" }]
+        : []),
+      ...(shown && shown.read < shown.total
+        ? [
+            {
+              text: `the first ${shown.read} of ${shown.total} tickets on this board — the rest are in Jira`,
+              tone: "hint",
+            },
+          ]
+        : []),
+    ];
+    return (
+      <Screen icon={TrackerGlyph} title="tickets" actions={actions} onClose={onClose} wide>
+        {(boardsError || boardError || notes.length > 0) && (
+          <div className="board-notes">
+            {boardsError && <p className="error">{boardsError}</p>}
+            {boardError && <p className="error">{boardError}</p>}
+            {notes.map((n) => (
+              <p key={n.text} className={n.tone}>
+                {n.text}
+              </p>
+            ))}
+          </div>
+        )}
+        {noJira ? (
+          <Empty
+            size="page"
+            icon={TrackerGlyph}
+            note="boards come from Jira — add a Jira tracker under trackers"
+          />
+        ) : boards !== null && boards.boards.length === 0 && !boardsError ? (
+          <Empty size="page" icon={TrackerGlyph} note="there are no boards this account can see" />
+        ) : boardLoading ? (
+          <Waiting />
+        ) : (
+          shown &&
+          area(
+            shown.columns.map((c, i) =>
+              column(`${shown.id}:${i}`, c.name, c.tasks, {
+                empty: "nothing here",
+                max: c.max,
+                min: c.min,
+              }),
+            ),
+          )
+        )}
+      </Screen>
+    );
+  }
+
   return (
     <Screen icon={TrackerGlyph} title="tickets" actions={actions} onClose={onClose} wide>
       {(error || (tickets?.warnings.length ?? 0) > 0) && (
@@ -235,50 +478,17 @@ export function TicketsScreen({
       {tickets !== null && columns.length === 0 && (
         <Empty size="page" icon={TrackerGlyph} note="no filters answered — see trackers" />
       )}
-      {columns.length > 0 && (
-        <div className="board-area">
-          <div className="board scrollbar-sleek">
-            {columns.map(({ tracker, filter }) => {
-              const cards = tickets!.tasks.filter(
-                (t) => t.tracker === tracker && t.filter === filter,
-              );
-              return (
-                <section key={`${tracker}:${filter}`} className="board-column">
-                  <header>
-                    <span className="board-filter">{filter}</span>
-                    {many && <span className="board-tracker">{tracker}</span>}
-                    <span className="board-count">{cards.length}</span>
-                  </header>
-                  <div className="board-cards scrollbar-sleek">
-                    {cards.length === 0 && <p className="hint">nothing matches</p>}
-                    {cards.map((task) => (
-                      <Card
-                        key={`${task.tracker}:${task.filter}:${task.id}`}
-                        task={task}
-                        projects={projects}
-                        currentProject={currentProject}
-                        onStart={onStart}
-                        on={isOpen(task)}
-                        onOpen={task.kind === "jira" ? () => setReading(task) : undefined}
-                      />
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-          {reading && (
-            <TicketPanel
-              key={`${reading.tracker}:${reading.key}`}
-              task={reading}
-              projects={projects}
-              currentProject={currentProject}
-              onStart={onStart}
-              onClose={() => setReading(null)}
-            />
-          )}
-        </div>
-      )}
+      {columns.length > 0 &&
+        area(
+          columns.map(({ tracker, filter }) =>
+            column(
+              `${tracker}:${filter}`,
+              filter,
+              tickets!.tasks.filter((t) => t.tracker === tracker && t.filter === filter),
+              { empty: "nothing matches", sub: many ? tracker : undefined },
+            ),
+          ),
+        )}
     </Screen>
   );
 }

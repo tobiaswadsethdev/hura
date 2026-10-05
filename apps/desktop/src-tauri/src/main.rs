@@ -654,27 +654,58 @@ fn my_skills() -> Vec<String> {
 #[tauri::command(async)]
 fn tickets(server: Option<String>) -> Result<Inbox, Failed> {
     let trackers = load_trackers()?;
-    let mut warnings = Vec::new();
-    let prefix = match server
-        .as_deref()
-        .map(|s| remote(s).and_then(|r| r.call(Request::Settings).map_err(to_message)))
-    {
-        Some(Ok(Reply::Settings(view))) => view
-            .settings
-            .branch_prefix
-            .unwrap_or(view.default_branch_prefix),
-        Some(Err(e)) => {
-            warnings.push(format!(
+    let (prefix, warning) = branch_prefix(server.as_deref());
+    let mut inbox = hura_core::tracker::inbox(trackers.list(), &prefix);
+    inbox.warnings.extend(warning);
+    Ok(inbox)
+}
+
+/// The server's `branch_prefix`, or the built-in one and why.
+fn branch_prefix(server: Option<&str>) -> (String, Option<String>) {
+    match server.map(|s| remote(s).and_then(|r| r.call(Request::Settings).map_err(to_message))) {
+        Some(Ok(Reply::Settings(view))) => (
+            view.settings
+                .branch_prefix
+                .unwrap_or(view.default_branch_prefix),
+            None,
+        ),
+        Some(Err(e)) => (
+            hura_core::session::DEFAULT_BRANCH_PREFIX.to_string(),
+            Some(format!(
                 "branch names use the default prefix: the server did not answer ({})",
                 e.message
-            ));
-            hura_core::session::DEFAULT_BRANCH_PREFIX.to_string()
-        }
-        _ => hura_core::session::DEFAULT_BRANCH_PREFIX.to_string(),
-    };
-    let mut inbox = hura_core::tracker::inbox(trackers.list(), &prefix);
-    inbox.warnings.extend(warnings);
-    Ok(inbox)
+            )),
+        ),
+        _ => (hura_core::session::DEFAULT_BRANCH_PREFIX.to_string(), None),
+    }
+}
+
+/// Every board the Jira trackers' accounts can see: the board view's picker.
+#[tauri::command(async)]
+fn boards() -> Result<hura_core::tracker::Boards, Failed> {
+    Ok(hura_core::tracker::boards(load_trackers()?.list()))
+}
+
+/// One board, its columns and the cards in each, read from this machine like
+/// the filters -- and like them, the server is asked only for the branch
+/// prefix its cards suggest.
+#[tauri::command(async)]
+fn board(
+    server: Option<String>,
+    tracker: String,
+    id: String,
+) -> Result<hura_core::tracker::BoardView, Failed> {
+    let trackers = load_trackers()?;
+    let stored = trackers
+        .list()
+        .iter()
+        .find(|t| t.source.name == tracker)
+        .ok_or_else(|| failed(format!("no tracker called `{tracker}`")))?;
+    // A board with a wrong prefix on its branches is still a board; the
+    // filters say why when the server is not answering, and saying it twice
+    // is noise.
+    let (prefix, _) = branch_prefix(server.as_deref());
+    hura_core::tracker::board(stored, &id, &prefix).map_err(failed)
 }
 
 /// One ticket in full -- description, comments, the people on it -- read
@@ -940,6 +971,8 @@ fn main() {
             my_skills,
             tickets,
             ticket,
+            boards,
+            board,
             settings,
             set_settings,
             watch,

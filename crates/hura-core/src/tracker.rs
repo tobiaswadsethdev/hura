@@ -1,4 +1,4 @@
-//! Tickets: what your trackers' filters match, read over REST.
+//! Tickets: what your trackers' filters and boards hold, read over REST.
 //!
 //! **Read by the client, with the client's own tokens.** A tracker is set up in
 //! the desktop application and stored on the machine it runs on, and the
@@ -25,8 +25,10 @@
 
 use serde::{Deserialize, Serialize};
 
+mod board;
 pub mod doc;
 mod issue;
+pub use board::{Board, BoardColumn, BoardView, Boards, board, boards};
 pub use issue::{
     Issue, IssueComment, Parent as IssueParent, Person as IssuePerson, Stage as IssueStage, issue,
 };
@@ -750,69 +752,74 @@ fn parse_jira(
     me: Option<&str>,
     prefix: &str,
 ) -> Result<Vec<Task>, String> {
-    let site = source
-        .site
-        .as_deref()
-        .unwrap_or_default()
-        .trim_end_matches('/');
     let issues = body
         .get("issues")
         .and_then(|i| i.as_array())
         .ok_or("jira did not answer with issues")?;
-
     Ok(issues
         .iter()
-        .filter_map(|i| {
-            let key = string(i, "key");
-            if key.is_empty() {
-                return None;
-            }
-            let fields = i.get("fields")?;
-            let title = string(fields, "summary");
-            let comment = fields.get("comment");
-            // The newest by `created`, rather than the last in the list: the
-            // list is a page, and its order is Jira's to change.
-            let last = comment
-                .and_then(|c| c.get("comments"))
-                .and_then(|c| c.as_array())
-                .and_then(|list| list.iter().max_by_key(|c| string(c, "created")));
-            Some(Task {
-                tracker: source.name.clone(),
-                kind: Kind::Jira,
-                // The key *is* the id in Jira's API: every write-back path
-                // takes an issue key or its numeric id interchangeably.
-                id: key.clone(),
-                session_name: session_name(&key, &title),
-                branch: branch(prefix, &key, &title),
-                url: format!("{site}/browse/{key}"),
-                key,
-                title,
-                status: fields
-                    .get("status")
-                    .map(|s| string(s, "name"))
-                    .unwrap_or_default(),
-                item_type: fields
-                    .get("issuetype")
-                    .map(|t| string(t, "name"))
-                    .unwrap_or_default(),
-                repo: None,
-                filter: String::new(),
-                updated: Some(string(fields, "updated")).filter(|s| !s.is_empty()),
-                comments: comment
-                    .and_then(|c| c.get("total"))
-                    .and_then(|t| t.as_u64())
-                    .map(|t| t as u32),
-                last_commenter: last
-                    .and_then(|c| c.get("author"))
-                    .map(|a| string(a, "displayName"))
-                    .filter(|s| !s.is_empty()),
-                last_comment_mine: match (me, last.and_then(|c| c.get("author"))) {
-                    (Some(me), Some(author)) => string(author, "accountId") == me,
-                    _ => false,
-                },
-            })
-        })
+        .filter_map(|i| jira_task(i, source, me, prefix))
         .collect())
+}
+
+/// One issue from a Jira search, as a task. Its own function because a board
+/// is a search too, answered in the same shape, and its cards have to be the
+/// same cards.
+fn jira_task(
+    i: &serde_json::Value,
+    source: &Source,
+    me: Option<&str>,
+    prefix: &str,
+) -> Option<Task> {
+    let site = jira_site(source);
+    let key = string(i, "key");
+    if key.is_empty() {
+        return None;
+    }
+    let fields = i.get("fields")?;
+    let title = string(fields, "summary");
+    let comment = fields.get("comment");
+    // The newest by `created`, rather than the last in the list: the list is a
+    // page, and its order is Jira's to change.
+    let last = comment
+        .and_then(|c| c.get("comments"))
+        .and_then(|c| c.as_array())
+        .and_then(|list| list.iter().max_by_key(|c| string(c, "created")));
+    Some(Task {
+        tracker: source.name.clone(),
+        kind: Kind::Jira,
+        // The key *is* the id in Jira's API: every write-back path takes an
+        // issue key or its numeric id interchangeably.
+        id: key.clone(),
+        session_name: session_name(&key, &title),
+        branch: branch(prefix, &key, &title),
+        url: format!("{site}/browse/{key}"),
+        key,
+        title,
+        status: fields
+            .get("status")
+            .map(|s| string(s, "name"))
+            .unwrap_or_default(),
+        item_type: fields
+            .get("issuetype")
+            .map(|t| string(t, "name"))
+            .unwrap_or_default(),
+        repo: None,
+        filter: String::new(),
+        updated: Some(string(fields, "updated")).filter(|s| !s.is_empty()),
+        comments: comment
+            .and_then(|c| c.get("total"))
+            .and_then(|t| t.as_u64())
+            .map(|t| t as u32),
+        last_commenter: last
+            .and_then(|c| c.get("author"))
+            .map(|a| string(a, "displayName"))
+            .filter(|s| !s.is_empty()),
+        last_comment_mine: match (me, last.and_then(|c| c.get("author"))) {
+            (Some(me), Some(author)) => string(author, "accountId") == me,
+            _ => false,
+        },
+    })
 }
 
 // --------------------------------------------------------- naming things
