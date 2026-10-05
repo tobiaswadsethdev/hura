@@ -13,6 +13,10 @@ import type { Inbox } from "./gen/Inbox";
 import type { Issue } from "./gen/Issue";
 import type { Boards } from "./gen/Boards";
 import type { BoardView } from "./gen/BoardView";
+import type { EditForm } from "./gen/EditForm";
+import type { FieldChange } from "./gen/FieldChange";
+import type { Transition } from "./gen/Transition";
+import type { UserChoice } from "./gen/UserChoice";
 import type { Integrations } from "./gen/Integrations";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Tracker } from "./gen/Tracker";
@@ -200,6 +204,23 @@ export const api = {
   boards: () => invoke<Boards>("boards"),
   board: (server: string | null, tracker: string, id: string) =>
     invoke<BoardView>("board", { server, tracker, id }),
+  // Changing a Jira ticket, with the same token: its fields, its status, its
+  // comments. Each answers with nothing; the ticket is read again after.
+  editForm: (tracker: string, key: string) => invoke<EditForm>("edit_form", { tracker, key }),
+  saveTicket: (tracker: string, key: string, changes: FieldChange[]) =>
+    invoke<void>("save_ticket", { tracker, key, changes }),
+  transitions: (tracker: string, key: string) =>
+    invoke<Transition[]>("transitions", { tracker, key }),
+  transition: (tracker: string, key: string, id: string) =>
+    invoke<void>("transition", { tracker, key, id }),
+  addComment: (tracker: string, key: string, markdown: string) =>
+    invoke<void>("add_comment", { tracker, key, markdown }),
+  editComment: (tracker: string, key: string, id: string, markdown: string) =>
+    invoke<void>("edit_comment", { tracker, key, id, markdown }),
+  deleteComment: (tracker: string, key: string, id: string) =>
+    invoke<void>("delete_comment", { tracker, key, id }),
+  users: (tracker: string, key: string, query: string, assignable: boolean) =>
+    invoke<UserChoice[]>("users", { tracker, key, query, assignable }),
 
   // The editable defaults in the server's config file. The server's, because
   // `branch_prefix` names the branch of every session on that machine and a

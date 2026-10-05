@@ -9,7 +9,7 @@
 // Read on the server with the credentials in its store, so this window shows
 // rows and never holds a token. The row knows how to become a session, with
 // the task, the branch and the name already right, and the session remembers
-// the ticket, so publishing writes back to it.
+// the ticket it came from.
 //
 // **A ticket does not know which repository it is about.** A Jira issue names a
 // project and an Azure DevOps work item names an area path; neither is a clone
@@ -21,7 +21,8 @@
 // than a page of scrolling; a ticket two filters match is in both. *Board* is
 // one Jira board as Jira draws it -- its columns, its sprint, its limits --
 // picked from every board the trackers can see, one at a time. Both are the
-// same cards. The setup is the screen's third half, behind the `trackers`
+// same cards. On a board a card moves by dragging it to a column, or from its
+// menu, and either is a Jira transition -- see `moveTo`. The setup is the screen's third half, behind the `trackers`
 // toggle in its header -- it used to sit above the tickets and push them off
 // the screen.
 // What is worth interrupting for -- a ticket changing -- is `ticketNotify.ts`,
@@ -32,7 +33,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, messageOf } from "./api";
 import { Empty, Waiting } from "./Empty";
 import type { Boards } from "./gen/Boards";
+import type { BoardColumn } from "./gen/BoardColumn";
 import type { BoardView } from "./gen/BoardView";
+import type { Transition } from "./gen/Transition";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Inbox as Tickets } from "./gen/Inbox";
 import type { Project } from "./gen/Project";
@@ -53,7 +56,7 @@ import {
   Store,
   Tracker as TrackerGlyph,
 } from "./icons";
-import { copy, useContextMenu } from "./ContextMenu";
+import { copy, useContextMenu, type MenuItem } from "./ContextMenu";
 import { openExternal } from "./open";
 import { Screen } from "./Screen";
 import { ago, TicketPanel } from "./Ticket";
@@ -200,9 +203,11 @@ export function TicketsScreen({
   }, [view, boards, readBoards]);
 
   const readBoard = useCallback(
-    (tracker: string, id: string) => {
+    (tracker: string, id: string, quietly = false) => {
       const read = ++boardRead.current;
-      setShown(null);
+      // Quietly after a change made from here: the board stays up while it is
+      // asked again, rather than blinking to a spinner under the pointer.
+      if (!quietly) setShown(null);
       setBoardError(null);
       api
         .board(server, tracker, id)
@@ -220,6 +225,126 @@ export function TicketsScreen({
   }, [view, picked?.tracker, picked?.id, readBoard]);
 
   const boardLoading = view === "board" && (boards === null || (picked !== null && shown === null)) && !boardsError && !boardError;
+
+  // Moving a card: which one is being moved (its key), a move that needs a
+  // choice of transition, and why the last one could not be made.
+  const [moving, setMoving] = useState<string | null>(null);
+  const [choosing, setChoosing] = useState<{
+    task: Task;
+    column: BoardColumn;
+    ways: Transition[];
+  } | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+
+  /// What changed from here -- a move, an edit in the panel -- means the
+  /// board or the filters are out of date. Asked again without blanking.
+  const refreshQuietly = () => {
+    if (view === "board" && picked) readBoard(picked.tracker, picked.id, true);
+    else void api.tickets(server).then((v) => {
+      onTickets(v, notifyRef.current);
+      setTickets(v);
+    }, () => {});
+  };
+
+  /// Take `task` along `way`, showing it in `column` straight away -- the
+  /// read that follows says whether Jira agrees.
+  const perform = async (task: Task, column: BoardColumn, way: Transition) => {
+    await api.transition(task.tracker, task.key, way.id);
+    setShown((v) =>
+      v && {
+        ...v,
+        columns: v.columns.map((c) => ({
+          ...c,
+          tasks:
+            c.name === column.name
+              ? [{ ...task, status: way.to, filter: c.name }, ...c.tasks.filter((t) => t.key !== task.key)]
+              : c.tasks.filter((t) => t.key !== task.key),
+        })),
+      },
+    );
+    refreshQuietly();
+  };
+
+  /// Move a card to a column: the transition out of its status that lands
+  /// in one of the column's -- asked which when there are several, and told
+  /// why not when there are none.
+  const moveTo = async (task: Task, column: BoardColumn) => {
+    setMoving(task.key);
+    setMoveError(null);
+    setChoosing(null);
+    try {
+      const ways = (await api.transitions(task.tracker, task.key)).filter((t) =>
+        column.statuses.includes(t.to_id),
+      );
+      if (ways.length === 0) {
+        setMoveError(
+          `${task.key} cannot go from ${task.status} to ${column.name}: the workflow has no transition that lands there`,
+        );
+      } else if (ways.length > 1) {
+        setChoosing({ task, column, ways });
+      } else {
+        await perform(task, column, ways[0]!);
+      }
+    } catch (e) {
+      setMoveError(`${task.key}: ${messageOf(e)}`);
+    } finally {
+      setMoving(null);
+    }
+  };
+
+  // Dragging. By pointer rather than HTML drag-and-drop, which the desktop
+  // window hands to the operating system for dropping files on it.
+  const [drag, setDrag] = useState<{
+    task: Task;
+    from: number;
+    x: number;
+    y: number;
+    over: number | null;
+  } | null>(null);
+  const pressed = useRef<{ task: Task; from: number; x: number; y: number } | null>(null);
+  // A drag ends in a click on the card it started on; that click is not a
+  // request to open it.
+  const dragged = useRef(false);
+
+  useEffect(() => {
+    const columnAt = (x: number, y: number) => {
+      const el = document.elementFromPoint(x, y)?.closest("[data-column]");
+      return el ? Number(el.getAttribute("data-column")) : null;
+    };
+    const move = (e: PointerEvent) => {
+      const p = pressed.current;
+      if (!p) return;
+      // Five pixels before it is a drag: a click with a shaky hand is a click.
+      if (!drag && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 5) return;
+      setDrag({ ...p, x: e.clientX, y: e.clientY, over: columnAt(e.clientX, e.clientY) });
+    };
+    const up = () => {
+      const p = pressed.current;
+      pressed.current = null;
+      if (!drag || !p) return;
+      dragged.current = true;
+      setTimeout(() => (dragged.current = false), 0);
+      const to = drag.over;
+      setDrag(null);
+      if (to !== null && to !== drag.from && shown?.columns[to]) void moveTo(p.task, shown.columns[to]!);
+    };
+    const cancel = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && drag) {
+        e.preventDefault();
+        pressed.current = null;
+        setDrag(null);
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("keydown", cancel, true);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("keydown", cancel, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag, shown]);
 
   const actions = (
     <>
@@ -297,12 +422,25 @@ export function TicketsScreen({
     key: string,
     title: string,
     cards: Task[],
-    extra: { empty: string; sub?: string; max?: number | null; min?: number | null },
+    extra: {
+      empty: string;
+      sub?: string;
+      max?: number | null;
+      min?: number | null;
+      /// On a board: where this column is, so a card can be dropped on it.
+      at?: number;
+    },
   ) => {
     const over = extra.max != null && cards.length > extra.max;
     const under = extra.min != null && cards.length < extra.min;
+    const target = drag !== null && extra.at === drag.over && extra.at !== drag.from;
+    const columns = view === "board" ? (shown?.columns ?? []) : [];
     return (
-      <section key={key} className="board-column">
+      <section
+        key={key}
+        className={`board-column${target ? " drop-target" : ""}`}
+        data-column={extra.at}
+      >
         <header>
           <span className="board-filter">{title}</span>
           {extra.sub && <span className="board-tracker">{extra.sub}</span>}
@@ -333,7 +471,35 @@ export function TicketsScreen({
               currentProject={currentProject}
               onStart={onStart}
               on={isOpen(task)}
-              onOpen={task.kind === "jira" ? () => setReading(task) : undefined}
+              onOpen={
+                task.kind === "jira"
+                  ? () => {
+                      if (!dragged.current) setReading(task);
+                    }
+                  : undefined
+              }
+              dragging={drag?.task.key === task.key || moving === task.key}
+              moves={
+                extra.at === undefined
+                  ? undefined
+                  : columns
+                      .filter((_, i) => i !== extra.at)
+                      .map((c) => ({
+                        label: `Move to ${c.name}`,
+                        disabled: moving !== null,
+                        run: () => void moveTo(task, c),
+                      }))
+              }
+              onPointerDown={
+                extra.at === undefined
+                  ? undefined
+                  : (e) => {
+                      if (e.button !== 0 || moving !== null) return;
+                      if ((e.target as HTMLElement).closest("button, a, input, .select-trigger"))
+                        return;
+                      pressed.current = { task, from: extra.at!, x: e.clientX, y: e.clientY };
+                    }
+              }
             />
           ))}
         </div>
@@ -353,7 +519,13 @@ export function TicketsScreen({
           currentProject={currentProject}
           onStart={onStart}
           onClose={() => setReading(null)}
+          onChanged={refreshQuietly}
         />
+      )}
+      {drag && (
+        <div className="drag-ghost" style={{ left: drag.x + 12, top: drag.y + 8 }} aria-hidden>
+          <span className="ticket-key">{drag.task.key}</span> {drag.task.title}
+        </div>
       )}
     </div>
   );
@@ -422,10 +594,39 @@ export function TicketsScreen({
     ];
     return (
       <Screen icon={TrackerGlyph} title="tickets" actions={actions} onClose={onClose} wide>
-        {(boardsError || boardError || notes.length > 0) && (
+        {(boardsError || boardError || moveError || choosing || notes.length > 0) && (
           <div className="board-notes">
             {boardsError && <p className="error">{boardsError}</p>}
             {boardError && <p className="error">{boardError}</p>}
+            {moveError && <p className="error">{moveError}</p>}
+            {/* A column that two of the workflow's transitions land in: which
+                one is a question about the process, so it is asked. */}
+            {choosing && (
+              <p className="board-choose">
+                <span>
+                  {choosing.task.key} can go to {choosing.column.name} more than one way:
+                </span>
+                {choosing.ways.map((w) => (
+                  <button
+                    key={w.id}
+                    className="quiet"
+                    onClick={() => {
+                      const c = choosing;
+                      setChoosing(null);
+                      setMoving(c.task.key);
+                      perform(c.task, c.column, w)
+                        .catch((e) => setMoveError(`${c.task.key}: ${messageOf(e)}`))
+                        .finally(() => setMoving(null));
+                    }}
+                  >
+                    {w.name} → {w.to}
+                  </button>
+                ))}
+                <button className="quiet" onClick={() => setChoosing(null)}>
+                  cancel
+                </button>
+              </p>
+            )}
             {notes.map((n) => (
               <p key={n.text} className={n.tone}>
                 {n.text}
@@ -451,6 +652,7 @@ export function TicketsScreen({
                 empty: "nothing here",
                 max: c.max,
                 min: c.min,
+                at: i,
               }),
             ),
           )
@@ -502,6 +704,9 @@ function Card({
   onStart,
   on,
   onOpen,
+  moves,
+  dragging = false,
+  onPointerDown,
 }: {
   task: Task;
   projects: Project[];
@@ -512,6 +717,12 @@ function Card({
   /// Read it in the window. Absent for a tracker that is only read in the
   /// browser so far, whose key links out instead.
   onOpen?: () => void;
+  /// On a board: "Move to …" for every other column, which is how a card is
+  /// moved without a mouse.
+  moves?: MenuItem[];
+  /// This card is the one being dragged.
+  dragging?: boolean;
+  onPointerDown?: (e: React.PointerEvent) => void;
 }) {
   const menu = useContextMenu();
   const menuProps = menu(() => [
@@ -521,6 +732,7 @@ function Card({
       icon: Elsewhere,
       run: () => openExternal(task.url),
     },
+    ...(moves && moves.length > 0 ? (["separator", ...moves] as MenuItem[]) : []),
     "separator",
     { label: "Copy key", icon: Copy, hint: task.key, run: () => copy(task.key) },
     { label: "Copy link", icon: Copy, run: () => copy(task.url) },
@@ -532,7 +744,8 @@ function Card({
 
   return (
     <article
-      className={`ticket-card${onOpen ? " opens" : ""}${on ? " on" : ""}`}
+      className={`ticket-card${onOpen ? " opens" : ""}${on ? " on" : ""}${dragging ? " dragging" : ""}`}
+      onPointerDown={onPointerDown}
       // The whole card opens it, except the controls on it.
       tabIndex={onOpen ? 0 : undefined}
       aria-current={on ? "true" : undefined}

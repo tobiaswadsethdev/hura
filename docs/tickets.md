@@ -46,7 +46,9 @@ on filters or a board, is where the screen opens next time.
   and ↗ opens the board in Jira.
 
 The cards are the filters' cards: click one to read it, start a session from
-it. Moving a card between columns is still Jira's — this screen only reads.
+it. **Drag a card to another column** to move it, or right-click it for *Move
+to …* each other column (the keyboard's way). See [Changing a
+ticket](#changing-a-ticket) for what a move is underneath.
 
 It is `GET /rest/agile/1.0/board` for the picker, and
 `/board/{id}/configuration`, `/board/{id}/sprint?state=active` (scrum only)
@@ -63,7 +65,7 @@ so picking the next card does not mean closing this one first, and the start
 button is at the bottom of the panel as well as on the card. Escape closes the
 panel; a second Escape closes the screen. The ↗ in the panel's header, and
 *Open in the browser* in a card's right-click menu, still go to Jira -- for the
-things only Jira does: editing, moving, attaching.
+things only Jira does: attaching, linking, logging work.
 
 It is one `GET /rest/api/3/issue/{key}` with the same token as the board. The
 description and comments arrive in Jira's document format and are drawn from
@@ -86,7 +88,49 @@ The agent may also have a Jira MCP server; this is not that, and the difference
 is deliberate. REST is for what the *interface* shows: a list, on a timer,
 rendered as rows. MCP is for what the *agent* gets: a tool it calls when it
 decides to — which is also how a ticket gets a comment or moves along, if you
-want the agent to do it. This screen only reads.
+want the agent to do it. This screen changes a ticket only when you press
+something on it, and never on a timer.
+
+## Changing a ticket
+
+Jira tickets can be changed from the window, with the board's own token:
+
+* **Status.** The status in the panel is a list of the workflow's transitions
+  out of it, named by where each lands. Dropping a card on a board column is
+  the same thing: the transition out of its status that lands in one of the
+  column's statuses. When two transitions land there you are asked which; when
+  none does, the move is refused and says so, rather than guessing. A
+  transition whose screen has required fields fails with Jira's own message.
+* **Fields.** The pencil in the panel's header turns it into the ticket's edit
+  screen: the fields Jira's edit screen has for it, each as its control — title
+  and text, Markdown for rich text, numbers (story points), dates, selects and
+  multi-selects, labels, priority, and people, found by name. A field of any
+  other type is shown read-only with its value, and a field this account may
+  not change is not on the form. Only the fields you changed are saved, so
+  whatever somebody else changed since the form opened is left alone.
+  Ctrl+Enter saves; Escape leaves a form with nothing changed on it.
+* **Comments.** A new one goes under the last, in Markdown, and Ctrl+Enter
+  sends it. Your own comments have an edit and a delete (the delete asks
+  first); other people's do not.
+
+**Rich text is Markdown here and Jira's document format there.** Paragraphs,
+headings, lists and checklists, code, quotes, rules, bold, italics,
+strike-through, inline code and links go both ways intact. Tables, panels,
+collapsible sections, mentions, status lozenges, dates and images do not exist
+in Markdown, so they become their text, or nothing for an image. When a
+description or comment holds any of those, the box says which, under it,
+*before* you save — saving from here flattens them, and Jira is where to edit
+it if they matter.
+
+| What | Request |
+| --- | --- |
+| the edit screen | `GET /rest/api/3/issue/{key}?expand=editmeta&fields=*all` |
+| save | `PUT /rest/api/3/issue/{key}` with the changed fields |
+| statuses | `GET` and `POST /rest/api/3/issue/{key}/transitions` |
+| comments | `POST`, `PUT` and `DELETE /rest/api/3/issue/{key}/comment[/{id}]` |
+| people | `GET /rest/api/3/user/assignable/search` for the assignee, `/user/search` otherwise |
+
+GitHub and Azure DevOps tickets are still changed in the browser.
 
 ## Setting one up
 
@@ -184,9 +228,13 @@ note about where the work came from. Nothing writes back through it.
 ## What it costs
 
 This computer holds a token that can read your tickets, in the same private
-state directory as the tokens for the servers it is paired with. Scope it to
-reading — *Work Items (read)*, a read-only GitHub token — rather than reusing an
-administrative one: reading is all this does.
+state directory as the tokens for the servers it is paired with.
+
+A Jira API token acts as you, so it can do whatever your account can, and the
+window uses that to change tickets when you ask it to. Nothing else changes
+anything: the timer only reads. For Azure DevOps and GitHub, which this
+window still only reads, scope the token to reading — *Work Items (read)*, a
+read-only GitHub token — rather than reusing an administrative one.
 
 ---
 

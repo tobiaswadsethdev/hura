@@ -24,6 +24,9 @@
 //! weeks Jira itself keeps showing it -- without that, the last column is
 //! every ticket the team ever closed.
 //!
+//! A card is moved by [`super::transition`], and a column says which
+//! statuses it holds so the window can find the transition that lands there.
+//!
 //! Jira only. Azure DevOps has boards too, per team, with columns of their
 //! own; a reader for those is a function here.
 
@@ -90,6 +93,9 @@ pub struct BoardColumn {
     /// The work-in-progress limits, when the board has them on.
     pub min: Option<u32>,
     pub max: Option<u32>,
+    /// The statuses it holds, by id: where a card dropped on it can go is a
+    /// transition to one of these.
+    pub statuses: Vec<String>,
     /// In the board's rank order, which is the order people put them in.
     pub tasks: Vec<Task>,
 }
@@ -351,6 +357,7 @@ fn parse_configuration(body: &Value) -> Result<Layout, String> {
                     name: string(c, "name"),
                     min: limit(c, "min"),
                     max: limit(c, "max"),
+                    statuses: statuses.clone(),
                     tasks: Vec::new(),
                 };
                 (column, statuses)

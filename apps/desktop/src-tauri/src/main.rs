@@ -680,6 +680,87 @@ fn branch_prefix(server: Option<&str>) -> (String, Option<String>) {
     }
 }
 
+/// The tracker a ticket came from, by the name the screen knows it by.
+fn tracker_named(
+    trackers: &hura_client::trackers::Trackers,
+    name: &str,
+) -> Result<hura_core::tracker::Stored, Failed> {
+    trackers
+        .list()
+        .iter()
+        .find(|t| t.source.name == name)
+        .cloned()
+        .ok_or_else(|| failed(format!("no tracker called `{name}`")))
+}
+
+// Changing a ticket. Each is one button somebody pressed: nothing here runs
+// on a timer, and each answers with nothing but whether it worked -- the
+// window reads the ticket again to see what it now says.
+
+/// A ticket's edit screen: the fields Jira lets this account change, as the
+/// control for each, with their values.
+#[tauri::command(async)]
+fn edit_form(tracker: String, key: String) -> Result<hura_core::tracker::EditForm, Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::edit_form(&stored, &key).map_err(failed)
+}
+
+#[tauri::command(async)]
+fn save_ticket(
+    tracker: String,
+    key: String,
+    changes: Vec<hura_core::tracker::FieldChange>,
+) -> Result<(), Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::save(&stored, &key, &changes).map_err(failed)
+}
+
+/// Where the ticket can move from its current status.
+#[tauri::command(async)]
+fn transitions(
+    tracker: String,
+    key: String,
+) -> Result<Vec<hura_core::tracker::Transition>, Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::transitions(&stored, &key).map_err(failed)
+}
+
+#[tauri::command(async)]
+fn transition(tracker: String, key: String, id: String) -> Result<(), Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::transition(&stored, &key, &id).map_err(failed)
+}
+
+#[tauri::command(async)]
+fn add_comment(tracker: String, key: String, markdown: String) -> Result<(), Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::comment(&stored, &key, &markdown).map_err(failed)
+}
+
+#[tauri::command(async)]
+fn edit_comment(tracker: String, key: String, id: String, markdown: String) -> Result<(), Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::edit_comment(&stored, &key, &id, &markdown).map_err(failed)
+}
+
+#[tauri::command(async)]
+fn delete_comment(tracker: String, key: String, id: String) -> Result<(), Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::delete_comment(&stored, &key, &id).map_err(failed)
+}
+
+/// People to put in a person field, by the start of their name.
+#[tauri::command(async)]
+fn users(
+    tracker: String,
+    key: String,
+    query: String,
+    assignable: bool,
+) -> Result<Vec<hura_core::tracker::UserChoice>, Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::users(&stored, &key, &query, assignable).map_err(failed)
+}
+
 /// Every board the Jira trackers' accounts can see: the board view's picker.
 #[tauri::command(async)]
 fn boards() -> Result<hura_core::tracker::Boards, Failed> {
@@ -973,6 +1054,14 @@ fn main() {
             ticket,
             boards,
             board,
+            edit_form,
+            save_ticket,
+            transitions,
+            transition,
+            add_comment,
+            edit_comment,
+            delete_comment,
+            users,
             settings,
             set_settings,
             watch,

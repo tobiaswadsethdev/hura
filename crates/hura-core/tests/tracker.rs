@@ -13,13 +13,19 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{Sender, channel};
 
-use hura_core::tracker::{Filter, Kind, Source, Stored, board, inbox};
+use hura_core::tracker::markdown::Markdown;
+use hura_core::tracker::{
+    Editable, FieldChange, Filter, Kind, Source, Stored, board, comment, delete_comment, inbox,
+    save, transition,
+};
 
 /// One request the stand-in received.
 #[derive(Debug)]
 struct Seen {
+    method: String,
     path: String,
     auth: String,
+    body: String,
 }
 
 /// A tracker on loopback that answers `requests` requests with `respond`.
@@ -74,8 +80,12 @@ fn serve(mut stream: TcpStream, seen: &Sender<Seen>, respond: fn(&str, &str) -> 
     );
     let _ = stream.write_all(answer.as_bytes());
     let _ = stream.flush();
-    let _ = body;
-    let _ = seen.send(Seen { path, auth });
+    let _ = seen.send(Seen {
+        method,
+        path,
+        auth,
+        body,
+    });
 }
 
 /// Every filter is its own search, each row says which filter found it, and a
@@ -337,4 +347,96 @@ fn a_scrum_board_with_no_sprint_running_says_so_and_searches_nothing() {
     assert!(got.columns[0].tasks.is_empty());
     let paths: Vec<String> = rx.try_iter().map(|s| s.path).collect();
     assert!(paths.iter().all(|p| !p.contains("/issue")), "{paths:?}");
+}
+
+/// A save, a move and a comment, as they leave: the method, the path, and a
+/// body in the shape Jira takes -- through curl, with the token on stdin.
+#[test]
+fn a_save_a_move_and_a_comment_go_out_as_jira_takes_them() {
+    let (tx, rx) = channel();
+    let port = answering(4, tx, |method, _| match method {
+        "POST" => (201, r#"{"id":"1"}"#.to_string()),
+        _ => (204, String::new()),
+    });
+    let jira = jira_at(port);
+
+    save(
+        &jira,
+        "CODE-7",
+        &[
+            FieldChange {
+                id: "summary".into(),
+                edit: Editable::Text {
+                    value: "A \"quoted\" title".into(),
+                },
+            },
+            FieldChange {
+                id: "description".into(),
+                edit: Editable::Doc {
+                    value: Markdown {
+                        text: "**bold**".into(),
+                        lost: vec![],
+                    },
+                },
+            },
+        ],
+    )
+    .unwrap();
+    transition(&jira, "CODE-7", "21").unwrap();
+    comment(&jira, "CODE-7", "on it").unwrap();
+    delete_comment(&jira, "CODE-7", "10001").unwrap();
+
+    let seen: Vec<Seen> = rx.try_iter().collect();
+    let line: Vec<String> = seen
+        .iter()
+        .map(|s| format!("{} {}", s.method, s.path))
+        .collect();
+    assert_eq!(
+        line,
+        [
+            "PUT /rest/api/3/issue/CODE-7",
+            "POST /rest/api/3/issue/CODE-7/transitions",
+            "POST /rest/api/3/issue/CODE-7/comment",
+            "DELETE /rest/api/3/issue/CODE-7/comment/10001",
+        ]
+    );
+    assert!(seen.iter().all(|s| s.auth.starts_with("Basic ")));
+
+    let put: serde_json::Value = serde_json::from_str(&seen[0].body).unwrap();
+    assert_eq!(
+        put["fields"]["summary"], "A \"quoted\" title",
+        "survives the curl config"
+    );
+    assert_eq!(put["fields"]["description"]["type"], "doc");
+    let moved: serde_json::Value = serde_json::from_str(&seen[1].body).unwrap();
+    assert_eq!(moved, serde_json::json!({ "transition": { "id": "21" } }));
+    let said: serde_json::Value = serde_json::from_str(&seen[2].body).unwrap();
+    assert_eq!(said["body"]["content"][0]["content"][0]["text"], "on it");
+    assert!(seen[3].body.is_empty(), "a delete has no body");
+}
+
+/// Jira's refusal of a write is per field, and is what the window says.
+#[test]
+fn a_refused_save_says_which_field_and_why() {
+    let (tx, _rx) = channel();
+    let port = answering(1, tx, |_, _| {
+        (
+            400,
+            r#"{"errorMessages":[],"errors":{"customfield_10016":"Number value expected"}}"#
+                .to_string(),
+        )
+    });
+    let e = save(
+        &jira_at(port),
+        "CODE-7",
+        &[FieldChange {
+            id: "customfield_10016".into(),
+            edit: Editable::Number { value: Some(3.0) },
+        }],
+    )
+    .unwrap_err();
+    assert!(
+        e.contains("customfield_10016: Number value expected"),
+        "{e}"
+    );
 }

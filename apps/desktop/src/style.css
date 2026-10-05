@@ -2729,3 +2729,78 @@ main { display: flex; flex: 1; min-height: 0; }
 .procs .pid { font-family: var(--font-mono); color: var(--dimmer); min-width: 36px; font-variant-numeric: tabular-nums; }
 .procs .cmd { flex: 1; min-width: 0; font-family: var(--font-mono); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .procs .hint { font-size: 11px; color: var(--dimmer); padding: 0 6px; }
+
+/* Moving a card. The card being moved fades where it was, a chip with its key
+   follows the pointer, and the column under it is lit -- the drop is a
+   transition, and the lit column is where it would land. */
+.ticket-card.dragging { opacity: 0.45; }
+.board-column.drop-target { border-color: var(--ring); background: var(--selected); }
+.drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  max-width: 280px;
+  padding: 5px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.35);
+}
+.board-choose { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 12px; }
+.board-choose .quiet { border: 1px solid var(--line-strong); }
+
+/* The status line, as the transitions out of it: the stage's colour on a
+   select, so it still reads as the status first and a control second. */
+.ticket-fields .stage-select { display: inline-flex; width: auto; max-width: 100%; height: 24px; padding: 1px 8px; font-family: var(--font-ui); font-size: 11.5px; }
+.ticket-panel-tools .quiet-icon.on { background: var(--selected); color: var(--text); }
+
+/* A ticket's edit screen: a label over each control, read top to bottom
+   like the panel it replaces. */
+.ticket-edit { display: flex; flex-direction: column; gap: 12px; }
+.edit-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.edit-label { font-size: 11.5px; color: var(--dim); }
+.edit-label .required { color: var(--bad); }
+.ticket-edit input.prose { font-family: var(--font-ui); }
+.edit-field.text:first-child input { font-size: 14px; font-weight: 600; }
+.edit-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.edit-readonly { color: var(--dimmer); font-size: 12px; }
+.ticket-edit-foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 14px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.ticket-edit-foot .hint { flex: 1; font-size: 11.5px; }
+.ticket-edit-foot .go { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Markdown, and what saving it would flatten -- said under the box, in the
+   warning colour, before anybody presses save. */
+.markdown-box { display: flex; flex-direction: column; gap: 5px; }
+.markdown-box textarea { font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+.markdown-lost { margin: 0; font-size: 11.5px; }
+
+.user-box { display: flex; flex-direction: column; gap: 5px; }
+.user-current { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); }
+.user-search { position: relative; display: block; }
+.user-search .lucide { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; color: var(--dimmer); }
+.ticket-edit .user-search input { padding-left: 26px; }
+.user-found { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; max-height: 180px; overflow-y: auto; }
+.user-found .quiet { width: 100%; text-align: left; }
+.user-found .hint { padding: 4px 8px; }
+
+/* Your own comments carry their two tools, quiet until the comment is
+   hovered; a new comment is written under the last one. */
+.comment-tools { margin-left: auto; display: inline-flex; gap: 2px; opacity: 0; transition: opacity 120ms; }
+.ticket-comments-list > li:hover .comment-tools,
+.ticket-comments-list > li:focus-within .comment-tools { opacity: 1; }
+.comment-compose { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.comment-compose-actions { display: flex; justify-content: flex-end; gap: 8px; }

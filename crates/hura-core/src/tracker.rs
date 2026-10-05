@@ -7,8 +7,10 @@
 //! sandbox -- or the machine hosting them -- has any business holding.
 //!
 //! REST is for what the *interface* shows: a list, on a timer, rendered as
-//! rows. What an *agent* does with a ticket -- commenting, moving it -- goes
-//! through an MCP server when the agent decides to, which is a different
+//! rows -- and, since the board, what a person changes from it: a card moved,
+//! a field edited, a comment written, each when somebody presses something
+//! and never on the timer (see [`edit`]). What an *agent* does with a ticket
+//! goes through an MCP server when the agent decides to, which is a different
 //! consumer with different failure modes.
 //!
 //! ## Why curl
@@ -27,8 +29,14 @@ use serde::{Deserialize, Serialize};
 
 mod board;
 pub mod doc;
+mod edit;
 mod issue;
+pub mod markdown;
 pub use board::{Board, BoardColumn, BoardView, Boards, board, boards};
+pub use edit::{
+    Choice, EditField, EditForm, Editable, FieldChange, Transition, UserChoice, comment,
+    delete_comment, edit_comment, edit_form, save, transition, transitions, users,
+};
 pub use issue::{
     Issue, IssueComment, Parent as IssueParent, Person as IssuePerson, Stage as IssueStage, issue,
 };
@@ -907,6 +915,17 @@ fn post(
     curl(url, auth, &[], Some(("POST", body, content_type)))
 }
 
+/// A write with a JSON body -- `POST`, `PUT` -- or none, for a `DELETE`.
+fn send(
+    method: &str,
+    url: &str,
+    auth: &str,
+    body: Option<&serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let body = body.map(serde_json::Value::to_string).unwrap_or_default();
+    curl(url, auth, &[], Some((method, &body, JSON)))
+}
+
 /// One request, with the credential on stdin.
 ///
 /// `-K -` makes curl read its configuration from standard input, which is how
@@ -944,11 +963,15 @@ fn curl(
     config.push_str("write-out = \"\\n%{http_code}\"\n");
     if let Some((method, body, content_type)) = body {
         config.push_str(&format!("request = {}\n", quote(method)));
-        config.push_str(&format!(
-            "header = {}\n",
-            quote(&format!("Content-Type: {content_type}"))
-        ));
-        config.push_str(&format!("data-raw = {}\n", quote(body)));
+        // A `DELETE` has no body, and a `Content-Type` with nothing after it
+        // is a request some servers refuse.
+        if !body.is_empty() {
+            config.push_str(&format!(
+                "header = {}\n",
+                quote(&format!("Content-Type: {content_type}"))
+            ));
+            config.push_str(&format!("data-raw = {}\n", quote(body)));
+        }
     }
 
     let mut command = Command::new("curl");
@@ -1015,6 +1038,9 @@ fn interpret(stdout: &str) -> Result<serde_json::Value, String> {
     let said = serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|v| {
+            if let Some(said) = jira_errors(&v) {
+                return Some(said);
+            }
             for key in ["message", "errorMessages", "error_description", "detail"] {
                 if let Some(found) = v.get(key) {
                     return Some(match found {
@@ -1033,6 +1059,31 @@ fn interpret(stdout: &str) -> Result<serde_json::Value, String> {
         0 => format!("no status came back: {said}"),
         _ => format!("{code}: {said}"),
     })
+}
+
+/// Jira's refusal of a write: `errorMessages` for the request as a whole and
+/// `errors` per field -- `summary: You must specify a summary` -- either of
+/// which may be the empty one. `None` when neither says anything.
+fn jira_errors(v: &serde_json::Value) -> Option<String> {
+    let mut said: Vec<String> = v
+        .get("errorMessages")
+        .and_then(|m| m.as_array())
+        .map(|m| {
+            m.iter()
+                .filter_map(|m| m.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(errors) = v.get("errors").and_then(|e| e.as_object()) {
+        for (field, message) in errors {
+            let message = message
+                .as_str()
+                .map_or_else(|| message.to_string(), str::to_string);
+            said.push(format!("{field}: {message}"));
+        }
+    }
+    (!said.is_empty()).then(|| said.join("; "))
 }
 
 fn first_line(s: &str) -> String {
