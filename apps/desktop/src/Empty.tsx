@@ -54,6 +54,7 @@ export function Empty({
   note,
   size = "pane",
   tone,
+  spin,
   children,
 }: {
   icon: React.ComponentType<{ size?: number; className?: string }>;
@@ -70,6 +71,9 @@ export function Empty({
   /// deliberately no `"bad"` beside it: a pane that failed to load is an
   /// error, and errors are red text, not a grey glyph in a different colour.
   tone?: "ok";
+  /// Turn the mark: a wait long enough that the note beside it is worth
+  /// reading -- a sandbox being made -- where `Waiting` has no words at all.
+  spin?: boolean;
   /// What to do about it: a button, or the two commands a first run needs.
   /// Rendered under the note, and the reason this is a component with children
   /// rather than a function returning a glyph.
@@ -79,7 +83,7 @@ export function Empty({
     <div className={`empty ${size}${tone ? ` ${tone}` : ""}`}>
       {/* `size` as a prop rather than a stylesheet rule, because scaling one
           of these in CSS changes its stroke weight -- see `ICON_BIG`. */}
-      <Mark size={MARK[size]} className="empty-mark" />
+      <Mark size={MARK[size]} className={`empty-mark${spin ? " turning" : ""}`} />
       {note && <p className="empty-note">{note}</p>}
       {children}
     </div>

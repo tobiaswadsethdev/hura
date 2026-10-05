@@ -17,7 +17,8 @@ use std::time::Duration;
 use axum::extract::ws::{Message, WebSocket};
 use hura_core::events::Event;
 use hura_core::ops;
-use hura_core::session::Session;
+use hura_core::seed;
+use hura_core::session::{Session, State};
 use hura_core::store::Store;
 use hura_proto::stream::{Channel, ChannelId, ClientFrame, ServerFrame, bytes};
 use tokio::sync::mpsc;
@@ -456,6 +457,26 @@ async fn terminal(
 /// minutes is worse than one that admits it.
 const ATTACH_WAIT_LIMIT: Duration = Duration::from_secs(60);
 const ATTACH_WAIT_EVERY: Duration = Duration::from_millis(500);
+/// How long the agent's terminal waits for seeding to finish. As long as the
+/// create's own watch, because this is waiting on the same clone.
+const SEED_WAIT_LIMIT: Duration = Duration::from_secs(15 * 60);
+
+/// Whether a session's seeder is still working, and so has not started the
+/// agent yet.
+fn seeding(backend: &dyn hura_core::backend::Backend, session: &Session) -> bool {
+    let recorded = Store::load()
+        .ok()
+        .and_then(|store| store.get(&session.name).map(|s| s.state));
+    if !matches!(recorded, Some(State::Creating | State::Seeding)) {
+        return false;
+    }
+    // `Unknown` is a seeder that has not written its first line yet. A dead one
+    // has nothing more to start, and the attach is the way to see what it left.
+    matches!(
+        seed::seed_state(backend, session),
+        seed::SeedState::Unknown | seed::SeedState::Running { alive: true, .. }
+    )
+}
 
 /// The blocking half: a pty, a child in it, and the two directions of traffic.
 ///
@@ -502,6 +523,40 @@ fn pty_worker(
         }
         std::thread::sleep(ATTACH_WAIT_EVERY);
         waited += ATTACH_WAIT_EVERY;
+    }
+
+    // **The agent's own tmux session is the seeder's to create**, and a
+    // reachable sandbox is not one that has got that far. The attach script
+    // falls back to `new-session` when there is nothing to attach to, so a tab
+    // opened mid-clone made the agent's session itself, as a bare shell -- and
+    // the seeder's agent step, which leaves a session that already exists
+    // alone, then never started the agent at all. A window that selects a
+    // session the moment it is asked for opens exactly that tab.
+    //
+    // Waited out on the record as well as on the seeder: the record is a file
+    // read, and once it says anything but creating or seeding there is nothing
+    // left to wait for. Shells are not held back -- the seeder never makes one.
+    if tmux == session.tmux {
+        let mut waited = Duration::ZERO;
+        while seeding(backend, &session) {
+            if waited.is_zero() {
+                let _ = out.blocking_send(b"waiting for the agent to start...\r\n".to_vec());
+            }
+            // The tab was closed. A clone can take minutes, and asking the
+            // sandbox twice a second on behalf of nobody is a leak.
+            if out.is_closed() {
+                return;
+            }
+            if waited >= SEED_WAIT_LIMIT {
+                let _ = out.blocking_send(
+                    b"the session is still being prepared; close this tab and open it again\r\n"
+                        .to_vec(),
+                );
+                return;
+            }
+            std::thread::sleep(ATTACH_WAIT_EVERY);
+            waited += ATTACH_WAIT_EVERY;
+        }
     }
 
     // A size to start with. The client sends its own as soon as it has one, and

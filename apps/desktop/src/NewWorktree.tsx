@@ -261,7 +261,9 @@ function Form({
         autoFocus
         rows={4}
         value={task}
-        placeholder="What should the agent do?"
+        // Said, because nothing else on the form does: this is the agent's first
+        // prompt, sent the moment the clone finishes, and blank starts it idle.
+        placeholder="What should the agent do? It starts on this as soon as the sandbox is ready — leave blank to start it idle."
         onChange={(e) => setTask(e.target.value)}
       />
 
