@@ -43,6 +43,13 @@ export type Prefs = {
   /// empty list without asking anyone. Off also stops the timer, so no
   /// tracker is asked on this window's behalf.
   notifyTickets: boolean;
+  /// Which reading of your tickets the tickets screen opens on: the filters'
+  /// columns, or a board's. Whichever was last looked at, because the screen
+  /// is somewhere you go back to and it should be where you left it.
+  ticketsView: "filters" | "board";
+  /// The board the board view shows, by tracker and Jira's id. `null` until
+  /// one is picked, and then the first board on the list.
+  board: { tracker: string; id: string } | null;
 };
 
 /// The bounds, and the reasons.
@@ -74,6 +81,8 @@ export const DEFAULTS: Prefs = {
   refreshMs: 3000,
   notify: true,
   notifyTickets: true,
+  ticketsView: "filters",
+  board: null,
 };
 
 function clamp(value: number, { min, max }: { min: number; max: number }): number {
@@ -100,7 +109,15 @@ export function sanitize(stored: unknown): Prefs {
     notify: typeof raw.notify === "boolean" ? raw.notify : DEFAULTS.notify,
     notifyTickets:
       typeof raw.notifyTickets === "boolean" ? raw.notifyTickets : DEFAULTS.notifyTickets,
+    ticketsView: raw.ticketsView === "board" ? "board" : "filters",
+    board: boardOf(raw.board),
   };
+}
+
+function boardOf(value: unknown): Prefs["board"] {
+  if (typeof value !== "object" || value === null) return null;
+  const { tracker, id } = value as Record<string, unknown>;
+  return typeof tracker === "string" && typeof id === "string" ? { tracker, id } : null;
 }
 
 function read(): Prefs {

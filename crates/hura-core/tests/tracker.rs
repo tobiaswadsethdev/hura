@@ -13,7 +13,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{Sender, channel};
 
-use hura_core::tracker::{Filter, Kind, Source, Stored, inbox};
+use hura_core::tracker::{Filter, Kind, Source, Stored, board, inbox};
 
 /// One request the stand-in received.
 #[derive(Debug)]
@@ -233,4 +233,108 @@ fn a_refused_token_is_one_warning_and_no_searches() {
     assert!(got.warnings[0].starts_with("work:"), "{:?}", got.warnings);
     let paths: Vec<String> = rx.try_iter().map(|s| s.path).collect();
     assert!(paths.iter().all(|p| p.contains("/myself")), "{paths:?}");
+}
+
+fn jira_at(port: u16) -> Stored {
+    Stored {
+        source: Source {
+            kind: Kind::Jira,
+            name: "work".into(),
+            site: Some(format!("http://127.0.0.1:{port}")),
+            email: Some("you@example.com".into()),
+            ..Default::default()
+        },
+        token: Some("a-token".into()),
+    }
+}
+
+/// A scrum board is its running sprint: the configuration, the active
+/// sprints, then the sprint's issues a page at a time until the total is in,
+/// each card in the column that holds its status.
+#[test]
+fn a_scrum_board_reads_its_sprint_a_page_at_a_time_into_its_columns() {
+    let (tx, rx) = channel();
+    let port = answering(5, tx, |_, path| {
+        if path.contains("/myself") {
+            return (200, r#"{"accountId":"me-1"}"#.to_string());
+        }
+        if path.contains("/configuration") {
+            let body = r#"{"name":"Team","type":"scrum","columnConfig":{"columns":[
+                {"name":"To Do","statuses":[{"id":"1"}]},
+                {"name":"Doing","statuses":[{"id":"3"}]}]}}"#;
+            return (200, body.to_string());
+        }
+        if path.contains("/sprint?state=active") {
+            return (
+                200,
+                r#"{"values":[{"id":41,"name":"Sprint 12"}]}"#.to_string(),
+            );
+        }
+        let issue = |key: &str, status: &str| {
+            format!(
+                r#"{{"key":"{key}","fields":{{"summary":"t","status":{{"id":"{status}","name":"s"}},"issuetype":{{"name":"Task"}}}}}}"#
+            )
+        };
+        if path.contains("startAt=0") {
+            let body = format!(
+                r#"{{"total":3,"issues":[{},{}]}}"#,
+                issue("T-1", "3"),
+                issue("T-2", "1")
+            );
+            return (200, body);
+        }
+        (
+            200,
+            format!(r#"{{"total":3,"issues":[{}]}}"#, issue("T-3", "1")),
+        )
+    });
+
+    let got = board(&jira_at(port), "7", "tobias").unwrap();
+    assert_eq!(got.name, "Team");
+    assert_eq!(got.sprints, ["Sprint 12"]);
+    assert_eq!((got.read, got.total), (3, 3));
+    let keys = |i: usize| {
+        got.columns[i]
+            .tasks
+            .iter()
+            .map(|t| t.key.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(keys(0), ["T-2", "T-3"]);
+    assert_eq!(keys(1), ["T-1"]);
+
+    let paths: Vec<String> = rx.try_iter().map(|s| s.path).collect();
+    let issues: Vec<&String> = paths
+        .iter()
+        .filter(|p| p.contains("/board/7/issue"))
+        .collect();
+    assert_eq!(issues.len(), 2, "{paths:?}");
+    assert!(issues[0].contains("sprint%20in%20%2841%29"), "{paths:?}");
+    assert!(issues[0].contains("ORDER%20BY%20Rank"), "{paths:?}");
+    assert!(issues[1].contains("startAt=2"), "{paths:?}");
+}
+
+/// With no sprint running there is nothing on a scrum board, and nothing is
+/// searched for: the board says why instead.
+#[test]
+fn a_scrum_board_with_no_sprint_running_says_so_and_searches_nothing() {
+    let (tx, rx) = channel();
+    let port = answering(3, tx, |_, path| {
+        if path.contains("/myself") {
+            return (200, r#"{"accountId":"me-1"}"#.to_string());
+        }
+        if path.contains("/configuration") {
+            let body = r#"{"name":"Team","type":"scrum","columnConfig":{"columns":[
+                {"name":"To Do","statuses":[{"id":"1"}]}]}}"#;
+            return (200, body.to_string());
+        }
+        (200, r#"{"values":[]}"#.to_string())
+    });
+
+    let got = board(&jira_at(port), "7", "tobias").unwrap();
+    assert!(got.note.unwrap().contains("no sprint"));
+    assert_eq!(got.columns.len(), 1, "the columns are still drawn");
+    assert!(got.columns[0].tasks.is_empty());
+    let paths: Vec<String> = rx.try_iter().map(|s| s.path).collect();
+    assert!(paths.iter().all(|p| !p.contains("/issue")), "{paths:?}");
 }
