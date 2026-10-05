@@ -3,8 +3,11 @@
 // The card says what a ticket is called and where it stands; this says what it
 // is. Description, conversation, who asked for it and who has it -- the reasons
 // to open a ticket at all, which used to mean leaving the window for a browser.
-// The browser is still one click away in the header, for the things only the
-// tracker can do: edit, transition, attach.
+// A Jira ticket is also changed here: its status from the status line, which
+// lists the workflow's ways out of it, its fields behind the edit button, and
+// its comments where they are read -- a new one at the bottom, your own ones
+// edited or deleted in place. The browser is still one click away in the
+// header, for what only the tracker does: attach, link, log work.
 //
 // Beside the board rather than over it, because the board is where you were:
 // picking the next card should not mean closing this one first.
@@ -18,8 +21,11 @@ import type { Issue } from "./gen/Issue";
 import type { IssuePerson } from "./gen/IssuePerson";
 import type { Project } from "./gen/Project";
 import type { Task } from "./gen/Task";
-import { Close, Elsewhere, Refresh, Start } from "./icons";
+import type { Transition } from "./gen/Transition";
+import { useConfirm } from "./Confirm";
+import { Close, Edit, Elsewhere, Forget, Refresh, Start } from "./icons";
 import { Select } from "./Select";
+import { MarkdownBox, TicketEditor } from "./TicketEdit";
 
 export function TicketPanel({
   task,
@@ -27,15 +33,32 @@ export function TicketPanel({
   currentProject,
   onStart,
   onClose,
+  onChanged,
 }: {
   task: Task;
   projects: Project[];
   currentProject: string | null;
   onStart: (project: Project, task: Task) => void;
   onClose: () => void;
+  /// Something about the ticket was changed from here, so whatever the
+  /// board or the filters say about it is out of date.
+  onChanged?: () => void;
 }) {
   const [issue, setIssue] = useState<Issue | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Only Jira's tickets are changed here so far.
+  const writable = task.kind === "jira";
+  const [editing, setEditing] = useState(false);
+  // The ways out of the current status, read with the ticket.
+  const [moves, setMoves] = useState<Transition[] | null>(null);
+  // Which change is in flight -- `status`, `comment`, or a comment's id --
+  // and what went wrong with the last one.
+  const [working, setWorking] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  // A comment of yours being rewritten: its id and the text so far.
+  const [rewriting, setRewriting] = useState<{ id: string; text: string } | null>(null);
+  const { ask, dialog } = useConfirm();
   const [where, setWhere] = useState(currentProject ?? projects[0]?.name ?? "");
   const project = projects.find((p) => p.name === where);
   const panel = useRef<HTMLElement>(null);
@@ -51,15 +74,46 @@ export function TicketPanel({
       (v) => live && setIssue(v),
       (e) => live && setError(messageOf(e)),
     );
+    if (writable) {
+      // No transitions is a status line that cannot be changed, not an error
+      // worth a banner: a ticket you may read and not move is ordinary.
+      api.transitions(task.tracker, task.key).then(
+        (v) => live && setMoves(v),
+        () => live && setMoves([]),
+      );
+    }
     return () => {
       live = false;
     };
-  }, [task.tracker, task.key]);
+  }, [task.tracker, task.key, writable]);
+
+  /// One change, then the ticket read again -- here and wherever it is on a
+  /// board.
+  const change = async (what: string, run: () => Promise<void>): Promise<boolean> => {
+    setWorking(what);
+    setFailed(null);
+    try {
+      await run();
+      read();
+      onChanged?.();
+      return true;
+    } catch (e) {
+      setFailed(messageOf(e));
+      return false;
+    } finally {
+      setWorking(null);
+    }
+  };
 
   useEffect(() => {
     setIssue(null);
     return read();
   }, [read]);
+
+  const send = () =>
+    void change("comment", () => api.addComment(task.tracker, task.key, draft)).then(
+      (ok) => ok && setDraft(""),
+    );
 
   return (
     <aside
@@ -83,6 +137,16 @@ export function TicketPanel({
           <span className="ticket-type">{issue?.item_type || task.item_type}</span>
         )}
         <span className="ticket-panel-tools">
+          {writable && (
+            <button
+              className={editing ? "quiet-icon on" : "quiet-icon"}
+              title={editing ? "stop editing" : "edit its fields"}
+              aria-pressed={editing}
+              onClick={() => setEditing((e) => !e)}
+            >
+              <Edit aria-label="edit" />
+            </button>
+          )}
           <button className="quiet-icon" title="read it again" onClick={() => void read()}>
             <Refresh aria-label="refresh" />
           </button>
@@ -105,14 +169,50 @@ export function TicketPanel({
       <h2 className="ticket-panel-title">{issue?.title ?? task.title}</h2>
 
       {error && <p className="error">{error}</p>}
+      {failed && <p className="error">{failed}</p>}
       {!issue && !error && <Waiting />}
+      {dialog}
 
-      {issue && (
+      {issue && editing && (
+        <TicketEditor
+          task={task}
+          onCancel={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            read();
+            onChanged?.();
+          }}
+        />
+      )}
+
+      {issue && !editing && (
         <>
           <dl className="ticket-fields">
             <dt>status</dt>
             <dd>
-              <span className={`stage ${issue.stage}`}>{issue.status}</span>
+              {/* A status is a transition out of this one, so the choices are
+                  the workflow's, named by where each lands. */}
+              {moves && moves.length > 0 ? (
+                <Select
+                  className={`stage-select stage ${issue.stage}`}
+                  aria-label="move it to"
+                  disabled={working !== null}
+                  value=""
+                  onChange={(id) =>
+                    void change("status", () => api.transition(task.tracker, task.key, id))
+                  }
+                  options={[
+                    { value: "", label: issue.status, hint: "now" },
+                    ...moves.map((t) => ({
+                      value: t.id,
+                      label: t.to,
+                      hint: t.name.toLowerCase() !== t.to.toLowerCase() ? t.name : undefined,
+                    })),
+                  ]}
+                />
+              ) : (
+                <span className={`stage ${issue.stage}`}>{issue.status}</span>
+              )}
             </dd>
             <dt>assignee</dt>
             <dd>{issue.assignee ? <Who person={issue.assignee} /> : <Nobody>unassigned</Nobody>}</dd>
@@ -177,18 +277,113 @@ export function TicketPanel({
             {issue.comments.length === 0 && <Nobody>no comments yet</Nobody>}
             <ol className="ticket-comments-list">
               {issue.comments.map((c, i) => (
-                <li key={i} className={c.author?.me ? "mine" : undefined}>
+                <li key={c.id || i} className={c.author?.me ? "mine" : undefined}>
                   <div className="comment-head">
                     {c.author ? <Who person={c.author} /> : <Nobody>someone</Nobody>}
                     <span className="comment-when" title={c.created ?? undefined}>
                       {ago(c.created)}
                       {c.edited && <span title={`edited ${c.edited}`}> · edited</span>}
                     </span>
+                    {/* Yours to change, and only yours: Jira lets an admin
+                        edit anybody's, and this is not the place for that. */}
+                    {writable && c.markdown && c.id && rewriting?.id !== c.id && (
+                      <span className="comment-tools">
+                        <button
+                          className="quiet-icon"
+                          title="edit your comment"
+                          disabled={working !== null}
+                          onClick={() => setRewriting({ id: c.id, text: c.markdown!.text })}
+                        >
+                          <Edit aria-label="edit" />
+                        </button>
+                        <button
+                          className="quiet-icon danger"
+                          title="delete your comment"
+                          disabled={working !== null}
+                          onClick={() =>
+                            ask({
+                              title: "Delete this comment?",
+                              body: (
+                                <>
+                                  Your comment on <code>{task.key}</code> goes from Jira, for
+                                  everybody. There is no undo.
+                                </>
+                              ),
+                              confirm: "delete",
+                              onConfirm: () =>
+                                void change(c.id, () =>
+                                  api.deleteComment(task.tracker, task.key, c.id),
+                                ),
+                            })
+                          }
+                        >
+                          <Forget aria-label="delete" />
+                        </button>
+                      </span>
+                    )}
                   </div>
-                  <Doc blocks={c.body} />
+                  {rewriting?.id === c.id && c.markdown ? (
+                    <div className="comment-compose">
+                      <MarkdownBox
+                        rows={4}
+                        autoFocus
+                        value={{ text: rewriting.text, lost: c.markdown.lost }}
+                        onChange={(text) => setRewriting({ id: c.id, text })}
+                      />
+                      <div className="comment-compose-actions">
+                        <button
+                          className="quiet"
+                          disabled={working !== null}
+                          onClick={() => setRewriting(null)}
+                        >
+                          cancel
+                        </button>
+                        <button
+                          className="go"
+                          disabled={working !== null || rewriting.text.trim().length === 0}
+                          onClick={() =>
+                            void change(c.id, () =>
+                              api.editComment(task.tracker, task.key, c.id, rewriting.text),
+                            ).then((ok) => ok && setRewriting(null))
+                          }
+                        >
+                          save
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Doc blocks={c.body} />
+                  )}
                 </li>
               ))}
             </ol>
+            {writable && (
+              <div
+                className="comment-compose"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && draft.trim() && !working) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+              >
+                <MarkdownBox
+                  rows={3}
+                  placeholder="Add a comment — Markdown, ctrl+enter sends"
+                  value={{ text: draft, lost: [] }}
+                  onChange={setDraft}
+                />
+                <div className="comment-compose-actions">
+                  <button
+                    className="go"
+                    disabled={working !== null || draft.trim().length === 0}
+                    onClick={send}
+                  >
+                    comment
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         </>
       )}

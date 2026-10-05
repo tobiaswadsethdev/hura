@@ -10,6 +10,11 @@ export type BoardColumn = { name: string,
  */
 min: number | null, max: number | null, 
 /**
+ * The statuses it holds, by id: where a card dropped on it can go is a
+ * transition to one of these.
+ */
+statuses: Array<string>, 
+/**
  * In the board's rank order, which is the order people put them in.
  */
 tasks: Array<Task>, };

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::doc::{self, Block};
+use super::markdown::{Markdown, to_markdown};
 use super::{Kind, Stored, get, jira_auth, jira_me, jira_site, string};
 
 /// A ticket, read in full.
@@ -76,11 +77,30 @@ pub struct Parent {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IssueComment {
+    /// Jira's id for it, which an edit or a delete is addressed to.
+    pub id: String,
     pub author: Option<Person>,
     pub created: Option<String>,
     /// Only when it differs from `created`: an edit worth saying so about.
     pub edited: Option<String>,
     pub body: Vec<Block>,
+    /// The body as Markdown, for a comment that is yours to edit -- and what
+    /// Markdown could not hold of it. `None` for anybody else's.
+    pub markdown: Option<Markdown>,
+}
+
+/// Where a status sits in its workflow, from the category Jira files it
+/// under -- which every project renames nothing of.
+pub(super) fn stage_of(status: Option<&Value>) -> Stage {
+    match status
+        .and_then(|s| s.get("statusCategory"))
+        .map(|c| string(c, "key"))
+        .as_deref()
+    {
+        Some("done") => Stage::Done,
+        Some("indeterminate") => Stage::Doing,
+        _ => Stage::Todo,
+    }
 }
 
 /// The fields asked for, and no more: an issue with forty custom fields
@@ -123,7 +143,7 @@ pub fn issue(tracker: &Stored, key: &str) -> Result<Issue, String> {
 }
 
 /// `PROJ-123`: letters, digits and underscores, a dash, a number.
-fn is_key(key: &str) -> bool {
+pub(super) fn is_key(key: &str) -> bool {
     let Some((project, number)) = key.split_once('-') else {
         return false;
     };
@@ -166,11 +186,15 @@ fn parse(body: &Value, tracker: &str, site: &str, me: Option<&str>) -> Result<Is
                 .map(|c| {
                     let created = Some(string(c, "created")).filter(|s| !s.is_empty());
                     let updated = Some(string(c, "updated")).filter(|s| !s.is_empty());
+                    let author = person(c.get("author"));
+                    let body = c.get("body").map(doc::from_adf).unwrap_or_default();
                     IssueComment {
-                        author: person(c.get("author")),
+                        id: string(c, "id"),
+                        markdown: author.as_ref().filter(|a| a.me).map(|_| to_markdown(&body)),
+                        author,
                         edited: updated.filter(|u| Some(u) != created.as_ref()),
                         created,
-                        body: c.get("body").map(doc::from_adf).unwrap_or_default(),
+                        body,
                     }
                 })
                 .collect()
@@ -186,15 +210,7 @@ fn parse(body: &Value, tracker: &str, site: &str, me: Option<&str>) -> Result<Is
         url: format!("{site}/browse/{key}"),
         title: string(fields, "summary"),
         status: status.map(|s| string(s, "name")).unwrap_or_default(),
-        stage: match status
-            .and_then(|s| s.get("statusCategory"))
-            .map(|c| string(c, "key"))
-            .as_deref()
-        {
-            Some("done") => Stage::Done,
-            Some("indeterminate") => Stage::Doing,
-            _ => Stage::Todo,
-        },
+        stage: stage_of(status),
         item_type: fields
             .get("issuetype")
             .map(|t| string(t, "name"))
