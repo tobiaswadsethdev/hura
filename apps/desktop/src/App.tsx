@@ -24,6 +24,7 @@ import { Dock } from "./Dock";
 import { Empty } from "./Empty";
 import {
   Branch,
+  Busy,
   Integrations,
   NewProject,
   NoServer,
@@ -377,12 +378,20 @@ export default function App() {
   // status frame, so this recomputes about as often either way -- the point is
   // the narrower prop, not a saved comparison.
   const session = sessions.find((s) => s.name === selected) ?? null;
+  // Selected but not ready to be looked at: asked for and not in the list yet,
+  // or in it and still being made. Every pane asks the sandbox about a working
+  // copy, and before the clone there is none -- so they are not mounted until
+  // there is, rather than each drawing its own error for half a minute.
+  const preparing =
+    (selected !== null && session === null) ||
+    session?.state === "creating" ||
+    session?.state === "seeding";
 
   // Asked once per worktree as it is selected. Not polled: a shell appears
   // because someone in this window asked for one, and paying an exec a second
   // to hear that nothing changed is what the stream exists to avoid.
   useEffect(() => {
-    if (!server || !session || shells[session.name]) return;
+    if (!server || !session || preparing || shells[session.name]) return;
     let live = true;
     api
       .shells(server, session.name)
@@ -391,7 +400,7 @@ export default function App() {
     return () => {
       live = false;
     };
-  }, [server, session, shells]);
+  }, [server, session, preparing, shells]);
 
   const openTabs = session
     ? arrange(
@@ -643,7 +652,12 @@ export default function App() {
             onChange={(treeWidth) => setPrefs({ treeWidth })}
           />
 
-          {session && server ? (
+          {preparing ? (
+            // The create's own progress, said once in the middle: the steps
+            // are seconds of gateway and then however long the clone takes,
+            // and a spinner with the step beside it is all there is to know.
+            <Empty size="page" icon={Busy} spin note={preparingNote(session)} />
+          ) : session && server ? (
             <>
               <Tabs
                 server={server}
@@ -827,6 +841,12 @@ export default function App() {
       )}
     </div>
   );
+}
+
+/// What a session that is not ready yet is doing.
+function preparingNote(session: Session | null) {
+  if (session?.state === "seeding") return `cloning into ${session.name} and starting the agent`;
+  return `creating the sandbox${session ? ` for ${session.name}` : ""}`;
 }
 
 /// One of the header's destinations.
