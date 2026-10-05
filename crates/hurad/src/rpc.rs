@@ -403,7 +403,10 @@ fn create(new: hura_core::ops::NewSession) -> Outcome {
     // Built here and not on the thread: naming, validating and resolving the
     // toolchains are everything that can fail on the client's account, and they
     // belong to the request that caused them.
-    let draft = match new.into_draft(&cfg) {
+    // A store that will not load leaves nothing to step around; `ops::create`
+    // loads it again and is the one that reports why.
+    let taken = Store::load().map(|s| s.names()).unwrap_or_default();
+    let draft = match new.into_draft(&cfg, &taken) {
         Ok(d) => d,
         Err(e) => return Failure::failed(e).into(),
     };

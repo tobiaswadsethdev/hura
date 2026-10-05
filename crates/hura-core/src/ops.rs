@@ -436,7 +436,18 @@ impl NewSession {
     ///
     /// The only place a client's message becomes a draft, which is why the
     /// fields it may not set are filled from `cfg` here rather than trusted.
-    pub fn into_draft(self, cfg: &crate::config::Config) -> Result<Draft, String> {
+    ///
+    /// `taken` is the names already in use. A derived name steps around them,
+    /// because the sandbox a name owns is one per machine, not one per project:
+    /// the same task started in two projects derives the same name, and the
+    /// second used to be refused by the gateway for a clash nobody typed. A
+    /// name the client sent is left as it is -- it is theirs to be wrong about,
+    /// and [`create`] says so.
+    pub fn into_draft(
+        self,
+        cfg: &crate::config::Config,
+        taken: &[String],
+    ) -> Result<Draft, String> {
         let name = match self
             .name
             .map(|n| n.trim().to_string())
@@ -444,6 +455,7 @@ impl NewSession {
         {
             Some(n) => n,
             None => session::derive_name(&self.task, &self.repo)
+                .map(|n| session::unique_name(&n, taken))
                 .ok_or("could not work out a name for this session; give it one")?,
         };
         session::validate_name(&name).map_err(|e| e.to_string())?;
@@ -1872,12 +1884,42 @@ mod tests {
             task: "Fix the flaky login test".into(),
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .expect("a name should have been derived");
         assert_eq!(
             draft.name,
             session::derive_name("Fix the flaky login test", "").unwrap()
         );
+    }
+
+    /// The same task in a second project derives the same name, and a sandbox
+    /// name is one per machine. The second gets a counter rather than a clash
+    /// at the gateway -- but a name the client typed is theirs and is kept.
+    #[test]
+    fn a_derived_name_that_is_taken_gets_a_counter_and_a_typed_one_does_not() {
+        let cfg = crate::config::Config::default();
+        let base = session::derive_name("Fix the flaky login test", "").unwrap();
+        let taken = vec![base.clone()];
+        let derived = NewSession {
+            name: None,
+            repo: "https://github.com/o/other.git".into(),
+            task: "Fix the flaky login test".into(),
+            ..Default::default()
+        }
+        .into_draft(&cfg, &taken)
+        .unwrap();
+        assert_eq!(derived.name, session::unique_name(&base, &taken));
+        assert_ne!(derived.name, base);
+
+        let typed = NewSession {
+            name: Some(base.clone()),
+            repo: "https://github.com/o/other.git".into(),
+            task: "Fix the flaky login test".into(),
+            ..Default::default()
+        }
+        .into_draft(&cfg, &taken)
+        .unwrap();
+        assert_eq!(typed.name, base);
     }
 
     /// A name of nothing but spaces is not a name. Trimmed to empty and then
@@ -1891,7 +1933,7 @@ mod tests {
             task: "tidy the docs".into(),
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .expect("a name should have been derived");
         // Compared against the rule rather than against a slug spelled out
         // here: `derive_name` drops stop words, and a literal would be a second
@@ -1913,11 +1955,11 @@ mod tests {
             task: String::new(),
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .expect("the repository should have named it");
         assert_eq!(draft.name, "thing");
 
-        let err = NewSession::default().into_draft(&cfg).unwrap_err();
+        let err = NewSession::default().into_draft(&cfg, &[]).unwrap_err();
         assert!(err.contains("name"), "{err}");
     }
 
@@ -1931,7 +1973,7 @@ mod tests {
             repo: "https://github.com/o/thing.git".into(),
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .unwrap_err();
         assert!(!err.is_empty());
     }
@@ -1947,7 +1989,7 @@ mod tests {
             toolchains: vec!["cobol".into()],
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .unwrap_err();
         assert!(err.contains("cobol"), "{err}");
     }
@@ -1971,7 +2013,7 @@ mod tests {
             repo: "https://github.com/o/thing.git".into(),
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .unwrap();
         assert_eq!(draft.mcp.len(), 1);
         assert_eq!(draft.mcp[0].name, "jira");
@@ -2041,7 +2083,7 @@ mod tests {
             repo: "https://github.com/o/thing.git".into(),
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .unwrap();
         assert_eq!(plain.branch.as_deref(), Some("tobias/readme-fix"));
 
@@ -2060,7 +2102,7 @@ mod tests {
             repo: "https://github.com/o/thing.git".into(),
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .unwrap();
         assert_eq!(
             from_ticket.branch.as_deref(),
@@ -2078,7 +2120,7 @@ mod tests {
                 repo: "https://github.com/o/thing.git".into(),
                 ..Default::default()
             }
-            .into_draft(&cfg)
+            .into_draft(&cfg, &[])
             .expect_err(bad);
             assert!(!e.is_empty(), "{bad}");
         }
@@ -2097,7 +2139,7 @@ mod tests {
             repo: "https://github.com/o/hura.git".into(),
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .unwrap();
         assert_eq!(draft.project.as_deref(), Some("hura"));
 
@@ -2108,7 +2150,7 @@ mod tests {
             repo: "https://github.com/o/hura.git".into(),
             ..Default::default()
         }
-        .into_draft(&cfg)
+        .into_draft(&cfg, &[])
         .unwrap();
         assert_eq!(from_terminal.project, None);
     }
