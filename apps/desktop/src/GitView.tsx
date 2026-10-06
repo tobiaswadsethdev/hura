@@ -146,11 +146,11 @@ export function GitView({
           {status.branch}
         </span>
         <span className="git-ops">
-          {remote("fetch", Fetch, "fetch — bring the remote's refs down without touching the working copy")}
+          {remote("fetch", Fetch, "fetch the remote's refs without touching the working copy")}
           {remote("pull", Pull, "pull")}
           {status.upstream
             ? remote("push", Push, "push")
-            : remote("push", Publish, "publish — this branch is not on the remote yet")}
+            : remote("push", Publish, "publish this branch, which is not on the remote yet")}
           <button className="quiet-icon" disabled={busy} onClick={load} title="re-read git" aria-label="re-read git">
             <Refresh />
           </button>

@@ -749,7 +749,15 @@ export default function App() {
             // The note survives because it names the control: a `+` that only
             // appears when a project row is hovered is the one thing in the
             // tree that a glyph here cannot point at.
-            <Empty size="page" icon={Branch} note="no worktrees — start one with + beside a project" />
+            <Empty
+              size="page"
+              icon={Branch}
+              note={
+                sessions.length === 0
+                  ? "start a worktree with + beside a project"
+                  : "pick a worktree, or start one with + beside a project"
+              }
+            />
           )}
         </div>
 

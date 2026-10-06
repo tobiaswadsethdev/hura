@@ -233,8 +233,8 @@ function Control({
       );
     case "read-only":
       return (
-        <span className="edit-readonly" title="not editable here — change it in Jira">
-          {value.value || "—"}
+        <span className="edit-readonly" title="change this in Jira">
+          {value.value || "none"}
         </span>
       );
   }
@@ -270,7 +270,7 @@ export function MarkdownBox({
       {value.lost.length > 0 && (
         <p className="warn markdown-lost">
           This holds what Markdown cannot: {value.lost.join(", ")}. Saving it from here flattens
-          those — edit it in Jira to keep them.
+          those. Edit it in Jira to keep them.
         </p>
       )}
     </div>

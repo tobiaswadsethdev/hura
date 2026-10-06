@@ -251,9 +251,9 @@ export function TicketPanel({
               </>
             )}
             <dt>created</dt>
-            <dd title={issue.created ?? undefined}>{ago(issue.created) ?? "—"}</dd>
+            <dd title={issue.created ?? undefined}>{ago(issue.created) ?? "unknown"}</dd>
             <dt>updated</dt>
-            <dd title={issue.updated ?? undefined}>{ago(issue.updated) ?? "—"}</dd>
+            <dd title={issue.updated ?? undefined}>{ago(issue.updated) ?? "unknown"}</dd>
           </dl>
 
           <section className="ticket-section">
@@ -369,7 +369,7 @@ export function TicketPanel({
               >
                 <MarkdownBox
                   rows={3}
-                  placeholder="Add a comment — Markdown, ctrl+enter sends"
+                  placeholder="Add a comment in Markdown. Ctrl+Enter sends it."
                   value={{ text: draft, lost: [] }}
                   onChange={setDraft}
                 />

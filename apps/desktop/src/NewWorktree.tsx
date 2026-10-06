@@ -263,12 +263,12 @@ function Form({
         value={task}
         // Said, because nothing else on the form does: this is the agent's first
         // prompt, sent the moment the clone finishes, and blank starts it idle.
-        placeholder="What should the agent do? It starts on this as soon as the sandbox is ready — leave blank to start it idle."
+        placeholder="What should the agent do? It starts on this as soon as the sandbox is ready. Leave blank to start it idle."
         onChange={(e) => setTask(e.target.value)}
       />
 
       <div className="chips">
-        <label className="chip-field" title="session name — derived from the task when blank">
+        <label className="chip-field" title="session name (derived from the task when blank)">
           <Edit />
           <input
             value={name}
@@ -277,7 +277,7 @@ function Form({
             onChange={(e) => setName(e.target.value)}
           />
         </label>
-        <label className="chip-field" title="base branch — the remote's default when blank">
+        <label className="chip-field" title="base branch (the remote's default when blank)">
           <Branch />
           <input
             value={base}
@@ -335,7 +335,7 @@ function Form({
         {/* Named, not offered: skills and MCP servers are one decision about
             what your agents can reach, made in the server's config file.
             Shown so a session's tools are not a surprise. */}
-        <PickRow icon={Skill} label="skills — set in the server's config">
+        <PickRow icon={Skill} label="skills, set in the server's config">
           {skills.length === 0 && <span className="hint">none</span>}
           {skills.map((s) => (
             <span
@@ -354,7 +354,7 @@ function Form({
             agent can do with the server's credentials. */}
         <PickRow
           icon={Integrations}
-          label="MCP servers — the agent acts with the server's credentials through these"
+          label="MCP servers, which act with the server's credentials"
         >
           {options.mcp.length === 0 && <span className="hint">none</span>}
           {options.mcp.map((m) => (

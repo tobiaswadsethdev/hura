@@ -41,6 +41,7 @@ import {
   BadgeInfo,
   Binary,
   BookOpen,
+  Box,
   Bot,
   Bug,
   ChevronDown,
@@ -55,6 +56,7 @@ import {
   Copy as CopyGlyph,
   ExternalLink,
   FileDiff,
+  FolderGit2,
   FolderOpen,
   FolderPlus,
   FolderSearch,
@@ -68,8 +70,10 @@ import {
   Monitor,
   Package,
   KeyRound,
+  List,
   ListMinus,
   ListPlus,
+  ListTree,
   MessageSquare,
   Pencil,
   Play,
@@ -90,6 +94,7 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
+  SquareTerminal,
   Ticket,
   TriangleAlert,
   Trash,
@@ -157,6 +162,11 @@ export const Record = Info;
 /// What is listening in the sandbox, and the previews of it.
 export const Ports = Globe;
 
+// The events pane's two readings of one feed: folded by endpoint, the way a
+// tree folds files under a folder, or flat, as the gateway said it.
+export const ByEndpoint = ListTree;
+export const AsLog = List;
+
 // The traffic feed, where an endpoint is opened or closed. Both are the
 // policy pane's shield with a verdict on it: the change is to the rules, made
 // from beside the evidence.
@@ -211,6 +221,15 @@ export const Toolchain = Package;
 export const Agent = Bot;
 /// This window, as opposed to the server it talks to.
 export const Desktop = Monitor;
+
+// The facts and policy panes: what a session is made of.
+/// The repository a session cloned.
+export const Repo = FolderGit2;
+/// The sandbox itself, the box everything else is inside.
+export const Sandbox = Box;
+/// A program a policy rule names: the rule grants it, and only it, the
+/// endpoints beside it.
+export const Program = SquareTerminal;
 
 // The about screen.
 /// A newer release is on offer. The header's badge and the screen's button.

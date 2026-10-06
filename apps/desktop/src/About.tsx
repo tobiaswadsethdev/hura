@@ -127,7 +127,7 @@ function Row({
     <li>
       <Icon />
       <span className="about-label">{label}</span>
-      <code className="about-value">{value ?? "—"}</code>
+      <code className="about-value">{value ?? "unknown"}</code>
       {note && <span className="about-note">{note}</span>}
     </li>
   );
@@ -150,7 +150,7 @@ function Updates({ supported }: { supported: boolean | null }) {
         <Toolchain />
         <div className="update-text">
           <b>built from source</b>
-          <span className="hint">this platform has no installer — pull and rebuild to update</span>
+          <span className="hint">this platform has no installer, so pull and rebuild to update</span>
         </div>
         <a className="quiet" href={`${REPO}/blob/main/docs/install.md`} target="_blank" rel="noreferrer">
           <Elsewhere /> how

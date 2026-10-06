@@ -117,7 +117,7 @@ export function FilePane({
   // sentence: what is worth saying is that there is nothing to show and how
   // big the thing being withheld is.
   if (file.binary) {
-    return <Empty icon={NotText} note={`binary — ${file.bytes} bytes`} />;
+    return <Empty icon={NotText} note={`binary file, ${file.bytes} bytes`} />;
   }
 
   return (

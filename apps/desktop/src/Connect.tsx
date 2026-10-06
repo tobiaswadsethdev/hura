@@ -74,7 +74,7 @@ export function ServersScreen({
       <p className="hint">
         <code>hurad pair desktop --host …</code> on the machine with the
         sandboxes prints one of these. <code>--host</code> is the address{" "}
-        <em>this</em> window should dial — leaving it out is the usual reason a
+        <em>this</em> window should dial. Leaving it out is the usual reason a
         paired server cannot be reached.
       </p>
 
