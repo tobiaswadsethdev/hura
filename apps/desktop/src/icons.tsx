@@ -62,11 +62,14 @@ import {
   Globe,
   GlobeLock,
   GitBranch,
+  GitCommitHorizontal,
   Info,
   LoaderCircle,
   Monitor,
   Package,
   KeyRound,
+  ListMinus,
+  ListPlus,
   MessageSquare,
   Pencil,
   Play,
@@ -173,6 +176,11 @@ export const Push = ArrowUpFromLine;
 export const Publish = CloudUpload;
 export const Refresh = RefreshCw;
 export const Revert = Undo2;
+/// The commit button, beside its word.
+export const Commit = GitCommitHorizontal;
+/// Every file in a section at once: the row's `Plus` and `Minus`, as a list.
+export const StageAll = ListPlus;
+export const UnstageAll = ListMinus;
 
 // The integrations screen: containers to run, credentials to hold, trackers to
 // read, skills to push.
