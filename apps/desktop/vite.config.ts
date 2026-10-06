@@ -27,4 +27,12 @@ export default defineConfig({
     // changes there are `cargo`'s to notice, and it does.
     watch: { ignored: ["**/src-tauri/**"] },
   },
+  build: {
+    // **The file tree's icons stay files.** Vite inlines any asset under 4 KB
+    // as a data URL, which is every one of the Material Icon Theme's twelve
+    // hundred -- five megabytes of base64 in the bundle the window parses at
+    // start, for a tree that shows a dozen. `undefined` leaves everything
+    // else to the default.
+    assetsInlineLimit: (file) => (file.includes("/material-icon-theme/icons/") ? false : undefined),
+  },
 });
