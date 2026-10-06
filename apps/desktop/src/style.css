@@ -114,7 +114,7 @@ html.broken-font-metrics #root { line-height: normal; }
    truncating elements, which is where the shearing is visible. */
 html.broken-font-metrics :is(
   .wt-name, .wt-branch, .wt-age, .wt-stat, .group-label, .group-count,
-  .files .label, .change .path, .tabs button, .git .branch
+  .files .label, .change .label, .tabs button, .git .branch
 ) { line-height: normal; }
 
 /* The same zero metrics, costing the opposite thing. A form control takes its
@@ -897,63 +897,54 @@ main { display: flex; flex: 1; min-height: 0; }
 /* ------------------------------------------------------------------------- */
 
 .git { min-height: 0; padding-bottom: 16px; }
-.git > header {
+/* The branch as the sidebar writes it: the glyph, then the name in mono. The
+   remote operations sit at the far end as the ports pane's tools do -- quiet
+   icons, revealed by their hover and not by a box. They used to be boxed, on
+   the argument that a control that acts should look unlike one that only
+   looks; in practice it made this the one pane in the dock drawn in a
+   different hand, and the tooltips already say which is which. */
+.git-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 0 8px;
+  gap: 6px;
+  min-height: 22px;
 }
+.git-branch-glyph { color: var(--dim); }
 .git .branch {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.git .ab {
+.git-ops { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+.git-ops .quiet-icon { width: 24px; height: 24px; }
+.git-ops .quiet-icon:disabled { color: var(--dimmer); cursor: default; background: none; }
+/* Where the branch goes, and how far apart the two are: the ports pane's
+   `→ localhost:5173 · 3 open`, said of a remote. */
+.git-sync {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0 12px 20px;
   color: var(--dim);
-  margin-left: auto;
-  white-space: nowrap;
-  font-family: var(--font-mono);
   font-size: 11px;
+  white-space: nowrap;
 }
+.git-sync .upstream {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+}
+.git-sync .ahead { color: var(--ok); }
+.git-sync .behind { color: var(--working); }
 /* Never pushed is not the same as in sync, which is why pushing says
    "publish" rather than nothing. */
-.git .ab.none { color: var(--attention); }
-.git-ops { display: flex; align-items: center; gap: 5px; padding: 0 0 10px; }
-/* fetch, pull, push. Bordered, unlike the dock's strip above, and the
-   difference is deliberate: these *do* something to the repository, and a
-   box is what tells a control that acts from a control that navigates. Square
-   now that the words have gone. */
-.git-ops .op {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 24px;
-  flex: none;
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  color: var(--dim);
-  font: inherit;
-  padding: 0;
-  cursor: pointer;
-  transition: background-color 150ms, border-color 150ms, color 150ms;
-}
-.git-ops .op:hover:not(:disabled) {
-  background: var(--hover);
-  border-color: var(--line-strong);
-  color: var(--text);
-}
-.git-ops .op:disabled { color: var(--dimmer); cursor: default; }
-/* Re-reading the pane is not an operation on the repository, so it keeps the
-   borderless `.quiet-icon` the rest of the window uses for a control that only
-   looks at something -- which is why the three above are `.op` rather than
-   `.git-ops button`: scoped to the element, this rule put a box round the
-   refresh too and quietly made it the fourth operation. */
-.git-ops .refresh { margin-left: auto; }
+.git-sync .none { color: var(--attention); }
+
 /* What git said back. Sunken and monospace: it is output, not a message the
    window composed. */
 .git .said {
@@ -970,16 +961,68 @@ main { display: flex; flex: 1; min-height: 0; }
   overflow-y: auto;
 }
 
-.changes h3 {
-  font-size: 11px;
-  color: var(--dim);
+/* On top, as the editor has it: the box stays where it is however long the
+   lists under it get. The button is the window's primary, sized to its word
+   rather than stretched across the pane -- a full-width grey slab was the
+   loudest thing in the dock while it was disabled, which is most of the
+   time. */
+.commit { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 0 0 6px; }
+.commit textarea {
+  align-self: stretch;
+  background: var(--sunken);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 6px 8px;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+}
+.commit textarea:focus { outline: none; border-color: var(--line-strong); }
+.commit textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.commit .go { padding: 4px 10px 4px 8px; }
+.commit .go .n {
+  font-family: var(--font-mono);
   font-weight: 500;
-  margin: 10px 0 3px;
+  opacity: 0.6;
+}
+
+/* A section's heading is its toggle, and carries the one action that applies
+   to all of it at the other end -- the ports pane's `PROCESSES`, with a
+   chevron, because these two can be long. */
+.changes h3 {
+  display: flex;
+  align-items: center;
+  margin: 10px 0 2px;
   padding: 0;
+}
+.changes .section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  cursor: pointer;
 }
-.changes .count { color: var(--dimmer); font-family: var(--font-mono); }
+.changes .section-toggle:hover { color: var(--text); }
+.changes .section-toggle .lucide { color: var(--dimmer); }
+.changes .count { color: var(--dimmer); font-family: var(--font-mono); letter-spacing: 0; }
+@media (hover: hover) {
+  .changes h3 .quiet-icon { opacity: 0; transition: opacity 120ms, background-color 150ms, color 150ms; }
+  .changes:hover h3 .quiet-icon, .changes h3:focus-within .quiet-icon { opacity: 1; }
+}
+
+/* The rows are the files tree's rows -- same indent, twisty, icons and type --
+   with the change on the right, where the editor keeps it. */
 .change {
   display: flex;
   align-items: center;
@@ -990,23 +1033,36 @@ main { display: flex; flex: 1; min-height: 0; }
 .change .open {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex: 1;
   min-width: 0;
   text-align: left;
   background: none;
   border: none;
-  color: inherit;
+  color: var(--text);
   font: inherit;
-  font-family: var(--font-mono);
-  font-size: 12px;
   padding: 3px 6px;
   cursor: pointer;
+  white-space: nowrap;
 }
-/* Right-to-left so a long path is cut at the front, where the repository root
-   is, rather than at the end, where the filename is. */
-.change .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
-.change .mark { width: 10px; flex: none; text-align: center; }
+.change .twist { width: 14px; color: var(--dimmer); flex: none; display: inline-flex; }
+.change .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.change.dir .label { color: var(--text); }
+.change.deleted .label { text-decoration: line-through; color: var(--dim); }
+.change .mark {
+  width: 14px;
+  flex: none;
+  margin-right: 6px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
 .change .mark.added, .change .mark.untracked { color: var(--ok); }
 .change .mark.modified, .change .mark.renamed { color: var(--working); }
 .change .mark.deleted, .change .mark.conflicted { color: var(--bad); }
@@ -1026,30 +1082,18 @@ main { display: flex; flex: 1; min-height: 0; }
   color: var(--dim);
   font: inherit;
   padding: 0;
-  margin-right: 3px;
+  margin-right: 2px;
   cursor: pointer;
   transition: background-color 120ms, color 120ms, opacity 120ms;
 }
+/* A folder has no letter, so its action takes the letter's place at the
+   edge rather than stopping short of it. */
+.change.dir .act { margin-right: 4px; }
 @media (hover: hover) {
   .change .act { opacity: 0; }
   .change:hover .act, .change:focus-within .act { opacity: 1; }
 }
 .change .act:hover { background: var(--line); color: var(--text); }
-
-.commit { display: flex; flex-direction: column; gap: 7px; padding: 14px 0 0; }
-.commit textarea {
-  background: var(--sunken);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  padding: 6px 8px;
-  font: inherit;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  resize: vertical;
-}
-.commit textarea:focus { outline: none; border-color: var(--line-strong); }
-.commit textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 
 /* The primary action, wherever it appears. Near-white and filled: the loudest
    thing this palette has, and the only element allowed to be it.
