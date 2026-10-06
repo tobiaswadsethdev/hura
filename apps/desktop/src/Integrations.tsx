@@ -89,7 +89,7 @@ export function IntegrationsScreen({
         <>
           <Section
             title="mcp servers"
-            hint="Tools the agent can call. They run on the server, in their own containers, holding their own credentials — the sandbox is granted one endpoint each."
+            hint="Tools the agent can call. They run on the server, in their own containers, holding their own credentials. The sandbox is granted one endpoint for each."
           >
             {view.mcp.length === 0 ? (
               <Empty
@@ -121,7 +121,7 @@ export function IntegrationsScreen({
 
           <Section
             title="secrets"
-            hint="Held by the server and given to the containers above as environment. A value goes in and never comes back out — nothing here can show you one."
+            hint="Held by the server and given to the containers above as environment. A value goes in and never comes back out, so nothing here can show you one."
           >
             {/* Nothing stored *and* nothing asking for anything, which is
                 the ordinary state of a server with no MCP container on it --

@@ -143,7 +143,7 @@ body, html, #root {
    never what was meant. Restored on the things that *are* text you might want
    to copy: a hostname, a log, a diff, an error. */
 body { user-select: none; }
-:is(pre, code, .terminal, .monaco, .panel .log, .traffic .subject, .traffic .reason, .ep-host, .facts dd,
+:is(pre, code, .terminal, .monaco, .panel .log, .traffic .subject, .traffic .reason, .ep-host, .fact-value, .facts-task p,
     .policy .host, .error, .empty) { user-select: text; }
 
 /* One focus ring for the window, and a visible one. Keyboard focus was
@@ -1188,75 +1188,161 @@ main { display: flex; flex: 1; min-height: 0; }
 /* the facts, policy and events panes                                        */
 /* ------------------------------------------------------------------------- */
 
-/* A label-and-value grid, used by the facts pane and by the parts of the
-   policy pane that are a list of settings. Previously unstyled, which on a
-   bare `<dl>` means every value starts on its own indented line. */
-.facts {
-  display: grid;
-  grid-template-columns: 84px 1fr;
-  gap: 3px 12px;
-  margin: 0;
-  font-size: 12px;
+/* A section heading in the facts and policy panes: the ports pane's
+   `PROCESSES`, so a label reads as a label in every pane of the dock. */
+:is(.facts-pane, .policy) h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 18px 0 6px;
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dimmer);
 }
-.facts dt { color: var(--dim); }
-.facts dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); }
-.facts .none { color: var(--dimmer); font-style: italic; font-family: var(--font-ui); }
+:is(.facts-pane, .policy) h4 .count { text-transform: none; letter-spacing: 0; font-family: var(--font-mono); }
 
-.policy { font-size: 12px; }
-.policy .rule { margin: 0 0 16px; }
-/* Not upper-cased, unlike every other small heading in the window, and the
-   exception is on purpose: these headings are `rule.key` -- a value out of the
-   policy, like `git` or `npm` -- and the sections that are genuine labels
-   ("global lists", "filesystem and process") are the same element. Upper-casing
-   reads as a label on both and misreports the value on one, so neither gets it
-   and weight carries the heading instead. */
-.policy h3 {
-  margin: 0 0 5px;
+/* A fact: glyph, label, value. The sidebar's grammar -- a glyph in front of
+   a mono value -- with the label between them, because unlike a branch name
+   in a card, `node, rust` does not say what it is. */
+.fact {
+  display: grid;
+  grid-template-columns: auto 76px 1fr;
+  align-items: start;
+  gap: 8px;
+  padding: 3px 0;
   font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
+  line-height: 18px;
 }
-.policy .hint, .policy .notice { color: var(--dimmer); margin: 4px 0 0; max-width: 60ch; }
-/* A caveat about a rule, not a rule. Set in from the list it qualifies. */
+.fact > .lucide { margin-top: 2px; color: var(--dimmer); }
+.policy .fact { grid-template-columns: 76px 1fr; }
+.fact-label { color: var(--dim); }
+.fact-value { min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+:is(.facts-pane, .policy) .mono { font-family: var(--font-mono); }
+:is(.facts-pane, .policy) .quiet { color: var(--dimmer); }
+:is(.facts-pane, .policy) .none { color: var(--dimmer); font-style: italic; }
+.fact-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.fact-chips .pill, .facts-task .pill { height: 20px; padding: 0 7px; font-size: 11px; }
+
+/* The task, as the sentence it is: the window's own type at reading size, not
+   code. */
+.facts-task { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.facts-task p { margin: 0; color: var(--text); font-size: 13px; line-height: 1.5; }
+.facts-task .ticket { gap: 5px; text-decoration: none; cursor: pointer; }
+.facts-task .ticket:hover { color: var(--text); }
+.facts-note { margin: 14px 0 0; color: var(--dimmer); font-size: 12px; }
+
+/* What it has spent: three tiles in a row, the value over its label, and the
+   context meter under them. The values are the window's sans at weight, not
+   mono -- a figure read on its own, not a column of them. */
+.facts-spend { margin-top: 14px; }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.tile-value { color: var(--text); font-size: 15px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.tile-value .added { color: var(--ok); }
+.tile-value .removed { color: var(--bad); }
+.tile-value .quiet { font-size: 13px; font-weight: 400; }
+.tile-label { color: var(--dimmer); font-size: 11px; }
+.meter-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; }
+.meter-label { color: var(--dim); width: 52px; flex: none; }
+.meter-value { color: var(--text); font-family: var(--font-mono); white-space: nowrap; }
+/* The fill carries the warning -- neutral, then yellow past 70, red past 90 --
+   on a track of its own hue, so the state reads along the whole bar and not
+   only where it is filled. */
+.meter {
+  --fill: var(--primary);
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fill) 16%, transparent);
+  overflow: hidden;
+}
+.meter > span { display: block; height: 100%; border-radius: 999px; background: var(--fill); }
+.meter.warn { --fill: var(--working); }
+.meter.bad { --fill: var(--bad); }
+
+/* The policy pane. */
+.policy { font-size: 12px; }
+.policy-head { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.policy-glyph { color: var(--dim); }
+.policy-name { color: var(--text); font-family: var(--font-mono); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.policy-head .pill { margin-left: auto; height: 20px; padding: 0 7px; font-size: 11px; cursor: help; }
+/* A caveat, on one line where it fits: the glyph says whether it is
+   something to know or something to watch. */
 .policy .notice {
-  border-left: 2px solid var(--line-strong);
-  padding-left: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 0 0;
+  color: var(--dimmer);
   font-size: 11px;
+  line-height: 16px;
 }
-.policy .endpoints, .policy .binaries { list-style: none; margin: 0; padding: 0; }
-.policy .endpoints > li, .policy .binaries > li { padding: 3px 0; overflow-wrap: anywhere; }
-/* Between items only. On the first one it reads as a rule under the heading,
-   which is a different claim about the layout than the one intended. */
-.policy .endpoints > li + li, .policy .binaries > li + li { border-top: 1px solid var(--line); }
-.policy .host { font-family: var(--font-mono); color: var(--text); margin-right: 6px; }
-/* The rule's human name beside its key, so prose and not an identifier. */
-.policy .alias { color: var(--dim); font-weight: 400; }
-/* A pill per attribute of an endpoint: the protocol, how it is enforced, what
-   class of access it grants. */
-.policy .tag { margin-right: 4px; }
-/* An endpoint or a list entry, with the action that changes it at the end of
-   its line. */
-.policy li.listed { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; }
-.policy li.listed .verb { margin-right: 6px; }
-.policy li.listed > :is(.l7, .notice) { flex-basis: 100%; }
-.policy .row-act { margin-left: auto; }
+.policy .notice > .lucide { flex: none; margin-top: 1px; }
+.policy .notice.warn { color: var(--warn); }
+
+/* A rule is a card: the dock's line, the window's medium corner. */
+.policy .rule {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+/* The rule's own name, which is what the policy file calls it -- its key is
+   the tooltip. Not upper-cased: it is a value out of the policy, not a
+   label. */
+.policy .rule h3 { margin: 0 0 4px; color: var(--text); font-size: 12px; font-weight: 600; }
+.policy ul { list-style: none; margin: 0; padding: 0; }
 .policy li.listed { border-radius: var(--r-sm); }
 .policy li.listed:focus-visible { outline: none; background: var(--hover); }
-.policy .endpoints > li.none { color: var(--dimmer); }
-.policy .l7 { list-style: none; margin: 3px 0 0; padding: 0 0 0 14px; }
-.policy .l7 > li { color: var(--dim); font-family: var(--font-mono); font-size: 11px; }
-/* allow and deny, in the two colours the events feed uses for the same two
-   words. One grammar for "the policy permits this" across both panes. */
-.policy .verb, .traffic .verdict {
+.policy .endpoints > li { padding: 3px 0; }
+.endpoint-line, .policy .lists > li { display: flex; align-items: center; gap: 6px; min-height: 20px; }
+.policy .host { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-family: var(--font-mono); }
+.policy .port { color: var(--dimmer); }
+.policy .access, .policy .state { margin-left: auto; flex: none; color: var(--dim); font-size: 11px; }
+.policy .access { font-family: var(--font-mono); }
+.policy .access.no { color: var(--bad); }
+.policy .state.off { color: var(--dimmer); }
+.policy .state.warn { color: var(--warn); }
+.policy .spin { margin-left: auto; }
+.policy .tag { flex: none; }
+/* Method and path, as a request line: the method in a fixed column so the
+   paths line up under each other. */
+.policy .l7 { margin: 3px 0 2px 10px; padding-left: 8px; border-left: 1px solid var(--line); }
+.policy .l7 > li { display: flex; gap: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 17px; color: var(--dim); }
+.policy .l7 .method { width: 34px; flex: none; color: var(--text); }
+.policy .l7 .path { min-width: 0; overflow-wrap: anywhere; }
+.policy .l7 .deny .method, .policy .l7 .deny-word { color: var(--bad); }
+.policy .l7 .deny-word { margin-left: auto; }
+/* Who the rule lets out, by name. */
+.programs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--dim);
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 600;
 }
-.policy .verb.allow, .traffic .verdict.allowed { color: var(--ok); }
-.policy .verb.block, .traffic .verdict.denied { color: var(--bad); }
-.traffic .verdict.neutral { color: var(--dimmer); }
-.policy .yes { color: var(--ok); }
-.policy .no { color: var(--bad); }
+.programs > .lucide { color: var(--dimmer); }
+.programs .program { cursor: default; }
+/* allow and block, as the events feed's two shields in its two colours. */
+.policy .lists > li { padding: 2px 0; }
+.policy .lists .lucide.allow { color: var(--ok); flex: none; }
+.policy .lists .lucide.block { color: var(--bad); flex: none; }
+.policy .lists > li.none { color: var(--dimmer); }
+.policy section > .fact:first-of-type { padding-top: 0; }
 
 /* The traffic pane: the allow/deny feed, folded by endpoint or read as a log.
 
@@ -1264,12 +1350,29 @@ main { display: flex; flex: 1; min-height: 0; }
    row, which at sidebar widths meant three lines per event with the rule name
    floating alone at the right of the third. So the line is taken apart: what
    it was about (the host, large, in mono), when (right-aligned, small), and
-   everything else as a quiet second line -- and denials are told apart by a
-   rail and a dot rather than by tinting the whole row, which at forty rows was
-   a pink pane. */
+   everything else as a quiet second line -- and denials are told apart by
+   the policy pane's shields rather than by tinting the whole row, which at
+   forty rows was a pink pane. */
 .traffic { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
-.traffic-bar { display: flex; align-items: center; gap: 6px; }
-.traffic-bar .quiet-icon { margin-left: auto; }
+/* Filters, then the two readings and a refresh at the far end. Wraps onto a
+   second line only when the dock is narrower than the three of them. */
+.traffic-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.traffic-bar .segmented { margin-left: auto; }
+/* The readings as glyphs, the way the dock's own strip names its panes. */
+.segmented.icons button { display: inline-flex; align-items: center; padding: 3px 7px; }
+.traffic h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0 4px 8px;
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dimmer);
+}
+.traffic h4 .count { font-family: var(--font-mono); letter-spacing: 0; }
+.traffic section + section { margin-top: 6px; }
 
 /* Two readings of one feed. A pair of tabs drawn as one control, because they
    are a choice between two views of the same thing and not two places. */
@@ -1332,29 +1435,23 @@ main { display: flex; flex: 1; min-height: 0; }
 .endpoints-list, .traffic-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .ep, .traffic-log > .entry {
   position: relative;
-  padding: 6px 8px 6px 10px;
+  padding: 6px 8px;
   border-radius: var(--r-sm);
   transition: background-color 120ms;
 }
 .ep:hover, .traffic-log > .entry:hover { background: var(--hover); }
-/* The rail: a denial says so in the margin, where scanning down finds it. */
-.ep::before, .traffic-log > .entry::before {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 7px;
-  bottom: 7px;
-  width: 2px;
-  border-radius: 2px;
-  background: transparent;
-}
-.ep.denied::before, .traffic-log > .entry.denied::before { background: var(--bad); }
+/* A decision, as a shield: the policy pane's and the menus', in the two
+   colours the chips above count them in. */
+.verdict-glyph { flex: none; }
+.verdict-glyph.denied, .change-what .denied { color: var(--bad); }
+.verdict-glyph.allowed, .change-what .allowed { color: var(--ok); }
+.verdict-glyph.neutral { color: var(--dimmer); }
 
 .ep-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ep-open {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
   flex: 1;
   background: none;
@@ -1382,32 +1479,54 @@ main { display: flex; flex: 1; min-height: 0; }
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+/* Under the host, from the host's own left edge: who reached for it, how
+   often it was refused, and where the policy stands -- words with the ports
+   pane's dots between them, where there used to be a pill each. */
 .ep-meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  margin: 3px 0 0 18px;
+  align-items: baseline;
+  gap: 2px 6px;
+  margin: 2px 0 0 38px;
   font-size: 11px;
-  color: var(--dim);
+  color: var(--dimmer);
 }
-.ep-meta .count { font-variant-numeric: tabular-nums; }
+.ep-meta .dot { color: var(--dimmer); }
+.ep-meta .count { font-variant-numeric: tabular-nums; color: var(--dim); }
 .ep-meta .count.bad { color: var(--bad); }
-.ep-meta .count.ok { color: var(--ok); }
 .ep-meta .bin { font-family: var(--font-mono); color: var(--dim); }
+/* The answer to a denial, on the denial: the colour of the change it makes,
+   outlined so it is a button and not a status. */
+.ep-allow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 20px;
+  padding: 0 8px 0 6px;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+  border-radius: 999px;
+  color: var(--ok);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 120ms, border-color 120ms;
+}
+.ep-allow:hover { background: color-mix(in srgb, var(--ok) 12%, transparent); border-color: color-mix(in srgb, var(--ok) 60%, transparent); }
+.ep-allow .lucide { width: 12px; height: 12px; }
 
 /* A change from the menu, in flight: the row says so where its age was. */
 .ep-age.applying { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); font-family: var(--font-ui); }
 .ep-age.applying .spin { width: 10px; height: 10px; }
 .entry-head .ep-age.applying { margin-left: auto; }
 .ep.busy { opacity: 0.75; }
-.traffic-hint { margin: 0 2px; color: var(--dimmer); font-size: 11px; }
 .traffic-log > .entry:focus-visible, .ep:has(.ep-open:focus-visible) { outline: none; background: var(--hover); }
 
 /* The question an allow or a block asks, under its row. Sunken, because it
    is a form, and bordered in the colour of the change it makes. */
 .change-panel {
-  margin: 8px 0 2px 18px;
+  margin: 8px 0 2px 38px;
   padding: 8px 10px;
   background: var(--sunken);
   border: 1px solid var(--line);
@@ -1420,7 +1539,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .change-panel.block { border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
 .change-panel p { margin: 0; }
 .change-panel code { font-family: var(--font-mono); color: var(--text); }
-.change-what { color: var(--text); }
+.change-what { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text); }
 .change-note { color: var(--dimmer); font-size: 11px; }
 .change-note b { color: var(--dim); font-weight: 500; font-family: var(--font-mono); }
 .change-bins { display: flex; flex-direction: column; gap: 2px; }
@@ -1451,9 +1570,9 @@ main { display: flex; flex: 1; min-height: 0; }
 }
 .change-panel .quiet:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 
-/* Tags on an endpoint: what the policy says now, and which list it is on.
-   The policy pane's pill, so one look means one thing in both panes. */
-:is(.ep-meta, .policy) .tag {
+/* A tag on a policy endpoint, for the attribute that is the exception --
+   `tls skip`, an enforcement that is not `enforce`. */
+.policy .tag {
   display: inline-block;
   padding: 0 6px;
   border: 1px solid var(--line);
@@ -1462,45 +1581,52 @@ main { display: flex; flex: 1; min-height: 0; }
   font-size: 10px;
   line-height: 16px;
 }
-:is(.ep-meta, .policy) .tag.yes { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
-:is(.ep-meta, .policy) .tag.no { color: var(--dimmer); }
-:is(.ep-meta, .policy) .tag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.policy .tag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
 
-/* An endpoint's own decisions, expanded. The log's grammar, smaller. */
+/* An endpoint's own decisions, expanded: one line each, time, shield and
+   who, with the rule at the end and a reason under it when it says more than
+   the row does. */
 .ep-log {
   list-style: none;
-  margin: 6px 0 0 18px;
+  margin: 6px 0 0 38px;
   padding: 4px 0 0;
   border-top: 1px solid var(--line);
   font-family: var(--font-mono);
   font-size: 11px;
 }
-.ep-log > li { display: flex; flex-wrap: wrap; gap: 0 6px; padding: 2px 0; }
-.ep-log .subject { flex-basis: 100%; color: var(--dim); overflow-wrap: anywhere; }
-.ep-log .rule, .ep-log .reason { flex-basis: 100%; }
+.ep-log > li { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; padding: 2px 0; }
+.ep-log .verdict-glyph { width: 12px; height: 12px; }
+.ep-log .what { min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.ep-log .rule { margin-left: auto; }
+.ep-log .reason { flex-basis: 100%; padding-left: 74px; }
 .ep-log-more { color: var(--dimmer); font-family: var(--font-ui); }
 
-/* The log: one decision per row, time and verdict first so the column can be
-   scanned, the subject under it, and why under that. */
-.entry-head { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+/* The log: what happened first, with the shield in front and the time at the
+   end of the line, and the class, the rule and the reason quiet under it. */
+.entry-head { display: flex; align-items: flex-start; gap: 6px; }
+.entry-head .verdict-glyph { margin-top: 2px; }
 :is(.traffic-log, .ep-log) .clock { color: var(--dimmer); flex: none; font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
-:is(.traffic-log, .ep-log) .verdict { flex: none; min-width: 4ch; }
+.entry-head .clock { margin-left: auto; line-height: 18px; }
 :is(.traffic-log, .ep-log) .class { color: var(--dimmer); flex: none; font-family: var(--font-mono); font-size: 11px; }
 .traffic-log .subject {
-  margin-top: 1px;
+  min-width: 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 18px;
   color: var(--text);
   overflow-wrap: anywhere;
 }
-.entry-why { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 2px; }
+/* Paths wrap at their slashes -- see `breakable` -- and not mid-word. */
+.traffic-log .subject, .ep-log .what { overflow-wrap: normal; word-break: normal; }
+/* An event about no endpoint is the gateway saying something in a sentence. */
+.traffic-log .subject.prose { font-family: var(--font-ui); font-size: 12px; color: var(--dim); }
+.entry-why { display: flex; flex-wrap: wrap; gap: 2px 8px; margin: 1px 0 0 20px; }
 :is(.traffic-log, .ep-log) .rule { color: var(--dim); font-family: var(--font-mono); font-size: 11px; }
 :is(.traffic-log, .ep-log) .rule::before { content: "rule "; color: var(--dimmer); font-family: var(--font-ui); }
 /* Why it was denied, which is the part worth reading and the part that is a
    sentence: the UI font. */
 :is(.traffic-log, .ep-log) .reason { color: var(--dim); font-family: var(--font-ui); font-size: 11px; }
-.traffic-log .change-panel, .ep .change-panel { margin-left: 0; }
-.ep .change-panel { margin-left: 18px; }
+.traffic-log .change-panel { margin-left: 20px; }
 
 /* A dropdown: the trigger looks like the inputs around it -- the dialogs and
    screens give it their sunken field -- and the list is the context menu's

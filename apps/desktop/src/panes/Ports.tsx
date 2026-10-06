@@ -170,7 +170,7 @@ export function PortsPane({
                             row.owner.certain ? "" : "\n(guessed: its command line names this port)"
                           }`
                         : row.listening
-                          ? "which process holds this cannot be seen from here — see the process list"
+                          ? "the process holding this is not visible from here. Check the process list."
                           : undefined
                     }
                   >
@@ -201,7 +201,7 @@ export function PortsPane({
                     {live && (
                       <button
                         className="quiet-icon"
-                        title="stop forwarding — closes every connection"
+                        title="stop forwarding and close every connection"
                         disabled={busy === row.port}
                         onClick={() => void stop(row.port)}
                       >
@@ -238,7 +238,7 @@ export function PortsPane({
                   {short(p.command)}
                 </span>
                 {p.protected ? (
-                  <span className="hint" title="the agent or its terminal — destroy the worktree to end it">
+                  <span className="hint" title="the agent or its terminal. Destroy the worktree to end it.">
                     agent
                   </span>
                 ) : (

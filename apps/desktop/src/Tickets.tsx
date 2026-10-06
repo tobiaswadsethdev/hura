@@ -537,12 +537,12 @@ export function TicketsScreen({
         <section className="panel">
           <h3>trackers</h3>
           <p className="hint">
-            Where tickets come from. Kept on this computer, token included, and read from here —
-            the server never sees either.
+            Where tickets come from. Kept on this computer, token included, and read from here.
+            The server never sees either.
           </p>
           {trackers === null && !error && <Waiting />}
           {trackers?.length === 0 && (
-            <Empty icon={TrackerGlyph} note="no trackers yet — add one below" />
+            <Empty icon={TrackerGlyph} note="add a tracker below to see its tickets" />
           )}
           {trackers?.map((t) => (
             <TrackerRow
@@ -586,7 +586,7 @@ export function TicketsScreen({
       ...(shown && shown.read < shown.total
         ? [
             {
-              text: `the first ${shown.read} of ${shown.total} tickets on this board — the rest are in Jira`,
+              text: `showing the first ${shown.read} of ${shown.total} tickets on this board. The rest are in Jira.`,
               tone: "hint",
             },
           ]
@@ -638,7 +638,7 @@ export function TicketsScreen({
           <Empty
             size="page"
             icon={TrackerGlyph}
-            note="boards come from Jira — add a Jira tracker under trackers"
+            note="add a Jira tracker under trackers to see its boards"
           />
         ) : boards !== null && boards.boards.length === 0 && !boardsError ? (
           <Empty size="page" icon={TrackerGlyph} note="there are no boards this account can see" />
@@ -678,7 +678,7 @@ export function TicketsScreen({
       )}
       {tickets === null && !error && <Waiting />}
       {tickets !== null && columns.length === 0 && (
-        <Empty size="page" icon={TrackerGlyph} note="no filters answered — see trackers" />
+        <Empty size="page" icon={TrackerGlyph} note="no tracker filter returned tickets. Check them under trackers." />
       )}
       {columns.length > 0 &&
         area(

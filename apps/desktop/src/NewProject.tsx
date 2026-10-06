@@ -147,7 +147,7 @@ function Picker({
                 <span className="name">{r.name}</span>
                 <span className="branch">{r.branch ?? "detached"}</span>
                 <span className="path">{r.display}</span>
-                <span className="origin">{r.origin ?? "no origin — cannot be cloned"}</span>
+                <span className="origin">{r.origin ?? "no origin, so it cannot be cloned"}</span>
               </button>
             </li>
           ))}

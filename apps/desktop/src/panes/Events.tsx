@@ -12,12 +12,19 @@
 // point. Both offer the same two changes beside the evidence: open an endpoint
 // for the binaries that were refused, or close one that is open -- for this
 // session, or for every new session too.
+//
+// The endpoints come in two sections, denied above allowed, because the
+// denied ones are the reason anybody opens this pane: each says what was
+// refused and carries an allow button, where it used to say "right-click" in a
+// hint over the list. Verdicts are the shields the policy pane and the menus
+// use, and inside an endpoint the rows say only what the endpoint does not --
+// `node(812)`, not `/usr/bin/node(812) -> registry.npmjs.org:443` again.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { copy, type MenuItem, useContextMenu } from "../ContextMenu";
 import { Empty, Waiting } from "../Empty";
-import { Chevron, Copy, Events, Grant, Refresh, Revoke } from "../icons";
+import { AsLog, ByEndpoint, Chevron, Copy, Events, Grant, Record, Refresh, Revoke } from "../icons";
 import { api, messageOf } from "../api";
 import type { FeedEvent } from "../gen/FeedEvent";
 import type { View as PolicyView } from "../gen/View";
@@ -127,12 +134,19 @@ export function EventsPane({
   // not a claim that the gateway has never denied anything.
   if (feed.length === 0) return <Empty icon={Events} note="no decisions in the recent log" />;
 
-  const denied = feed.filter((e) => e.verdict === "Denied").length;
-  const allowed = feed.filter((e) => e.verdict === "Allowed").length;
-
-  const shownGroups = groups.filter((g) =>
-    filter === "denied" ? g.denied > 0 : filter === "allowed" ? g.allowed > 0 : true,
-  );
+  const toneOf = (g: Group) => toneFor(g, standing(g.endpoint));
+  const blocked = groups.filter((g) => toneOf(g) === "denied");
+  const passing = groups.filter((g) => toneOf(g) === "allowed");
+  // The chips count what the view lists: endpoints when it is folded, events
+  // when it is the log.
+  const counts =
+    mode === "endpoints"
+      ? { all: groups.length, denied: blocked.length, allowed: passing.length }
+      : {
+          all: feed.length,
+          denied: feed.filter((e) => e.verdict === "Denied").length,
+          allowed: feed.filter((e) => e.verdict === "Allowed").length,
+        };
   const shownLog = feed.filter((e) =>
     filter === "denied"
       ? e.verdict === "Denied"
@@ -164,23 +178,66 @@ export function EventsPane({
         .finally(() => setBusy(null));
     },
   };
-  // Said once, quietly, while there is something to act on: the actions are
-  // in a menu now, and a menu nobody knows about is a feature nobody has.
-  const actionable = groups.some((g) => g.denied > 0 && !opensFor(standing(g.endpoint), g.refused));
+  const rows = (list: Group[]) =>
+    list.map((g) => (
+      <EndpointRow
+        key={g.endpoint}
+        group={g}
+        tone={toneOf(g)}
+        open={expanded.has(g.endpoint)}
+        onToggle={() =>
+          setExpanded((prev) => {
+            const next = new Set(prev);
+            if (next.has(g.endpoint)) next.delete(g.endpoint);
+            else next.add(g.endpoint);
+            return next;
+          })
+        }
+        {...actions}
+      />
+    ));
+  const showDenied = filter !== "allowed" && blocked.length > 0;
+  const showAllowed = filter !== "denied" && passing.length > 0;
 
   return (
     <div className="traffic">
+      {/* One row: which decisions, then how they are read. The two readings
+          used to be a row of tabs of their own above the filters. */}
       <div className="traffic-bar">
-        <div className="segmented" role="tablist" aria-label="how the feed is read">
-          {(["endpoints", "log"] as const).map((m) => (
+        <div className="traffic-filters" role="group" aria-label="which decisions">
+          <Chip on={filter === "all"} onClick={() => setFilter("all")} label="all" count={counts.all} />
+          <Chip
+            on={filter === "denied"}
+            onClick={() => setFilter("denied")}
+            label="denied"
+            count={counts.denied}
+            tone="bad"
+          />
+          <Chip
+            on={filter === "allowed"}
+            onClick={() => setFilter("allowed")}
+            label="allowed"
+            count={counts.allowed}
+            tone="ok"
+          />
+        </div>
+        <div className="segmented icons" role="tablist" aria-label="how the feed is read">
+          {(
+            [
+              ["endpoints", ByEndpoint, "by endpoint"],
+              ["log", AsLog, "as a log, newest first"],
+            ] as const
+          ).map(([m, Glyph, label]) => (
             <button
               key={m}
               role="tab"
               aria-selected={mode === m}
+              aria-label={label}
+              title={label}
               className={mode === m ? "on" : ""}
               onClick={() => setMode(m)}
             >
-              {m}
+              <Glyph />
             </button>
           ))}
         </div>
@@ -189,58 +246,31 @@ export function EventsPane({
         </button>
       </div>
 
-      <div className="traffic-filters" role="group" aria-label="which decisions">
-        <Chip on={filter === "all"} onClick={() => setFilter("all")} label="all" count={feed.length} />
-        <Chip
-          on={filter === "denied"}
-          onClick={() => setFilter("denied")}
-          label="denied"
-          count={denied}
-          tone="bad"
-        />
-        <Chip
-          on={filter === "allowed"}
-          onClick={() => setFilter("allowed")}
-          label="allowed"
-          count={allowed}
-          tone="ok"
-        />
-      </div>
-
-      {actionable && (
-        <p className="traffic-hint">right-click an endpoint to allow or block it</p>
-      )}
       {error && <p className="error">{error}</p>}
       {failed && <p className="error">{failed}</p>}
 
       {mode === "endpoints" ? (
         <>
-          {shownGroups.length === 0 ? (
-            <p className="traffic-none">nothing {filter} in the recent log</p>
-          ) : (
-            <ul className="endpoints-list">
-              {shownGroups.map((g) => (
-                <EndpointRow
-                  key={g.endpoint}
-                  group={g}
-                  open={expanded.has(g.endpoint)}
-                  onToggle={() =>
-                    setExpanded((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(g.endpoint)) next.delete(g.endpoint);
-                      else next.add(g.endpoint);
-                      return next;
-                    })
-                  }
-                  {...actions}
-                />
-              ))}
-            </ul>
+          {!showDenied && !showAllowed && <p className="traffic-none">nothing {filter} in the recent log</p>}
+          {showDenied && (
+            <section>
+              <h4>
+                denied <span className="count">{blocked.length}</span>
+              </h4>
+              <ul className="endpoints-list">{rows(blocked)}</ul>
+            </section>
+          )}
+          {showAllowed && (
+            <section>
+              <h4>
+                allowed <span className="count">{passing.length}</span>
+              </h4>
+              <ul className="endpoints-list">{rows(passing)}</ul>
+            </section>
           )}
           {untargeted > 0 && filter === "all" && (
             <button className="traffic-more" onClick={() => setMode("log")}>
-              {untargeted} {untargeted === 1 ? "event names" : "events name"} no endpoint — see
-              the log
+              {untargeted === 1 ? "1 event with no endpoint is" : `${untargeted} events with no endpoint are`} in the log
             </button>
           )}
         </>
@@ -271,66 +301,92 @@ type Actions = {
 
 function EndpointRow({
   group: g,
+  tone,
   open,
   onToggle,
   ...actions
-}: { group: Group; open: boolean; onToggle: () => void } & Actions) {
+}: { group: Group; tone: "denied" | "allowed"; open: boolean; onToggle: () => void } & Actions) {
   const last = g.events[0];
   const s = actions.standing(g.endpoint);
   const row = `ep:${g.endpoint}`;
   const [host, port] = split(g.endpoint);
-  // The verdict the row wears is the last one the gateway gave, unless the
-  // policy has since moved: a denial followed by an allow from this pane is
-  // an endpoint that is open, and should stop looking like a problem.
-  const tone = last.verdict === "Denied" && !opensFor(s, g.refused) ? "denied" : "allowed";
+  const busy = actions.busy === g.endpoint;
+  const grant = grantable(s, g.refused);
+  // The one change that is on the row rather than in its menu: it is what a
+  // denial is asking for, and it opens the panel, so it is still asked.
+  const canAllow = tone === "denied" && grant.length > 0 && actions.busy === null;
+  // An L7 denial names no binary; what it names is the request, which is the
+  // thing to read.
+  const request = g.refused.length === 0 ? g.events.find((e) => e.verdict === "Denied") : undefined;
+
+  const meta: React.ReactNode[] = [
+    ...binariesOf(g).map((b) => (
+      <span key={b} className="bin" title={b}>
+        {base(b)}
+      </span>
+    )),
+    ...(request ? [<span key="req" className="bin">{brief(request)}</span>] : []),
+    ...(g.denied > 0 ? [<span key="d" className="count bad">{g.denied} denied</span>] : []),
+    ...(g.allowed > 0 ? [<span key="a" className="count">{g.allowed} allowed</span>] : []),
+    <span key="s" title={s.rules.length ? `by ${s.rules.join(", ")}` : undefined}>
+      {s.open ? "in policy" : "not in policy"}
+    </span>,
+    ...(s.listed === "allow" ? [<span key="l">allowed everywhere</span>] : []),
+    ...(s.listed === "block" ? [<span key="l">blocked everywhere</span>] : []),
+  ];
 
   return (
     <li
-      className={`ep ${tone}${actions.busy === g.endpoint ? " busy" : ""}`}
+      className={`ep ${tone}${busy ? " busy" : ""}`}
       {...actions.menu(() => itemsFor(g.endpoint, row, g.refused, g.denied > 0, actions))}
     >
       <div className="ep-head">
         <button className="ep-open" onClick={onToggle} aria-expanded={open}>
           <Chevron open={open} className="ep-chevron" />
+          <Verdict verdict={tone === "denied" ? "Denied" : "Allowed"} />
           <span className="ep-host" title={g.endpoint}>
             {host}
             <span className="ep-port">:{port}</span>
           </span>
         </button>
-        {actions.busy === g.endpoint ? (
+        {busy ? (
           <span className="ep-age applying">
             <span className="spin" /> applying
           </span>
         ) : (
-          <span className="ep-age" title={`last decision ${clock(last.at)} UTC`}>
-            {ago(last.at)}
-          </span>
+          <>
+            {canAllow && (
+              <button
+                className="ep-allow"
+                title={`allow ${grant.map(base).join(", ")} to reach ${g.endpoint}`}
+                onClick={() => actions.setAsking({ row, kind: "allow" })}
+              >
+                <Grant />
+                allow
+              </button>
+            )}
+            <span className="ep-age" title={`last decision ${clock(last.at)} UTC`}>
+              {ago(last.at)}
+            </span>
+          </>
         )}
       </div>
 
-      <div className="ep-meta">
-        {g.denied > 0 && <span className="count bad">{g.denied} denied</span>}
-        {g.allowed > 0 && <span className="count ok">{g.allowed} allowed</span>}
-        {binariesOf(g).map((b) => (
-          <span key={b} className="bin" title={b}>
-            {base(b)}
-          </span>
-        ))}
-        <StandingTags standing={s} />
-      </div>
+      <div className="ep-meta">{dotted(meta)}</div>
 
       <Panel endpoint={g.endpoint} row={row} refused={g.refused} {...actions} />
 
       {open && (
         <ul className="ep-log">
           {g.events.slice(0, RECENT).map((e) => (
-            <li key={`${e.at}|${e.class}|${e.subject}`} className={e.verdict.toLowerCase()}>
+            <li key={`${e.at}|${e.class}|${e.subject}`}>
               <span className="clock">{clock(e.at)}</span>
-              <span className={`verdict ${e.verdict.toLowerCase()}`}>{VERDICT[e.verdict]}</span>
-              <span className="class">{e.class}</span>
-              <span className="subject">{e.subject}</span>
+              <Verdict verdict={e.verdict} />
+              <span className="what" title={e.subject}>
+                {breakable(brief(e))}
+              </span>
               {e.policy && <span className="rule">{e.policy}</span>}
-              {e.reason && <span className="reason">{e.reason}</span>}
+              {e.reason && !GENERIC.test(e.reason) && <span className="reason">{e.reason}</span>}
             </li>
           ))}
           {g.events.length > RECENT && (
@@ -357,26 +413,42 @@ function LogRow({ event: e, ...actions }: { event: FeedEvent } & Actions) {
           : [line];
       })}
     >
+      {/* What happened first, and when at the end of the same line; the
+          class, the rule and the reason are the quiet line under it. */}
       <div className="entry-head">
-        <span className="clock">{clock(e.at)}</span>
-        <span className={`verdict ${e.verdict.toLowerCase()}`}>{VERDICT[e.verdict]}</span>
-        <span className="class">{e.class}</span>
-        {e.target && actions.busy === e.target.endpoint && (
+        <Verdict verdict={e.verdict} />
+        <span className={`subject${e.target ? "" : " prose"}`} title={e.subject}>
+          {breakable(pretty(e))}
+        </span>
+        {e.target && actions.busy === e.target.endpoint ? (
           <span className="ep-age applying">
             <span className="spin" /> applying
           </span>
+        ) : (
+          <span className="clock">{clock(e.at)}</span>
         )}
       </div>
-      <div className="subject">{e.subject}</div>
-      {(e.reason || e.policy) && (
-        <div className="entry-why">
-          {e.policy && <span className="rule">{e.policy}</span>}
-          {e.reason && <span className="reason">{e.reason}</span>}
-        </div>
-      )}
+      <div className="entry-why">
+        <span className="class">{e.class}</span>
+        {e.policy && <span className="rule">{e.policy}</span>}
+        {e.reason && (
+          <span className="reason" title={e.reason}>
+            {GENERIC.test(e.reason) ? "no rule allows it" : e.reason}
+          </span>
+        )}
+      </div>
       {e.target && <Panel endpoint={e.target.endpoint} row={row} refused={refused} {...actions} />}
     </li>
   );
+}
+
+/// A decision, as the shield the policy pane and the menus draw it: a tick for
+/// let through, a bar for refused, and the plain information glyph for the
+/// gateway saying something that decides nothing.
+function Verdict({ verdict }: { verdict: FeedEvent["verdict"] }) {
+  if (verdict === "Denied") return <Revoke className="verdict-glyph denied" aria-label="denied" />;
+  if (verdict === "Allowed") return <Grant className="verdict-glyph allowed" aria-label="allowed" />;
+  return <Record className="verdict-glyph neutral" aria-label="no decision" />;
 }
 
 /// What a row's menu offers, each item only when it would change something: an
@@ -399,7 +471,7 @@ function itemsFor(
 ): MenuItem[] {
   const s = a.standing(endpoint);
   const offered = candidates(s, refused);
-  const grant = refused.length > 0 ? offered.filter((b) => !s.binaries.includes(b)) : offered;
+  const grant = grantable(s, refused);
   const who = grant.map(base).join(", ");
   const items: MenuItem[] = [];
 
@@ -520,7 +592,7 @@ function ChangePanel({
       {kind === "allow" ? (
         <>
           <p className="change-what">
-            Open <code>{endpoint}</code> to
+            <Grant className="allowed" /> Allow <code>{endpoint}</code> for
           </p>
           <div className="change-bins">
             {offered.map((b) => (
@@ -548,14 +620,13 @@ function ChangePanel({
       ) : (
         <>
           <p className="change-what">
-            Close <code>{endpoint}</code>
+            <Revoke className="denied" /> Block <code>{endpoint}</code>
           </p>
           <p className="change-note">
             Removed from this sandbox for every binary
             {s.binaries.length > 0 && (
               <>
-                {" "}
-                — including <b>{s.binaries.map(base).join(", ")}</b>
+                , including <b>{s.binaries.map(base).join(", ")}</b>
               </>
             )}
             . Anything that depends on it stops working.
@@ -598,22 +669,6 @@ function ChangePanel({
         </button>
       </div>
     </div>
-  );
-}
-
-function StandingTags({ standing: s }: { standing: Standing }) {
-  return (
-    <>
-      {s.open ? (
-        <span className="tag yes" title={s.rules.length ? `by ${s.rules.join(", ")}` : undefined}>
-          open now
-        </span>
-      ) : (
-        <span className="tag">not in policy</span>
-      )}
-      {s.listed === "allow" && <span className="tag yes">allowed everywhere</span>}
-      {s.listed === "block" && <span className="tag no">blocked everywhere</span>}
-    </>
   );
 }
 
@@ -687,6 +742,26 @@ function standingOf(policy: PolicyView | null, endpoint: string): Standing {
   };
 }
 
+/// The gateway's reason when no rule names the endpoint at all. It repeats the
+/// endpoint the line above it names, so the endpoint's row drops it -- the row
+/// already says `not in policy` -- and the log says it in four words, with the
+/// gateway's own on hover and in "Copy line".
+const GENERIC = /^endpoint \S+ is not allowed by any policy$/;
+
+/// The verdict an endpoint's row wears: its last decision, unless the policy
+/// has since moved -- a denial followed by an allow from this pane is an
+/// endpoint that is open, and should stop looking like a problem.
+function toneFor(g: Group, s: Standing): "denied" | "allowed" {
+  return g.events[0].verdict === "Denied" && !opensFor(s, g.refused) ? "denied" : "allowed";
+}
+
+/// Who an allow would add: the refused binaries no rule grants yet, or, for an
+/// L7 denial that names none, the binaries a rule already sends there.
+function grantable(s: Standing, refused: string[]): string[] {
+  const offered = candidates(s, refused);
+  return refused.length > 0 ? offered.filter((b) => !s.binaries.includes(b)) : offered;
+}
+
 /// What an allow can be offered for: the binaries that were refused, or, for
 /// an L7 denial that names none, the binaries a rule already sends there --
 /// adding full access for them is what lifts a path restriction.
@@ -714,6 +789,42 @@ function lineOf(e: FeedEvent): string {
   return [clock(e.at), VERDICT[e.verdict], e.class, e.subject, e.policy && `[${e.policy}]`, e.reason]
     .filter(Boolean)
     .join("  ");
+}
+
+/// `/usr/bin/node(812) -> registry.npmjs.org:443`, the gateway's L4 line.
+const OPEN = /^(.*?)(\(\d+\))? -> (\S+)$/;
+/// `GET github.com:443/owner/repo.git/info/refs`, its L7 one.
+const REQUEST = /^([A-Z]+) [^/\s]+(\/\S*)?$/;
+
+/// An event as its endpoint's row needs it: the endpoint is the row, so what
+/// is left is who asked, or what they asked for.
+function brief(e: FeedEvent): string {
+  const open = OPEN.exec(e.subject);
+  if (open) return `${base(open[1])}${open[2] ?? ""}`;
+  const request = REQUEST.exec(e.subject);
+  if (request) return `${request[1]} ${request[2] ?? "/"}`;
+  return e.subject;
+}
+
+/// An event as the log shows it: the program by name and an arrow, with the
+/// gateway's own line, path and all, on hover and in "Copy line".
+function pretty(e: FeedEvent): string {
+  const open = OPEN.exec(e.subject);
+  return open ? `${base(open[1])}${open[2] ?? ""} → ${open[3]}` : e.subject;
+}
+
+/// A path that may wrap only after a `/`, so a long request breaks between its
+/// segments rather than in the middle of `hura.git`. `<wbr>` rather than a
+/// zero-width space, which would come along when the line is copied.
+function breakable(text: string): React.ReactNode[] {
+  return text.split("/").flatMap((part, i) => (i === 0 ? [part] : [<wbr key={i} />, `/${part}`]));
+}
+
+/// Parts of a line, with the ports pane's middle dot between them.
+function dotted(parts: React.ReactNode[]): React.ReactNode[] {
+  return parts.flatMap((p, i) =>
+    i === 0 ? [p] : [<span key={`dot${i}`} className="dot">·</span>, p],
+  );
 }
 
 function split(endpoint: string): [string, string] {

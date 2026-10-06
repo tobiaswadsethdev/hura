@@ -135,7 +135,7 @@ export function FileDiffPane({
   if (error && !sides) return <p className="error">{error}</p>;
   if (!sides) return <Waiting />;
   // The path is on the tab above this pane, so the sentence loses it.
-  if (sides.binary) return <Empty icon={NotText} note="binary — nothing to diff" />;
+  if (sides.binary) return <Empty icon={NotText} note="binary file, so there is no diff to show" />;
 
   const mine = review.filter((c) => c.file === path);
 
