@@ -876,7 +876,7 @@ main { display: flex; flex: 1; min-height: 0; }
   border-radius: var(--r-sm);
   color: var(--text);
   font: inherit;
-  padding: 2px 6px;
+  padding: 3px 6px;
   cursor: pointer;
   white-space: nowrap;
   transition: background-color 120ms;
@@ -888,7 +888,7 @@ main { display: flex; flex: 1; min-height: 0; }
   overflow: hidden;
   text-overflow: ellipsis;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 .files .loading, .files .error { padding: 2px 6px; margin: 0; color: var(--dim); font-size: 12px; }
 
@@ -2370,18 +2370,9 @@ main { display: flex; flex: 1; min-height: 0; }
    Never shrink and never stretch: an icon in a flex row with a long filename
    beside it is the first thing the browser will squash. */
 .lucide { flex: none; }
-/* Colour by what the file is, dim enough that the name is still the thing you
-   read. The page outline stays neutral so a directory of mixed kinds does not
-   look like a paint chart. */
-.kind-rust { color: #d08770; }
-.kind-code { color: #61afef; }
-.kind-shell { color: #98c379; }
-.kind-config { color: #c586c0; }
-.kind-lock { color: #6f6f7c; }
-.kind-doc { color: #9aa4b8; }
-.kind-style { color: #56b6c2; }
-.kind-image { color: #e5c07b; }
-.kind-plain { color: #6f6f7c; }
+/* The file and folder icons, which are pictures rather than lucide glyphs and
+   so need the same rule said again. */
+.file-icon { flex: none; }
 
 /* ------------------------------------------------------------------------- */
 /* the terminal                                                              */

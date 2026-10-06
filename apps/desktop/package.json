@@ -16,6 +16,7 @@
     "@tauri-apps/plugin-updater": "^2",
     "@xterm/xterm": "^6.0.0",
     "lucide-react": "^1.41.0",
+    "material-icon-theme": "^5.39.0",
     "monaco-editor": "^0.56.0",
     "react": "^19",
     "react-dom": "^19"

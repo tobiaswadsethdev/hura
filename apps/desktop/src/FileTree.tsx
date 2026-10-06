@@ -113,7 +113,7 @@ function Level({
               ])}
             >
               <span className="twist">{e.dir && <Chevron open={isOpen} />}</span>
-              {e.dir ? <Folder open={isOpen} /> : <FileIcon name={e.name} />}
+              {e.dir ? <Folder name={e.name} open={isOpen} /> : <FileIcon name={e.name} />}
               <span className="label">{e.name}</span>
             </button>
             {e.dir && isOpen && (

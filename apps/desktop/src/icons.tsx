@@ -1,5 +1,5 @@
-// The icons: lucide, pinned to one grid, plus the file-kind glyphs it has no
-// equivalent for.
+// The icons: lucide, pinned to one grid, plus the file tree's, which are VS
+// Code's.
 //
 // This file used to argue against an icon set, and the argument was really
 // about consistency rather than about packages: a set arrives with its own idea
@@ -7,8 +7,8 @@
 // drawn here would read as two families. `LucideProvider` in `main.tsx`
 // settles that centrally -- every lucide icon in the window renders at one size
 // and one stroke, whatever the library's own defaults are -- so the objection
-// is answered rather than accepted. What is left of the old argument is the
-// bottom half of this file, which stays hand-drawn because it has to.
+// is answered rather than accepted. The file and folder icons at the bottom are
+// the exception, and say why.
 //
 // **Every glyph the window uses is named here, and nothing else imports
 // `lucide-react`.** That rule is what keeps the vocabulary honest now that the
@@ -55,7 +55,6 @@ import {
   Copy as CopyGlyph,
   ExternalLink,
   FileDiff,
-  Folder as FolderClosed,
   FolderOpen,
   FolderPlus,
   FolderSearch,
@@ -95,6 +94,13 @@ import {
   Unplug,
   X,
 } from "lucide-react";
+
+import {
+  fileExtensions,
+  fileNames,
+  folderNames,
+  folderNamesExpanded,
+} from "material-icon-theme/dist/material-icons.json";
 
 import type { State } from "./gen/State";
 
@@ -257,11 +263,6 @@ export const NotText = Binary;
 
 type Props = { className?: string; title?: string };
 
-/// A directory, open or shut. Two glyphs behind one prop, because the caller
-/// has a boolean and not a choice of icon.
-export const Folder = ({ open, ...p }: Props & { open: boolean }) =>
-  open ? <FolderOpen {...p} /> : <FolderClosed {...p} />;
-
 /// The file tree's twisty. Down when expanded, right when not -- the rotation
 /// is two glyphs rather than a CSS transform so the stroke ends stay on the
 /// pixel grid at 14px.
@@ -323,139 +324,83 @@ export function StateDot({ state, className }: { state: State; className?: strin
       );
   }
 }
-
 // ---------------------------------------------------------------------------
-// The file-kind glyphs, still drawn by hand.
+// Files and folders: the Material Icon Theme, as VS Code draws them.
 //
-// Not stubbornness: what these encode is "rust", "lock file", "config", which
-// is a judgement about a filename rather than a picture, and no set ships it.
-// lucide has a page and a folder; it does not have "this is the lock file, do
-// not read it". They are on the same 14-pixel grid and the same stroke as
-// everything above, taken from the constants rather than repeated, so a page
-// from here beside a chevron from lucide is one family.
+// These used to be hand-drawn -- a page outline with a mark in it for eight
+// kinds of file -- and they were the one place a monochrome line icon was the
+// wrong answer. The tree is scanned, not read, and what the eye scans a
+// directory for is the shape and colour of a file kind it already knows from
+// the editor it spends the rest of the day in. So this borrows that editor's
+// most-installed icon theme wholesale, mapping and all, rather than drawing a
+// smaller one that is nearly it.
+//
+// They are full-colour pictures and not glyphs, so they sit outside the grid
+// above: 16 pixels rather than 14, which is what VS Code renders them at, and
+// no stroke to pin. Served as files rather than inlined -- `vite.config.ts`
+// says why -- so a directory listing fetches the dozen it shows, not all of
+// them.
 // ---------------------------------------------------------------------------
 
-/// The frame the glyphs below are drawn in: a 16 viewBox rendered at
-/// `ICON_SIZE`, with the stroke pre-divided so it lands on `ICON_STROKE`
-/// actual pixels -- the same arithmetic lucide's `absoluteStrokeWidth` does.
-function Svg({ children, className, title }: Props & { children: React.ReactNode }) {
+/// What VS Code renders these at, and the row height of its explorer follows.
+export const FILE_ICON_SIZE = 16;
+
+/// Every icon the theme ships, by name: `rust` to the URL of `rust.svg`. A few
+/// are recoloured copies of another, shipped as `<name>.clone.svg` and named
+/// in the mapping without the `.clone`.
+const URLS: Record<string, string> = Object.fromEntries(
+  Object.entries(
+    import.meta.glob<string>("/node_modules/material-icon-theme/icons/*.svg", {
+      eager: true,
+      query: "?url",
+      import: "default",
+    }),
+  ).map(([path, url]) => [path.slice(path.lastIndexOf("/") + 1).replace(/(\.clone)?\.svg$/, ""), url]),
+);
+
+const lookup = (table: Record<string, string>, key: string) =>
+  Object.hasOwn(table, key) ? table[key] : undefined;
+
+/// The theme's icon for a filename, matched the way VS Code matches it: the
+/// whole name first (`package.json`, `Dockerfile`), then the extension from the
+/// longest down, so `foo.test.ts` is a test before it is TypeScript.
+function fileIconName(path: string): string {
+  const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
+  const whole = lookup(fileNames, name);
+  if (whole) return whole;
+  for (let i = name.indexOf("."); i !== -1; i = name.indexOf(".", i + 1)) {
+    const ext = lookup(fileExtensions, name.slice(i + 1));
+    if (ext) return ext;
+  }
+  return "file";
+}
+
+function Icon({ icon, fallback, className }: { icon: string; fallback: string; className?: string }) {
   return (
-    <svg
-      className={`lucide ${className ?? ""}`}
-      viewBox="0 0 16 16"
-      width={ICON_SIZE}
-      height={ICON_SIZE}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={(ICON_STROKE * 16) / ICON_SIZE}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      // Decorative by default: the filename beside it is the name. A title is
-      // set only where the icon is the whole control.
-      aria-hidden={title ? undefined : true}
-      role={title ? "img" : undefined}
-    >
-      {title && <title>{title}</title>}
-      {children}
-    </svg>
+    <img
+      className={`file-icon ${className ?? ""}`}
+      src={URLS[icon] ?? URLS[fallback]}
+      width={FILE_ICON_SIZE}
+      height={FILE_ICON_SIZE}
+      // Decorative: the filename beside it is the name.
+      alt=""
+      draggable={false}
+    />
   );
 }
 
-/// A page with a folded corner. The base every file icon is drawn on, so an
-/// unknown extension is the same shape as a known one rather than nothing.
-const Page = ({ children }: { children?: React.ReactNode }) => (
-  <>
-    <path d="M9 1.8H4.5a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5.3z" />
-    <path d="M9 1.8v3.5h3.5" />
-    {children}
-  </>
+/// A file's icon, by what it is. Takes a path or a bare name.
+export const FileIcon = ({ name, className }: { name: string; className?: string }) => (
+  <Icon icon={fileIconName(name)} fallback="file" className={className} />
 );
 
-export const File = (p: Props) => (
-  <Svg {...p}>
-    <Page />
-  </Svg>
-);
-
-/// The extensions worth telling apart at a glance, and nothing else.
-///
-/// A short list on purpose. Two hundred entries is two hundred chances to be
-/// subtly wrong, and the value of a file icon is almost entirely in the few
-/// kinds you scan a directory for -- source, config, docs, lock files. The rest
-/// get the page, which is honest.
-const KIND: Record<string, string> = {
-  rs: "rust",
-  ts: "code",
-  tsx: "code",
-  js: "code",
-  jsx: "code",
-  py: "code",
-  go: "code",
-  cs: "code",
-  java: "code",
-  c: "code",
-  h: "code",
-  cpp: "code",
-  sh: "shell",
-  bash: "shell",
-  json: "config",
-  toml: "config",
-  yaml: "config",
-  yml: "config",
-  ini: "config",
-  conf: "config",
-  lock: "lock",
-  md: "doc",
-  txt: "doc",
-  css: "style",
-  html: "style",
-  png: "image",
-  jpg: "image",
-  jpeg: "image",
-  svg: "image",
-  gif: "image",
-  webp: "image",
-  ico: "image",
-};
-
-export function kindOf(name: string): string {
+/// A directory, open or shut -- and, like VS Code, a `src` or a `.github` gets
+/// a folder of its own.
+export function Folder({ name, open, className }: { name: string; open: boolean; className?: string }) {
   const lower = name.toLowerCase();
-  if (lower === "cargo.lock" || lower === "package-lock.json") return "lock";
-  if (lower.startsWith(".git")) return "config";
-  const ext = lower.includes(".") ? (lower.split(".").pop() ?? "") : "";
-  return KIND[ext] ?? "plain";
-}
-
-/// A file's icon, by what it is.
-export function FileIcon({ name, className }: { name: string; className?: string }) {
-  const kind = kindOf(name);
-  return (
-    <Svg className={`${className ?? ""} kind-${kind}`}>
-      <Page>
-        {kind === "code" && <path d="M6.6 8.6L5.3 10l1.3 1.4M9.4 8.6L10.7 10l-1.3 1.4" />}
-        {kind === "rust" && <path d="M6 11.6V8.4h2a1.1 1.1 0 0 1 0 2.2H6.6l1.9 1" />}
-        {kind === "shell" && <path d="M5.4 8.8l1.7 1.4-1.7 1.4M8.6 11.8h2.2" />}
-        {kind === "config" && (
-          <>
-            <circle cx="8" cy="10.4" r="1.5" />
-            <path d="M8 7.9v.6M8 12.3v.6M5.9 9.2l.5.3M9.6 11.3l.5.3M5.9 11.6l.5-.3M9.6 9.5l.5-.3" />
-          </>
-        )}
-        {kind === "lock" && (
-          <>
-            <rect x="5.7" y="10" width="4.6" height="3.2" rx="0.6" />
-            <path d="M6.9 10V9.1a1.1 1.1 0 0 1 2.2 0V10" />
-          </>
-        )}
-        {kind === "doc" && <path d="M5.6 8.8h4.8M5.6 10.8h4.8M5.6 12.6h3" />}
-        {kind === "style" && <path d="M8 7.8l2.4 1.5v2.9L8 13.7l-2.4-1.5V9.3z" />}
-        {kind === "image" && (
-          <>
-            <circle cx="6.5" cy="9.3" r="0.9" />
-            <path d="M4.4 13l2.4-2.4 1.5 1.5 1.4-1.4 2 2" />
-          </>
-        )}
-      </Page>
-    </Svg>
+  return open ? (
+    <Icon icon={lookup(folderNamesExpanded, lower) ?? "folder-open"} fallback="folder-open" className={className} />
+  ) : (
+    <Icon icon={lookup(folderNames, lower) ?? "folder"} fallback="folder" className={className} />
   );
 }
