@@ -15,7 +15,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use rand::TryRngCore;
+use rand::TryRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -189,7 +189,7 @@ impl Tokens {
 /// mode -- for the sake of a string twice as long as it needs to be.
 fn mint() -> io::Result<String> {
     let mut bytes = [0u8; 32];
-    rand::rngs::OsRng
+    rand::rngs::SysRng
         .try_fill_bytes(&mut bytes)
         .map_err(io::Error::other)?;
     Ok(hex(&bytes))
