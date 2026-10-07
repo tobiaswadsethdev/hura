@@ -20,11 +20,11 @@ git clone https://github.com/octocat/Hello-World.git   -> SUCCEEDS
 curl https://github.com                                 -> DENIED
 ```
 
-The window is a workspace: projects containing worktrees, the agent's terminal
-and extra shells beside it, the working copy in a file tree, diffs in an editor
-with comments that go back to the agent, and git on the right.
+The window is a workspace: projects containing worktrees, a conversation with
+each agent and shells beside it, the working copy in a file tree, diffs in an
+editor with comments that go back to the agent, and git on the right.
 
-![The hura workspace: the Hello-World and Spoon-Knife projects and their worktrees on the left, the agent's terminal in the middle showing git status in the sandbox, and the git pane on the right listing the two changed files](docs/images/workspace.png)
+![The hura workspace: the Hello-World and Spoon-Knife projects and their worktrees on the left, one idle, one waiting on a permission prompt and one working; the readme-fix conversation in the middle, where the agent asks to edit README and shows the diff with allow, allow and don't ask again, and decline; and the git pane on the right](docs/images/workspace.png)
 
 **The isolation is not a claim, it is a pane.** Every allow and deny the gateway
 made, folded by where it was going: how often each endpoint was refused or let
@@ -33,13 +33,13 @@ been fetching from github.com all along, while `curl` reaching for the same host
 over plain HTTP, `node` and `curl` going for docs.rs, and Python going for PyPI
 were all refused:
 
-![The events pane for a session, grouped by endpoint: docs.rs:443 denied three times to node and curl, pypi.org:443 denied to python3.13, github.com:80 denied to curl, each marked not in policy, and github.com:443 allowed six times to git-remote-http and marked open now](docs/images/events.png)
+![The events pane for a session, grouped by endpoint: docs.rs:443 denied three times to curl and node, pypi.org:443 denied to python3.13, github.com:80 denied to curl, each marked not in policy with an allow button, and github.com:443 allowed ten times to git-remote-http and api.anthropic.com:443 to claude, both in policy](docs/images/events.png)
 
 A denial is something to act on, not only to read. Right-click it to open the
 endpoint to the binaries that were refused -- for this session, or for every
 new session too -- or right-click an open one to block it:
 
-![The context menu on the denied docs.rs:443 row: allow in this session, allow in every new session too, allow… to choose binaries, and copy endpoint](docs/images/events-menu.png)
+![The context menu on the denied docs.rs:443 row: allow in this session, allow in every new session too, allow… to choose binaries, allow only some paths…, and copy endpoint](docs/images/events-menu.png)
 
 The rules behind those decisions are what the policy pane shows -- each one an
 endpoint, the binaries it is granted to, and how much of it they get:
@@ -57,6 +57,12 @@ endpoint, the binaries it is granted to, and how much of it they get:
   denied endpoint is opened -- for one binary, for this session or every new one
   -- from a right-click on the denial, and an open one is blocked the same way.
   This is the part an ADE built on git worktrees has no equivalent for.
+- **The agent as a conversation.** A new session's agent is a chat the window
+  draws: replies as they are written, every tool call as a card with its output
+  or its diff, and permission prompts and questions as buttons. It runs through
+  the Agent SDK *inside* the sandbox, on the same `claude` under the same policy,
+  and the terminal is one setting away. More conversations, or shells, open
+  beside it. See [docs/desktop.md](docs/desktop.md#talking-to-the-agent).
 - **Several agents at once, without babysitting.** A session blocked on a
   permission prompt says so in the list -- and the window sends an OS
   notification the moment it starts waiting, so watching costs nothing at all.
