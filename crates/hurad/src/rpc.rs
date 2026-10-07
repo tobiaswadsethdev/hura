@@ -419,8 +419,19 @@ fn create(new: hura_core::ops::NewSession) -> Outcome {
         // is what a client watching the list sees either way, only for longer
         // the first time a set of toolchains is used.
         let backends = backends();
+        // Said on the record as well as here, because the window that asked
+        // for this session reads the record and nothing else. `ops::create`
+        // records its own failures, so for those this only prints; the ones it
+        // cannot record are the image build below and its refusals before its
+        // first write, which would otherwise leave no session at all.
+        let failed = |why: String| {
+            eprintln!("hurad: {}: {why}", draft.name);
+            if let Err(e) = ops::record_failure(&draft, &why) {
+                eprintln!("hurad: {}: could not record why: {e}", draft.name);
+            }
+        };
         if let Err(e) = image::ensure_for(&draft.toolchains) {
-            eprintln!("hurad: {}: could not build the image: {e}", draft.name);
+            failed(format!("could not build the image: {e}"));
             return;
         }
         // The managed MCP containers, before the seeder registers them with the
@@ -436,7 +447,7 @@ fn create(new: hura_core::ops::NewSession) -> Outcome {
         // the record already carries, and a channel per create would be a second
         // way to learn the same thing.
         if let Err(e) = ops::create(&backends, &draft, &mut |_| {}) {
-            eprintln!("hurad: {}: could not create the session: {e}", draft.name);
+            failed(format!("could not create the session: {e}"));
         }
     });
 

@@ -487,6 +487,7 @@ impl CliClient {
         if out.ok() {
             return Ok(out);
         }
+        let said = unwrap_report(&out.stderr);
         // The gateway reports a missing sandbox as a generic exit-1 error, so
         // the message is the only thing distinguishing it.
         //
@@ -498,14 +499,14 @@ impl CliClient {
         // pull that failed on a missing *image* used to report a session
         // successfully removed while its sandbox kept running.
         if let Some(name) = subject
-            && out.stderr.contains("sandbox not found")
+            && said.contains("sandbox not found")
         {
             return Err(Error::NotFound(name.to_string()));
         }
         Err(Error::Cli {
             args: display.to_string(),
             code: out.exit_code,
-            stderr: out.stderr.trim().to_string(),
+            stderr: said,
         })
     }
 
@@ -734,9 +735,56 @@ impl OpenShell for CliClient {
     }
 }
 
+/// The CLI's error report, with the lines it wrapped for a terminal put back.
+///
+/// The CLI renders errors with miette, which wraps a long message at eighty
+/// columns even when stderr is a pipe, and marks each continuation with a `│`
+/// gutter. Shown anywhere but a terminal, the wrap is a bar in the middle of
+/// the sentence that matters: `name exceeds │ maximum length (20 > 19)`. Only
+/// continuations are joined; a line of its own, a cause or a help, stays one.
+fn unwrap_report(stderr: &str) -> String {
+    let mut out = String::new();
+    for line in stderr.trim().lines() {
+        match line.trim_start().strip_prefix('│') {
+            Some(rest) if !out.is_empty() => {
+                out.push(' ');
+                out.push_str(rest.trim());
+            }
+            _ => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(line.trim_end());
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Captured from `openshell sandbox create` on 0.0.110, refusing a name one
+    /// character too long. The wrap fell inside the reason.
+    #[test]
+    fn a_wrapped_report_reads_as_one_sentence() {
+        let stderr = "Error:   × code: 'Client specified an invalid argument', message: \"name exceeds\n  │ maximum length (20 > 19)\"\n";
+        assert_eq!(
+            unwrap_report(stderr),
+            "Error:   × code: 'Client specified an invalid argument', message: \"name exceeds maximum length (20 > 19)\""
+        );
+    }
+
+    /// A report with more than one line of its own keeps them.
+    #[test]
+    fn lines_that_are_not_continuations_stay_lines() {
+        let stderr = "Error:   × could not apply the policy\n  ╰─▶ endpoint `x` is not a host\n";
+        assert_eq!(
+            unwrap_report(stderr),
+            "Error:   × could not apply the policy\n  ╰─▶ endpoint `x` is not a host"
+        );
+    }
 
     /// Captured verbatim from `openshell sandbox list --output json` on 0.0.110.
     const LIST_JSON: &str = r#"[

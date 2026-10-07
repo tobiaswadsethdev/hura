@@ -1029,6 +1029,11 @@ fn print_sessions(rows: &[(Session, State)]) {
             s.work_branch,
             s.repo,
         );
+        // Under its row rather than in a column: it is a sentence, and only a
+        // failed or dead session has one.
+        if let Some(why) = &s.failure {
+            println!("  {why}");
+        }
     }
 }
 

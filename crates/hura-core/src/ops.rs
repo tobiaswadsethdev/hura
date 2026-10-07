@@ -121,13 +121,19 @@ pub fn refresh_with(
             // The seeder's own report, which is the only thing that knows: it runs
             // detached inside the sandbox, so "still cloning" and "gave up" look
             // identical from out here.
-            let (state, note) = match seed::seed_state(backend, &s) {
-                seed::SeedState::Done => (State::Ready, "seeding finished".to_string()),
+            //
+            // The third part is the reason a failure goes on the record with:
+            // the create that launched the seeder has gone, so nobody heard it
+            // stop and this is the first anyone will.
+            let (state, note, failure) = match seed::seed_state(backend, &s) {
+                seed::SeedState::Done => (State::Ready, "seeding finished".to_string(), None),
                 seed::SeedState::Failed(why) => {
-                    (State::Failed, seed::failure_message(&s.name, &why))
+                    let why = seed::failure_message(&s.name, &why);
+                    (State::Failed, why.clone(), Some(why))
                 }
                 seed::SeedState::Running { step, alive: false } => {
-                    (State::Failed, format!("seeding stopped during `{step}`"))
+                    let why = format!("seeding stopped during `{step}`");
+                    (State::Failed, why.clone(), Some(why))
                 }
                 // Genuinely still going, in the sandbox, whatever happened to the
                 // tool that started it. Leave it alone.
@@ -136,7 +142,9 @@ pub fn refresh_with(
                 // seeder reported anything. Fall back to the metadata, which is
                 // written once seeding is done.
                 seed::SeedState::Unknown => match backend.read_meta(&s.name) {
-                    Ok(m) if m.state != s.state => (m.state, "sandbox metadata".to_string()),
+                    Ok(m) if m.state != s.state => {
+                        (m.state, "sandbox metadata".to_string(), m.failure)
+                    }
                     _ => continue,
                 },
             };
@@ -148,6 +156,7 @@ pub fn refresh_with(
                 .push(format!("{}: {} -> {state} ({note})", s.name, s.state));
             let mut fixed = s.clone();
             fixed.state = state;
+            fixed.failure = failure;
             let record = fixed.clone();
             store::update(|store| store.upsert(record))?;
             if let Some(slot) = out.sessions.iter_mut().find(|x| x.name == fixed.name) {
@@ -687,17 +696,7 @@ pub fn create(
     // session if its own record were ever lost.
     removed::forget(&draft.name);
 
-    let mut s = Session::new(draft.name.clone(), draft.repo.clone(), draft.task.clone());
-    s.base_branch = draft.base.clone();
-    s.ticket = draft.ticket.clone();
-    if let Some(branch) = &draft.branch {
-        s.work_branch = branch.clone();
-    }
-    s.project = draft.project.clone();
-    s.providers = draft.providers.clone();
-    s.toolchains = toolchain::labels(&draft.toolchains);
-    s.mcp = draft.mcp.clone();
-    s.skills = draft.skills.clone();
+    let mut s = record(draft);
 
     // Written before the gateway is asked for anything, because until there is
     // a record there is nothing for a client to show: creating a sandbox is
@@ -709,13 +708,12 @@ pub fn create(
     save(s.clone(), &mut warnings);
 
     progress(Step::Place);
-    // Each failure is recorded before being returned. A `Failed` record is the
-    // only trace of a sandbox that may exist at the gateway but was never
-    // seeded, and without it that sandbox is invisible to `hura rm`.
+    // Each failure is recorded, reason and all, before being returned. A
+    // `Failed` record is the only trace of a sandbox that may exist at the
+    // gateway but was never seeded, and without it that sandbox is invisible to
+    // `hura rm`.
     if let Err(e) = backend.place(&mut s, draft) {
-        s.state = State::Failed;
-        save(s, &mut warnings);
-        return Err(e.to_string());
+        return Err(fail(s, e.to_string(), &mut warnings));
     }
 
     // The record is written the moment the sandbox exists, and before the policy
@@ -735,9 +733,7 @@ pub fn create(
     save(s.clone(), &mut warnings);
 
     if let Err(e) = backend.configure(&s, draft, &mut warnings) {
-        s.state = State::Failed;
-        save(s, &mut warnings);
-        return Err(e.to_string());
+        return Err(fail(s, e.to_string(), &mut warnings));
     }
 
     // The seeder packs the skills itself; this is the same pack, thrown away,
@@ -752,9 +748,7 @@ pub fn create(
 
     progress(Step::Clone);
     if let Err(e) = seed::launch(backend, &s, draft.start) {
-        s.state = State::Failed;
-        save(s, &mut warnings);
-        return Err(e.to_string());
+        return Err(fail(s, e.to_string(), &mut warnings));
     }
 
     // From here the sandbox is doing the work and this is only watching. Quitting
@@ -765,11 +759,7 @@ pub fn create(
             s.state = State::Ready;
             save(s.clone(), &mut warnings);
         }
-        Watched::Failed(why) => {
-            s.state = State::Failed;
-            save(s.clone(), &mut warnings);
-            return Err(why);
-        }
+        Watched::Failed(why) => return Err(fail(s, why, &mut warnings)),
         Watched::StillGoing => {
             warnings.push(format!(
                 "{} is still being prepared; it will be picked up on the next refresh",
@@ -843,6 +833,53 @@ fn save(session: Session, warnings: &mut Vec<String>) {
     if let Err(e) = store::update(|store| store.upsert(session)) {
         warnings.push(format!("could not update the session cache: {e}"));
     }
+}
+
+/// The record a draft becomes, before anything has been made for it.
+fn record(draft: &Draft) -> Session {
+    let mut s = Session::new(draft.name.clone(), draft.repo.clone(), draft.task.clone());
+    s.base_branch = draft.base.clone();
+    s.ticket = draft.ticket.clone();
+    if let Some(branch) = &draft.branch {
+        s.work_branch = branch.clone();
+    }
+    s.project = draft.project.clone();
+    s.providers = draft.providers.clone();
+    s.toolchains = toolchain::labels(&draft.toolchains);
+    s.mcp = draft.mcp.clone();
+    s.skills = draft.skills.clone();
+    s
+}
+
+/// Mark a session failed, with the reason on its record, and hand the reason
+/// back for the caller to return.
+fn fail(mut s: Session, why: String, warnings: &mut Vec<String>) -> String {
+    s.state = State::Failed;
+    s.failure = Some(why.clone());
+    save(s, warnings);
+    why
+}
+
+/// Record a create that stopped before [`create`] wrote anything, so the
+/// session it was meant to be still says why.
+///
+/// For what a caller does ahead of [`create`], which on `hurad` is building
+/// the image on the create's own thread, and for the refusals [`create`]
+/// makes before its first write. A window that asked for the session has
+/// selected its name and is waiting for it to appear. With no record it never
+/// does, the window moves on after a few seconds, and the reason is on the
+/// server's terminal.
+///
+/// Written only if the name is free: "already exists" is one of those
+/// refusals, and the record already there is somebody's session. So is the
+/// one [`create`] marks failed itself, which already says why.
+pub fn record_failure(draft: &Draft, why: &str) -> std::io::Result<()> {
+    let mut s = record(draft);
+    s.state = State::Failed;
+    s.failure = Some(why.to_string());
+    store::update(|store| {
+        store.insert_new(s);
+    })
 }
 
 /// Line cap on a fetched diff. Diffs can be arbitrarily large and the pane is

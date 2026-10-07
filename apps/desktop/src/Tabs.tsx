@@ -60,11 +60,17 @@ export function Tabs({
   onCloseShell,
   onCloseFile,
   onReorder,
+  failure,
 }: {
   server: string;
   name: string;
   tabs: Tab[];
   active: string;
+  /// Why the session failed, when its sandbox is still there to look into.
+  /// Above the tabs rather than in place of them, unlike a dead session's:
+  /// a clone the gateway denied is explained in the events pane, and the
+  /// reason says to go and look there.
+  failure?: string | null;
   onActivate: (key: string) => void;
   onNewShell: () => void;
   /// Closing a shell kills what is running in it, which is why only a shell has
@@ -169,6 +175,7 @@ export function Tabs({
           <Plus aria-label="new shell" />
         </button>
       </nav>
+      {failure && <p className="error tabs-failure">{failure}</p>}
 
       {tabs.map((tab) => {
         const key = keyOf(tab);

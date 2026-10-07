@@ -457,6 +457,21 @@ pub struct Session {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub created_at: u64,
     pub state: State,
+    /// Why the session failed, in the words of whatever refused it: the
+    /// gateway turning down a create, a clone the seeder gave up on.
+    ///
+    /// On the record because the record is the only thing a window reads. A
+    /// create on `hurad` runs on a thread whose one way to speak is its own
+    /// terminal, so without this a sandbox the gateway refused showed up as a
+    /// `dead` row whose panes each said `sandbox not found`, and the reason
+    /// was on a screen nobody was looking at.
+    ///
+    /// Kept when a failed session goes `dead`, which is what one whose sandbox
+    /// was never made does on the next refresh, and dropped when a session
+    /// comes back to life. `None` on a `dead` session means its sandbox went
+    /// away later, not that it never had one.
+    #[serde(default)]
+    pub failure: Option<String>,
 }
 
 fn default_agent() -> String {
@@ -501,6 +516,7 @@ impl Session {
             agent: default_agent(),
             created_at: now_epoch(),
             state: State::Creating,
+            failure: None,
         }
     }
 
