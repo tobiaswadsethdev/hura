@@ -161,6 +161,11 @@ one back; the separator is focusable and takes arrow keys, `Home`, `End` and
 change at all. Widths are this window's own and kept on this machine -- see
 [settings](#settings).
 
+**Tickets are at the top of the sidebar**, above the projects and outside their
+scroll, with the number your filters held at the last read. **Ctrl+Shift+T**
+(⌘⇧T on macOS) opens them from anywhere and goes back again. See
+[tickets.md](tickets.md).
+
 **Worktrees are indented under their project, with a rule down the indent.** The
 rule is the part doing the work rather than the offset: project headers are
 sticky, so once a long list has scrolled, the header above a card is not that
@@ -243,6 +248,12 @@ may reach:
 - **Allow in every new session too** does the same and puts it on the global
   allow list.
 - **Allow…** is there when more than one binary was refused, to choose which.
+- **Allow only some paths…** opens the same panel on *only these paths*: a
+  method and a path glob per row, so a package feed can be opened without the
+  rest of its host. A URL pasted into a row is cut down to its path.
+- **Allow this path…** replaces the two one-click allows on a denial that a
+  rule's own paths made. It names the request it refused, and the panel starts
+  from that request instead of handing over the whole host.
 - **Block…** removes an endpoint the policy opens, for **every** binary in the
   sandbox -- git included, if it is git's -- so it asks under the row first,
   with the same *every new session too* option.

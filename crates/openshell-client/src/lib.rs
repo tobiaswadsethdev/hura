@@ -349,7 +349,13 @@ pub struct PolicyUpdate {
     pub add_endpoints: Vec<String>,
     /// `host:port`.
     pub remove_endpoints: Vec<String>,
-    /// Applied to each added endpoint.
+    /// `host:port:METHOD:path_glob`, added to the one rule that names the
+    /// endpoint. The gateway picks that rule by host and port alone, so it
+    /// refuses when more than one rule names it, including a rule that an
+    /// `--add-endpoint` in the same call creates beside an existing one.
+    pub add_allow: Vec<String>,
+    /// Applied to each added endpoint. Only accepted beside an
+    /// `--add-endpoint`; an `--add-allow` inherits the binaries of its rule.
     pub binaries: Vec<String>,
     pub rule_name: Option<String>,
     /// Block until the sandbox reports the new revision loaded. Without this
@@ -359,7 +365,9 @@ pub struct PolicyUpdate {
 
 impl PolicyUpdate {
     pub fn is_empty(&self) -> bool {
-        self.add_endpoints.is_empty() && self.remove_endpoints.is_empty()
+        self.add_endpoints.is_empty()
+            && self.remove_endpoints.is_empty()
+            && self.add_allow.is_empty()
     }
 }
 
@@ -673,6 +681,10 @@ impl OpenShell for CliClient {
         for e in &update.remove_endpoints {
             args.push("--remove-endpoint".into());
             args.push(e.clone());
+        }
+        for r in &update.add_allow {
+            args.push("--add-allow".into());
+            args.push(r.clone());
         }
         for b in &update.binaries {
             args.push("--binary".into());

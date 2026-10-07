@@ -40,6 +40,7 @@ use hura_client::trackers::Trackers;
 use hura_client::{Incoming, Remote, Remotes, Sink};
 use hura_core::comments::{Comment, NewComment};
 use hura_core::events::FeedEvent;
+use hura_core::endpoints::Route;
 use hura_core::files::{Dir, FileText};
 use hura_core::git::{Against, FileDiff, Status as GitStatus};
 use hura_core::integrations::View as IntegrationsView;
@@ -279,6 +280,29 @@ fn allow(
             name,
             endpoint,
             binaries,
+            everywhere,
+        })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Policy(view) => view, "a policy")
+}
+
+/// Open only some methods and paths of an endpoint to a session, and to every
+/// new one when `everywhere`. Answers with the policy re-read.
+#[tauri::command(async)]
+fn allow_paths(
+    server: String,
+    name: String,
+    endpoint: String,
+    binaries: Vec<String>,
+    routes: Vec<Route>,
+    everywhere: bool,
+) -> Result<PolicyView, Failed> {
+    let reply = remote(&server)?
+        .call(Request::AllowPaths {
+            name,
+            endpoint,
+            binaries,
+            routes,
             everywhere,
         })
         .map_err(to_message)?;
@@ -1017,6 +1041,7 @@ fn main() {
             policy,
             events,
             allow,
+            allow_paths,
             block,
             unlist,
             diff,

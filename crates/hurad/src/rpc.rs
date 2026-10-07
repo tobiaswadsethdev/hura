@@ -44,7 +44,26 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             everywhere,
         } => with_session(&name, |s| {
             let backend = backends.for_session(s);
-            let revision = ops::allow(backend, s, &endpoint, &binaries, everywhere)
+            let revision = ops::allow(backend, s, &endpoint, &binaries, &[], everywhere)
+                .map_err(Failure::failed)?;
+            Ok(policy_view(&revision, s))
+        }),
+        Request::AllowPaths {
+            name,
+            endpoint,
+            binaries,
+            routes,
+            everywhere,
+        } => with_session(&name, |s| {
+            let backend = backends.for_session(s);
+            // Never an allow of the whole host: that is `Allow`, and an empty
+            // list here is a client that lost the paths on the way.
+            if routes.is_empty() {
+                return Err(Failure::failed(format!(
+                    "no paths named to allow on {endpoint}"
+                )));
+            }
+            let revision = ops::allow(backend, s, &endpoint, &binaries, &routes, everywhere)
                 .map_err(Failure::failed)?;
             Ok(policy_view(&revision, s))
         }),

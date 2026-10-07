@@ -251,6 +251,12 @@ enum Command {
         /// omitted, which is the widest the gateway can express.
         #[arg(long = "binary", value_name = "PATH", requires = "allow")]
         binaries: Vec<String>,
+
+        /// Narrow an `--allow` to one method and path glob, e.g.
+        /// `GET /org/_packaging/feed/nuget/v3/**`, or a bare path for GET.
+        /// Repeatable; nothing else on the endpoint is opened.
+        #[arg(long = "path", value_name = "[METHOD] PATH", requires = "allow")]
+        paths: Vec<String>,
     },
 
     /// Delete sessions and their sandboxes.
@@ -480,7 +486,8 @@ fn main() -> ExitCode {
             allow,
             block,
             binaries,
-        }) => cmd_endpoints(allow.as_deref(), block.as_deref(), binaries),
+            paths,
+        }) => cmd_endpoints(allow.as_deref(), block.as_deref(), binaries, &paths),
         Some(Command::Rm { names }) => cmd_rm(&backends, names),
     };
 
@@ -1158,11 +1165,27 @@ fn cmd_attach(backends: &Backends, name: &str) -> Fallible {
 /// Through [`endpoints::update_at`] rather than a load/modify/save here,
 /// because that takes the lock file the window's own writes take: two processes
 /// editing this at once is not exotic when one of them is a server.
-fn cmd_endpoints(allow: Option<&str>, block: Option<&str>, binaries: Vec<String>) -> Fallible {
+fn cmd_endpoints(
+    allow: Option<&str>,
+    block: Option<&str>,
+    binaries: Vec<String>,
+    paths: &[String],
+) -> Fallible {
     let path = endpoints::Lists::default_path();
     if let Some(endpoint) = allow {
+        let routes = paths
+            .iter()
+            .map(|p| match p.trim().split_once(char::is_whitespace) {
+                Some((method, glob)) => endpoints::Route::checked(method, glob),
+                None => endpoints::Route::checked("GET", p),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         endpoints::update_at(&path, path.with_extension("lock"), |l| {
-            l.allow(endpoint, binaries)
+            if routes.is_empty() {
+                l.allow(endpoint, binaries)
+            } else {
+                l.allow_routes(endpoint, binaries, routes)
+            }
         })?;
         println!("{endpoint} is on the allow list");
     } else if let Some(endpoint) = block {
@@ -1181,6 +1204,16 @@ fn cmd_endpoints(allow: Option<&str>, block: Option<&str>, binaries: Vec<String>
             false => a.binaries.join(" "),
         };
         println!("{:<7} {:<32} {who}", "allow", a.endpoint);
+    }
+    for r in &lists.routes {
+        let who = match r.binaries.is_empty() {
+            true => "the rule already naming it".to_string(),
+            false => r.binaries.join(" "),
+        };
+        println!("{:<7} {:<32} {who}", "allow", r.endpoint);
+        for route in &r.routes {
+            println!("{:<7} {:<32} only {route}", "", "");
+        }
     }
     for e in &lists.block {
         println!("{:<7} {e}", "block");

@@ -31,7 +31,8 @@ import type { Session } from "./gen/Session";
 import { copy, useContextMenu } from "./ContextMenu";
 import { usePreviews } from "./previews";
 import { Empty } from "./Empty";
-import { Branch, Chevron, Copy, Forget, Plus, Ports, StateDot } from "./icons";
+import { Branch, Chevron, Copy, Forget, Plus, Ports, StateDot, Tracker } from "./icons";
+import { useHeldTickets } from "./ticketNotify";
 
 export type Group = {
   /// The project, or `null` for the by-repository groups at the bottom.
@@ -39,6 +40,17 @@ export type Group = {
   label: string;
   hint: string;
   worktrees: Session[];
+};
+
+/// The way to the tickets screen from the top of the sidebar. Only ever seen
+/// with the screen shut: a screen covers the sidebar, so there is no lit state
+/// and the way back is the header's button, Escape or the shortcut.
+export type TicketsEntry = {
+  disabled: boolean;
+  /// The shortcut: as this platform writes it, and as `aria-keyshortcuts`
+  /// spells it.
+  keys: { label: string; aria: string };
+  onOpen: () => void;
 };
 
 /// Sort sessions into their projects.
@@ -89,10 +101,12 @@ export function Tree({
   onNewWorktree,
   onForget,
   onDestroy,
+  tickets,
 }: {
   /// How wide, in pixels. From the window's own preferences and written by the
   /// handle on this sidebar's right edge -- see `prefs.ts` and `Split.tsx`.
   width: number;
+  tickets: TicketsEntry;
   groups: Group[];
   /// Each worktree's diff against its base, by session name, as the last poll
   /// reported it. Absent for a session that has not been polled yet, which is
@@ -122,129 +136,158 @@ export function Tree({
     });
 
   return (
-    <nav
-      className="tree scrollbar-sleek"
-      style={{ width }}
-      aria-label="projects and worktrees"
-    >
-      {groups.map((g) => {
-        const key = keyOf(g);
-        const open = !shut.has(key);
-        return (
-          <section key={key} className="group">
-            {/* The toggle and the actions are siblings rather than nested: a
-                button inside a button is not markup a browser will honour, and
-                the alternative -- a div with a click handler -- gives up the
-                keyboard and the focus ring that make the reveal below safe. */}
-            {/* Everything you can do to a project is in its menu; the `+`
-                stays on the row as well, because starting a worktree is the
-                reason to be pointing at a project and it has no other door. */}
-            <header
-              className="group-head"
-              {...menu(() => [
-                ...(g.project
-                  ? [
-                      {
-                        label: "New worktree",
-                        icon: Plus,
-                        run: () => onNewWorktree(g.project!),
-                      },
-                      "separator" as const,
-                    ]
-                  : []),
-                { label: "Copy repository URL", icon: Copy, hint: g.hint, run: () => copy(g.hint) },
-                ...(g.project
-                  ? [
-                      "separator" as const,
-                      {
-                        label: "Forget project",
-                        icon: Forget,
-                        hint: "worktrees stay",
-                        danger: true,
-                        run: () => onForget(g.project!),
-                      },
-                    ]
-                  : []),
-              ])}
-            >
-              <button
-                className="group-toggle"
-                aria-expanded={open}
-                title={g.hint}
-                onClick={() => toggle(key)}
+    // The tickets above the projects and outside their scroll, so the way to
+    // them is in the same place however long the list of worktrees gets.
+    <div className="sidebar" style={{ width }}>
+      <TicketsRow {...tickets} />
+      <nav className="tree scrollbar-sleek" aria-label="projects and worktrees">
+        {groups.map((g) => {
+          const key = keyOf(g);
+          const open = !shut.has(key);
+          return (
+            <section key={key} className="group">
+              {/* The toggle and the actions are siblings rather than nested: a
+                  button inside a button is not markup a browser will honour, and
+                  the alternative -- a div with a click handler -- gives up the
+                  keyboard and the focus ring that make the reveal below safe. */}
+              {/* Everything you can do to a project is in its menu; the `+`
+                  stays on the row as well, because starting a worktree is the
+                  reason to be pointing at a project and it has no other door. */}
+              <header
+                className="group-head"
+                {...menu(() => [
+                  ...(g.project
+                    ? [
+                        {
+                          label: "New worktree",
+                          icon: Plus,
+                          run: () => onNewWorktree(g.project!),
+                        },
+                        "separator" as const,
+                      ]
+                    : []),
+                  { label: "Copy repository URL", icon: Copy, hint: g.hint, run: () => copy(g.hint) },
+                  ...(g.project
+                    ? [
+                        "separator" as const,
+                        {
+                          label: "Forget project",
+                          icon: Forget,
+                          hint: "worktrees stay",
+                          danger: true,
+                          run: () => onForget(g.project!),
+                        },
+                      ]
+                    : []),
+                ])}
               >
-                <Chevron open={open} className="group-twist" />
-                <span className={`group-label${g.project ? "" : " loose"}`}>{g.label}</span>
-                <span className="group-count">{g.worktrees.length}</span>
-              </button>
+                <button
+                  className="group-toggle"
+                  aria-expanded={open}
+                  title={g.hint}
+                  onClick={() => toggle(key)}
+                >
+                  <Chevron open={open} className="group-twist" />
+                  <span className={`group-label${g.project ? "" : " loose"}`}>{g.label}</span>
+                  <span className="group-count">{g.worktrees.length}</span>
+                </button>
 
-              {/* Hidden until the group is hovered or something inside it has
-                  focus -- see `style.css`. A row of controls beside every
-                  project is a row of controls you read past; the ones here are
-                  for the moment you have decided to act on *this* project and
-                  are already pointing at it.
+                {/* Hidden until the group is hovered or something inside it has
+                    focus -- see `style.css`. A row of controls beside every
+                    project is a row of controls you read past; the ones here are
+                    for the moment you have decided to act on *this* project and
+                    are already pointing at it.
 
-                  Nothing at all for a by-repository group, and no `+`: there
-                  is no project to start a worktree in, and making one from
-                  here would have to guess which checkout on the server the URL
-                  meant, of which there may be several.
+                    Nothing at all for a by-repository group, and no `+`: there
+                    is no project to start a worktree in, and making one from
+                    here would have to guess which checkout on the server the URL
+                    meant, of which there may be several.
 
-                  There used to be an `external` badge in its place, and it was
-                  a word on every row of the bottom half of the sidebar that
-                  told you something the label above it already says: a group
-                  with no project is drawn in the mono face at the dimmer rank,
-                  which is the difference. A badge earns its space when it
-                  marks an exception, and `external` marked a whole category. The full URL is
-                  still one hover away on the group's own title. */}
-              {g.project && (
-                <span className="group-actions">
-                  <button
-                    className="quiet-icon"
-                    title="new worktree in this project"
-                    onClick={() => onNewWorktree(g.project!)}
-                  >
-                    <Plus aria-label="new worktree" />
-                  </button>
-                </span>
-              )}
-            </header>
-
-            {/* Indented, and with a rule running down the indent -- see
-                `.group-body` in `style.css`. Two things a flat list could not
-                say: which project a card belongs to once the header above it
-                has scrolled out from under the sticky one, and where a group
-                ends. The project row keeps its own alignment at the sidebar's
-                edge, so the twisty and the name are still the column your eye
-                runs down. */}
-            {open && (
-              <div className="group-body">
-                {/* A branch glyph on the row a worktree would occupy, and
-                    no words: `no worktrees yet` was three of them restating
-                    the `0` already sitting in the group's own header two
-                    lines above. */}
-                {g.worktrees.length === 0 ? (
-                  <Empty size="row" icon={Branch} />
-                ) : (
-                  g.worktrees.map((s) => (
-                    <Worktree
-                      key={s.name}
-                      session={s}
-                      stat={polls[s.name]?.stat ?? null}
-                      usage={polls[s.name]?.usage ?? null}
-                      listening={polls[s.name]?.ports.map((l) => l.port) ?? []}
-                      on={s.name === selected}
-                      onSelect={onSelect}
-                      onDestroy={onDestroy}
-                    />
-                  ))
+                    There used to be an `external` badge in its place, and it was
+                    a word on every row of the bottom half of the sidebar that
+                    told you something the label above it already says: a group
+                    with no project is drawn in the mono face at the dimmer rank,
+                    which is the difference. A badge earns its space when it
+                    marks an exception, and `external` marked a whole category. The full URL is
+                    still one hover away on the group's own title. */}
+                {g.project && (
+                  <span className="group-actions">
+                    <button
+                      className="quiet-icon"
+                      title="new worktree in this project"
+                      onClick={() => onNewWorktree(g.project!)}
+                    >
+                      <Plus aria-label="new worktree" />
+                    </button>
+                  </span>
                 )}
-              </div>
-            )}
-          </section>
-        );
-      })}
-      <Spend groups={groups} polls={polls} />
-    </nav>
+              </header>
+
+              {/* Indented, and with a rule running down the indent -- see
+                  `.group-body` in `style.css`. Two things a flat list could not
+                  say: which project a card belongs to once the header above it
+                  has scrolled out from under the sticky one, and where a group
+                  ends. The project row keeps its own alignment at the sidebar's
+                  edge, so the twisty and the name are still the column your eye
+                  runs down. */}
+              {open && (
+                <div className="group-body">
+                  {/* A branch glyph on the row a worktree would occupy, and
+                      no words: `no worktrees yet` was three of them restating
+                      the `0` already sitting in the group's own header two
+                      lines above. */}
+                  {g.worktrees.length === 0 ? (
+                    <Empty size="row" icon={Branch} />
+                  ) : (
+                    g.worktrees.map((s) => (
+                      <Worktree
+                        key={s.name}
+                        session={s}
+                        stat={polls[s.name]?.stat ?? null}
+                        usage={polls[s.name]?.usage ?? null}
+                        listening={polls[s.name]?.ports.map((l) => l.port) ?? []}
+                        on={s.name === selected}
+                        onSelect={onSelect}
+                        onDestroy={onDestroy}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+            </section>
+          );
+        })}
+        <Spend groups={groups} polls={polls} />
+      </nav>
+    </div>
+  );
+}
+
+/// The tickets, as a row the width of the sidebar.
+///
+/// The header's button is the same destination, and it stays: this is the
+/// one people reach for many times a day, and a 28-pixel glyph in a strip of
+/// five was a target to find rather than a place to go. The count is how many
+/// tickets the filters held at the last read, so the row says whether there
+/// is anything there before it is opened.
+function TicketsRow({ disabled, keys, onOpen }: TicketsEntry) {
+  const held = useHeldTickets();
+  return (
+    <button
+      className="tickets-row"
+      disabled={disabled}
+      title={`tickets (${keys.label})`}
+      aria-keyshortcuts={keys.aria}
+      onClick={onOpen}
+    >
+      <Tracker />
+      <span className="tickets-label">tickets</span>
+      {held !== null && held > 0 && (
+        <span className="tickets-count" title={`${held} in your filters at the last read`}>
+          {held}
+        </span>
+      )}
+    </button>
   );
 }
 

@@ -18,6 +18,7 @@
 // filters actually answered; the rest keep the membership they had.
 
 import { sendNotification } from "@tauri-apps/plugin-notification";
+import { useSyncExternalStore } from "react";
 
 import type { Inbox } from "./gen/Inbox";
 import type { Task } from "./gen/Task";
@@ -175,4 +176,28 @@ function save(snapshot: Snapshot) {
     // Storage full or refused: the next read compares with the last one that
     // did save, which errs towards telling you twice rather than never.
   }
+  held = Object.keys(snapshot.tickets).length;
+  for (const listener of listeners) listener();
+}
+
+/// How many tickets the filters held at the last read, whoever made it.
+///
+/// From the snapshot rather than a read of its own, so the count in the
+/// sidebar costs the trackers nothing: it is as fresh as the window's timer
+/// or the tickets screen last made it, and from the last session before the
+/// first read of this one. `null` before any read at all.
+let held: number | null = (() => {
+  const snapshot = load();
+  return snapshot ? Object.keys(snapshot.tickets).length : null;
+})();
+const listeners = new Set<() => void>();
+
+export function useHeldTickets(): number | null {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    () => held,
+  );
 }

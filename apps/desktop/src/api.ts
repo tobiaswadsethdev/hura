@@ -39,6 +39,7 @@ import type { Project } from "./gen/Project";
 import type { NewSession } from "./gen/NewSession";
 import type { Poll } from "./gen/Poll";
 import type { Session } from "./gen/Session";
+import type { Route } from "./gen/Route";
 import type { Settings } from "./gen/Settings";
 import type { SettingsView } from "./gen/SettingsView";
 import type { View as PolicyView } from "./gen/View";
@@ -107,6 +108,16 @@ export const api = {
   // `everywhere` also writes the global list every new session starts from.
   allow: (server: string, name: string, endpoint: string, binaries: string[], everywhere: boolean) =>
     invoke<PolicyView>("allow", { server, name, endpoint, binaries, everywhere }),
+  // Only these methods and paths of the endpoint. A request of its own, so an
+  // older `hurad` refuses it rather than opening the whole host.
+  allowPaths: (
+    server: string,
+    name: string,
+    endpoint: string,
+    binaries: string[],
+    routes: Route[],
+    everywhere: boolean,
+  ) => invoke<PolicyView>("allow_paths", { server, name, endpoint, binaries, routes, everywhere }),
   block: (server: string, name: string, endpoint: string, everywhere: boolean) =>
     invoke<PolicyView>("block", { server, name, endpoint, everywhere }),
   // Off the global lists only; no sandbox is touched.
