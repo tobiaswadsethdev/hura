@@ -15,7 +15,8 @@ use hura_core::backend::{Backend, Backends};
 use hura_core::session::Session;
 use hura_core::store::Store;
 use hura_core::{
-    comments, config, endpoints, files, git, image, ops, policy, projects, repos, secrets, skills,
+    chat, comments, config, endpoints, files, git, image, ops, policy, projects, repos, secrets,
+    skills,
 };
 use hura_proto::{Failure, GitOp, McpOp, Outcome, Reply, Request};
 use openshell_client::CliClient;
@@ -163,6 +164,34 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             ops::kill_shell(backends.for_session(s), s, &tmux).map_err(Failure::failed)?;
             ops::shells(backends.for_session(s), s)
                 .map(|shells| Reply::Shells { shells })
+                .map_err(Failure::gateway)
+        }),
+        Request::Chats { name } => with_session(&name, |s| {
+            chat::list(backends.for_session(s), s)
+                .map(|chats| Reply::Chats {
+                    chats,
+                    opened: None,
+                })
+                .map_err(Failure::gateway)
+        }),
+        Request::NewChat { name } => with_session(&name, |s| {
+            let backend = backends.for_session(s);
+            let opened = chat::open(backend, s).map_err(Failure::failed)?;
+            chat::list(backend, s)
+                .map(|chats| Reply::Chats {
+                    chats,
+                    opened: Some(opened),
+                })
+                .map_err(Failure::gateway)
+        }),
+        Request::CloseChat { name, conv } => with_session(&name, |s| {
+            let backend = backends.for_session(s);
+            chat::close(backend, s, &conv).map_err(Failure::failed)?;
+            chat::list(backend, s)
+                .map(|chats| Reply::Chats {
+                    chats,
+                    opened: None,
+                })
                 .map_err(Failure::gateway)
         }),
         Request::Comments { name } => with_session(&name, |s| Ok(review(comments::list(&s.name)))),
@@ -449,7 +478,11 @@ fn create(new: hura_core::ops::NewSession) -> Outcome {
                 eprintln!("hurad: {}: could not record why: {e}", draft.name);
             }
         };
-        if let Err(e) = image::ensure_for(&draft.toolchains) {
+        let image = match draft.interface {
+            chat::Interface::Terminal => image::ensure_for(&draft.toolchains),
+            chat::Interface::Chat => image::ensure_chat(&draft.toolchains),
+        };
+        if let Err(e) = image {
             failed(format!("could not build the image: {e}"));
             return;
         }

@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+use crate::chat;
 use crate::mcp;
 use crate::policy;
 use crate::session;
@@ -100,6 +101,9 @@ pub struct Config {
     /// `tobias/PROJ-123-add-the-changelog` -- the convention a tracker's own
     /// commit hooks and every reviewer already look for.
     pub branch_prefix: Option<String>,
+    /// Whether a new session's agent is a chat or a terminal. `None` is a
+    /// chat; see [`Self::interface`].
+    pub interface: Option<chat::Interface>,
 }
 
 impl Config {
@@ -164,6 +168,16 @@ impl Config {
                 ),
             ));
         }
+
+        let interface = match blank_to_none(raw.interface.take()) {
+            None => None,
+            Some(text) => Some(chat::Interface::parse(&text).ok_or_else(|| {
+                invalid(
+                    "interface",
+                    format!("`{text}` is not an interface; expected \"chat\" or \"terminal\""),
+                )
+            })?),
+        };
 
         let refresh = match &raw.refresh {
             None => None,
@@ -309,7 +323,15 @@ impl Config {
             skills: resolved_skills,
             mcp,
             branch_prefix: raw.branch_prefix,
+            interface,
         })
+    }
+
+    /// What a new session's agent is when nothing else says: a chat. The
+    /// terminal is still there for anyone who would rather have it, and is
+    /// what every session made before the choice existed stays.
+    pub fn interface(&self) -> chat::Interface {
+        self.interface.unwrap_or(chat::Interface::Chat)
     }
 
     /// The policy a new session gets when nothing else says.
@@ -379,6 +401,7 @@ struct Raw {
     #[allow(dead_code)]
     tracker: Option<serde::de::IgnoredAny>,
     branch_prefix: Option<String>,
+    interface: Option<String>,
 }
 
 /// One `[[mcp]]` table, before it is checked. Its own struct so a misspelled key

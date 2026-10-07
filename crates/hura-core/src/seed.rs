@@ -409,6 +409,11 @@ pub fn failure_message(session: &str, why: &str) -> String {
 /// than being the session's command. When the agent exits the pane survives,
 /// which is what makes it possible to attach afterwards and see what happened.
 pub fn start_agent_script(backend: &dyn Backend, session: &Session) -> String {
+    // A chat session's agent is the host that runs the SDK. Same tmux session,
+    // same idempotence, different command; see `chat::start_script`.
+    if session.interface == crate::chat::Interface::Chat {
+        return crate::chat::start_script(backend, session);
+    }
     let paths = backend.paths(session);
     let launch = if session.task.trim().is_empty() {
         session.agent.clone()

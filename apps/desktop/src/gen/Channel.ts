@@ -10,4 +10,4 @@ export type Channel = { "kind": "terminal", session: string, tmux: string | null
  * `localhost` under a recent Node listens on `::1` alone, and is
  * unreachable at `127.0.0.1`.
  */
-host: Loopback, };
+host: Loopback, } | { "kind": "chat", session: string, conv: string, since: number, };

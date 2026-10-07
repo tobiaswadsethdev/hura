@@ -214,6 +214,15 @@ pub enum Request {
     /// Close one, killing whatever is running in it. The agent's own is not a
     /// shell and is refused.
     KillShell { name: String, tmux: String },
+    /// A chat session's conversations, the agent's first. Asked of the host in
+    /// the sandbox, for the reason the shells are asked of tmux.
+    Chats { name: String },
+    /// Open another conversation beside the agent's. Answers with the list and
+    /// the new one's name, which the host chose.
+    NewChat { name: String },
+    /// End a conversation and forget its transcript. The agent's own is
+    /// refused, as its terminal is.
+    CloseChat { name: String, conv: String },
     /// What is listening in a session's sandbox, which process holds each
     /// port, and the forwards this server is running into it for previews.
     Ports { name: String },
@@ -359,6 +368,9 @@ impl Request {
             | Request::Shells { name }
             | Request::NewShell { name }
             | Request::KillShell { name, .. }
+            | Request::Chats { name }
+            | Request::NewChat { name }
+            | Request::CloseChat { name, .. }
             | Request::Ports { name }
             | Request::StopForward { name, .. }
             | Request::KillPort { name, .. }
@@ -437,6 +449,11 @@ pub enum Reply {
     },
     Shells {
         shells: Vec<String>,
+    },
+    Chats {
+        chats: Vec<String>,
+        /// The conversation just opened, when that is what was asked for.
+        opened: Option<String>,
     },
     Ports(hura_core::ports::PortsView),
     Files(Dir),

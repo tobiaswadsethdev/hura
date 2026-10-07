@@ -111,6 +111,23 @@ export function useContextMenu() {
 /// Put text on the clipboard. Here because "copy" is the one item nearly every
 /// menu has, and a failure is not worth more than silence: the menu has
 /// already closed, and there is nowhere honest to say so.
+/// The same menu, opened by pressing a button rather than by a right-click:
+/// for a button whose action is a choice between a few things. Opened under
+/// the button, and from the keyboard when the press was a key, so the first
+/// item takes focus as it does for the menu key.
+export function useButtonMenu() {
+  const show = useContext(Ctx);
+  return useCallback(
+    (items: () => MenuItem[]) => (e: React.MouseEvent<HTMLElement>) => {
+      const list = items();
+      if (list.length === 0) return;
+      const r = e.currentTarget.getBoundingClientRect();
+      show({ x: r.left, y: r.bottom + 4, items: list, from: e.currentTarget, keyboard: e.detail === 0 });
+    },
+    [show],
+  );
+}
+
 export function copy(text: string) {
   void navigator.clipboard?.writeText(text).catch(() => {});
 }

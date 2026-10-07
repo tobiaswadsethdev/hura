@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import { api, messageOf } from "./api";
 import { Waiting } from "./Empty";
 import {
+  Agent,
   Branch,
   Busy,
   Close,
@@ -32,6 +33,7 @@ import {
   Tracker,
 } from "./icons";
 import type { Facts } from "./gen/Facts";
+import type { Interface } from "./gen/Interface";
 import type { NewOptions } from "./gen/NewOptions";
 import type { Picked } from "./gen/Picked";
 import type { Project } from "./gen/Project";
@@ -126,6 +128,7 @@ function Form({
   const [policy, setPolicy] = useState(options.default_policy);
   const [toolchains, setToolchains] = useState<string[]>([]);
   const [providers, setProviders] = useState<string[]>(options.default_providers);
+  const [agentInterface, setAgentInterface] = useState<Interface>(options.default_interface);
   const [facts, setFacts] = useState<Facts | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -209,6 +212,7 @@ function Form({
         providers,
         toolchains,
         start: true,
+        interface: agentInterface,
       });
       onCreated(created);
     } catch (e) {
@@ -284,6 +288,18 @@ function Form({
             placeholder="default branch"
             spellCheck={false}
             onChange={(e) => setBase(e.target.value)}
+          />
+        </label>
+        <label className="chip-field" title="how you talk to the agent">
+          <Agent />
+          <Select
+            value={agentInterface}
+            onChange={(v) => setAgentInterface(v as Interface)}
+            aria-label="agent"
+            options={[
+              { value: "chat", label: "chat", hint: "drawn by this window" },
+              { value: "terminal", label: "terminal", hint: "Claude Code's own, in tmux" },
+            ]}
           />
         </label>
         <label className="chip-field" title="network policy">

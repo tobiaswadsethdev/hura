@@ -37,6 +37,7 @@ import {
   Activity,
   ArrowDownToLine,
   ArrowLeft,
+  ArrowUp,
   ArrowUpFromLine,
   BadgeInfo,
   Binary,
@@ -76,6 +77,7 @@ import {
   ListPlus,
   ListTree,
   MessageSquare,
+  MessagesSquare,
   Pencil,
   Play,
   Plug,
@@ -96,6 +98,7 @@ import {
   Sparkles,
   Square,
   SquareTerminal,
+  Terminal as TerminalGlyph,
   Ticket,
   TriangleAlert,
   Trash,
@@ -112,6 +115,7 @@ import {
 } from "material-icon-theme/dist/material-icons.json";
 
 import type { State } from "./gen/State";
+import "./working.css";
 
 /// The grid every icon in this window is on: 14 pixels across, with a stroke
 /// of `ICON_STROKE` *actual* pixels. Applied to lucide through its provider in
@@ -220,6 +224,17 @@ export const Skill = Sparkles;
 export const Toolchain = Package;
 /// The agent the session runs, and the version of it.
 export const Agent = Bot;
+
+// The chat: a conversation with the agent, as opposed to its terminal.
+/// A conversation tab, and the menu entry that opens one. Two bubbles rather
+/// than the one `Comments` already means, so the review and the chat are not
+/// one word.
+export const Chat = MessagesSquare;
+/// Sending a message. An arrow up, which is where the message goes.
+export const Send = ArrowUp;
+/// A shell, in the menu that opens either. Not `Program`'s square: that is a
+/// binary a policy names, and this is a prompt to type at.
+export const Shell = TerminalGlyph;
 /// This window, as opposed to the server it talks to.
 export const Desktop = Monitor;
 
@@ -311,20 +326,35 @@ export const Chevron = ({ open, ...p }: Props & { open: boolean }) =>
 ///
 /// The colours are in `style.css`, keyed on the state name, for the same reason
 /// the palette is: one place to change what `waiting` looks like.
+/// An agent working, or a session being made ready for one: three dots turning
+/// round each other. See `working.css` for where the motion comes from.
+///
+/// Sized by `size` like the lucide glyphs, so the empty states can pass theirs,
+/// and coloured by `currentColor` like them too.
+export function Working({ size = ICON_SIZE, className }: { size?: number; className?: string }) {
+  return (
+    <span className={`working ${className ?? ""}`} style={{ fontSize: size }} aria-hidden>
+      <span className="working-dot a" />
+      <span className="working-dot b" />
+      <span className="working-dot c" />
+    </span>
+  );
+}
+
 export function StateDot({ state, className }: { state: State; className?: string }) {
   const box = `state-dot ${state} ${className ?? ""}`;
 
   switch (state) {
     // In progress, and the two are worth telling apart: `running` is an agent
     // working, `creating`/`seeding` is the sandbox not being there yet. Same
-    // spinner, different hue, because the thing you do about them is the same
-    // -- wait -- and the thing they mean is not.
+    // mark, different hue, because the thing you do about them is the same
+    // (wait) and the thing they mean is not.
     case "running":
     case "creating":
     case "seeding":
       return (
         <span className={box} role="img" aria-label={state}>
-          <span className="spinner" />
+          <Working />
         </span>
       );
 

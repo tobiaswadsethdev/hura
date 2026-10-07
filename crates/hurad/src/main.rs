@@ -27,7 +27,7 @@ use clap::{Parser, Subcommand};
 use hura_client as remote;
 use hura_core::backend::Backends;
 use hura_core::{
-    config, doctor, endpoints, events, image, mcp, ops, pane, policy, repos, session, store,
+    chat, config, doctor, endpoints, events, image, mcp, ops, pane, policy, repos, session, store,
     toolchain, update,
 };
 use hura_proto::{DEFAULT_PORT, Pairing};
@@ -333,6 +333,16 @@ struct NewArgs {
     /// Create the sandbox and clone, but do not start the agent.
     #[arg(long)]
     no_start: bool,
+
+    /// What the agent is: `chat`, drawn by the window through the Agent SDK,
+    /// or `terminal`, Claude Code's own interface in tmux. Defaults to
+    /// `interface` in the config file, else `chat`.
+    #[arg(long, value_parser = parse_interface)]
+    interface: Option<chat::Interface>,
+}
+
+fn parse_interface(text: &str) -> Result<chat::Interface, String> {
+    chat::Interface::parse(text).ok_or_else(|| format!("`{text}` is not `chat` or `terminal`"))
 }
 
 #[derive(Subcommand)]
@@ -765,13 +775,18 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
         // rather than as a docker tag nothing has ever built.
         toolchains: toolchain::resolve(&args.toolchains)?,
         start: !args.no_start,
+        interface: args.interface.unwrap_or_else(|| cfg.interface()),
     };
 
     // Here rather than inside ops::create, which never builds the image: the
     // build streams docker's output to the terminal, which only a command-line
     // caller can afford. The first session wanting a toolchain pays for the
-    // variant; every one after it starts as fast as any other.
-    image::ensure_for(&draft.toolchains)?;
+    // variant; every one after it starts as fast as any other. A chat session
+    // also needs an image new enough to carry its host.
+    match draft.interface {
+        chat::Interface::Terminal => image::ensure_for(&draft.toolchains)?,
+        chat::Interface::Chat => image::ensure_chat(&draft.toolchains)?,
+    };
     // The managed MCP containers, before the seeder points the agent at them.
     // Here rather than in `ops::create` for the reason the image build is here:
     // it is a side effect on this machine, with output of its own, and `ops` is
@@ -1151,6 +1166,15 @@ fn print_events(events: &[events::Event]) {
 fn cmd_attach(backends: &Backends, name: &str) -> Fallible {
     let session = require_session(name)?;
 
+    // A chat session's agent is drawn by the window. What this terminal gets is
+    // the host that runs it: its log, which is what is worth seeing from here
+    // when the window says something is wrong.
+    if session.interface == chat::Interface::Chat {
+        println!(
+            "{name} is a chat session: its conversations are in the window. \
+             This is the log of the process that runs them."
+        );
+    }
     println!("attaching to {name} - detach with Ctrl-b d");
 
     let status = attach::interactively(backends, &session)?;

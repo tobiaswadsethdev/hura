@@ -21,6 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use hura_core::chat::{ChatCommand, ChatFrame};
 use hura_core::events::Event;
 use hura_core::ops::Poll;
 pub use hura_core::ports::Loopback;
@@ -71,6 +72,19 @@ pub enum Channel {
         #[serde(default)]
         host: Loopback,
     },
+    /// One conversation in a chat session: its transcript and then what
+    /// happens in it, and the commands a person sends it.
+    ///
+    /// `since` is the last entry the client already has, so a channel opened
+    /// again after the connection dropped is sent what it missed rather than
+    /// the whole transcript twice.
+    Chat {
+        session: String,
+        conv: String,
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        since: u64,
+    },
 }
 
 impl Channel {
@@ -79,7 +93,8 @@ impl Channel {
             Channel::Terminal { session, .. }
             | Channel::Events { session }
             | Channel::Status { session }
-            | Channel::Port { session, .. } => session,
+            | Channel::Port { session, .. }
+            | Channel::Chat { session, .. } => session,
         }
     }
 }
@@ -110,6 +125,11 @@ pub enum ClientFrame {
         cols: u16,
         rows: u16,
     },
+    /// Something done in a conversation, on a chat channel.
+    Chat {
+        id: ChannelId,
+        command: ChatCommand,
+    },
 }
 
 /// Server to client.
@@ -134,6 +154,9 @@ pub enum ServerFrame {
     /// usage, the listening ports -- and every other frame would otherwise be
     /// allocated at its size. Invisible on the wire.
     Status { id: ChannelId, poll: Box<Poll> },
+    /// What the conversation on a chat channel said: the host's own frame,
+    /// passed through.
+    Chat { id: ChannelId, frame: ChatFrame },
     /// The channel has ended, for a reason worth showing when there is one.
     Closed {
         id: ChannelId,
@@ -148,6 +171,7 @@ impl ServerFrame {
             | ServerFrame::Output { id, .. }
             | ServerFrame::Events { id, .. }
             | ServerFrame::Status { id, .. }
+            | ServerFrame::Chat { id, .. }
             | ServerFrame::Closed { id, .. } => *id,
         }
     }
@@ -225,6 +249,11 @@ mod tests {
             },
             Channel::Status {
                 session: "a".into(),
+            },
+            Channel::Chat {
+                session: "a".into(),
+                conv: "agent".into(),
+                since: 0,
             },
         ] {
             assert_eq!(c.session(), "a");
@@ -310,6 +339,30 @@ mod tests {
             panic!("not an output frame");
         };
         assert_eq!(bytes::decode(&data).as_deref(), Some(typed));
+    }
+
+    /// A chat channel opened for the first time asks for everything, and says
+    /// so by leaving `since` out.
+    #[test]
+    fn a_chat_channel_without_since_starts_from_the_beginning() {
+        let c: Channel =
+            serde_json::from_str(r#"{"kind":"chat","session":"s","conv":"chat-1"}"#).unwrap();
+        assert_eq!(
+            c,
+            Channel::Chat {
+                session: "s".into(),
+                conv: "chat-1".into(),
+                since: 0,
+            }
+        );
+        let f = ClientFrame::Chat {
+            id: 2,
+            command: ChatCommand::Send { text: "go".into() },
+        };
+        let v = serde_json::to_value(&f).unwrap();
+        assert_eq!(v["do"], "chat");
+        assert_eq!(v["command"]["op"], "send");
+        assert_eq!(serde_json::from_value::<ClientFrame>(v).unwrap(), f);
     }
 
     /// A client written before there were shells sends a terminal channel with

@@ -50,6 +50,10 @@ export type ServerSummary = { name: string; address: string };
 /// and the version of the `hurad` that answered -- see `Paired` in main.rs.
 export type Paired = { server: ServerSummary; servers: ServerSummary[]; version: string };
 
+/// A chat session's conversations, and the one just opened when that is what
+/// was asked: `Chats` in main.rs.
+export type Chats = { chats: string[]; opened: string | null };
+
 /// Hand-written because it is the bridge's own shape rather than a message: see
 /// `GitAnswer` in main.rs. Both halves are generated types.
 export type GitAnswer = { said: string; status: GitStatus };
@@ -149,6 +153,14 @@ export const api = {
   newShell: (server: string, name: string) => invoke<string[]>("new_shell", { server, name }),
   killShell: (server: string, name: string, tmux: string) =>
     invoke<string[]>("kill_shell", { server, name, tmux }),
+
+  // A chat session's conversations, asked of the host in the sandbox for the
+  // reason the shells are asked of tmux. Opening one answers with the list and
+  // its name, which the host chose.
+  chats: (server: string, name: string) => invoke<Chats>("chats", { server, name }),
+  newChat: (server: string, name: string) => invoke<Chats>("new_chat", { server, name }),
+  closeChat: (server: string, name: string, conv: string) =>
+    invoke<Chats>("close_chat", { server, name, conv }),
 
   // The review. Kept on the server, per session, so an unsent one survives the
   // window closing -- see `hura_core::comments`.

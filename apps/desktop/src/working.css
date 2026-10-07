@@ -1,0 +1,143 @@
+/* Working: three dots turning round each other, each one shrinking as it
+   passes behind the others and swelling as it comes back round. The depth is
+   all in the size, which is why it reads as something turning in space rather
+   than as a ring going round.
+
+   The motion follows the loader Claude Desktop shows, measured from its frames
+   rather than drawn by eye: every dot centre and radius in each of its sixty
+   frames, followed from one frame to the next into three paths, then written
+   down here every other frame in em, so the mark is as sharp at 40 pixels as at
+   14. The numbers below are that measurement; change the timing on
+   `.working-dot`, not the frames.
+
+   currentColor, so it takes the hue of where it is: the working hue in the
+   tree, dimmer where something is only being prepared. */
+
+.working {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+}
+.working-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0.249em;
+  height: 0.249em;
+  margin: -0.1245em 0 0 -0.1245em;
+  border-radius: 50%;
+  background: currentColor;
+  animation-duration: 1.8s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.working-dot.a { transform: translate(0.219em, 0.338em) scale(0.955); animation-name: working-a; }
+.working-dot.b { transform: translate(0.819em, 0.317em) scale(0.797); animation-name: working-b; }
+.working-dot.c { transform: translate(0.498em, 0.472em) scale(0.268); animation-name: working-c; }
+/* Still, the three dots where the loop begins: a triangle, which still says
+   "working" without moving. */
+@media (prefers-reduced-motion: reduce) {
+  .working-dot { animation: none; }
+}
+
+@keyframes working-a {
+  0.00% { transform: translate(0.219em, 0.338em) scale(0.955); }
+  3.33% { transform: translate(0.196em, 0.324em) scale(0.984); }
+  6.67% { transform: translate(0.179em, 0.316em) scale(0.980); }
+  10.00% { transform: translate(0.171em, 0.312em) scale(0.953); }
+  13.33% { transform: translate(0.170em, 0.310em) scale(0.907); }
+  16.67% { transform: translate(0.179em, 0.314em) scale(0.831); }
+  20.00% { transform: translate(0.210em, 0.333em) scale(0.722); }
+  23.33% { transform: translate(0.267em, 0.365em) scale(0.585); }
+  26.67% { transform: translate(0.352em, 0.413em) scale(0.411); }
+  30.00% { transform: translate(0.459em, 0.475em) scale(0.234); }
+  33.33% { transform: translate(0.520em, 0.511em) scale(0.262); }
+  36.67% { transform: translate(0.585em, 0.549em) scale(0.478); }
+  40.00% { transform: translate(0.650em, 0.585em) scale(0.675); }
+  43.33% { transform: translate(0.702em, 0.617em) scale(0.827); }
+  46.67% { transform: translate(0.744em, 0.642em) scale(0.921); }
+  50.00% { transform: translate(0.779em, 0.662em) scale(0.961); }
+  53.33% { transform: translate(0.802em, 0.675em) scale(0.984); }
+  56.67% { transform: translate(0.821em, 0.683em) scale(0.988); }
+  60.00% { transform: translate(0.829em, 0.688em) scale(0.961); }
+  63.33% { transform: translate(0.831em, 0.690em) scale(0.911); }
+  66.67% { transform: translate(0.817em, 0.681em) scale(0.827); }
+  70.00% { transform: translate(0.777em, 0.659em) scale(0.709); }
+  73.33% { transform: translate(0.712em, 0.625em) scale(0.559); }
+  76.67% { transform: translate(0.630em, 0.575em) scale(0.364); }
+  80.00% { transform: translate(0.536em, 0.523em) scale(0.205); }
+  83.33% { transform: translate(0.475em, 0.483em) scale(0.211); }
+  86.67% { transform: translate(0.401em, 0.443em) scale(0.407); }
+  90.00% { transform: translate(0.335em, 0.403em) scale(0.602); }
+  93.33% { transform: translate(0.281em, 0.372em) scale(0.760); }
+  96.67% { transform: translate(0.240em, 0.350em) scale(0.878); }
+  100% { transform: translate(0.219em, 0.338em) scale(0.955); }
+}
+@keyframes working-b {
+  0.00% { transform: translate(0.819em, 0.317em) scale(0.797); }
+  3.33% { transform: translate(0.787em, 0.335em) scale(0.679); }
+  6.67% { transform: translate(0.726em, 0.368em) scale(0.533); }
+  10.00% { transform: translate(0.642em, 0.418em) scale(0.343); }
+  13.33% { transform: translate(0.540em, 0.475em) scale(0.201); }
+  16.67% { transform: translate(0.475em, 0.513em) scale(0.209); }
+  20.00% { transform: translate(0.411em, 0.551em) scale(0.421); }
+  23.33% { transform: translate(0.346em, 0.586em) scale(0.624); }
+  26.67% { transform: translate(0.293em, 0.618em) scale(0.783); }
+  30.00% { transform: translate(0.251em, 0.642em) scale(0.898); }
+  33.33% { transform: translate(0.219em, 0.664em) scale(0.947); }
+  36.67% { transform: translate(0.196em, 0.678em) scale(0.978); }
+  40.00% { transform: translate(0.182em, 0.685em) scale(0.982); }
+  43.33% { transform: translate(0.173em, 0.689em) scale(0.955); }
+  46.67% { transform: translate(0.171em, 0.690em) scale(0.909); }
+  50.00% { transform: translate(0.179em, 0.684em) scale(0.837); }
+  53.33% { transform: translate(0.210em, 0.666em) scale(0.726); }
+  56.67% { transform: translate(0.265em, 0.633em) scale(0.593); }
+  60.00% { transform: translate(0.350em, 0.587em) scale(0.411); }
+  63.33% { transform: translate(0.454em, 0.527em) scale(0.238); }
+  66.67% { transform: translate(0.524em, 0.488em) scale(0.266); }
+  70.00% { transform: translate(0.589em, 0.451em) scale(0.484); }
+  73.33% { transform: translate(0.649em, 0.416em) scale(0.677); }
+  76.67% { transform: translate(0.702em, 0.385em) scale(0.809); }
+  80.00% { transform: translate(0.746em, 0.358em) scale(0.904); }
+  83.33% { transform: translate(0.781em, 0.339em) scale(0.978); }
+  86.67% { transform: translate(0.805em, 0.325em) scale(1.000); }
+  90.00% { transform: translate(0.817em, 0.316em) scale(0.986); }
+  93.33% { transform: translate(0.827em, 0.311em) scale(0.957); }
+  96.67% { transform: translate(0.828em, 0.310em) scale(0.902); }
+  100% { transform: translate(0.819em, 0.317em) scale(0.797); }
+}
+@keyframes working-c {
+  0.00% { transform: translate(0.498em, 0.472em) scale(0.268); }
+  3.33% { transform: translate(0.501em, 0.399em) scale(0.484); }
+  6.67% { transform: translate(0.500em, 0.330em) scale(0.671); }
+  10.00% { transform: translate(0.500em, 0.268em) scale(0.813); }
+  13.33% { transform: translate(0.499em, 0.217em) scale(0.907); }
+  16.67% { transform: translate(0.502em, 0.176em) scale(0.967); }
+  20.00% { transform: translate(0.502em, 0.148em) scale(0.992); }
+  23.33% { transform: translate(0.500em, 0.130em) scale(0.984); }
+  26.67% { transform: translate(0.499em, 0.120em) scale(0.957); }
+  30.00% { transform: translate(0.499em, 0.118em) scale(0.900); }
+  33.33% { transform: translate(0.499em, 0.137em) scale(0.811); }
+  36.67% { transform: translate(0.499em, 0.183em) scale(0.697); }
+  40.00% { transform: translate(0.499em, 0.254em) scale(0.543); }
+  43.33% { transform: translate(0.501em, 0.351em) scale(0.362); }
+  46.67% { transform: translate(0.500em, 0.458em) scale(0.205); }
+  50.00% { transform: translate(0.501em, 0.533em) scale(0.207); }
+  53.33% { transform: translate(0.499em, 0.615em) scale(0.388); }
+  56.67% { transform: translate(0.501em, 0.693em) scale(0.598); }
+  60.00% { transform: translate(0.500em, 0.753em) scale(0.756); }
+  63.33% { transform: translate(0.500em, 0.800em) scale(0.878); }
+  66.67% { transform: translate(0.501em, 0.832em) scale(0.955); }
+  70.00% { transform: translate(0.501em, 0.855em) scale(0.984); }
+  73.33% { transform: translate(0.499em, 0.873em) scale(0.984); }
+  76.67% { transform: translate(0.499em, 0.881em) scale(0.959); }
+  80.00% { transform: translate(0.499em, 0.882em) scale(0.911); }
+  83.33% { transform: translate(0.503em, 0.869em) scale(0.837); }
+  86.67% { transform: translate(0.501em, 0.833em) scale(0.730); }
+  90.00% { transform: translate(0.501em, 0.770em) scale(0.604); }
+  93.33% { transform: translate(0.497em, 0.672em) scale(0.421); }
+  96.67% { transform: translate(0.496em, 0.552em) scale(0.240); }
+  100% { transform: translate(0.498em, 0.472em) scale(0.268); }
+}

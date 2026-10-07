@@ -43,6 +43,14 @@
 # a long list, and lower it if the diff pane feels behind the agent. 250ms to 60s.
 # refresh = "1s"
 
+# What a new session's agent is. "chat" runs Claude Code through the Agent SDK,
+# inside the sandbox, and the window draws the conversation: messages, tool
+# calls, permission prompts and questions as things to click. "terminal" is
+# Claude Code's own terminal interface in tmux, which is what every session was
+# before there was a choice. Either way it is the same `claude`, under the same
+# policy. The create form can choose for one session.
+# interface = "chat"
+
 # Whether `hurad serve` may fetch a newer release in the background. It never
 # replaces a running binary: it downloads and verifies ahead of time and leaves
 # the result beside the current one, and the swap happens at the next process

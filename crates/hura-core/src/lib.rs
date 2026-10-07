@@ -21,6 +21,7 @@
 
 pub mod ansi;
 pub mod backend;
+pub mod chat;
 pub mod comments;
 pub mod config;
 pub mod doctor;

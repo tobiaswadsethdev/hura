@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type { Channel } from "./gen/Channel";
+import type { ChatCommand } from "./gen/ChatCommand";
 import type { ServerFrame } from "./gen/ServerFrame";
 
 /// The id the Rust side uses for a `Closed` about the whole connection rather
@@ -89,6 +90,11 @@ export async function close(id: number): Promise<void> {
   // showing, and the pane is going away regardless.
   await invoke("unwatch", { id }).catch(() => {});
 }
+
+/// Something done in a conversation, on its chat channel.
+export const chat = {
+  command: (id: number, command: ChatCommand) => invoke("chat_command", { id, command }),
+};
 
 export const terminal = {
   input: (id: number, data: string) => invoke("terminal_input", { id, data }),

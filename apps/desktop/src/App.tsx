@@ -24,7 +24,6 @@ import { Dock } from "./Dock";
 import { Empty } from "./Empty";
 import {
   Branch,
-  Busy,
   Forget,
   Integrations,
   NewProject,
@@ -33,6 +32,7 @@ import {
   Servers,
   Settings,
   Tracker,
+  Working,
 } from "./icons";
 import { TicketsScreen } from "./Tickets";
 import { IntegrationsScreen } from "./Integrations";
@@ -93,15 +93,35 @@ function isTicketsKey(e: KeyboardEvent): boolean {
 /// fact about the sandbox, and one that outlives this window. A tab list kept
 /// in the client would show a shell that had been closed from elsewhere and
 /// hide one opened from elsewhere.
-function tabsFor(shells: string[], open: Tab[]): Tab[] {
+///
+/// A chat session's agent is its first conversation rather than a terminal, and
+/// the others it has are asked of the host the same way the shells are asked
+/// of tmux. Until that answer arrives the agent's own is there anyway, because
+/// it always exists.
+function tabsFor(session: Session, shells: string[], chats: string[], open: Tab[]): Tab[] {
+  const agent: Tab[] =
+    session.interface === "chat"
+      ? [
+          { kind: "chat", conv: "agent", label: "agent" },
+          ...chats
+            .filter((conv) => conv !== "agent")
+            .map((conv): Tab => ({ kind: "chat", conv, label: conv })),
+        ]
+      : [{ kind: "terminal", tmux: null, label: "agent" }];
   return [
-    { kind: "terminal", tmux: null, label: "agent" },
+    ...agent,
     ...shells.map((tmux): Tab => ({ kind: "terminal", tmux, label: tmux })),
     // Files and diffs last, in the order they were opened -- the one thing here
     // that is genuinely this window's state. A file is open because someone in
     // *this* window clicked it, and nothing in the sandbox knows that.
     ...open,
   ];
+}
+
+/// The tab a worktree falls back to when the one in front goes away: the
+/// agent, whichever kind of agent it has.
+function home(session: Session): string {
+  return session.interface === "chat" ? "chat:agent" : "terminal:agent";
 }
 
 /// Put the tabs in the order the user dragged them into.
@@ -196,6 +216,8 @@ export default function App() {
   /// per worktree: switching away and back finds it as you left it, because a
   /// shell you opened in one is not a shell in another.
   const [shells, setShells] = useState<Record<string, string[]>>({});
+  /// A chat session's conversations beside the agent's, the same way.
+  const [chats, setChats] = useState<Record<string, string[]>>({});
   const [files, setFiles] = useState<Record<string, Tab[]>>({});
   const [active, setActive] = useState<Record<string, string>>({});
   /// Tab keys per worktree, in the order they were dragged into. Window state
@@ -451,9 +473,24 @@ export default function App() {
     };
   }, [server, session, preparing, gone, shells]);
 
+  // The conversations, asked once per worktree like the shells, and only of a
+  // chat session: a terminal session has no host to ask.
+  const chatSession = session?.interface === "chat";
+  useEffect(() => {
+    if (!server || !session || !chatSession || preparing || gone || chats[session.name]) return;
+    let live = true;
+    api
+      .chats(server, session.name)
+      .then((list) => live && setChats((all) => ({ ...all, [session.name]: list.chats })))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [server, session, chatSession, preparing, gone, chats]);
+
   const openTabs = session
     ? arrange(
-        tabsFor(shells[session.name] ?? [], files[session.name] ?? []),
+        tabsFor(session, shells[session.name] ?? [], chats[session.name] ?? [], files[session.name] ?? []),
         order[session.name] ?? [],
       )
     : [];
@@ -720,7 +757,7 @@ export default function App() {
             // The create's own progress, said once in the middle: the steps
             // are seconds of gateway and then however long the clone takes,
             // and a spinner with the step beside it is all there is to know.
-            <Empty size="page" icon={Busy} spin note={preparingNote(session)} />
+            <Empty size="page" icon={Working} note={preparingNote(session)} />
           ) : gone && session ? (
             // Why there is nothing here, which is what used to be missing: the
             // panes each said `sandbox not found`, and the reason was on the
@@ -762,13 +799,45 @@ export default function App() {
                     })
                     .catch((e) => setError(messageOf(e)));
                 }}
+                onNewChat={
+                  session.interface === "chat"
+                    ? () => {
+                        api
+                          .newChat(server, session.name)
+                          .then(({ chats: list, opened }) => {
+                            setChats((all) => ({ ...all, [session.name]: list }));
+                            // In front, for the reason a new shell is.
+                            if (opened) setActive((a) => ({ ...a, [session.name]: `chat:${opened}` }));
+                          })
+                          .catch((e) => setError(messageOf(e)));
+                      }
+                    : undefined
+                }
+                onCloseChat={(conv) => {
+                  ask({
+                    title: `End ${conv}?`,
+                    body: <>The conversation stops, and its transcript is forgotten.</>,
+                    confirm: "end it",
+                    onConfirm: () => {
+                      api
+                        .closeChat(server, session.name, conv)
+                        .then(({ chats: list }) => {
+                          setChats((all) => ({ ...all, [session.name]: list }));
+                          setActive((a) =>
+                            a[session.name] === `chat:${conv}` ? { ...a, [session.name]: home(session) } : a,
+                          );
+                        })
+                        .catch((e) => setError(messageOf(e)));
+                    },
+                  });
+                }}
                 onCloseFile={(key) => {
                   setFiles((all) => ({
                     ...all,
                     [session.name]: (all[session.name] ?? []).filter((t) => keyOf(t) !== key),
                   }));
                   setActive((a) =>
-                    a[session.name] === key ? { ...a, [session.name]: "terminal:agent" } : a,
+                    a[session.name] === key ? { ...a, [session.name]: home(session) } : a,
                   );
                 }}
                 onCloseShell={(tmux) => {
@@ -780,7 +849,7 @@ export default function App() {
                       // agent is the one tab that is always there.
                       setActive((a) =>
                         a[session.name] === `terminal:${tmux}`
-                          ? { ...a, [session.name]: "terminal:agent" }
+                          ? { ...a, [session.name]: home(session) }
                           : a,
                       );
                     })

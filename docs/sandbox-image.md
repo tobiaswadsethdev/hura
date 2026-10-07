@@ -40,6 +40,34 @@ download is checked against the release manifest's SHA-256.
 `--build-arg CLAUDE_VERSION=2.1.246` pins a specific one. `hurad doctor` reports
 what the built image carries and warns when a newer release is out.
 
+## The chat agent's host
+
+A chat session's agent is not a terminal, and the image carries what runs it:
+`hura-agent`, in `/usr/local/lib/hura-agent` beside the Agent SDK, with a link
+on `PATH`. The seeder starts it in the agent's tmux session where a terminal
+session gets `claude`, and it runs Claude Code through the SDK with
+`pathToClaudeCodeExecutable` set to the image's own `/usr/local/bin/claude`. That
+is the binary the policy grants the API to, so nothing about the network rules
+changes.
+
+The SDK release is chosen by the Claude Code version the image installs: every
+release names the one it was made with in its `claudeCodeVersion`, and the two
+speak a control protocol to each other. Its own copy of Claude Code, an optional
+dependency, is not installed. Like `claude`, it is owned by root.
+
+The image is labelled `hura.chat`, which is what lets the first chat session on
+an older image rebuild it rather than wait for a host that is not there, and what
+`hurad doctor` checks.
+
+Three things measured against Claude Code 2.1.289 rather than read in the SDK's
+types. Turn state (idle, running, waiting on you) is only sent when
+`CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS` is set, which the host sets. The
+rate-limit windows arrive in a `rate_limit_event` under `unifiedWindows`, as
+fractions, with the documented `utilization` absent. And `hura-status` stands
+aside when `HURA_CHAT` is set, because the hooks in `settings.json` still fire
+under the SDK and would otherwise write over the host's own, better informed
+status.
+
 ## Toolchains
 
 The image above is the *base*, and what a session with no toolchain runs. A
@@ -55,6 +83,9 @@ point. [toolchains.md](toolchains.md) is the whole story -- the variants, the
 registry each toolchain opens, and what to change to add one.
 
 ## The status line, and why the image has one
+
+For a terminal agent; a chat agent has no status line, and its host writes the
+same file from what the SDK reports.
 
 Claude Code hands out what it knows about cost and rate limits in exactly one
 place: the `statusLine` command it invokes on every render, with a JSON payload

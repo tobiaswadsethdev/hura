@@ -194,6 +194,19 @@ fn check_image() -> Check {
                 "hurad image build",
             );
         }
+        // Rebuilt by the first chat session to need it, so this is not a
+        // failure; it is the minute that first session would otherwise spend
+        // without saying why.
+        if !crate::image::supports_chat(crate::session::IMAGE) {
+            return Check::warn(
+                "image",
+                format!(
+                    "{} predates chat sessions: the first one will rebuild it",
+                    crate::session::IMAGE
+                ),
+                "hurad image build",
+            );
+        }
         // The agent's own version. The base image freezes whatever Claude Code
         // was current when it was published, and the agent cannot upgrade itself
         // from inside a sandbox -- so without this an image built months ago

@@ -180,6 +180,37 @@ RUN chmod 0755 /usr/local/bin/hura-status /usr/local/bin/hura-usage \
     && chmod 0644 /sandbox/.claude/settings.json \
     && chown -R sandbox:sandbox /sandbox/.claude
 
+# The chat agent: Claude Code driven through the Agent SDK, by a host process
+# that lives in here rather than on the machine outside.
+#
+# The SDK release is the one paired with the Claude Code installed above. Each
+# release names its CLI in `claudeCodeVersion`, and the two speak a control
+# protocol to each other, so the pair is chosen together rather than each being
+# whatever was newest. Optional dependencies are left out: they are the SDK's
+# own copy of Claude Code for every platform, and the host points it at
+# /usr/local/bin/claude instead, which is the binary the policy grants the API
+# to. Peer dependencies are left out too; the SDK bundles what it imports.
+#
+# Root-owned, like the claude binary, so the agent cannot rewrite the process
+# that answers its permission prompts.
+COPY hura-agent.mjs /usr/local/lib/hura-agent/hura-agent.mjs
+RUN set -eu; \
+    claude_version="$(claude --version | awk '{print $1}')"; \
+    sdk="$(npm view '@anthropic-ai/claude-agent-sdk@>=0.0.0' claudeCodeVersion 2>/dev/null \
+        | awk -v want="'$claude_version'" '$2 == want { sub(/.*@/, "", $1); print $1 }' | tail -n 1)"; \
+    [ -n "$sdk" ] || { echo "no Agent SDK release is paired with claude $claude_version" >&2; exit 1; }; \
+    cd /usr/local/lib/hura-agent; \
+    npm install --no-save --no-audit --no-fund --omit=optional --legacy-peer-deps \
+        "@anthropic-ai/claude-agent-sdk@$sdk"; \
+    chmod 0755 hura-agent.mjs; \
+    ln -s /usr/local/lib/hura-agent/hura-agent.mjs /usr/local/bin/hura-agent; \
+    printf '%s\n' "$sdk" > /usr/local/lib/hura-agent/sdk-version; \
+    node --input-type=module -e "await import('@anthropic-ai/claude-agent-sdk')"
+
+# What `image::supports_chat` asks the image, without starting a container. A
+# variant inherits it, so a variant built from an older base says so too.
+LABEL hura.chat="1"
+
 USER sandbox
 
 # Inherited from the base image, restated so a future base change is visible

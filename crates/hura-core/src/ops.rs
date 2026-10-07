@@ -241,6 +241,9 @@ pub struct NewOptions {
     /// session's tools are not a surprise, and has nothing to offer about them.
     pub skills: Vec<String>,
     pub mcp: Vec<String>,
+    /// Whether a session started here gets a chat or a terminal, when the form
+    /// does not say otherwise: the config file's answer.
+    pub default_interface: crate::chat::Interface,
 }
 
 /// The templates, with a configured YAML path in front of them when there is
@@ -306,6 +309,7 @@ pub fn new_options(backends: &Backends, cfg: &crate::config::Config) -> NewOptio
         default_base: cfg.base.clone(),
         skills: cfg.skills().iter().map(|s| s.name.clone()).collect(),
         mcp: cfg.mcp().iter().map(|e| e.name().to_string()).collect(),
+        default_interface: cfg.interface(),
     }
 }
 
@@ -438,6 +442,10 @@ pub struct NewSession {
     /// posted on the wrong ticket in a tracker the config file already names.
     #[serde(default)]
     pub ticket: Option<crate::tracker::Ticket>,
+    /// A terminal or a chat. `None` is the config file's answer, so a client
+    /// that has never heard of the choice gets the one this server makes.
+    #[serde(default)]
+    pub interface: Option<crate::chat::Interface>,
 }
 
 impl NewSession {
@@ -501,6 +509,7 @@ impl NewSession {
             skills: with_library(cfg.skills()),
             toolchains: toolchain::resolve(&self.toolchains).map_err(|e| e.to_string())?,
             start: self.start,
+            interface: self.interface.unwrap_or_else(|| cfg.interface()),
         })
     }
 }
@@ -564,6 +573,8 @@ pub struct Draft {
     pub toolchains: Vec<&'static Toolchain>,
     /// Whether to start the agent once the clone is done.
     pub start: bool,
+    /// Whether that agent is a terminal or a chat.
+    pub interface: crate::chat::Interface,
 }
 
 /// A stage of creating a session, reported as it begins.
@@ -848,6 +859,7 @@ fn record(draft: &Draft) -> Session {
     s.toolchains = toolchain::labels(&draft.toolchains);
     s.mcp = draft.mcp.clone();
     s.skills = draft.skills.clone();
+    s.interface = draft.interface;
     s
 }
 
@@ -1029,9 +1041,16 @@ if [ -z "$any" ]; then printf 'no changes yet\n'; fi
 ///
 /// `-d` deletes the buffer after pasting, so a review does not sit in the
 /// sandbox's tmux buffer stack after it has been delivered.
+///
+/// A chat session has no terminal to paste into. Its agent is told through the
+/// host, as one message from you, which is what the paste was imitating.
 pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(), String> {
     if message.trim().is_empty() {
         return Err("nothing to say".into());
+    }
+    if session.interface == crate::chat::Interface::Chat {
+        return crate::chat::tell(backend, session, message)
+            .map_err(|e| format!("the agent could not be told: {e}"));
     }
     let script = tell_script(backend.tmux(), &session.tmux, message);
     match backend.exec(session, &["sh", "-c", &script]) {
@@ -1564,6 +1583,18 @@ pub fn poll(backend: &dyn Backend, session: &Session) -> Poll {
 /// failure would otherwise take the rest of the script with it.
 fn poll_script(backend: &dyn Backend, session: &Session) -> String {
     let paths = backend.paths(session);
+    // A chat session's tmux pane is the host's log, not an agent's screen, so
+    // there is nothing in it for the scraper to read; the host's own status
+    // file says everything. Left empty rather than captured, because a log
+    // line that happened to look like a prompt would be read as one.
+    let pane = match session.interface {
+        crate::chat::Interface::Terminal => format!(
+            "{tmux_bin} capture-pane -pe -t {tmux} 2>/dev/null | tail -n {PANE_LINES}",
+            tmux_bin = backend.tmux(),
+            tmux = seed::sh_quote(&session.tmux),
+        ),
+        crate::chat::Interface::Chat => String::new(),
+    };
     format!(
         r#"( cd {repo} 2>/dev/null || exit 0
 {resolve_base}
@@ -1589,7 +1620,7 @@ printf '
 printf '
 %s
 ' {pane_marker}
-{tmux_bin} capture-pane -pe -t {tmux} 2>/dev/null | tail -n {pane_lines}
+{pane}
 "#,
         repo = seed::sh_quote(&paths.repo),
         resolve_base = resolve_base_script(session),
@@ -1597,12 +1628,9 @@ printf '
         status_path = seed::sh_quote(&paths.status()),
         usage_marker = seed::sh_quote(status::USAGE_MARKER),
         usage_path = seed::sh_quote(&paths.usage()),
-        tmux_bin = backend.tmux(),
         pane_marker = seed::sh_quote(status::PANE_MARKER),
         ports_marker = seed::sh_quote(status::PORTS_MARKER),
         ports = crate::ports::SCRIPT,
-        tmux = seed::sh_quote(&session.tmux),
-        pane_lines = PANE_LINES,
     )
 }
 
@@ -1643,7 +1671,12 @@ fn parse_poll(stdout: &str, now: u64) -> Poll {
         // screen of nothing but colour changes is a blank screen.
         pane: (!plain.trim().is_empty()).then_some(pane_part.trim_end().to_string()),
         usage: crate::usage::parse(usage_part).filter(|u| !u.is_empty()),
-        ports: crate::ports::parse(ports_part),
+        // The chat host listens on a loopback port as well, and it is not
+        // something to preview.
+        ports: crate::ports::parse(ports_part)
+            .into_iter()
+            .filter(|l| l.port != crate::chat::PORT)
+            .collect(),
     }
 }
 
