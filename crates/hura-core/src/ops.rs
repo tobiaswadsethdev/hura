@@ -1106,6 +1106,31 @@ pub fn events(backend: &dyn Backend, session: &Session) -> Result<Vec<events::Ev
     Ok(events::merge_kept(&session.name, events::parse(&raw)))
 }
 
+/// Read every live session's log into its kept feed.
+///
+/// The gateway's log is a window, and at the status channel's two-second
+/// polls its own execs fill it in about six minutes. The only thing that read
+/// it was the events pane, and only while it was the dock's open tab: a denial
+/// made while you were in the files, in another worktree, or away from the
+/// window scrolled out before anything saw it, and the feed looked as if it had
+/// stopped. `hurad serve` calls this on a timer, so the record is kept whoever
+/// is looking, and the pane draws from it as before.
+///
+/// Failures are not reported. A sandbox that cannot be read has usually just
+/// gone, the next refresh marks it dead, and the pane says why when opened.
+pub fn keep_feeds(backends: &Backends) {
+    let Ok(store) = Store::load() else {
+        return;
+    };
+    for s in store.list() {
+        // No sandbox to ask, or none yet.
+        if matches!(s.state, State::Creating | State::Dead) {
+            continue;
+        }
+        let _ = events(backends.for_session(s), s);
+    }
+}
+
 /// Apply an incremental policy change and report what the sandbox ended up
 /// with, so the caller never has to assume the change landed.
 pub fn repolicy(
