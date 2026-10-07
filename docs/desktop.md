@@ -248,11 +248,15 @@ one click opens it. The reply is drawn as it is written.
    |  v Edit  NOTES.md                                              |
    |      - hello from chat                                         |
    |      + Hello from the chat pane.                               |
-   |  | Claude wants to run npm test                                |
-   |  |   npm test                                                  |
-   |  |   [allow]  allow, and don't ask again   decline...          |
-   |  [ tell the agent what to do                              ]    |
-   |  ask v   claude-opus-5-5[1m] v              ctx 2%  $0.13  [^] |
+   |  +----------------------------------------------------------+  |
+   |  | (?) Claude wants to run npm test                          |  |
+   |  |     npm test                                              |  |
+   |  |     [allow]  allow, and don't ask again   decline...      |  |
+   |  +----------------------------------------------------------+  |
+   |  +----------------------------------------------------------+  |
+   |  | tell the agent what to do                                 |  |
+   |  | ask v  Opus 5.5 (1M) v                ctx 2%  $0.13  [^]  |  |
+   |  +----------------------------------------------------------+  |
    +--------------------------------------------------------------+
 ```
 
@@ -261,16 +265,17 @@ request says what the agent wants to do and shows it (the command, the diff) wit
 three answers: allow, allow and stop asking for calls like it, or decline with a
 word about what to do instead. A question from the agent is its options as
 buttons, with room to say something else. A plan is shown whole, approved into
-accepting edits or asking for each, or sent back. These cards carry the one hue a
-conversation is allowed, the attention purple, because they are the same thing
-as the dot in the tree that sent you there.
+accepting edits or asking for each, or sent back. Each card carries the tree's
+own mark for a session waiting on you, the purple question, because it is the
+same thing as the row that sent you there; that mark is the one place the
+attention hue appears in a conversation.
 
 **Enter sends, Shift+Enter is a new line, Esc stops the turn.** A message sent
 while the agent is working waits for the turn to end, which is how Claude Code
-treats one. A `/` offers the slash commands this session's Claude Code has. Under
-the box are the permission mode (auto, ask, accept edits, plan) and the model,
-both kept with the conversation, and how full its context is and what it has
-cost.
+treats one. A `/` offers the slash commands this session's Claude Code has. In
+the box, under what you write, are the permission mode (auto, ask, accept edits,
+plan) and the model, named as a person would (Opus 5.5 rather than its id), both
+kept with the conversation, and how full its context is and what it has cost.
 
 **`+` opens another conversation** beside the agent's: the same sandbox, the
 same working copy and the same policy, with a context of its own. Two agents in

@@ -36,6 +36,7 @@ export function Select({
   className,
   title,
   disabled,
+  shown,
   "aria-label": ariaLabel,
 }: {
   value: string;
@@ -44,6 +45,9 @@ export function Select({
   className?: string;
   title?: string;
   disabled?: boolean;
+  /// What the closed control says, when it is not the chosen option's label:
+  /// a value that is none of the options, said in words.
+  shown?: string;
   "aria-label"?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -73,7 +77,7 @@ export function Select({
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onKeyDown}
       >
-        <span className="select-value">{current?.label ?? value}</span>
+        <span className="select-value">{shown ?? current?.label ?? value}</span>
         <Chevron open className="select-chevron" />
       </button>
       {open && trigger.current && (

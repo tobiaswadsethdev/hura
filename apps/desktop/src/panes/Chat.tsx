@@ -161,11 +161,22 @@ function Writing({ live, entries }: { live: Live; entries: ChatEntry[] }) {
 
 /// Claude Code's permission modes, in the words the window uses for them.
 const MODES = [
-  { value: "auto", label: "auto", hint: "a classifier decides what needs asking" },
-  { value: "default", label: "ask", hint: "ask before edits and commands" },
-  { value: "acceptEdits", label: "accept edits", hint: "edit without asking, ask for the rest" },
-  { value: "plan", label: "plan", hint: "read and plan, change nothing" },
+  { value: "auto", label: "auto", hint: "decides what to ask" },
+  { value: "default", label: "ask", hint: "before edits and commands" },
+  { value: "acceptEdits", label: "accept edits", hint: "asks for the rest" },
+  { value: "plan", label: "plan", hint: "changes nothing" },
 ];
+
+/// A model id as a person would say it: `claude-opus-5-5[1m]` is Opus 5.5,
+/// with the million-token context. Anything that does not look like an id is
+/// left as it is, since an alias like `opus` is already a word.
+export function modelName(id: string): string {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/.exec(id);
+  if (!m) return id;
+  const [, family, major, minor, wide] = m;
+  const name = `${family[0].toUpperCase()}${family.slice(1)} ${major}${minor ? `.${minor}` : ""}`;
+  return wide ? `${name} (1M)` : name;
+}
 
 function Composer({
   state,
@@ -200,6 +211,7 @@ function Composer({
   };
 
   const models = state?.models ?? [];
+  const model = state?.model ?? null;
   return (
     <div className="chat-composer">
       {offered.length > 0 && (
@@ -219,67 +231,76 @@ function Composer({
           ))}
         </ul>
       )}
-      <textarea
-        ref={box}
-        rows={1}
-        value={text}
-        placeholder={working ? "queue a message for when this turn is done" : "tell the agent what to do"}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.nativeEvent.isComposing) return;
-          if (e.key === "Tab" && offered.length) {
-            e.preventDefault();
-            setText(`/${offered[0]} `);
-          } else if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            send();
-          } else if (e.key === "Escape" && working) {
-            e.preventDefault();
-            onCommand({ op: "interrupt" });
-          }
-        }}
-      />
-      <div className="chat-controls">
-        <Select
-          className="chat-select"
-          aria-label="permission mode"
-          title="permission mode"
-          value={state?.mode ?? "auto"}
-          options={MODES}
-          onChange={(mode) => onCommand({ op: "mode", mode })}
+      {/* One box: what you write, and under it, in the same frame, what it
+          will run under. The controls are words until pointed at, because
+          they are read far more often than they are changed. A click on the
+          box's own padding is a click on the text. */}
+      <div className="chat-box" onClick={(e) => e.target === e.currentTarget && box.current?.focus()}>
+        <textarea
+          ref={box}
+          rows={1}
+          value={text}
+          placeholder={working ? "queue a message for when this turn is done" : "tell the agent what to do"}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === "Tab" && offered.length) {
+              e.preventDefault();
+              setText(`/${offered[0]} `);
+            } else if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            } else if (e.key === "Escape" && working) {
+              e.preventDefault();
+              onCommand({ op: "interrupt" });
+            }
+          }}
         />
-        {models.length > 0 && (
+        <div className="chat-controls">
           <Select
             className="chat-select"
-            aria-label="model"
-            title="model"
-            value={state?.model ?? models[0].value}
-            options={[
-              // What Claude Code says it is running, which is a full model id
-              // rather than one of the names it offers to switch to, so it is
-              // its own entry at the top rather than a guess at which alias it
-              // came from.
-              ...(state?.model && !models.some((m) => m.value === state.model)
-                ? [{ value: state.model, label: state.model, hint: "running now" }]
-                : []),
-              ...models.map((m) => ({ value: m.value, label: m.display_name, hint: m.description })),
-            ]}
-            onChange={(model) => onCommand({ op: "model", model })}
+            aria-label="permission mode"
+            title="permission mode"
+            value={state?.mode ?? "auto"}
+            options={MODES}
+            onChange={(mode) => onCommand({ op: "mode", mode })}
           />
-        )}
-        <span className="chat-facts">
-          {state?.status === "compacting" && <span>compacting</span>}
-          {state?.context_percentage != null && <span title="context used">ctx {Math.round(state.context_percentage)}%</span>}
-          {state?.cost_usd != null && state.cost_usd > 0 && <span title="spent in this conversation">${state.cost_usd.toFixed(2)}</span>}
-        </span>
-        {working ? (
-          <button className="chat-stop" title="stop this turn (Esc)" onClick={() => onCommand({ op: "interrupt" })}>
-            <Stop aria-label="stop" />
+          {models.length > 0 && (
+            <Select
+              className="chat-select"
+              aria-label="model"
+              title={model ? `model: ${model}` : "model"}
+              // Claude Code reports a full id and offers aliases to switch to,
+              // so the closed control names the one running and the list
+              // holds the choices, each with the model it stands for.
+              value={model ?? models[0].value}
+              shown={model ? modelName(model) : undefined}
+              options={models.map((m) => ({
+                value: m.value,
+                label: m.display_name,
+                hint: m.description.split(" · ")[0],
+              }))}
+              onChange={(next) => onCommand({ op: "model", model: next })}
+            />
+          )}
+          <span className="chat-facts">
+            {state?.status === "compacting" && <span>compacting</span>}
+            {state?.context_percentage != null && (
+              <span title="context used">ctx {Math.round(state.context_percentage)}%</span>
+            )}
+            {state?.cost_usd != null && state.cost_usd > 0 && (
+              <span title="spent in this conversation">${state.cost_usd.toFixed(2)}</span>
+            )}
+          </span>
+          {working ? (
+            <button className="chat-stop" title="stop this turn (Esc)" onClick={() => onCommand({ op: "interrupt" })}>
+              <Stop aria-label="stop" />
+            </button>
+          ) : null}
+          <button className="go chat-send" title="send (Enter)" disabled={!text.trim()} onClick={send}>
+            <Send aria-label="send" />
           </button>
-        ) : null}
-        <button className="go chat-send" title="send (Enter)" disabled={!text.trim()} onClick={send}>
-          <Send aria-label="send" />
-        </button>
+        </div>
       </div>
     </div>
   );

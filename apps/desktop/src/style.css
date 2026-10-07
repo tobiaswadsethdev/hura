@@ -3223,19 +3223,20 @@ p.chat-quiet { margin: 0; font-size: 12px; }
 .chat-divider::before, .chat-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .chat-working { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--working); font-size: 12px; }
 
-/* Waiting on you, which is the one thing in a conversation allowed the
-   attention hue: the same colour as the dot in the tree that brought you
-   here. */
+/* Waiting on you. A raised card with the tree's waiting glyph at its corner,
+   which is the one place in a conversation the attention hue appears: the
+   same mark as the row that brought you here, rather than a coloured edge
+   down the side of a box. */
 .chat-ask {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px 12px;
+  gap: 10px;
+  padding: 11px 12px 12px 10px;
   background: var(--surface);
   border: 1px solid var(--line-strong);
-  border-left: 3px solid var(--attention);
   border-radius: var(--r-md);
 }
+.chat-ask-mark { margin-top: 2px; }
+.chat-ask-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .chat-ask header { display: flex; flex-direction: column; gap: 2px; }
 .chat-ask header p { margin: 0; color: var(--dim); font-size: 12px; }
 .chat-ask-subject { margin: 0; font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
@@ -3279,8 +3280,9 @@ p.chat-quiet { margin: 0; font-size: 12px; }
 
 .chat-banner { margin: 0; padding: 4px 20px; border-top: 1px solid var(--line); }
 
-/* The composer: a box to write in, and one row under it of what the next
-   message will run under. */
+/* The composer: one box, the text and under it a row of what the next
+   message will run under. The box takes the focus ring, not the textarea, so
+   the controls read as part of what you are writing. */
 .chat-composer {
   position: relative;
   flex: none;
@@ -3289,26 +3291,44 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   margin: 0 auto;
   padding: 8px 20px 14px;
 }
-.chat-composer textarea {
-  display: block;
-  width: 100%;
-  min-height: 38px;
-  padding: 9px 11px;
+.chat-box {
   background: var(--sunken);
-  color: var(--text);
   border: 1px solid var(--line-strong);
   border-radius: var(--r);
+  cursor: text;
+  transition: border-color 120ms;
+}
+.chat-box:focus-within { border-color: var(--ring); }
+.chat-box textarea {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 12px 4px;
+  background: none;
+  color: var(--text);
+  border: none;
   font: inherit;
   line-height: 1.5;
   resize: none;
 }
-.chat-composer textarea:focus { outline: none; border-color: var(--ring); }
-.chat-controls { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-.chat-select { max-width: 200px; }
+.chat-box textarea:focus { outline: none; }
+.chat-controls { display: flex; align-items: center; gap: 2px; padding: 2px 6px 6px; cursor: default; }
+/* The mode and the model: words until pointed at. Borderless, so two of them
+   in a row are a sentence about the next turn rather than a form. */
+.select-trigger.chat-select {
+  max-width: 220px;
+  padding: 3px 6px;
+  background: none;
+  border-color: transparent;
+  color: var(--dim);
+}
+.select-trigger.chat-select:hover:not(:disabled),
+.select-trigger.chat-select[aria-expanded="true"] { background: var(--hover); border-color: transparent; color: var(--text); }
+.select-trigger.chat-select:focus-visible { border-color: var(--ring); }
 .chat-facts {
   display: inline-flex;
   gap: 10px;
-  margin-left: auto;
+  margin: 0 8px 0 auto;
   color: var(--dimmer);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -3320,14 +3340,15 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   justify-content: center;
   width: 28px;
   height: 26px;
+  margin-right: 4px;
   background: none;
-  border: 1px solid var(--line-strong);
+  border: none;
   border-radius: var(--r-sm);
   color: var(--text);
   cursor: pointer;
 }
 .chat-stop:hover { background: var(--hover); }
-.chat-send { padding: 5px 9px; }
+.chat-send { width: 28px; height: 26px; padding: 0; }
 .chat-commands {
   position: absolute;
   bottom: calc(100% - 4px);

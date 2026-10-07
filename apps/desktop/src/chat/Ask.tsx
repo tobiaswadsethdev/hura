@@ -13,6 +13,7 @@ import { useState } from "react";
 
 import type { ChatAsk } from "../gen/ChatAsk";
 import type { ChatDecision } from "../gen/ChatDecision";
+import { StateDot } from "../icons";
 import { Markdown } from "../Markdown";
 import { describe, Diff, diffLines, relative } from "./Items";
 
@@ -232,16 +233,21 @@ function Plan({ ask, onAnswer }: { ask: ChatAsk; onAnswer: Answer }) {
   );
 }
 
+/// Marked with the tree's own glyph for a session waiting on you, so the card
+/// and the row that sent you to it are visibly the same thing.
 export function AskCard({ ask, onAnswer }: { ask: ChatAsk; onAnswer: Answer }) {
   return (
     <section className="chat-ask" aria-live="polite">
-      {ask.tool === "AskUserQuestion" ? (
-        <Questions ask={ask} onAnswer={onAnswer} />
-      ) : ask.tool === "ExitPlanMode" ? (
-        <Plan ask={ask} onAnswer={onAnswer} />
-      ) : (
-        <Permission ask={ask} onAnswer={onAnswer} />
-      )}
+      <StateDot state="waiting" className="chat-ask-mark" />
+      <div className="chat-ask-body">
+        {ask.tool === "AskUserQuestion" ? (
+          <Questions ask={ask} onAnswer={onAnswer} />
+        ) : ask.tool === "ExitPlanMode" ? (
+          <Plan ask={ask} onAnswer={onAnswer} />
+        ) : (
+          <Permission ask={ask} onAnswer={onAnswer} />
+        )}
+      </div>
     </section>
   );
 }
