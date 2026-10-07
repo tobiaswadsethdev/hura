@@ -1147,6 +1147,11 @@ pub fn repolicy(
 /// Open an endpoint to a running session for the named binaries, and put it
 /// on the global allow list too when `everywhere`.
 ///
+/// The whole host when `routes` is empty, and only those methods and paths
+/// when it is not, planned against the policy the sandbox has now, because
+/// whether that is a new rule or an addition to an existing one depends on
+/// it. See [`endpoints::routes_update`].
+///
 /// The live change first, and the list only once it has landed: an entry that
 /// promised every new session something this one was just refused would be a
 /// list the next create fails on.
@@ -1155,6 +1160,7 @@ pub fn allow(
     session: &Session,
     endpoint: &str,
     binaries: &[String],
+    routes: &[endpoints::Route],
     everywhere: bool,
 ) -> Result<PolicyRevision, String> {
     let endpoint = checked_endpoint(endpoint)?;
@@ -1168,13 +1174,30 @@ pub fn allow(
             "`{b}` is not an absolute path, which is what the gateway matches"
         ));
     }
-    let rev = repolicy(
-        backend,
-        session,
-        &endpoints::allow_update(&endpoint, binaries),
-    )?;
+    // Checked again on this side, since they arrive from a client.
+    let routes = routes
+        .iter()
+        .map(|r| endpoints::Route::checked(&r.method, &r.path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let update = if routes.is_empty() {
+        endpoints::allow_update(&endpoint, binaries)
+    } else {
+        let now = policy(backend, session)?;
+        let current = now
+            .policy
+            .as_ref()
+            .ok_or("the gateway returned no policy to add paths to")?;
+        endpoints::routes_update(current, &endpoint, binaries, &routes)?
+    };
+    let rev = repolicy(backend, session, &update)?;
     if everywhere {
-        edit_lists(|l| l.allow(&endpoint, binaries.to_vec()))?;
+        edit_lists(|l| {
+            if routes.is_empty() {
+                l.allow(&endpoint, binaries.to_vec())
+            } else {
+                l.allow_routes(&endpoint, binaries.to_vec(), routes)
+            }
+        })?;
     }
     Ok(rev)
 }

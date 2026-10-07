@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use openshell_client::{Policy, PolicyRevision, PolicyUpdate};
 
-use crate::endpoints::Lists;
+use crate::endpoints::{Lists, Route};
 use crate::pane;
 
 /// A policy shipped with the binary, selectable by name.
@@ -459,6 +459,10 @@ impl L7 {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ListsView {
     pub allow: Vec<ListedAllow>,
+    /// Allows narrowed to methods and paths. Absent from an `hurad` that
+    /// predates them, which had none to list.
+    #[serde(default)]
+    pub routes: Vec<ListedRoutes>,
     pub block: Vec<ListedBlock>,
 }
 
@@ -467,6 +471,16 @@ pub struct ListsView {
 pub struct ListedAllow {
     pub endpoint: String,
     pub binaries: Vec<String>,
+    pub in_policy: bool,
+}
+
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ListedRoutes {
+    pub endpoint: String,
+    pub binaries: Vec<String>,
+    pub routes: Vec<Route>,
+    /// Whether every one of the routes is an allow rule on this endpoint here.
     pub in_policy: bool,
 }
 
@@ -488,6 +502,16 @@ impl ListsView {
                 .values()
                 .any(|r| r.endpoints.iter().any(|e| e.host_port() == endpoint))
         };
+        let routed = |endpoint: &str, route: &Route| {
+            policy
+                .network_policies
+                .values()
+                .flat_map(|r| &r.endpoints)
+                .filter(|e| e.host_port() == endpoint)
+                .flat_map(|e| &e.rules)
+                .filter_map(|r| r.allow.as_ref())
+                .any(|a| a.method == route.method && a.path == route.path)
+        };
         Some(ListsView {
             allow: lists
                 .allow
@@ -496,6 +520,16 @@ impl ListsView {
                     endpoint: a.endpoint.clone(),
                     binaries: a.binaries.clone(),
                     in_policy: present(&a.endpoint),
+                })
+                .collect(),
+            routes: lists
+                .routes
+                .iter()
+                .map(|r| ListedRoutes {
+                    endpoint: r.endpoint.clone(),
+                    binaries: r.binaries.clone(),
+                    routes: r.routes.clone(),
+                    in_policy: r.routes.iter().all(|route| routed(&r.endpoint, route)),
                 })
                 .collect(),
             block: lists
@@ -630,6 +664,20 @@ fn render_lists(out: &mut String, lists: &ListsView) {
         };
         pane::field(out, "allow", format!("{}  {state}", a.endpoint));
         for b in &a.binaries {
+            pane::field(out, "", b.clone());
+        }
+    }
+    for r in &lists.routes {
+        let state = if r.in_policy {
+            "in this policy"
+        } else {
+            "NOT in this policy"
+        };
+        pane::field(out, "allow", format!("{}  {state}", r.endpoint));
+        for route in &r.routes {
+            pane::field(out, "", format!("only {route}"));
+        }
+        for b in &r.binaries {
             pane::field(out, "", b.clone());
         }
     }
@@ -836,6 +884,43 @@ mod tests {
         );
         // And the thing "blacklist" invites people to assume, said out loud.
         assert!(body.contains("not a deny that outranks an allow"), "{body}");
+    }
+
+    /// A listed path is in this policy when the rule naming its endpoint
+    /// allows exactly it. The host alone being reachable says nothing about
+    /// the path: a rule for other paths on it is still a denial of this one.
+    #[test]
+    fn listed_paths_are_in_this_policy_only_when_each_one_is() {
+        let mut lists = Lists::default();
+        let feed = Route::checked("GET", "/feed/**").unwrap();
+        lists.allow_routes(
+            "pkgs.example.com:443",
+            vec!["/usr/bin/node".into()],
+            vec![feed],
+        );
+
+        let mut p = policy_with("pkgs", "pkgs.example.com");
+        let view = View::of(&revision(Some(p.clone())), None, &lists);
+        assert!(!view.lists.unwrap().routes[0].in_policy);
+
+        p.network_policies.get_mut("pkgs").unwrap().endpoints[0]
+            .rules
+            .push(Rule {
+                allow: Some(MethodPath {
+                    method: "GET".into(),
+                    path: "/feed/**".into(),
+                }),
+                deny: None,
+            });
+        let view = View::of(&revision(Some(p)), None, &lists);
+        assert!(view.lists.as_ref().unwrap().routes[0].in_policy);
+
+        let body = pane::to_plain(&super::render(&view));
+        assert!(
+            body.contains("pkgs.example.com:443  in this policy"),
+            "{body}"
+        );
+        assert!(body.contains("only GET /feed/**"), "{body}");
     }
 
     /// Empty lists are the common case and do not need a heading saying so.

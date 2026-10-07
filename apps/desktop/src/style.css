@@ -1349,6 +1349,9 @@ main { display: flex; flex: 1; min-height: 0; }
 .policy .lists .lucide.allow { color: var(--ok); flex: none; }
 .policy .lists .lucide.block { color: var(--bad); flex: none; }
 .policy .lists > li.none { color: var(--dimmer); }
+/* An entry narrowed to paths: its routes under it, as the rules draw theirs. */
+.policy .lists > li.routed { flex-wrap: wrap; }
+.policy .lists > li.routed .l7 { flex-basis: 100%; }
 .policy section > .fact:first-of-type { padding-top: 0; }
 
 /* The traffic pane: the allow/deny feed, folded by endpoint or read as a log.
@@ -1576,6 +1579,29 @@ main { display: flex; flex: 1; min-height: 0; }
   padding: 3px 7px;
 }
 .change-panel .quiet:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+/* How much of the endpoint, and when it is paths, the paths: a method, the
+   glob in the mono face the rules are drawn in, and a way to drop one. The
+   panel is already sunken, so the fields sit on the page colour. */
+.change-panel .segmented { align-self: flex-start; }
+.change-paths { display: flex; flex-direction: column; gap: 4px; }
+.change-path { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.change-path .change-method { flex: none; width: 84px; background: var(--bg); font-family: var(--font-mono); }
+.change-path input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 3px 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.change-path input:focus { outline: none; border-color: var(--ring); }
+.change-path input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--bad) 60%, transparent); }
+.change-problem { flex-basis: 100%; padding-left: 90px; color: var(--bad); font-size: 11px; }
+.change-panel .change-more { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; }
+.change-panel .change-more .lucide { width: 12px; height: 12px; }
 
 /* A tag on a policy endpoint, for the attribute that is the exception --
    `tls skip`, an enforcement that is not `enforce`. */

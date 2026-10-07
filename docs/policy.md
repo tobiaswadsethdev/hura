@@ -77,10 +77,12 @@ sandbox: allowing `github.com:443` off a denied `curl` grants it to curl and
 leaves git's own rule alone. An event decided by an L7 rule --
 `GET httpbin.org:443/ip`, which names a method and a path and no binary -- has
 no binary of its own to bind to, so the desktop offers the binaries the rules
-already sending there name: full access for them is what lifts a path
-restriction, since access and rules together grant the union. With no rule
-naming the endpoint there is nothing to offer, and no allow is issued: an
-endpoint rule with no binaries grants nothing.
+already sending there name. The panel starts on the path that was refused
+(see [only some paths](#only-some-paths)), and the whole host is still one
+choice away: full access for those binaries lifts the path restriction, since
+access and rules together grant the union. With no rule naming the endpoint
+there is nothing to offer, and no allow is issued: an endpoint rule with no
+binaries grants nothing.
 
 **A block is a removal, not a veto.** OpenShell denies by default and has no
 deny-that-outranks-an-allow at L4, so blocking `pastebin.com` is a no-op -- it was
@@ -108,6 +110,44 @@ There is no key for taking an entry off a list -- `A` and `B` move an endpoint
 between them, and removing it outright means editing the file, which is plain
 JSON and hand-editable.
 
+## Only some paths
+
+An allow does not have to be the whole host. *Only these paths* in the panel
+under a denial takes a method and a path glob per row
+(`GET /contoso/tools/_packaging/feed/nuget/v3/**`), and the binaries get those
+and nothing else on the host: the rule carries method and path rules and no
+access class, which is default-deny. `*` matches one path segment and `**` any
+number.
+
+A denial of the host names no path, because the connection was refused before
+any request was made. So the first paths are typed, or pasted as a URL. After
+that the host is inspected, and anything outside the paths is refused with its
+request in the feed (`GET pkgs.example.com:443/...`), so the next path can be
+read off the denial. *Allow this path…* opens the panel on it.
+
+The gateway adds paths with `policy update --add-allow`, which picks the rule to
+add them to by host and port alone, and `--binary` only rides on a new
+endpoint. That leaves two shapes it can take and one it cannot:
+
+- **no rule names the endpoint**: a new rule, for the binaries ticked;
+- **one rule names it and already grants those binaries**: the paths join it,
+  for every binary it grants. This is the case for a path the rule itself
+  refused;
+- **anything else** is refused with the rule named. Paths for `dotnet` on
+  `dev.azure.com`, which `azure_git` grants to git and curl, would need a
+  second rule for one endpoint, and the gateway will not guess which of the two
+  to widen. That one can only be the whole host, or a policy file of your own.
+
+With *every new session too*, the entry goes on the allow list with its paths.
+A second path for the same binaries is added to the entry, since a feed needs
+its index, its metadata and its packages before a restore works. At create the
+paths are planned against the policy the template gave, the same way. The
+command line writes the same entries:
+
+```sh
+hurad endpoints --allow pkgs.example.com:443 --binary /usr/share/dotnet/dotnet \
+    --path "GET /contoso/tools/_packaging/feed/nuget/v3/**"
+```
 
 ---
 

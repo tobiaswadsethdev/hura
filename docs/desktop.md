@@ -243,6 +243,12 @@ may reach:
 - **Allow in every new session too** does the same and puts it on the global
   allow list.
 - **Allow…** is there when more than one binary was refused, to choose which.
+- **Allow only some paths…** opens the same panel on *only these paths*: a
+  method and a path glob per row, so a package feed can be opened without the
+  rest of its host. A URL pasted into a row is cut down to its path.
+- **Allow this path…** replaces the two one-click allows on a denial that a
+  rule's own paths made. It names the request it refused, and the panel starts
+  from that request instead of handing over the whole host.
 - **Block…** removes an endpoint the policy opens, for **every** binary in the
   sandbox -- git included, if it is git's -- so it asks under the row first,
   with the same *every new session too* option.

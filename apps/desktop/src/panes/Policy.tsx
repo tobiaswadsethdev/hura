@@ -92,6 +92,8 @@ function Policy({ view, change, busy }: { view: View; change: Change; busy: stri
       { label: "Copy endpoint", icon: Copy, hint: endpoint, run: () => copy(endpoint) },
     ]);
 
+  // Absent from an `hurad` that predates paths, which had none to list.
+  const routed = view.lists?.routes ?? [];
   const r = view.revision;
   const changedSinceCreation = r.version > 1 && view.template !== null;
   const endpoints = view.network?.reduce((n, rule) => n + rule.endpoints.length, 0) ?? 0;
@@ -203,7 +205,7 @@ function Policy({ view, change, busy }: { view: View; change: Change; busy: stri
         <section>
           <h4 title="Applied to every new session, so an entry may not be in this one.">every new session</h4>
           <ul className="lists">
-            {view.lists.allow.length + view.lists.block.length === 0 && (
+            {view.lists.allow.length + routed.length + view.lists.block.length === 0 && (
               <li className="none">
                 none yet. Allow or block from the events pane with “every new session” ticked.
               </li>
@@ -219,6 +221,27 @@ function Policy({ view, change, busy }: { view: View; change: Change; busy: stri
                     {a.in_policy ? "in this policy" : "not in this one"}
                   </span>
                 )}
+              </li>
+            ))}
+            {routed.map((r) => (
+              <li key={r.endpoint} className="listed routed" tabIndex={0} {...listed(r.endpoint)}>
+                <Grant className="allow" aria-label="allowed" />
+                <span className="host">{r.endpoint}</span>
+                {busy === r.endpoint ? (
+                  <span className="spin" />
+                ) : (
+                  <span className={`state${r.in_policy ? "" : " off"}`}>
+                    {r.in_policy ? "in this policy" : "not in this one"}
+                  </span>
+                )}
+                <ul className="l7" title={r.binaries.length ? `for ${r.binaries.join(", ")}` : undefined}>
+                  {r.routes.map((route) => (
+                    <li key={`${route.method} ${route.path}`}>
+                      <span className="method">{route.method}</span>
+                      <span className="path">{route.path}</span>
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
             {view.lists.block.map((b) => (

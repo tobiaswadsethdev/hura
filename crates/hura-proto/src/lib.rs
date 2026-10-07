@@ -25,6 +25,7 @@ pub mod stream;
 pub use pairing::Pairing;
 
 use hura_core::comments::{Comment, NewComment};
+use hura_core::endpoints::Route;
 use hura_core::events::Event;
 use hura_core::files::{Dir, FileText};
 use hura_core::git::{Against, FileDiff, Status as GitStatus};
@@ -126,6 +127,20 @@ pub enum Request {
         name: String,
         endpoint: String,
         binaries: Vec<String>,
+        everywhere: bool,
+    },
+    /// [`Request::Allow`] narrowed to methods and paths: the binaries may
+    /// reach those on the endpoint and nothing else on it. Answers with
+    /// [`Reply::Policy`].
+    ///
+    /// A request of its own rather than a field on `Allow`, because an older
+    /// server would read `Allow` with a field it does not know as an allow of
+    /// the whole host. Sent as this, it answers `unsupported` instead.
+    AllowPaths {
+        name: String,
+        endpoint: String,
+        binaries: Vec<String>,
+        routes: Vec<Route>,
         everywhere: bool,
     },
     /// Remove an endpoint from a running session, for every binary.
@@ -333,6 +348,7 @@ impl Request {
             | Request::Policy { name }
             | Request::Events { name }
             | Request::Allow { name, .. }
+            | Request::AllowPaths { name, .. }
             | Request::Block { name, .. }
             | Request::Unlist { name, .. }
             | Request::GitStatus { name }
@@ -617,6 +633,19 @@ mod tests {
                     everywhere: false,
                 },
                 "allow",
+            ),
+            (
+                Request::AllowPaths {
+                    name: "a".into(),
+                    endpoint: "pkgs.dev.azure.com:443".into(),
+                    binaries: vec!["/usr/share/dotnet/dotnet".into()],
+                    routes: vec![Route {
+                        method: "GET".into(),
+                        path: "/feed/**".into(),
+                    }],
+                    everywhere: false,
+                },
+                "allow-paths",
             ),
             (
                 Request::Block {

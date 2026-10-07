@@ -65,12 +65,7 @@ impl Sandboxed {
                 return Ok(());
             }
         };
-        let updates = lists.updates();
-        if updates.is_empty() {
-            return Ok(());
-        }
-
-        for update in &updates {
+        for update in &lists.updates() {
             let Err(e) = self.client.policy_update(sandbox, update) else {
                 continue;
             };
@@ -85,7 +80,55 @@ impl Sandboxed {
                 update.add_endpoints.join(", ")
             ));
         }
+        self.impose_routes(sandbox, &lists.routes, warnings);
         Ok(())
+    }
+
+    /// The allows narrowed to routes, each planned against the policy as the
+    /// lists above have left it, since whether a route makes a rule or joins
+    /// one depends on what the template already grants.
+    ///
+    /// Warnings, like any allow: a route that did not land is a path the
+    /// events pane will show refused the first time it is asked for.
+    fn impose_routes(
+        &self,
+        sandbox: &str,
+        routed: &[endpoints::RouteAllow],
+        warnings: &mut Vec<String>,
+    ) {
+        if routed.is_empty() {
+            return;
+        }
+        let policy = match self.client.policy(sandbox) {
+            Ok(rev) => rev.policy,
+            Err(e) => {
+                warnings.push(format!(
+                    "could not read the policy to add the allowed paths to, so none of \
+                     them were: {e}"
+                ));
+                return;
+            }
+        };
+        for entry in routed {
+            let update = policy
+                .as_ref()
+                .ok_or_else(|| "the gateway returned no policy".to_string())
+                .and_then(|p| {
+                    endpoints::routes_update(p, &entry.endpoint, &entry.binaries, &entry.routes)
+                })
+                .and_then(|u| {
+                    self.client
+                        .policy_update(sandbox, &u)
+                        .map_err(|e| e.to_string())
+                });
+            if let Err(e) = update {
+                warnings.push(format!(
+                    "the allowed paths on {} could not be applied, so they are not \
+                     reachable: {e}",
+                    entry.endpoint
+                ));
+            }
+        }
     }
 
     /// Open the endpoints of the session's MCP servers.
