@@ -69,6 +69,24 @@ type Screen = "tickets" | "integrations" | "servers" | "settings" | "about";
 /// How often the tickets are read for changes. See the effect that uses it.
 const TICKET_POLL_MS = 3 * 60_000;
 
+const MAC = navigator.userAgent.includes("Mac");
+
+/// The tickets screen from anywhere. With Shift, because Ctrl+T on its own is
+/// a terminal's: bash and readline transpose two characters with it, and the
+/// shortcut is taken before a terminal sees the key.
+const TICKETS_KEYS = MAC
+  ? { label: "⌘⇧T", aria: "Meta+Shift+T" }
+  : { label: "Ctrl+Shift+T", aria: "Control+Shift+T" };
+
+function isTicketsKey(e: KeyboardEvent): boolean {
+  return (
+    e.shiftKey &&
+    !e.altKey &&
+    (MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
+    e.key.toLowerCase() === "t"
+  );
+}
+
 /// The tabs a worktree has open.
 ///
 /// Derived from the sandbox rather than remembered here: what shells exist is a
@@ -209,6 +227,23 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [screen]);
+
+  // The tickets shortcut. In the capture phase, so it is this window's before
+  // a focused terminal takes the key and sends it to the sandbox. Not while a
+  // dialog is up: that is asking a question, and the screen would change
+  // under it.
+  const dialogOpen = creatingProject || creatingIn !== null || confirmation !== null;
+  useEffect(() => {
+    if (!server || dialogOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!isTicketsKey(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setScreen((current) => (current === "tickets" ? null : "tickets"));
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [server, dialogOpen]);
 
   // Keyed on the *names*, joined, rather than on the array: the list is a new
   // array every few seconds and re-subscribing to four sandboxes that often
@@ -597,6 +632,7 @@ export default function App() {
           <Destination
             icon={Tracker}
             label="tickets"
+            keys={TICKETS_KEYS}
             on={screen === "tickets"}
             disabled={!server}
             onOpen={() => setScreen("tickets")}
@@ -663,6 +699,11 @@ export default function App() {
                 .catch((e) => setError(messageOf(e)));
             }}
             onDestroy={destroy}
+            tickets={{
+              disabled: !server,
+              keys: TICKETS_KEYS,
+              onOpen: () => setScreen("tickets"),
+            }}
           />
 
           <Split
@@ -906,6 +947,7 @@ function preparingNote(session: Session | null) {
 function Destination({
   icon: Mark,
   label,
+  keys,
   on,
   disabled,
   onOpen,
@@ -917,6 +959,8 @@ function Destination({
   /// at all to a screen reader, which is the one way an icon-only strip can be
   /// genuinely worse rather than merely terser.
   label: string;
+  /// The shortcut, when it has one, for the tooltip.
+  keys?: { label: string; aria: string };
   on: boolean;
   disabled?: boolean;
   onOpen: () => void;
@@ -926,8 +970,9 @@ function Destination({
     <button
       className={`dest${on ? " on" : ""}`}
       disabled={disabled}
-      title={label}
+      title={keys ? `${label} (${keys.label})` : label}
       aria-label={label}
+      aria-keyshortcuts={keys?.aria}
       aria-current={on ? "page" : undefined}
       onClick={on ? onClose : onOpen}
     >

@@ -7,6 +7,11 @@ toggle in the screen's header switches between the two; the **trackers** button
 beside it switches to where each tracker is set up — where it points, its token
 and its filters — and back.
 
+The way in is **tickets** at the top of the projects sidebar, which also says
+how many tickets your filters held at the last read, or **Ctrl+Shift+T** (⌘⇧T on
+macOS) from anywhere in the window, a terminal included. The same keys go back.
+Ctrl+T on its own is left to the terminal, where it transposes two characters.
+
 ```
  ┌ ready to start      3 ┐ ┌ assigned to me      2 ┐ ┌ needs my review     1 ┐
  │ PROJ-12 Story   Ready │ │ PROJ-7  Bug   In Prog │ │ PROJ-28 Task  In Rev. │
@@ -134,7 +139,7 @@ GitHub and Azure DevOps tickets are still changed in the browser.
 
 ## Setting one up
 
-On the tickets screen (the ticket icon in the header), **trackers** in the
+On the tickets screen (**tickets** in the sidebar), **trackers** in the
 screen's own header lists your trackers and, under them, **add a tracker**. With
 no trackers yet, the screen opens there:
 

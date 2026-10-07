@@ -161,6 +161,11 @@ one back; the separator is focusable and takes arrow keys, `Home`, `End` and
 change at all. Widths are this window's own and kept on this machine -- see
 [settings](#settings).
 
+**Tickets are at the top of the sidebar**, above the projects and outside their
+scroll, with the number your filters held at the last read. **Ctrl+Shift+T**
+(⌘⇧T on macOS) opens them from anywhere and goes back again. See
+[tickets.md](tickets.md).
+
 **Worktrees are indented under their project, with a rule down the indent.** The
 rule is the part doing the work rather than the offset: project headers are
 sticky, so once a long list has scrolled, the header above a card is not that
