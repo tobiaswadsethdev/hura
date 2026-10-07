@@ -197,7 +197,9 @@ Every tab stays mounted and is hidden rather than unmounted: a terminal that
 unmounts closes its channel and detaches, so switching to the diff and back
 would lose the screen and re-attach.
 
-**`+` opens another shell** in the same sandbox, under the same policy. It is
+**`+` opens another shell** in the same sandbox, under the same policy. In a
+chat session it is a menu of two, another conversation or a shell; see
+[talking to the agent](#talking-to-the-agent). It is
 not a way around the isolation; it is a second prompt inside it, which is the
 point -- you can run the tests while the agent is still working. Each shell is
 its own tmux session in the sandbox, so they do not contend: `attach -d` evicts
@@ -227,6 +229,78 @@ click away rather than behind a tab is the point: the isolation being *visible*
 is the reason this is worth building rather than adopting an ADE built on git
 worktrees, and a denial you have to go looking for is one you will not find. It
 costs width the editor would otherwise have; that is the trade.
+
+## Talking to the agent
+
+A new session's agent is a **chat** by default: the first tab is a
+conversation, drawn by the window, rather than Claude Code's terminal. Your
+messages on the right, the agent's replies as markdown, and every tool call as
+one card: what it ran in the header, what came back underneath. A command shows
+its output, an edit shows its diff, the todo list is a checklist, and what a
+subagent did sits inside the call that started it. Thinking is folded away and
+one click opens it. The reply is drawn as it is written.
+
+```
+   +--------------------------------------------------------------+
+   |  agent | chat-1 | shell-1 | +                                 |
+   |                                  [ add a greeting to NOTES ]  |
+   |  > Read  NOTES.md                                              |
+   |  v Edit  NOTES.md                                              |
+   |      - hello from chat                                         |
+   |      + Hello from the chat pane.                               |
+   |  | Claude wants to run npm test                                |
+   |  |   npm test                                                  |
+   |  |   [allow]  allow, and don't ask again   decline...          |
+   |  [ tell the agent what to do                              ]    |
+   |  ask v   claude-opus-5-5[1m] v              ctx 2%  $0.13  [^] |
+   +--------------------------------------------------------------+
+```
+
+**What it waits on you for is a card, not a prompt to find.** A permission
+request says what the agent wants to do and shows it (the command, the diff) with
+three answers: allow, allow and stop asking for calls like it, or decline with a
+word about what to do instead. A question from the agent is its options as
+buttons, with room to say something else. A plan is shown whole, approved into
+accepting edits or asking for each, or sent back. These cards carry the one hue a
+conversation is allowed, the attention purple, because they are the same thing
+as the dot in the tree that sent you there.
+
+**Enter sends, Shift+Enter is a new line, Esc stops the turn.** A message sent
+while the agent is working waits for the turn to end, which is how Claude Code
+treats one. A `/` offers the slash commands this session's Claude Code has. Under
+the box are the permission mode (auto, ask, accept edits, plan) and the model,
+both kept with the conversation, and how full its context is and what it has
+cost.
+
+**`+` opens another conversation** beside the agent's: the same sandbox, the
+same working copy and the same policy, with a context of its own. Two agents in
+one working copy edit the same files, which is what running `claude` in a shell
+beside the agent always meant. Closing one ends it and forgets its transcript;
+the agent's own has no cross, as its terminal has none. Shells are still there,
+on the same menu.
+
+**Where it runs.** Not in this window, and not on the server: the image carries
+`hura-agent`, a small process that runs Claude Code through the Agent SDK
+*inside the sandbox*, using the image's own `claude`. So the binary that reaches
+the API is still the one the policy grants it to, and the credential is still
+the one the gateway injects. It lives in the agent's tmux session and keeps every
+conversation's transcript on disk there, which is why a window opened later, a
+second window, or one that lost its connection is sent the whole conversation
+and carries on from it. It also writes the status and usage files a terminal
+agent's hooks write, so the tree, the notifications and the spend strip do not
+know the difference. The server reaches it through the same forward a preview
+uses.
+
+**Nothing here is a security boundary**, and the terminal was not one either:
+the agent runs as the same user as the process that asks you, and could answer
+for itself, as it could always type into its own tmux pane. What it can reach is
+the policy's to decide, and that has not changed.
+
+**The terminal is still there.** The settings screen and the create form choose
+between `chat` and `terminal` for new sessions, and `interface` in the config
+file is the same choice. A session made before chat existed stays a terminal.
+`hurad attach` on a chat session shows the host's log, which is what is worth
+reading from a terminal when a conversation will not start.
 
 ## The traffic pane
 
@@ -800,6 +874,9 @@ same reason: a client is a window onto a session, and a review half-written when
 the window closes is work. It also makes the review the session's rather than
 the window's, so a second client sees it and the agent is told once whichever
 one sends it.
+
+In a chat session the review goes to the agent's conversation as one message
+from you, which is what everything below is arranging for a terminal.
 
 Delivery is `tmux load-buffer` then `paste-buffer -p`, not `send-keys`. The
 difference is everything for text with newlines in it: `send-keys` types a

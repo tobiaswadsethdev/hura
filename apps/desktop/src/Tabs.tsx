@@ -11,10 +11,12 @@
 
 import { useState } from "react";
 
+import { useButtonMenu } from "./ContextMenu";
+import { ChatPane } from "./panes/Chat";
 import { FilePane } from "./panes/File";
 import { FileDiffPane } from "./panes/FileDiff";
 import type { Against } from "./gen/Against";
-import { Close, Plus } from "./icons";
+import { Chat, Close, Plus, Shell } from "./icons";
 import { TerminalPane } from "./panes/Terminal";
 
 export type Tab =
@@ -22,6 +24,9 @@ export type Tab =
   /// agent's own -- so a shell is a second tab rather than a second pane, and
   /// nothing has to remember which one is special.
   | { kind: "terminal"; tmux: string | null; label: string }
+  /// A conversation in a chat session. `agent` is the one the task started,
+  /// which is the agent in the way the terminal agent's tab is.
+  | { kind: "chat"; conv: string; label: string }
   | { kind: "file"; path: string }
   /// One file's diff, side by side. `against` is part of the key: the staged
   /// and unstaged diffs of one file are two different questions, and opening
@@ -32,6 +37,8 @@ export function keyOf(tab: Tab): string {
   switch (tab.kind) {
     case "terminal":
       return `terminal:${tab.tmux ?? "agent"}`;
+    case "chat":
+      return `chat:${tab.conv}`;
     case "file":
       return `file:${tab.path}`;
     case "filediff":
@@ -42,6 +49,7 @@ export function keyOf(tab: Tab): string {
 export function labelOf(tab: Tab): string {
   switch (tab.kind) {
     case "terminal":
+    case "chat":
       return tab.label;
     case "file":
       return tab.path.split("/").pop() ?? tab.path;
@@ -57,7 +65,9 @@ export function Tabs({
   active,
   onActivate,
   onNewShell,
+  onNewChat,
   onCloseShell,
+  onCloseChat,
   onCloseFile,
   onReorder,
   failure,
@@ -73,10 +83,16 @@ export function Tabs({
   failure?: string | null;
   onActivate: (key: string) => void;
   onNewShell: () => void;
+  /// Another conversation, in a chat session. Absent in a terminal session,
+  /// which has no host to hold one, and then `+` is a shell as it always was.
+  onNewChat?: () => void;
   /// Closing a shell kills what is running in it, which is why only a shell has
   /// the button: the agent's terminal is not yours to close, and the diff is
   /// not a thing that can be.
   onCloseShell: (tmux: string) => void;
+  /// Ending a conversation forgets it. The agent's own has no cross, as its
+  /// terminal has none.
+  onCloseChat: (conv: string) => void;
   onCloseFile: (path: string) => void;
   /// Put `moved` where `onto` currently is. The order lives with the caller
   /// because the tab list is derived -- see `tabsFor` -- so this says what the
@@ -95,18 +111,33 @@ export function Tabs({
     setOver(null);
   };
 
+  const menu = useButtonMenu();
+  const add = onNewChat
+    ? menu(() => [
+        { label: "chat", icon: Chat, run: onNewChat },
+        { label: "shell", icon: Shell, run: onNewShell },
+      ])
+    : onNewShell;
+
   return (
     <section className="editor">
       <nav className="tabs">
         {tabs.map((tab) => {
           const key = keyOf(tab);
           const shell = tab.kind === "terminal" && tab.tmux !== null ? tab.tmux : null;
+          const conv = tab.kind === "chat" && tab.conv !== "agent" ? tab.conv : null;
           const file = tab.kind === "file" || tab.kind === "filediff" ? keyOf(tab) : null;
           /// Middle click closes exactly what the cross closes, and nothing
           /// else: the agent's terminal has no cross because it is not yours to
           /// close, and a middle click that killed it would be the same mistake
           /// made faster.
-          const close = shell ? () => onCloseShell(shell) : file ? () => onCloseFile(file) : null;
+          const close = shell
+            ? () => onCloseShell(shell)
+            : conv
+              ? () => onCloseChat(conv)
+              : file
+                ? () => onCloseFile(file)
+                : null;
           return (
             <span
               key={key}
@@ -163,6 +194,15 @@ export function Tabs({
                   <Close aria-label="close" />
                 </button>
               )}
+              {conv && (
+                <button
+                  className="close"
+                  title="end this conversation, and forget it"
+                  onClick={() => onCloseChat(conv)}
+                >
+                  <Close aria-label="close" />
+                </button>
+              )}
               {file && (
                 <button className="close" title="close" onClick={() => onCloseFile(file)}>
                   <Close aria-label="close" />
@@ -171,8 +211,13 @@ export function Tabs({
             </span>
           );
         })}
-        <button className="add" title="another shell in this sandbox" onClick={onNewShell}>
-          <Plus aria-label="new shell" />
+        <button
+          className="add"
+          title={onNewChat ? "another conversation, or a shell" : "another shell in this sandbox"}
+          aria-haspopup={onNewChat ? "menu" : undefined}
+          onClick={add}
+        >
+          <Plus aria-label={onNewChat ? "new tab" : "new shell"} />
         </button>
       </nav>
       {failure && <p className="error tabs-failure">{failure}</p>}
@@ -193,6 +238,9 @@ export function Tabs({
                 name={name}
                 tmux={tab.tmux}
               />
+            )}
+            {tab.kind === "chat" && (
+              <ChatPane key={`${name}:chat:${tab.conv}`} server={server} name={name} conv={tab.conv} />
             )}
             {tab.kind === "filediff" && (
               <FileDiffPane

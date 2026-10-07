@@ -174,6 +174,20 @@ export function SettingsScreen({
             </p>
 
             <label>
+              <span>agent</span>
+              {/* Chat is what the server does with the key missing, so it is
+                  the option a file that does not mention it shows. */}
+              <Select
+                value={draft.interface ?? "chat"}
+                onChange={(v) => edit({ interface: v === "terminal" ? "terminal" : "chat" })}
+                options={[
+                  { value: "chat", label: "chat", hint: "the Agent SDK, drawn by this window" },
+                  { value: "terminal", label: "terminal", hint: "Claude Code's own, in tmux" },
+                ]}
+              />
+            </label>
+
+            <label>
               <span>base branch</span>
               <input
                 value={draft.base ?? ""}

@@ -59,6 +59,9 @@ pub struct Settings {
     pub providers: Option<Vec<String>>,
     /// Whether `hurad serve` may fetch a newer release in the background.
     pub auto_update: Option<bool>,
+    /// Whether a new session's agent is a chat or a terminal.
+    #[serde(default)]
+    pub interface: Option<crate::chat::Interface>,
 }
 
 /// What a settings screen is drawn from.
@@ -89,6 +92,7 @@ impl From<&Config> for Settings {
             policy: cfg.policy.clone(),
             providers: cfg.providers.clone(),
             auto_update: cfg.auto_update,
+            interface: cfg.interface,
         }
     }
 }
@@ -128,6 +132,7 @@ impl Settings {
                 })
                 .filter(|list| !list.is_empty()),
             auto_update: self.auto_update,
+            interface: self.interface,
         }
     }
 }
@@ -204,7 +209,7 @@ fn write_atomically(path: &Path, text: &str) -> Result<(), Error> {
     })
 }
 
-/// The file with the five managed keys set to what `settings` says, and
+/// The file with the six managed keys set to what `settings` says, and
 /// nothing else touched.
 fn edit(text: &str, settings: &Settings) -> String {
     // Line endings are preserved as a whole rather than per line: a file is
@@ -238,6 +243,11 @@ fn edit(text: &str, settings: &Settings) -> String {
         &mut lines,
         "auto_update",
         settings.auto_update.map(|on| on.to_string()),
+    );
+    set(
+        &mut lines,
+        "interface",
+        settings.interface.map(|i| quote(i.as_str())),
     );
 
     let mut out = lines.join(newline);
@@ -582,6 +592,7 @@ mod tests {
             policy: Some("feature-work".into()),
             providers: Some(vec!["claude-oauth".into(), "azure-pat".into()]),
             auto_update: Some(false),
+            interface: Some(crate::chat::Interface::Terminal),
         };
         let text = edit(config::EXAMPLE, &settings);
         let cfg = Config::parse(Path::new("x.toml"), &text).unwrap();

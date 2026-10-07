@@ -448,6 +448,10 @@ pub struct Session {
     pub toolchains: Vec<String>,
     #[serde(default = "default_agent")]
     pub agent: String,
+    /// Whether the agent is a terminal or a chat. A record from before there
+    /// was a choice is a terminal, which is what it was.
+    #[serde(default)]
+    pub interface: crate::chat::Interface,
     /// Epoch seconds. Deliberately not a formatted timestamp: the display wants
     /// a relative age, and storing epoch avoids a date-library dependency.
     // `number`, not the `bigint` ts-rs assumes for a u64: serde_json writes it
@@ -514,6 +518,7 @@ impl Session {
             mcp: Vec::new(),
             toolchains: Vec::new(),
             agent: default_agent(),
+            interface: crate::chat::Interface::Terminal,
             created_at: now_epoch(),
             state: State::Creating,
             failure: None,

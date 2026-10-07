@@ -15,8 +15,10 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
+use hura_core::chat::{self, ChatCommand, ChatFrame};
 use hura_core::events::Event;
 use hura_core::ops;
+use hura_core::ports::Loopback;
 use hura_core::seed;
 use hura_core::session::{Session, State};
 use hura_core::store::Store;
@@ -50,10 +52,12 @@ const _: () = assert!(
     "a server polls for every client at once; a TUI's own second is too fast here"
 );
 
-/// What a terminal channel accepts while it is running.
-enum ToTerminal {
+/// What a channel accepts while it is running: bytes and a size for a terminal
+/// or a port, commands for a chat.
+enum ToChannel {
     Input(Vec<u8>),
     Resize { cols: u16, rows: u16 },
+    Chat(ChatCommand),
 }
 
 pub async fn run(socket: WebSocket) {
@@ -121,12 +125,17 @@ pub async fn run(socket: WebSocket) {
             }
             ClientFrame::Input { id, data } => {
                 if let (Some(handle), Some(raw)) = (channels.get(&id), bytes::decode(&data)) {
-                    handle.send(ToTerminal::Input(raw)).await;
+                    handle.send(ToChannel::Input(raw)).await;
                 }
             }
             ClientFrame::Resize { id, cols, rows } => {
                 if let Some(handle) = channels.get(&id) {
-                    handle.send(ToTerminal::Resize { cols, rows }).await;
+                    handle.send(ToChannel::Resize { cols, rows }).await;
+                }
+            }
+            ClientFrame::Chat { id, command } => {
+                if let Some(handle) = channels.get(&id) {
+                    handle.send(ToChannel::Chat(command)).await;
                 }
             }
         }
@@ -143,7 +152,7 @@ pub async fn run(socket: WebSocket) {
 
 struct ChannelHandle {
     task: tokio::task::JoinHandle<()>,
-    to_terminal: Option<mpsc::Sender<ToTerminal>>,
+    to_terminal: Option<mpsc::Sender<ToChannel>>,
     /// Whether ending this channel means typing tmux's detach into it first.
     /// A terminal's does; a port's must not, since those two bytes would be
     /// written into somebody's HTTP request.
@@ -151,7 +160,7 @@ struct ChannelHandle {
 }
 
 impl ChannelHandle {
-    async fn send(&self, message: ToTerminal) {
+    async fn send(&self, message: ToChannel) {
         if let Some(tx) = &self.to_terminal {
             let _ = tx.send(message).await;
         }
@@ -163,7 +172,7 @@ impl ChannelHandle {
     /// else is simply dropped. See `terminal` for why the difference matters.
     async fn shutdown(self) {
         if let Some(tx) = self.to_terminal.as_ref().filter(|_| self.detach) {
-            let _ = tx.send(ToTerminal::Input(DETACH.to_vec())).await;
+            let _ = tx.send(ToChannel::Input(DETACH.to_vec())).await;
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         self.task.abort();
@@ -227,7 +236,235 @@ async fn open(
                 detach: false,
             }
         }
+        Channel::Chat { conv, since, .. } => {
+            let (tx, rx) = mpsc::channel(64);
+            ChannelHandle {
+                task: tokio::spawn(chat_channel(id, session, conv, since, out, rx)),
+                to_terminal: Some(tx),
+                detach: false,
+            }
+        }
     })
+}
+
+/// How long a chat channel waits for the host once the session is past
+/// seeding. The host starts in well under a second and restarts itself in two,
+/// so a minute without one is something wrong rather than something slow.
+const HOST_WAIT_LIMIT: Duration = Duration::from_secs(60);
+const HOST_WAIT_EVERY: Duration = Duration::from_secs(1);
+
+/// One conversation in a chat session, from the host inside the sandbox.
+///
+/// Reached through the same forward a preview uses: the host listens on a
+/// loopback port in there, and a forward is the gateway's way to that. Unlike
+/// a terminal's `exec --tty`, a forward is safe to stop, so nothing here has to
+/// be careful about how the channel ends.
+///
+/// The host can be missing for a while, and the channel waits it out rather
+/// than closing: through seeding, since the seeder is what starts it, and
+/// through a restart, after which the channel attaches again from the last
+/// entry it passed on. The client sees one channel throughout, with a notice
+/// while there is nothing to show.
+async fn chat_channel(
+    id: ChannelId,
+    session: Session,
+    conv: String,
+    since: u64,
+    out: mpsc::Sender<ServerFrame>,
+    mut input: mpsc::Receiver<ToChannel>,
+) {
+    let reason = chat(id, &session, &conv, since, &out, &mut input).await;
+    let _ = out.send(ServerFrame::Closed { id, reason }).await;
+}
+
+async fn chat(
+    id: ChannelId,
+    session: &Session,
+    conv: &str,
+    mut since: u64,
+    out: &mpsc::Sender<ServerFrame>,
+    input: &mut mpsc::Receiver<ToChannel>,
+) -> Option<String> {
+    if session.interface != chat::Interface::Chat {
+        return Some(format!(
+            "`{}` has a terminal agent, not a chat",
+            session.name
+        ));
+    }
+    let notice = |text: &str| ServerFrame::Chat {
+        id,
+        frame: ChatFrame::Notice {
+            text: text.to_string(),
+        },
+    };
+
+    let mut waited = Duration::ZERO;
+    let mut said = None;
+    let mut held: Vec<ChatCommand> = Vec::new();
+    loop {
+        // Seeding is the seeder's to finish, and the host is the last thing
+        // it starts. Waited out on its own limit, which is the clone's.
+        let s = session.clone();
+        let still_seeding = tokio::task::spawn_blocking(move || {
+            let backends = crate::rpc::backends();
+            seeding(backends.for_session(&s), &s)
+        })
+        .await
+        .unwrap_or(false);
+
+        if !still_seeding {
+            let lease = match crate::forward::acquire(session, chat::PORT, Loopback::V4).await {
+                Ok(lease) => lease,
+                Err(reason) => return Some(reason),
+            };
+            match tokio::net::TcpStream::connect(("127.0.0.1", lease.local)).await {
+                Ok(stream) => {
+                    match converse(id, stream, conv, &mut since, &mut held, out, input).await {
+                        Conversed::ClientGone => return None,
+                        // Talking, then not: the host stopped, and is starting
+                        // again. The wait begins afresh.
+                        Conversed::HostGone { heard: true } => {
+                            waited = Duration::ZERO;
+                            said = None;
+                        }
+                        Conversed::HostGone { heard: false } => {}
+                        Conversed::Refused(reason) => return Some(reason),
+                    }
+                }
+                Err(e) => return Some(format!("could not reach the forward: {e}")),
+            }
+        }
+
+        let (text, limit) = if still_seeding {
+            ("cloning, and starting the agent", SEED_WAIT_LIMIT)
+        } else {
+            ("waiting for the agent to start", HOST_WAIT_LIMIT)
+        };
+        if said != Some(text) {
+            said = Some(text);
+            if out.send(notice(text)).await.is_err() {
+                return None;
+            }
+        }
+        if waited >= limit {
+            return Some(format!(
+                "the agent did not start in {}s; its log is in the sandbox, where `hurad attach {}` shows it",
+                limit.as_secs(),
+                session.name
+            ));
+        }
+        // The client closing the tab ends the wait, as it ends a terminal's.
+        // Anything said in the meantime is held for the host rather than
+        // dropped: a message typed into a session that is still cloning is
+        // the first thing its agent should hear.
+        tokio::select! {
+            _ = tokio::time::sleep(HOST_WAIT_EVERY) => waited += HOST_WAIT_EVERY,
+            message = input.recv() => match message {
+                None => return None,
+                Some(ToChannel::Chat(command)) => held.push(command),
+                Some(_) => {}
+            },
+        }
+    }
+}
+
+enum Conversed {
+    /// The tab was closed, or the client went.
+    ClientGone,
+    /// The connection to the host ended. `heard` is whether it ever said
+    /// anything: a forward to a port nobody is listening on accepts and then
+    /// closes, which is what a host that has not started yet looks like.
+    HostGone { heard: bool },
+    /// The host refused what was asked of it, and will go on refusing.
+    Refused(String),
+}
+
+/// Attach to one conversation and carry frames both ways until one end goes.
+async fn converse(
+    id: ChannelId,
+    stream: tokio::net::TcpStream,
+    conv: &str,
+    since: &mut u64,
+    held: &mut Vec<ChatCommand>,
+    out: &mpsc::Sender<ServerFrame>,
+    input: &mut mpsc::Receiver<ToChannel>,
+) -> Conversed {
+    use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
+
+    let _ = stream.set_nodelay(true);
+    let (read, mut write) = stream.into_split();
+    let mut lines = tokio::io::BufReader::new(read).lines();
+
+    let mut attach = match serde_json::to_string(&chat::Attach::new(conv, *since)) {
+        Ok(text) => text,
+        Err(e) => return Conversed::Refused(e.to_string()),
+    };
+    attach.push('\n');
+    if write.write_all(attach.as_bytes()).await.is_err() {
+        return Conversed::HostGone { heard: false };
+    }
+    // What was said while there was no host, in the order it was said. Kept
+    // until the write has gone, so a host that drops now still gets it from
+    // the next attach.
+    while let Some(command) = held.first() {
+        let Ok(mut text) = serde_json::to_string(command) else {
+            held.remove(0);
+            continue;
+        };
+        text.push('\n');
+        if write.write_all(text.as_bytes()).await.is_err() {
+            return Conversed::HostGone { heard: false };
+        }
+        held.remove(0);
+    }
+
+    let mut heard = false;
+    loop {
+        tokio::select! {
+            line = lines.next_line() => match line {
+                Ok(Some(line)) => {
+                    // A frame this server does not know is skipped rather than
+                    // ending the channel: the host and the server ship
+                    // together, but a transcript outlives both.
+                    let Ok(frame) = serde_json::from_str::<ChatFrame>(&line) else {
+                        continue;
+                    };
+                    // Refused on attaching is for good: there is no such
+                    // conversation, and asking again will not make one.
+                    if let ChatFrame::Error { message } = &frame && !heard {
+                        return Conversed::Refused(message.clone());
+                    }
+                    heard = true;
+                    match &frame {
+                        ChatFrame::Replay { seq, .. } => *since = (*since).max(*seq),
+                        ChatFrame::Entry { entry } => *since = (*since).max(entry.seq),
+                        _ => {}
+                    }
+                    // Waited for rather than dropped: a replay is one large
+                    // frame, and a client still drawing the last one should
+                    // slow the host down, not lose the conversation.
+                    if out.send(ServerFrame::Chat { id, frame }).await.is_err() {
+                        return Conversed::ClientGone;
+                    }
+                }
+                Ok(None) | Err(_) => return Conversed::HostGone { heard },
+            },
+            message = input.recv() => match message {
+                None => return Conversed::ClientGone,
+                Some(ToChannel::Chat(command)) => {
+                    let Ok(mut text) = serde_json::to_string(&command) else {
+                        continue;
+                    };
+                    text.push('\n');
+                    if write.write_all(text.as_bytes()).await.is_err() {
+                        return Conversed::HostGone { heard };
+                    }
+                }
+                // Keystrokes and sizes are a terminal's.
+                Some(_) => {}
+            },
+        }
+    }
 }
 
 /// One connection to a port in the sandbox, through the forward for it.
@@ -243,7 +480,7 @@ async fn port_channel(
     port: u16,
     host: hura_core::ports::Loopback,
     out: mpsc::Sender<ServerFrame>,
-    mut input: mpsc::Receiver<ToTerminal>,
+    mut input: mpsc::Receiver<ToChannel>,
 ) {
     let reason = match crate::forward::acquire(&session, port, host).await {
         Err(reason) => Some(reason),
@@ -256,7 +493,7 @@ async fn pipe(
     id: ChannelId,
     local: u16,
     out: &mpsc::Sender<ServerFrame>,
-    input: &mut mpsc::Receiver<ToTerminal>,
+    input: &mut mpsc::Receiver<ToChannel>,
 ) -> Option<String> {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -271,12 +508,12 @@ async fn pipe(
     loop {
         tokio::select! {
             message = input.recv() => match message {
-                Some(ToTerminal::Input(raw)) => {
+                Some(ToChannel::Input(raw)) => {
                     if let Err(e) = to_service.write_all(&raw).await {
                         return Some(e.to_string());
                     }
                 }
-                Some(ToTerminal::Resize { .. }) => {}
+                Some(ToChannel::Resize { .. } | ToChannel::Chat(_)) => {}
                 // The client closed its end.
                 None => return None,
             },
@@ -405,10 +642,10 @@ async fn terminal(
     session: Session,
     tmux: String,
     out: mpsc::Sender<ServerFrame>,
-    mut input: mpsc::Receiver<ToTerminal>,
+    mut input: mpsc::Receiver<ToChannel>,
 ) {
     let (from_pty, mut output) = mpsc::channel::<Vec<u8>>(BACKLOG);
-    let (to_pty, pty_input) = std::sync::mpsc::channel::<ToTerminal>();
+    let (to_pty, pty_input) = std::sync::mpsc::channel::<ToChannel>();
 
     let worker = {
         let session = session.clone();
@@ -486,7 +723,7 @@ fn pty_worker(
     session: Session,
     tmux: String,
     out: mpsc::Sender<Vec<u8>>,
-    input: std::sync::mpsc::Receiver<ToTerminal>,
+    input: std::sync::mpsc::Receiver<ToChannel>,
 ) {
     use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 
@@ -605,7 +842,7 @@ fn pty_worker(
 
     while let Ok(message) = input.recv() {
         match message {
-            ToTerminal::Input(raw) => {
+            ToChannel::Input(raw) => {
                 if std::io::Write::write_all(&mut writer, &raw).is_err()
                     || std::io::Write::flush(&mut writer).is_err()
                 {
@@ -614,7 +851,7 @@ fn pty_worker(
             }
             // The client's window, as a real terminal's size change. tmux
             // resizes from it the way it would for any client.
-            ToTerminal::Resize { cols, rows } => {
+            ToChannel::Resize { cols, rows } => {
                 let _ = pair.master.resize(PtySize {
                     rows,
                     cols,
@@ -622,6 +859,7 @@ fn pty_worker(
                     pixel_height: 0,
                 });
             }
+            ToChannel::Chat(_) => {}
         }
     }
 

@@ -14,6 +14,13 @@
 state=${1:-idle}
 detail=''
 
+# A chat session's agent is run by `hura-agent`, which knows its state better
+# than these hooks can and writes the same file. The hooks still fire, since the
+# settings are shared; they leave the file to it.
+if [ -n "${HURA_CHAT:-}" ]; then
+    exit 0
+fi
+
 # Hooks always supply a payload. The `-t 0` guard is for a human running
 # `hura-status running` by hand to check a sandbox, which would otherwise block
 # forever waiting for stdin that never comes.

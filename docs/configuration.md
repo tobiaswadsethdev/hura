@@ -14,6 +14,7 @@ repo_roots = ["~/dev", "~/work"]                      # where the picker looks
 branch_prefix = "tobias"                              # <prefix>/<name> for a work branch
 refresh    = "1s"                                     # unused since v0.4.0; still parsed
 auto_update = true                                    # download new releases ahead of a restart
+interface  = "chat"                                   # a new session's agent: "chat" or "terminal"
 
 skills     = ["ship-pr"]                               # copied into every session
 

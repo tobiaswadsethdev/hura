@@ -38,6 +38,7 @@ mod previews;
 
 use hura_client::trackers::Trackers;
 use hura_client::{Incoming, Remote, Remotes, Sink};
+use hura_core::chat::ChatCommand;
 use hura_core::comments::{Comment, NewComment};
 use hura_core::events::FeedEvent;
 use hura_core::endpoints::Route;
@@ -425,6 +426,37 @@ fn kill_shell(server: String, name: String, tmux: String) -> Result<Vec<String>,
         .call(Request::KillShell { name, tmux })
         .map_err(to_message)?;
     expect_reply!(reply, Reply::Shells { shells } => shells, "a shell list")
+}
+
+/// A chat session's conversations, and the one just opened when that is what
+/// was asked. The webview's shape for `Reply::Chats`.
+#[derive(Serialize)]
+struct Chats {
+    chats: Vec<String>,
+    opened: Option<String>,
+}
+
+fn chats_of(reply: Reply) -> Result<Chats, Failed> {
+    expect_reply!(reply, Reply::Chats { chats, opened } => Chats { chats, opened }, "a conversation list")
+}
+
+#[tauri::command(async)]
+fn chats(server: String, name: String) -> Result<Chats, Failed> {
+    chats_of(remote(&server)?.call(Request::Chats { name }).map_err(to_message)?)
+}
+
+#[tauri::command(async)]
+fn new_chat(server: String, name: String) -> Result<Chats, Failed> {
+    chats_of(remote(&server)?.call(Request::NewChat { name }).map_err(to_message)?)
+}
+
+#[tauri::command(async)]
+fn close_chat(server: String, name: String, conv: String) -> Result<Chats, Failed> {
+    chats_of(
+        remote(&server)?
+            .call(Request::CloseChat { name, conv })
+            .map_err(to_message)?,
+    )
 }
 
 #[tauri::command(async)]
@@ -967,6 +999,12 @@ fn terminal_input(app: tauri::AppHandle, id: ChannelId, data: String) -> Result<
     send(&app, ClientFrame::Input { id, data })
 }
 
+/// Something done in a conversation, on its chat channel.
+#[tauri::command(async)]
+fn chat_command(app: tauri::AppHandle, id: ChannelId, command: ChatCommand) -> Result<(), Failed> {
+    send(&app, ClientFrame::Chat { id, command })
+}
+
 #[tauri::command(async)]
 fn terminal_resize(
     app: tauri::AppHandle,
@@ -1053,6 +1091,10 @@ fn main() {
             shells,
             new_shell,
             kill_shell,
+            chats,
+            new_chat,
+            close_chat,
+            chat_command,
             comments,
             comment,
             uncomment,

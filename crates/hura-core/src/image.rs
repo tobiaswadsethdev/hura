@@ -33,14 +33,21 @@ const HURA_STATUS: &str = include_str!("../../../images/hura-base/hura-status");
 const HURA_USAGE: &str = include_str!("../../../images/hura-base/hura-usage");
 /// Hook wiring, baked in so a session needs no per-session setup.
 const CLAUDE_SETTINGS: &str = include_str!("../../../images/hura-base/claude-settings.json");
+/// The chat agent's host: the Agent SDK, run from inside the sandbox. See
+/// [`crate::chat`].
+const HURA_AGENT: &str = include_str!("../../../images/hura-base/hura-agent.mjs");
 
 /// Files making up the build context, as (name in the context, content).
-const CONTEXT: [(&str, &str); 4] = [
+const CONTEXT: [(&str, &str); 5] = [
     ("Dockerfile", DOCKERFILE),
     ("hura-status", HURA_STATUS),
     ("hura-usage", HURA_USAGE),
     ("claude-settings.json", CLAUDE_SETTINGS),
+    ("hura-agent.mjs", HURA_AGENT),
 ];
+
+/// The label an image able to run a chat session carries.
+const CHAT_LABEL: &str = "hura.chat";
 
 pub fn exists() -> bool {
     exists_tag(IMAGE)
@@ -379,6 +386,44 @@ pub fn is_older(built: &str, available: &str) -> bool {
         (Some(a), Some(b)) => a < b,
         _ => false,
     }
+}
+
+/// Whether an image can run a chat session: whether it carries `hura-agent`.
+///
+/// Read from a label rather than by starting a container, because this is on
+/// the create path. An image built before chat sessions existed starts and
+/// runs a terminal agent perfectly well, and a chat session on it would sit
+/// waiting for a host that is not there.
+pub fn supports_chat(tag: &str) -> bool {
+    let format = format!("{{{{index .Config.Labels \"{CHAT_LABEL}\"}}}}");
+    Command::new("docker")
+        .args(["image", "inspect", "--format", &format, tag])
+        .output()
+        .map(|out| out.status.success() && String::from_utf8_lossy(&out.stdout).trim() == "1")
+        .unwrap_or(false)
+}
+
+/// Build what a chat session on these toolchains needs, when the image there
+/// predates chat sessions. Returns whether a build happened.
+///
+/// The base first, because a variant inherits its label from the base it was
+/// built on: rebuilding only the variant over an old base would still answer no.
+pub fn ensure_chat(chains: &[&'static Toolchain]) -> Result<bool, String> {
+    let mut built = ensure_for(chains)?;
+    if !supports_chat(IMAGE) {
+        println!("rebuilding {IMAGE}: it predates chat sessions ...");
+        build()?;
+        built = true;
+    }
+    if !chains.is_empty() {
+        let tag = toolchain::tag(chains);
+        if !supports_chat(&tag) {
+            println!("rebuilding {tag}: it predates chat sessions ...");
+            build_variant(chains)?;
+            built = true;
+        }
+    }
+    Ok(built)
 }
 
 /// Build the image if it is missing. Returns whether a build happened.

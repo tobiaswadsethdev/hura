@@ -70,6 +70,7 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `removed.rs` | the names of destroyed sessions, kept until the sandbox behind them has actually gone. Deletion is asynchronous, and a sandbox still listed with its record already dropped is the exact shape of an orphan worth adopting -- so without this a removed session came back on the next refresh, and the name could not be used again |
 | `seed.rs` | the detached script that clones, cuts the branch, writes the record and starts the agent |
 | `status.rs` | what the agent is doing, from hooks and from its screen |
+| `chat.rs` | a chat session: the agent driven through the Agent SDK by `hura-agent` inside the sandbox. The frames between it, the server and the window, the script that starts it, and the execs that list, open and close conversations. The SDK's own messages are carried whole rather than modelled |
 | `policy.rs` | the templates, the mid-run widen/tighten, and `View`: the policy pane as facts, which each renderer words for itself |
 | `endpoints.rs` | the global allow and block lists applied to every new session |
 | `events.rs` | the allow/deny feed, merged and kept on disk per session |
@@ -102,10 +103,12 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `ws.rs` | *(hura-client)* the streaming half, and the pty a terminal channel needs on this side of it |
 | `rpc.rs` | *(hurad)* one request in, one outcome out; every arm a call into `ops` |
 | `serve.rs` | *(hurad)* the routes, the token check, and keeping blocking work off the runtime |
-| `stream.rs` | *(hurad)* the channels a client subscribes to, and the pty behind a terminal |
+| `stream.rs` | *(hurad)* the channels a client subscribes to, the pty behind a terminal, and the connection to a chat session's host through a forward |
 | `App.tsx` | *(desktop)* the workspace: the project tree, the tabs and the dock |
 | `charSize.ts` | *(desktop)* the font metrics WebKit gets wrong, and the probe that corrects them |
-| `panes/` | *(desktop)* the terminal, a file in Monaco, and a file's diff with the review on it |
+| `panes/` | *(desktop)* the terminal, a conversation, a file in Monaco, and a file's diff with the review on it |
+| `chat/` | *(desktop)* a transcript folded into things to draw, tool calls as cards, and what the agent is waiting on you for |
+| `hura-agent.mjs` | *(the image)* the process that runs the Agent SDK inside a chat session's sandbox: conversations, their transcripts, permission requests, and the status and usage files. `images/hura-base/` |
 
 ## Three rules worth knowing before you change anything
 

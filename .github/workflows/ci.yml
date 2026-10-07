@@ -67,6 +67,8 @@ jobs:
       - name: Tauri versions agree
         run: ./scripts/check-tauri-versions.sh
 
+      - name: The chat host
+        run: node --test images/hura-base/hura-agent.test.mjs
       - name: Desktop types
         working-directory: apps/desktop
         run: |
