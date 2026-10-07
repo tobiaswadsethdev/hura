@@ -82,9 +82,16 @@ const MAX_NAME_IN_SANDBOX: usize = MAX_SANDBOX_NAME - PREFIX.len();
 /// column in the list, and something you type after `hura attach`.
 const MAX_NAME: usize = 40;
 
-/// Characters of the name kept when a sandbox name has to be shortened. The
-/// rest of the budget goes to the discriminator below.
-const SANDBOX_STEM: usize = 10;
+/// Characters of the name kept when a sandbox name has to be shortened: what
+/// is left once the dash and the four hex digits of the discriminator below
+/// have had theirs.
+///
+/// Worked out from the budget rather than written down, because written down
+/// it was ten, one more than there is room for. The names it was tested with
+/// all had a dash as their tenth character, which is trimmed, so they came to
+/// nineteen; `data-239-all-campaign-costs-from-google` came to twenty, and the
+/// gateway refused to create its sandbox.
+const SANDBOX_STEM: usize = MAX_NAME_IN_SANDBOX - "-0000".len();
 
 /// The size to leave the agent's tmux window at when nothing is attached.
 ///
@@ -106,7 +113,7 @@ pub fn sandbox_name(name: &str) -> String {
     }
     // Truncation alone would collide: `maxgaming-scala-customer-id` and
     // `maxgaming-scala-tax` share their first fifteen characters, and the two
-    // sessions would name one sandbox. So a long name keeps its first ten
+    // sessions would name one sandbox. So a long name keeps its first nine
     // characters -- enough to recognise in `openshell sandbox list` -- and ends
     // in four hex digits of the *whole* name, which keeps this a pure function
     // of the session name. That is what makes it a convention rather than a
@@ -450,6 +457,21 @@ pub struct Session {
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub created_at: u64,
     pub state: State,
+    /// Why the session failed, in the words of whatever refused it: the
+    /// gateway turning down a create, a clone the seeder gave up on.
+    ///
+    /// On the record because the record is the only thing a window reads. A
+    /// create on `hurad` runs on a thread whose one way to speak is its own
+    /// terminal, so without this a sandbox the gateway refused showed up as a
+    /// `dead` row whose panes each said `sandbox not found`, and the reason
+    /// was on a screen nobody was looking at.
+    ///
+    /// Kept when a failed session goes `dead`, which is what one whose sandbox
+    /// was never made does on the next refresh, and dropped when a session
+    /// comes back to life. `None` on a `dead` session means its sandbox went
+    /// away later, not that it never had one.
+    #[serde(default)]
+    pub failure: Option<String>,
 }
 
 fn default_agent() -> String {
@@ -494,6 +516,7 @@ impl Session {
             agent: default_agent(),
             created_at: now_epoch(),
             state: State::Creating,
+            failure: None,
         }
     }
 
@@ -667,6 +690,45 @@ mod tests {
         assert_eq!(
             sandbox_name(&"a".repeat(MAX_NAME_IN_SANDBOX)).len(),
             MAX_SANDBOX_NAME
+        );
+    }
+
+    /// Whatever the cut lands on, the sandbox name fits. The names above all
+    /// cut on a dash, which is trimmed, and that hid a stem one character too
+    /// long: a name cut on a letter came to twenty, and the gateway refused it
+    /// with `name exceeds maximum length (20 > 19)`.
+    #[test]
+    fn a_shortened_sandbox_name_fits_whatever_it_is_cut_on() {
+        for len in 1..=MAX_NAME {
+            let sandbox = sandbox_name(&"a".repeat(len));
+            assert!(
+                sandbox.len() <= MAX_SANDBOX_NAME,
+                "`{sandbox}` is {} long",
+                sandbox.len()
+            );
+        }
+        assert_eq!(
+            sandbox_name("data-239-all-campaign-costs-from-google"),
+            "hura-data-239-19fb"
+        );
+    }
+
+    /// Sandboxes already made keep their names. Only a stem cut on a dash ever
+    /// fitted, and nine characters trimmed is the same as ten trimmed when the
+    /// tenth is a dash, so shortening the stem renamed nothing that exists.
+    #[test]
+    fn sandboxes_made_before_the_stem_shrank_keep_their_names() {
+        assert_eq!(
+            sandbox_name("maxgaming-scala-customer-id"),
+            "hura-maxgaming-92cf"
+        );
+        assert_eq!(
+            sandbox_name("maxgaming-scala-tax-rate"),
+            "hura-maxgaming-7a38"
+        );
+        assert_eq!(
+            sandbox_name("fix-thing-with-a-long-tail"),
+            "hura-fix-thing-2e65"
         );
     }
 

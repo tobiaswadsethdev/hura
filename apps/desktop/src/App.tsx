@@ -25,8 +25,10 @@ import { Empty } from "./Empty";
 import {
   Branch,
   Busy,
+  Forget,
   Integrations,
   NewProject,
+  NoSandbox,
   NoServer,
   Servers,
   Settings,
@@ -211,7 +213,14 @@ export default function App() {
   // Keyed on the *names*, joined, rather than on the array: the list is a new
   // array every few seconds and re-subscribing to four sandboxes that often
   // would be worse than not subscribing at all.
-  const names = sessions.map((s) => s.name).join("\u0000");
+  //
+  // Not a dead session's: there is no sandbox to poll, and the server would
+  // ask the gateway about it every two seconds for as long as the row is
+  // listed, to hear `sandbox not found` each time.
+  const names = sessions
+    .filter((s) => s.state !== "dead")
+    .map((s) => s.name)
+    .join("\u0000");
   useEffect(() => {
     if (!server) return;
     let live = true;
@@ -386,12 +395,17 @@ export default function App() {
     (selected !== null && session === null) ||
     session?.state === "creating" ||
     session?.state === "seeding";
+  // Selected and never going to be ready: its sandbox is gone, or was never
+  // made. Every pane would ask the gateway about it and draw `sandbox not
+  // found`, which says what is missing and not why, so they are not mounted
+  // and the reason is shown instead.
+  const gone = session?.state === "dead";
 
   // Asked once per worktree as it is selected. Not polled: a shell appears
   // because someone in this window asked for one, and paying an exec a second
   // to hear that nothing changed is what the stream exists to avoid.
   useEffect(() => {
-    if (!server || !session || preparing || shells[session.name]) return;
+    if (!server || !session || preparing || gone || shells[session.name]) return;
     let live = true;
     api
       .shells(server, session.name)
@@ -400,7 +414,7 @@ export default function App() {
     return () => {
       live = false;
     };
-  }, [server, session, preparing, shells]);
+  }, [server, session, preparing, gone, shells]);
 
   const openTabs = session
     ? arrange(
@@ -408,6 +422,37 @@ export default function App() {
         order[session.name] ?? [],
       )
     : [];
+
+  /// Destroy a worktree, from its row in the tree or from the page a dead one
+  /// shows.
+  const destroy = (s: Session) => {
+    if (!server) return;
+    // Asked, and asked with the consequence spelled out, because this is the
+    // one thing in the window that cannot be undone: the sandbox goes, and with
+    // it whatever the agent had not pushed. A dead one has nothing left to
+    // lose, and saying so is the difference between a click and a hesitation.
+    const dead = s.state === "dead";
+    ask({
+      title: dead ? `Remove ${s.name}?` : `Destroy ${s.name}?`,
+      body: dead ? (
+        <>Its sandbox is already gone, so this only takes it off the list.</>
+      ) : (
+        <>Its sandbox goes with it, and anything the agent has not pushed is lost.</>
+      ),
+      confirm: dead ? "remove" : "destroy",
+      onConfirm: () => {
+        api
+          .destroy(server, s.name)
+          .then((left) => {
+            setSessions(left);
+            // Whatever was showing is gone. Left selected, the panes would go
+            // on asking the server about a session it no longer has.
+            if (selected === s.name) setSelected(null);
+          })
+          .catch((e) => setError(messageOf(e)));
+      },
+    });
+  };
 
   /// Open a tab if it is not already open, and bring it to the front either way.
   const openTab = (worktree: string, tab: Tab) => {
@@ -617,29 +662,7 @@ export default function App() {
                 .then(setProjects)
                 .catch((e) => setError(messageOf(e)));
             }}
-            onDestroy={(s) => {
-              if (!server) return;
-              // Asked, and asked with the consequence spelled out, because this
-              // is the one thing in the window that cannot be undone: the
-              // sandbox goes, and with it whatever the agent had not pushed.
-              ask({
-                title: `Destroy ${s.name}?`,
-                body: <>Its sandbox goes with it, and anything the agent has not pushed is lost.</>,
-                confirm: "destroy",
-                onConfirm: () => {
-                  api
-                    .destroy(server, s.name)
-                    .then((left) => {
-                      setSessions(left);
-                      // Whatever was showing is gone. Left selected, the panes
-                      // would go on asking the server about a session it no
-                      // longer has.
-                      if (selected === s.name) setSelected(null);
-                    })
-                    .catch((e) => setError(messageOf(e)));
-                },
-              });
-            }}
+            onDestroy={destroy}
           />
 
           <Split
@@ -657,6 +680,18 @@ export default function App() {
             // are seconds of gateway and then however long the clone takes,
             // and a spinner with the step beside it is all there is to know.
             <Empty size="page" icon={Busy} spin note={preparingNote(session)} />
+          ) : gone && session ? (
+            // Why there is nothing here, which is what used to be missing: the
+            // panes each said `sandbox not found`, and the reason was on the
+            // server's terminal. The mark is grey because it only says what is
+            // absent; the reason is red because it is an error.
+            <Empty size="page" icon={NoSandbox} note="no sandbox behind this worktree">
+              {session.failure && <p className="error">{session.failure}</p>}
+              <button className="go" onClick={() => destroy(session)}>
+                <Forget />
+                remove
+              </button>
+            </Empty>
           ) : session && server ? (
             <>
               <Tabs
@@ -664,6 +699,7 @@ export default function App() {
                 name={session.name}
                 tabs={openTabs}
                 active={activeTab}
+                failure={session.state === "failed" ? session.failure : null}
                 onActivate={(key) => setActive((a) => ({ ...a, [session.name]: key }))}
                 onReorder={(moved, onto) =>
                   setOrder((all) => ({

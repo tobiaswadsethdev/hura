@@ -14,6 +14,7 @@
 //! `save` alone is atomic (temp file and rename); it is the *read* before it that
 //! has to be inside the same lock.
 
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -90,6 +91,17 @@ impl Store {
 
     pub fn upsert(&mut self, session: Session) {
         self.sessions.insert(session.name.clone(), session);
+    }
+
+    /// Add a session only if nothing holds its name yet. Whether it went in.
+    pub fn insert_new(&mut self, session: Session) -> bool {
+        match self.sessions.entry(session.name.clone()) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(slot) => {
+                slot.insert(session);
+                true
+            }
+        }
     }
 
     pub fn remove(&mut self, name: &str) -> Option<Session> {
@@ -233,7 +245,14 @@ pub fn reconcile(
                     }
                     session.state = State::Dead;
                 }
-                Phase::Error => session.state = State::Failed,
+                // Said only where nothing more particular has been: a create
+                // that recorded why it failed knows more than the phase does.
+                Phase::Error => {
+                    session.state = State::Failed;
+                    session.failure.get_or_insert_with(|| {
+                        format!("the gateway reports its sandbox `{}` in `Error`", sb.name)
+                    });
+                }
                 Phase::Stopped => session.state = State::Idle,
                 Phase::Ready if session.state == State::Dead => session.state = State::Ready,
                 // A sandbox that is not running yet, under a record that claims
@@ -253,6 +272,11 @@ pub fn reconcile(
                 }
                 _ => {}
             },
+        }
+        // A sandbox that came back, under a record that said why it had gone.
+        // The reason is about a session that is not this one any more.
+        if !matches!(session.state, State::Failed | State::Dead) {
+            session.failure = None;
         }
         out.sessions.push(session);
     }
@@ -376,6 +400,21 @@ mod tests {
         assert!(after.contains("new"), "the record the refresh never saw");
     }
 
+    /// What a failure is recorded with when there may already be a record: the
+    /// name a create was refused for is often taken by the session it clashed
+    /// with, and replacing that one would lose somebody's work.
+    #[test]
+    fn insert_new_leaves_a_taken_name_alone() {
+        let mut store = Store::default();
+        assert!(store.insert_new(session("a", State::Ready)));
+
+        let mut refused = session("a", State::Failed);
+        refused.failure = Some("session `a` already exists".into());
+        assert!(!store.insert_new(refused));
+        assert_eq!(store.get("a").map(|s| s.state), Some(State::Ready));
+        assert_eq!(store.get("a").and_then(|s| s.failure.clone()), None);
+    }
+
     /// Two writers at once, for real: the lock has to serialise them, and both
     /// changes have to be there afterwards.
     #[test]
@@ -483,6 +522,49 @@ mod tests {
         let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
         let r = reconcile(vec![session("a", State::Dead)], &live);
         assert_eq!(r.sessions[0].state, State::Ready);
+    }
+
+    /// A create the gateway refused leaves a failed record and no sandbox, and
+    /// the next refresh turns that into `dead`. The reason has to come through:
+    /// it is what the window shows in place of panes that have nothing to read.
+    #[test]
+    fn a_refused_create_keeps_its_reason_once_dead() {
+        let mut refused = session("a", State::Failed);
+        refused.failure = Some("name exceeds maximum length (20 > 19)".into());
+        let r = reconcile(vec![refused], &[]);
+        assert_eq!(r.sessions[0].state, State::Dead);
+        assert_eq!(
+            r.sessions[0].failure.as_deref(),
+            Some("name exceeds maximum length (20 > 19)")
+        );
+    }
+
+    /// The phase is a reason when there is no better one, and only then.
+    #[test]
+    fn an_error_phase_says_so_unless_the_record_knows_more() {
+        let live = [sandbox("hura-a", Phase::Error, Some("a"))];
+        let r = reconcile(vec![session("a", State::Ready)], &live);
+        let said = r.sessions[0].failure.as_deref().unwrap_or_default();
+        assert!(said.contains("`Error`"), "{said}");
+
+        let mut known = session("a", State::Failed);
+        known.failure = Some("seeding failed: fatal: repository not found".into());
+        let r = reconcile(vec![known], &live);
+        assert_eq!(
+            r.sessions[0].failure.as_deref(),
+            Some("seeding failed: fatal: repository not found")
+        );
+    }
+
+    /// A session that comes back is not the one the reason was about.
+    #[test]
+    fn a_revived_session_drops_its_reason() {
+        let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
+        let mut gone = session("a", State::Dead);
+        gone.failure = Some("the gateway reports its sandbox `hura-a` in `Error`".into());
+        let r = reconcile(vec![gone], &live);
+        assert_eq!(r.sessions[0].state, State::Ready);
+        assert_eq!(r.sessions[0].failure, None);
     }
 
     #[test]

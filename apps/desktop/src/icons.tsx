@@ -61,6 +61,7 @@ import {
   FolderPlus,
   FolderSearch,
   FolderTree,
+  Ghost,
   Globe,
   GlobeLock,
   GitBranch,
@@ -287,6 +288,11 @@ export const NoIntegrations = Unplug;
 export const NoPorts = GlobeLock;
 /// A file Monaco will not be shown.
 export const NotText = Binary;
+/// A session whose sandbox is gone, or was never made: the record outliving
+/// the thing it describes. Not a box with a cross through it, which lucide
+/// does not have, and not `PackageX`, which would read as no toolchain: the
+/// package is the toolchain glyph, beside the sandbox's box in the facts pane.
+export const NoSandbox = Ghost;
 
 type Props = { className?: string; title?: string };
 

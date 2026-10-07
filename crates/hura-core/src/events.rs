@@ -84,6 +84,11 @@ pub struct Event {
 /// back on every fetch stays free. Trimmed oldest-first.
 const KEPT: usize = 4000;
 
+/// Held by [`merge_kept`]. One for every session rather than one each: a merge
+/// is a file read and a write, and nothing waits on another long enough to be
+/// worth a map of locks.
+static MERGING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Where a session's kept events live.
 fn kept_path(session: &str) -> PathBuf {
     // Beside the session cache, under a directory of its own so a session name
@@ -106,6 +111,12 @@ fn kept_path(session: &str) -> PathBuf {
 /// deduplicated, and trimmed; the pane draws the union. Losing the file costs the
 /// history and nothing else, like the session cache beside it.
 pub fn merge_kept(session: &str, fetched: Vec<Event>) -> Vec<Event> {
+    // Across the read and the write. `hurad` merges from more than one thread,
+    // its own collector and whichever pane is open, and two merges interleaved
+    // lose the additions of whichever wrote first.
+    let _held = MERGING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let path = kept_path(session);
     let mut all = read_kept(&path);
     let mut known: std::collections::HashSet<(u64, String, String)> =
@@ -156,8 +167,34 @@ fn read_kept(path: &Path) -> Vec<Event> {
     // A line that will not parse is skipped rather than failing the read: this
     // is a cache, and half a history is better than none.
     text.lines()
-        .filter_map(|l| serde_json::from_str(l).ok())
+        .filter_map(|l| serde_json::from_str::<Event>(l).ok())
+        .map(|mut e| {
+            e.subject = mended(&e.subject).to_string();
+            e
+        })
         .collect()
+}
+
+/// A subject as it was meant to be read, from one kept before the parser
+/// counted nested brackets.
+///
+/// Those were cut at the first `]` inside a reason, and what followed became
+/// more of the subject: `/usr/bin/curl(8898) -> api.github.com:443  , cmdline:
+/// ). S...]`. They are on disk, and the denials they record have long left the
+/// gateway's window, so mending them as they are read is the only way they
+/// can still be allowed. The tail always begins with whitespace and then the
+/// `,` or `]` that followed a nested group, which no subject the gateway
+/// writes has. Mended, they also match the same lines read again, so a
+/// denial still in the window is not kept twice.
+fn mended(subject: &str) -> &str {
+    subject
+        .char_indices()
+        .filter(|(_, c)| c.is_whitespace())
+        .find(|(i, _)| {
+            let next = subject[*i..].trim_start();
+            next.starts_with(',') || next.starts_with(']')
+        })
+        .map_or(subject, |(i, _)| subject[..i].trim_end())
 }
 
 fn write_kept(path: &Path, events: &[Event]) -> std::io::Result<()> {
@@ -469,8 +506,8 @@ fn fill_payload(event: &mut Event, payload: &str) {
                 let after = &cursor[start + 1..];
                 // The gateway truncates long reasons with a trailing `...` and
                 // no closing bracket, so an unterminated group is normal.
-                let (group, tail) = match after.split_once(']') {
-                    Some((g, t)) => (g, t),
+                let (group, tail) = match closing(after) {
+                    Some(end) => (&after[..end], &after[end + 1..]),
                     None => (after, ""),
                 };
                 absorb_group(event, group);
@@ -489,6 +526,30 @@ fn fill_payload(event: &mut Event, payload: &str) {
     if !subject.is_empty() {
         event.subject = strip_scheme(subject);
     }
+}
+
+/// Where the group that `after` is the inside of ends: the `]` that closes it,
+/// counting the brackets nested in it. `None` when nothing does.
+///
+/// Nesting is ordinary. A binary refused for an endpoint some rule does name
+/// is explained as `[reason:binary '/usr/bin/curl' not allowed in policy
+/// 'github_rest_api' (ancestors: [...], cmdline: [...]). ...]`, and a tunnel
+/// cut by a policy change carries `[captured_generation:5 ...]`. Stopping at
+/// the first `]` cut those reasons short and took the rest for more of the
+/// subject, so `api.github.com:443` came out as `api.github.com:443  ,
+/// cmdline: ). S...]`, which is no endpoint, and the pane could not offer to
+/// allow the very denials that most need it.
+fn closing(after: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, c) in after.char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' if depth == 0 => return Some(i),
+            ']' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Drop the `http://` an L7 decision carries.
@@ -787,6 +848,74 @@ mod tests {
                 .unwrap()
                 .starts_with("binary not allowed")
         );
+    }
+
+    /// Captured verbatim from `openshell logs` on 0.0.110: an agent's fetch
+    /// refused because `github_rest_api` names the endpoint for other binaries.
+    /// The reason has brackets of its own, and stopping at the first `]` left
+    /// a subject with no endpoint in it, so the pane had nothing to allow.
+    #[test]
+    fn a_reason_with_brackets_inside_stays_the_reason() {
+        let line = "[1791358393.418] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/claude(1702) -> api.github.com:443 [policy:- engine:opa] [reason:binary '/usr/local/bin/claude' not allowed in policy 'github_rest_api' (ancestors: [/usr/bin/bash -> /usr/bin/tmux -> /opt/openshell/bin/openshell-sandbox], cmdline: [/etc/tmux.conf, /sandbox/repo, /sandbox]). SYMLINK HINT: the binary path is the kernel-re...]";
+        let e = parse_line(line).expect("an event");
+        assert_eq!(
+            e.subject,
+            "/usr/local/bin/claude(1702) -> api.github.com:443"
+        );
+        let reason = e.reason.as_deref().unwrap();
+        assert!(
+            reason.ends_with("SYMLINK HINT: the binary path is the kernel-re..."),
+            "{reason}"
+        );
+        assert_eq!(
+            e.target(),
+            Some(Target {
+                endpoint: "api.github.com:443".into(),
+                binary: Some("/usr/local/bin/claude".into()),
+            })
+        );
+    }
+
+    /// Cut off inside a nested group, the reason runs to the end of the line
+    /// rather than taking the subject with it.
+    #[test]
+    fn a_reason_truncated_inside_a_nested_group_still_parses() {
+        let line = "[1791358393.418] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(8898) -> api.github.com:443 [policy:- engine:opa] [reason:binary '/usr/bin/curl' not allowed in policy 'github_rest_api' (ancestors: [/usr/bin/bash -> /usr/lo...]";
+        let e = parse_line(line).expect("an event");
+        assert_eq!(e.subject, "/usr/bin/curl(8898) -> api.github.com:443");
+        assert!(
+            e.reason
+                .as_deref()
+                .unwrap()
+                .contains("(ancestors: [/usr/bin/bash")
+        );
+    }
+
+    /// Subjects kept before the parser counted brackets come back readable,
+    /// and so allowable. Taken from a real kept feed.
+    #[test]
+    fn kept_subjects_from_the_old_parser_are_mended() {
+        for (kept, meant) in [
+            (
+                "/usr/bin/curl(8898) -> api.github.com:443  , cmdline: ). S...]",
+                "/usr/bin/curl(8898) -> api.github.com:443",
+            ),
+            (
+                "/usr/bin/curl(5422) -> api.nuget.org:443  , cmdline:",
+                "/usr/bin/curl(5422) -> api.nuget.org:443",
+            ),
+            ("api.anthropic.com:443 ]", "api.anthropic.com:443"),
+        ] {
+            assert_eq!(mended(kept), meant);
+        }
+        // What the gateway writes is left exactly as it is.
+        for fine in [
+            "/usr/bin/curl(79) -> pastebin.com:443",
+            "GET httpbin.org:443/ip",
+            "ssh relay closed (channel_id=a, target=unix:/run/openshell/ssh.sock)",
+        ] {
+            assert_eq!(mended(fine), fine);
+        }
     }
 
     #[test]

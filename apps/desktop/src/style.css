@@ -733,6 +733,13 @@ main { display: flex; flex: 1; min-height: 0; }
 .tabs > .add:hover { background: var(--line); color: var(--text); }
 /* Every tab stays mounted -- see Tabs.tsx -- so the inactive ones are hidden
    rather than removed, and `hidden` alone loses to `display: flex`. */
+/* Why a failed worktree failed, between the tabs and whatever is open. */
+.tabs-failure {
+  flex: none;
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
 .tab-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; }
 .tab-body[hidden] { display: none; }
 
@@ -2469,6 +2476,15 @@ main { display: flex; flex: 1; min-height: 0; }
   /* The one place in the window a line wraps to a measure rather than being
      clipped: these are fragments, and a fragment with an ellipsis in it has
      lost the half that made it actionable. */
+  text-wrap: pretty;
+}
+/* Why a dead worktree is dead, under its note. The colour is said again
+   because `.empty p` below greys every paragraph in here, and this one is an
+   error. */
+.empty > .error {
+  margin: 0;
+  color: var(--bad);
+  text-align: center;
   text-wrap: pretty;
 }
 

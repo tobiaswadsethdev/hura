@@ -1029,6 +1029,11 @@ fn print_sessions(rows: &[(Session, State)]) {
             s.work_branch,
             s.repo,
         );
+        // Under its row rather than in a column: it is a sentence, and only a
+        // failed or dead session has one.
+        if let Some(why) = &s.failure {
+            println!("  {why}");
+        }
     }
 }
 
@@ -1382,6 +1387,7 @@ fn serve(opts: Serve) -> Fallible {
         if auto_update {
             tokio::spawn(watch_for_releases());
         }
+        tokio::spawn(keep_feeds());
 
         let config = axum_server::tls_rustls::RustlsConfig::from_pem(
             identity.cert_pem.into_bytes(),
@@ -1395,6 +1401,28 @@ fn serve(opts: Serve) -> Fallible {
     })?;
 
     Ok(())
+}
+
+/// How often every session's feed is read into its record. A sixth of the
+/// six minutes the gateway's window lasts at rest, which leaves room for a
+/// burst of connections, a package restore say, to shorten it a great deal.
+/// One `openshell logs` per session, about 13ms each.
+const FEED_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Keep every live session's allow/deny feed, whether or not a window is
+/// showing it. See [`hura_core::ops::keep_feeds`].
+///
+/// `spawn_blocking` for the reason the release check is: each read is a
+/// subprocess.
+async fn keep_feeds() {
+    loop {
+        tokio::time::sleep(FEED_EVERY).await;
+        if let Err(e) =
+            tokio::task::spawn_blocking(|| hura_core::ops::keep_feeds(&rpc::backends())).await
+        {
+            eprintln!("hurad: the feeds were not kept this time: {e}");
+        }
+    }
 }
 
 /// Ask github for a newer release, and download one if there is.

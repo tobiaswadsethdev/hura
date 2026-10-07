@@ -393,7 +393,7 @@ pub fn failure_message(session: &str, why: &str) -> String {
     let mut msg = format!("seeding failed: {why}");
     if why.contains("CONNECT tunnel failed") {
         msg.push_str(&format!(
-            " -- that 403 is the gateway denying the connection, not the host refusing it; \
+            ". That 403 is the gateway denying the connection, not the host refusing it; \
              `hurad events {session}` names the rule and the reason"
         ));
     }

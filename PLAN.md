@@ -1207,7 +1207,7 @@ Increments 0-21 are done. What is left is the unscheduled list below.
   **The 15-character cap was the gateway's, not ours.** Sandbox names are capped
   at 19 and `hura-` takes four. So the session name is now ours (40 characters,
   bounded by being a branch and a list column) and the *sandbox* name is derived
-  from it: unchanged for short names, and for long ones the first ten characters
+  from it: unchanged for short names, and for long ones the first nine characters
   plus four hex digits of FNV-1a over the whole name. Deterministic, because
   `hura rm` and adoption have to name a sandbox with no record to read it from;
   distinct, because `maxgaming-scala-customer-id` and `maxgaming-scala-tax` would
