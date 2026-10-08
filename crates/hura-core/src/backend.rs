@@ -1,12 +1,12 @@
 //! Where a session's work actually happens.
 //!
 //! [`crate::ops`], [`crate::git`], [`crate::files`] and [`crate::seed`] all talk
-//! to a [`Backend`] rather than to the gateway directly. The scripts -- the
-//! diff, the poll, the status scrape, the file tree, the review, the shells --
-//! are shared and pure; where they run, where the files are and how tmux is
+//! to a [`Backend`] rather than to the sandbox runtime directly. The scripts,
+//! the diff, the poll, the status scrape, the file tree, the review and the
+//! shells, are shared and pure; where they run, where the files are and how tmux is
 //! invoked is this trait's business rather than theirs. There is one
-//! implementation, [`Sandboxed`]: a session inside an OpenShell sandbox, with
-//! the gateway's policy on everything that leaves it.
+//! implementation, [`Sandboxed`]: a session inside a sandbox of its own, with
+//! the sandbox's rules on everything that leaves it.
 //!
 //! There used to be a second, a plain `git worktree` on the server with no
 //! isolation at all. It was removed: two backends meant two of everything to
@@ -165,7 +165,7 @@ pub trait Backend {
     fn interactive_argv(&self, session: &Session, argv: &[&str]) -> Result<Vec<String>>;
 
     /// The long-running argv that forwards a loopback port on the server to
-    /// `port` inside this session. See [`OpenShell::forward_argv`].
+    /// `port` inside this session. See [`Sandboxed::forward_argv`].
     fn forward_argv(
         &self,
         session: &Session,
@@ -175,8 +175,8 @@ pub trait Backend {
 
     /// How to invoke tmux where this session's agent runs.
     ///
-    /// The image ships a config and a sandbox exec inherits no locale, so this
-    /// carries both. `-u` says "this terminal is UTF-8" outright rather than
+    /// The image ships a config, and the locale is safer said than inherited,
+    /// so this carries both. `-u` says "this terminal is UTF-8" outright rather than
     /// inferring it from an environment.
     fn tmux(&self) -> &'static str;
 
@@ -195,8 +195,8 @@ pub trait Backend {
     /// Apart from [`Backend::place`] because the record is written between the
     /// two, and it has to be: between the sandbox existing and its record being
     /// saved it is an orphan that a refresh in another process will try to
-    /// adopt. Imposing MCP endpoints is a `policy update --wait`, which made
-    /// that window seconds wide.
+    /// adopt. Imposing the policy and the MCP endpoints is a runtime call per
+    /// rule, which makes that window far wider than a moment.
     fn configure(
         &self,
         session: &Session,

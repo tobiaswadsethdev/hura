@@ -6,7 +6,7 @@
 // `hura_client::pair` on the Rust side, called by both. What this adds is that
 // the machine running the window does not need a CLI: on Windows there is no
 // `hura` to install, because the half of it that drives sandboxes needs a
-// gateway and a Docker daemon that only exist on the Linux side.
+// sandbox runtime and a Docker daemon that only exist on the Linux side.
 //
 // The string carries a credential, so it is never echoed back into an error
 // message and never logged. What comes back on success is the server's own

@@ -1,7 +1,7 @@
 //! The half of the protocol that pushes: one websocket, several channels.
 //!
 //! `/rpc` answers a question. This is for the three things a client wants
-//! *told*: what the agent's screen is doing, what the gateway has just decided,
+//! *told*: what the agent's screen is doing, what the sandbox has just decided,
 //! and the terminal itself. Polling all three over `/rpc` would be a request per
 //! session per second per client, each one a TLS handshake, to say "nothing has
 //! changed" nearly every time.
@@ -142,7 +142,7 @@ pub enum ServerFrame {
     /// Terminal output, base64 of the raw bytes -- or, on a port channel, what
     /// the service answered.
     Output { id: ChannelId, data: String },
-    /// Decisions the gateway has made since the last of these.
+    /// Decisions the sandbox runtime has made since the last of these.
     ///
     /// Newest first, matching what `/rpc` answers, and only the new ones: the
     /// first frame after `Opened` carries the recent log, and every frame after

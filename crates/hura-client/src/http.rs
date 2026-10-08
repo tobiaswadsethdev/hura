@@ -24,7 +24,7 @@ use rustls::{ClientConnection, StreamOwned};
 /// How long to wait for a server that has accepted the connection but is not
 /// answering.
 ///
-/// A gateway call behind the server can legitimately take seconds, so this is
+/// A runtime call behind the server can legitimately take seconds, so this is
 /// generous.
 const TIMEOUT: Duration = Duration::from_secs(30);
 

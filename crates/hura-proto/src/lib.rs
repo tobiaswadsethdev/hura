@@ -15,8 +15,8 @@
 //!
 //! Requests are named for what a *client* wants, not for the function that
 //! serves them, which is why there is no `Refresh`: reconciling the cache
-//! against the gateway is how the server answers [`Request::Ls`], and a client
-//! has no way to want one without the other.
+//! against the sandbox runtime is how the server answers [`Request::Ls`], and a
+//! client has no way to want one without the other.
 
 use serde::{Deserialize, Serialize};
 
@@ -55,9 +55,9 @@ pub const VERSION: u32 = 4;
 ///
 /// Here rather than in the server because three things need to agree about it:
 /// the server that binds it, `hurad pair` which puts it in the string, and
-/// `hura doctor`, which tells a Windows user what to dial. Next to the gateway's
-/// own 17670 so the pair are memorable together, and out of the ephemeral range
-/// so it can be bound reliably.
+/// `hura doctor`, which tells a Windows user what to dial. Chosen beside
+/// OpenShell's gateway on 17670, when sessions ran there, and out of the
+/// ephemeral range so it can be bound reliably.
 pub const DEFAULT_PORT: u16 = 17671;
 
 /// What `GET /version` answers, to anyone, without a token.
@@ -106,7 +106,7 @@ impl Hello {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum Request {
-    /// Every session, reconciled against the gateway first.
+    /// Every session, reconciled against the sandbox runtime first.
     Ls,
     /// What the agent is doing, and how far the working copy has moved.
     Poll { name: String },
@@ -170,7 +170,7 @@ pub enum Request {
     Repos,
     /// What is known about one of them: git's account of the drift and the
     /// toolchains it points at, and the credentials a session here should
-    /// start with. Costs subprocesses and a gateway call, so it is asked once,
+    /// start with. Costs subprocesses and a runtime call, so it is asked once,
     /// about the repository actually picked, rather than for every row.
     Inspect {
         path: String,
@@ -516,7 +516,7 @@ impl From<Poll> for Reply {
 ///
 /// A message and a kind, rather than only a message: a client showing a
 /// stale-session error wants to drop it from the list, and one showing a
-/// gateway error wants to keep it and say the gateway is unreachable. Matching
+/// runtime error wants to keep it and say the runtime is unreachable. Matching
 /// on rendered English to tell those apart is how a client ends up wrong.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -696,9 +696,9 @@ mod tests {
             !DOCKERFILE.contains("set -g prefix"),
             "tui::term sends Ctrl-b to detach; the image must not rebind the prefix"
         );
-        // The one that reaches the agent: the gateway does not pass the image's
-        // environment through, so the `ENV` above covers only what a person
-        // starts by hand.
+        // The one the agent reads whatever its environment: the `ENV` above
+        // reaches it only because the runtime passes the image's environment
+        // through to an exec.
         let settings: serde_json::Value =
             serde_json::from_str(CLAUDE_SETTINGS).expect("valid settings");
         assert_eq!(

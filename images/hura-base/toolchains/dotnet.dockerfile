@@ -19,12 +19,11 @@
 # find out.
 #
 # The symlink at the end puts `dotnet` on the PATH the base image already has,
-# rather than adding a directory to PATH. `ENV PATH` would not reach the agent --
-# the gateway does not pass the image's environment through to an exec -- and the
-# alternative is teaching tmux.conf about PATH, which is a second place to be
-# wrong. The symlink is invisible to the policy either way: the gateway matches
-# the kernel-resolved `/proc/<pid>/exe`, so a rule for dotnet has to name
-# `/usr/local/dotnet/dotnet`. `toolchain.rs` does, and a test keeps them in step.
+# rather than adding a directory to PATH. `ENV PATH` did not reach the agent
+# under OpenShell, whose exec passed none of the image's environment through,
+# and a symlink works however the environment arrives, with nothing in
+# tmux.conf to keep in step. The policy does not mind either way: its rules are
+# for the whole sandbox, not for one program in it.
 ARG DOTNET_CHANNEL=9.0
 RUN set -eu; \
     arch="$(dpkg --print-architecture)"; \

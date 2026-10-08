@@ -5,19 +5,23 @@
 [![Rust](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
 A desktop workspace and a CLI for running several coding agents in parallel,
-each in its own [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell)
-sandbox.
+each in its own [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)
+microVM.
 
-Claude Squad's workflow, with real isolation underneath: kernel-enforced
-filesystem, network and process policy per session, credentials injected at
-runtime instead of sitting on disk, and an audit trail of every allow/deny.
+Claude Squad's workflow, with real isolation underneath: a VM per session with
+its own Docker Engine, network policy enforced outside it, credentials injected
+into requests instead of sitting on disk, and an audit trail of every
+allow/deny.
 
-Network policy binds endpoints to **binaries**, not just hosts, so a session can
-be configured such that:
+Network policy names hosts, and for the ones that matter the requests allowed on
+them, so a session can be configured such that:
 
 ```
 git clone https://github.com/octocat/Hello-World.git   -> SUCCEEDS
-curl https://github.com                                 -> DENIED
+git push origin hura/readme-fix                         -> SUCCEEDS
+curl https://github.com/settings                        -> DENIED
+curl https://pastebin.com                               -> DENIED
+docker run --rm hello-world                             -> SUCCEEDS, inside the session
 ```
 
 The window is a workspace: projects containing worktrees, a conversation with
@@ -26,36 +30,43 @@ editor with comments that go back to the agent, and git on the right.
 
 ![The hura workspace: the Hello-World and Spoon-Knife projects and their worktrees on the left, one idle, one waiting on a permission prompt and one working; the readme-fix conversation in the middle, where the agent asks to edit README and shows the diff with allow, allow and don't ask again, and decline; and the git pane on the right](docs/images/workspace.png)
 
-**The isolation is not a claim, it is a pane.** Every allow and deny the gateway
-made, folded by where it was going: how often each endpoint was refused or let
-through, by which binaries, and whether the policy opens it now. Here `git` has
-been fetching from github.com all along, while `curl` reaching for the same host
-over plain HTTP, `node` and `curl` going for docs.rs, and Python going for PyPI
-were all refused:
+**The isolation is not a claim, it is a pane.** Every allow and deny the sandbox
+runtime made, folded by where it was going: how often each endpoint was refused
+or let through, and whether the policy opens it now. Here the model API and the
+git traffic to github.com have been let through all along, while docs.rs, PyPI
+and a path on github.com that no rule names were refused, and so was the
+`apt-get update` the sandbox runtime itself runs while making a sandbox:
 
-![The events pane for a session, grouped by endpoint: docs.rs:443 denied three times to curl and node, pypi.org:443 denied to python3.13, github.com:80 denied to curl, each marked not in policy with an allow button, and github.com:443 allowed ten times to git-remote-http and api.anthropic.com:443 to claude, both in policy](docs/images/events.png)
+![The events pane for a session, grouped by endpoint: a refused GET on github.com:443 shown with its path, beside its two allowed git requests; pypi.org:443 and docs.rs:443 denied, docs.rs three times; archive.ubuntu.com:80, download.docker.com:443 and security.ubuntu.com:80 denied from the sandbox's first seconds, each marked not in policy with an allow button; and api.anthropic.com:443 allowed and open](docs/images/events.png)
 
 A denial is something to act on, not only to read. Right-click it to open the
-endpoint to the binaries that were refused -- for this session, or for every
-new session too -- or right-click an open one to block it:
+endpoint, all of it or only some paths, for this session or for every new
+session too, or right-click an open one to block it:
 
-![The context menu on the denied docs.rs:443 row: allow in this session, allow in every new session too, allow… to choose binaries, allow only some paths…, and copy endpoint](docs/images/events-menu.png)
+![The context menu on the denied docs.rs:443 row: allow in this session, allow in every new session too, allow only some paths…, and copy endpoint](docs/images/events-menu.png)
 
-The rules behind those decisions are what the policy pane shows -- each one an
-endpoint, the binaries it is granted to, and how much of it they get:
+The rules behind those decisions are what the policy pane shows: a card per
+host, and under it each rule, every request or a method and a path, with a deny
+marked as one:
 
-![The policy pane: the feature-work template's rules, each naming an endpoint such as dev.azure.com:443 or api.anthropic.com:443 and the specific binaries allowed to reach it, with the method and path rules under the ones that have them](docs/images/policy.png)
+![The policy pane: the feature-work template's ten rules as a card per host, such as github.com:443 with its three git paths and api.anthropic.com:443 open to every request](docs/images/policy.png)
 
 ## What it does
 
 - **One sandbox per session.** The agent clones the repository inside it and
   works on `hura/<name>`; your worktree is never handed over.
-- **Credentials the sandbox never sees.** OpenShell providers hold the tokens
-  and the gateway substitutes them into outgoing requests.
+- **Credentials the sandbox never sees.** A credential is a command or a
+  1Password reference on this machine; the sandbox runtime resolves it and swaps
+  it into requests to its hosts, and inside the sandbox there is only a
+  placeholder. hura never reads the value either.
+- **Docker inside every session.** Each sandbox is a microVM with its own Docker
+  Engine, so the agent can build and run containers, compose included, with no
+  path to the Docker on your machine.
 - **Isolation you can look at, and change.** The panes above are one click away
   in the window, and `hurad policy` / `hurad events` on the command line. A
-  denied endpoint is opened -- for one binary, for this session or every new one
-  -- from a right-click on the denial, and an open one is blocked the same way.
+  denied endpoint is opened, all of it or some paths, for this session or every
+  new one, from a right-click on the denial, and an open one is blocked the same
+  way.
   This is the part an ADE built on git worktrees has no equivalent for.
 - **The agent as a conversation.** A new session's agent is a chat the window
   draws: replies as they are written, every tool call as a card with its output
@@ -69,13 +80,13 @@ endpoint, the binaries it is granted to, and how much of it they get:
   What each session has spent, and how much of the account's rate-limit window
   is gone, come from the agent's own status line.
 - **A toolchain when the task needs one.** `--toolchain dotnet` runs the session
-  on an image variant carrying the SDK, and opens nuget for the SDK's binary and
-  nothing else. The create form ticks it from what the repository contains.
+  on an image variant carrying the SDK, and opens nuget for reading in that
+  session. The create form ticks it from what the repository contains.
 - **The parts of your setup that matter, carried in.** Skills are copied into
   each sandbox -- pushed from the machine you are sitting at, so editing one
   reaches the next session even when the sessions are somewhere else. MCP
-  servers run on the host, holding their own credentials, and are granted
-  per-binary like everything else; `hurad` can own their containers and their
+  servers run on the host, holding their own credentials, and each session is
+  granted the ones it is given; `hurad` can own their containers and their
   secrets, with a screen that says what each one is doing.
 - **Tickets.** Named filters over Jira, Azure DevOps and GitHub -- "ready to
   start", "assigned to me" -- set up token and all in the desktop application
@@ -91,17 +102,18 @@ endpoint, the binaries it is granted to, and how much of it they get:
   created with survive the edit, because they are most of what it is for. See
   [docs/configuration.md](docs/configuration.md).
 - **The window can be somewhere else.** `hurad` serves its sessions over one
-  authenticated TLS port, so the machine you sit at needs no gateway, no Docker
-  and no tmux of its own -- a Linux server inside WSL with the window out on
-  Windows is the case it was built for. See [docs/server.md](docs/server.md).
+  authenticated TLS port, so the machine you sit at needs no sandbox runtime, no
+  Docker and no tmux of its own. A Linux server inside WSL with the window out
+  on Windows is the case it was built for. See [docs/server.md](docs/server.md).
 
 ## Quickstart
 
-Linux with systemd and a Docker daemon -- the isolation is kernel-enforced, so
-nothing here is portable to macOS. You need [OpenShell](https://github.com/NVIDIA/OpenShell)
-0.0.110 with its gateway running, Docker 29.x and tmux -- plus Rust 1.89 or
-newer, but only to build it yourself. [docs/install.md](docs/install.md) walks
-through all of it, including the providers that hold your credentials.
+Linux with systemd, KVM and a Docker daemon (WSL 2 counts, with nested
+virtualization). You need [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)
+signed in with its `deny-all` policy, Docker to build the image, and tmux, plus
+Rust 1.89 or newer, but only to build it yourself.
+[docs/install.md](docs/install.md) walks through all of it, including the
+credentials.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/install.sh | sh
@@ -132,32 +144,33 @@ page](https://github.com/tobiaswadsethdev/hura/releases) and is all that side
 needs -- it pairs with a server from its own screen, so there is no `hurad` to
 install there. Both are [docs/install.md](docs/install.md#the-desktop-application).
 
-`hurad doctor` is the one to run when something looks wrong -- it checks the
-gateway, Docker, tmux, lingering, the image and the Claude Code version in it,
-plus the providers, skills and MCP servers your config names and the toolchain
-variants you have built:
+`hurad doctor` is the one to run when something looks wrong. It checks the
+sandbox runtime and its daemon, its global policy, Docker, tmux, lingering, the
+image and the Claude Code version in it, plus the credentials, skills and MCP
+servers your config names and the toolchain variants you have built:
 
 ```
-[  ok  ] version      hurad 0.5.0, newest
-[  ok  ] openshell    openshell 0.0.110
-[  ok  ] gateway      https://127.0.0.1:17670 0.0.110 (authenticated)
-[  ok  ] docker       server 29.6.0
-[  ok  ] tmux         tmux 3.6b
+[  ok  ] sbx          v0.47.0 (daemon v0.47.0)
+[  ok  ] sbx checks   13 passed
+[  ok  ] sbx policy   deny-all: only what a session's rules allow gets out
+[  ok  ] sbx daemon   sbx-daemon.service
+[  ok  ] docker       server 29.7.2
+[  ok  ] tmux         tmux 3.6
 [  ok  ] linger       enabled
-[  ok  ] image        hura-base:latest built, claude 2.1.246
+[  ok  ] templates    1 loaded
 ```
 
 ## Commands
 
 ```sh
-hurad doctor                                    # check gateway, docker, tmux, image
+hurad doctor                                    # check the sandbox runtime, docker, tmux, image
 hurad image build                               # build the sandbox image (automatic on first use)
 hurad image build --toolchain dotnet,rust       # ... plus toolchains, as their own image variant
 hurad new --repo <url> --task "what to do"      # sandbox + clone + branch + agent
-hurad ls                                        # sessions, reconciled with the gateway
+hurad ls                                        # sessions, reconciled with their sandboxes
 hurad attach <name>                             # attach to the agent; Ctrl-b d to detach
 hurad diff <name>                               # what the agent has changed so far
-hurad policy <name>                             # the policy the gateway is enforcing
+hurad policy <name>                             # the rules on a session's sandbox
 hurad events <name>                             # recent allow/deny decisions
 hurad policies                                  # the policy templates shipped in the binary
 hurad toolchains                                # the toolchains a sandbox image can be built with
@@ -172,12 +185,12 @@ hurad mcp                                      # the MCP catalog, and what each 
 printf %s "$TOKEN" | hurad secret <NAME>       # store a secret a managed MCP server needs
 hurad skills                                   # the skills a client has uploaded here
 hurad connect <string>                          # pair with a server
-hurad --server=<name> ls                        # ... and ask it instead of the local gateway
+hurad --server=<name> ls                        # ... and ask it instead of this machine
 hurad watch <name> --server=<name>              # follow a session's events and state as they happen
 ```
 
-`--policy` takes a template name or a path to a YAML file. Three templates ship
-in the binary, and `feature-work` is the default:
+`--policy` takes a template name or a path to a template file of your own.
+Three templates ship in the binary, and `feature-work` is the default:
 
 | Template           | Egress                                               |
 | ------------------ | ---------------------------------------------------- |
@@ -186,14 +199,14 @@ in the binary, and `feature-work` is the default:
 | `net-open`         | `feature-work` plus the npm and PyPI registries      |
 
 A package registry is otherwise a _toolchain's_ to open, not a template's:
-`--toolchain rust` grants crates.io to cargo, in that session, and to nothing
-else. See [docs/toolchains.md](docs/toolchains.md).
+`--toolchain rust` opens crates.io for reading in that session, and in no other.
+See [docs/toolchains.md](docs/toolchains.md).
 
 ## Documentation
 
 |                                            |                                                                       |
 | ------------------------------------------ | --------------------------------------------------------------------- |
-| [Install](docs/install.md)                 | prerequisites, the gateway, providers, `hurad`, and the window on Linux and Windows |
+| [Install](docs/install.md)                 | prerequisites, Docker Sandboxes, credentials, `hurad`, and the window on Linux and Windows |
 | [The desktop app](docs/desktop.md)         | projects and worktrees, files, git, the editor, and the review        |
 | [The server](docs/server.md)               | `hurad`, pairing a client on another machine, WSL, what a token is worth |
 | [Configuration](docs/configuration.md)     | `~/.config/hura/config.toml`, and which default wins                   |
@@ -205,7 +218,6 @@ else. See [docs/toolchains.md](docs/toolchains.md).
 | [MCP servers](docs/mcp.md)                 | servers hurad runs or you do, their secrets, and what one costs you    |
 | [The sandbox image](docs/sandbox-image.md) | what the image bakes in, and why the agent runs in auto mode          |
 | [Architecture](docs/architecture.md)       | how the pieces fit, for anyone reading the code                       |
-| [The manual loop](docs/manual-loop.md)     | the verified setup, run by hand                                       |
 
 ## Contributing
 
@@ -214,7 +226,7 @@ Contributions are welcome -- issues, questions and pull requests alike.
 strategy and what a reviewable change looks like here; the short version is:
 
 ```sh
-cargo test --workspace               # 442 tests, no gateway or Docker needed
+cargo test --workspace               # 513 tests, no sandbox runtime or Docker needed
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 ```

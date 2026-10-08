@@ -10,10 +10,9 @@ command: string,
  * Whether the socket was traced to this process, or the process was
  * picked because its command line names the port.
  *
- * Usually a guess, and that is the sandbox rather than a shortcut here:
- * it runs under `ptrace_scope=1`, which lets a process read another's
- * descriptors only if it is that process's ancestor -- and an exec is
- * never the ancestor of the agent's dev server. Measured: `readlink` on
- * another process's `fd/3` is refused, and so is `ss -p`'s netlink.
+ * Certain for anything running as the sandbox's user: the VM has no
+ * Yama, so an exec reads the descriptors of a dev server it did not
+ * start (measured against v0.47.0). A server started with `sudo` keeps
+ * its descriptors from the exec, and is the guess.
  */
 certain: boolean, };

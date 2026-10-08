@@ -1,14 +1,12 @@
 # rust -- the standalone distribution, not rustup.
 #
-# rustup is the obvious choice and the wrong one here, for a reason that only
-# shows up under this gateway. `$CARGO_HOME/bin/cargo` installed by rustup is a
+# rustup is the obvious choice, and it was the wrong one under OpenShell, whose
+# rules named programs. `$CARGO_HOME/bin/cargo` installed by rustup is a
 # *proxy*: it execs the real cargo inside
-# `$RUSTUP_HOME/toolchains/<channel>-<triple>/bin/cargo`, and the gateway matches
-# on the kernel-resolved `/proc/<pid>/exe`. So a policy rule for cargo would have
-# to name a path containing the host triple -- the same trap `net-open.yaml`
-# documents for uv's managed python, where `pip install` is denied with a path
-# nobody put in the policy. The standalone installer lays down a real binary at a
-# path this file chooses, so `toolchain.rs` can name it and be right on every
+# `$RUSTUP_HOME/toolchains/<channel>-<triple>/bin/cargo`, so a rule for cargo had
+# to name a path containing the host triple. The sandbox runtime's rules are for
+# the whole sandbox, but the standalone installer still lays down a real binary
+# at a path this file chooses, read-only to the agent and the same on every
 # architecture.
 #
 # Nothing is lost that a sandbox could use anyway: rustup exists to switch

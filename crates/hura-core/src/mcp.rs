@@ -98,7 +98,7 @@ pub struct Server {
     pub url: String,
     #[serde(default)]
     pub transport: Transport,
-    /// `host:port`, which is what `policy update` addresses. Derived at parse
+    /// `host:port`, which is what a rule addresses. Derived at parse
     /// time and kept, so nothing downstream re-derives it and so the sandbox's
     /// own record says what it was granted.
     pub endpoint: String,
@@ -205,7 +205,7 @@ pub fn register_script(servers: &[Server]) -> String {
 /// `host:port` for a URL, with the scheme's default port when it carries none.
 ///
 /// A deliberately small parser rather than a URL crate: the shapes that reach it
-/// are `http://name:9000/mcp` and `https://host.openshell.internal/mcp`, and the
+/// are `http://name:9000/mcp` and `https://host.docker.internal/mcp`, and the
 /// only questions asked of them are the host and the port.
 fn endpoint_of(url: &str) -> Result<String, Error> {
     let (scheme, rest) = url.split_once("://").ok_or(Error::Scheme)?;
@@ -323,7 +323,7 @@ mod tests {
     }
 
     /// The whole reason this is validated at parse time rather than left to the
-    /// gateway: a loopback URL is correct on the host and wrong in the sandbox,
+    /// runtime: a loopback URL is correct on the host and wrong in the sandbox,
     /// and nothing downstream can tell the difference.
     #[test]
     fn loopback_is_refused_with_the_address_that_works() {

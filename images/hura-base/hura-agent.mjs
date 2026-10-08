@@ -4,15 +4,15 @@
 // A chat session's agent is not a terminal. This process owns it instead: one
 // or more conversations, each a `query()` from @anthropic-ai/claude-agent-sdk
 // in streaming input mode, each running the image's own /usr/local/bin/claude.
-// So the process that reaches api.anthropic.com is still the binary the policy
-// grants it to, the version is still the image's, and the credential is still
-// the one the gateway injects. Running the SDK on the host would have put the
+// So the process that reaches api.anthropic.com is still inside the sandbox's
+// policy, the version is still the image's, and the credential is still the
+// one the runtime's proxy swaps in. Running the SDK on the host would have put the
 // agent outside the sandbox, which is the one thing hura exists to prevent.
 //
 // It lives under tmux for the reason the terminal agent does: it survives the
 // connection that started it, and `hurad attach` can still look at what it
 // printed. Clients reach it on a loopback port, through the same
-// `openshell forward service` a preview travels over.
+// `hurad relay` a preview travels over.
 //
 // What it keeps, it keeps on disk under /sandbox/.hura/chat: which
 // conversations exist, the Claude session id behind each, and every message

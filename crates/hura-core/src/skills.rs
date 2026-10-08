@@ -40,7 +40,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-/// Where the agent looks for skills inside the sandbox. `HOME` is `/sandbox`.
+/// Where the agent looks for skills inside the sandbox. `HOME` is `/home/agent`.
 pub const SANDBOX_SKILLS_DIR: &str = "/home/agent/.claude/skills";
 
 /// The file that makes a directory a skill.
@@ -48,12 +48,11 @@ const MANIFEST: &str = "SKILL.md";
 
 /// The most base64 one skill may weigh, after compression.
 ///
-/// The payload rides inside the seeder script, which is itself written into the
-/// sandbox through an `exec` argument, so this is bounded by what a command line
-/// can hold rather than by anything in the gateway. 256 KiB of base64 is ~190KiB
-/// of gzip and far more prose than any skill has; a skill above it is one that
-/// has a virtualenv or a video in it by accident, and saying so is more useful
-/// than a create that fails on `argument list too long`.
+/// The payload rides inside the seeder script, which goes into the sandbox on
+/// an exec's stdin, so no command line bounds it any more; this does. 256 KiB
+/// of base64 is ~190KiB of gzip and far more prose than any skill has; a skill
+/// above it is one that has a virtualenv or a video in it by accident, and
+/// saying so is more useful than copying it into every sandbox.
 const MAX_PAYLOAD: usize = 256 * 1024;
 
 /// One skill, as the config file points at it and as the sandbox records it.

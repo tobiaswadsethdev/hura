@@ -15,7 +15,7 @@ name: string,
  */
 url: string, transport: Transport, 
 /**
- * `host:port`, which is what `policy update` addresses. Derived at parse
+ * `host:port`, which is what a rule addresses. Derived at parse
  * time and kept, so nothing downstream re-derives it and so the sandbox's
  * own record says what it was granted.
  */

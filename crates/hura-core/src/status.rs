@@ -222,7 +222,7 @@ fn detail(text: &str) -> Option<String> {
 /// far larger than any plausible skew.
 ///
 /// Returns `None` when neither source knows anything, which leaves the session
-/// showing whatever the gateway says about the sandbox.
+/// showing whatever the runtime says about the sandbox.
 pub fn combine(hook: Option<&HookStatus>, pane: Option<PaneSignal>, now: u64) -> Option<Report> {
     let fresh = hook.filter(|h| now.saturating_sub(h.at) <= HOOK_STALE_SECS);
     let tool = || fresh.and_then(|h| detail(&h.detail));

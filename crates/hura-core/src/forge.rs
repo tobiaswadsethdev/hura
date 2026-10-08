@@ -79,8 +79,8 @@ impl Forge {
 /// `http.extraHeader` rather than a credential helper or a URL with userinfo.
 /// A helper would have to be written and installed in the image; userinfo makes
 /// git demand a password for that username *before* it sends anything, so it
-/// fails with "could not read Username" while the gateway waits to authenticate
-/// a request git never makes.
+/// fails with "could not read Username" while the proxy waits to swap in a
+/// credential for a request git never makes.
 pub fn git_auth_prelude(forge: Forge) -> String {
     format!(
         r#"git_auth=''
@@ -149,9 +149,9 @@ impl Remote {
     /// default offered by the "Clone" button. The userinfo is stripped rather
     /// than kept: with a username in the URL git demands a password for it
     /// before sending anything, and fails with "could not read Username" even
-    /// though the gateway would have injected a working credential into the
-    /// request. Without it git sends the request unauthenticated, the gateway
-    /// adds the header, and there is nothing to prompt for.
+    /// though the proxy would have swapped a working credential into the
+    /// request. Without it git sends the placeholder's header, the proxy swaps
+    /// in the real one, and there is nothing to prompt for.
     pub fn parse(url: &str) -> Result<Self, Error> {
         let url = url.trim();
 
@@ -314,7 +314,7 @@ mod tests {
 
     /// The userinfo has to go. With a username in the URL git asks for that
     /// user's password before it sends anything, and fails with "could not read
-    /// Username" -- while the gateway sits ready to inject a credential into a
+    /// Username" while the proxy sits ready to swap a credential into a
     /// request git never makes.
     #[test]
     fn userinfo_is_stripped_from_the_clone_url() {

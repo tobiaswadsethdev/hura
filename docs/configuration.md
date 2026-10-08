@@ -5,22 +5,33 @@ stops them being typed. `~/.config/hura/config.toml`, beside the session cache,
 all keys optional:
 
 ```toml
-gateway    = "openshell"                              # unset: the active one
 repo       = "https://github.com/octocat/Hello-World" # `hurad new` with no --repo
 base       = "develop"                                # unset: the remote's default
-policy     = "feature-work"                           # a template, or a path to a YAML file
-providers  = ["claude-oauth", "azure-pat"]            # credentials for a new session
+policy     = "feature-work"                           # a template, or a path to a TOML file
+providers  = ["claude", "azure-devops"]               # credentials for a new session, by name
 repo_roots = ["~/dev", "~/work"]                      # where the picker looks
 branch_prefix = "tobias"                              # <prefix>/<name> for a work branch
 refresh    = "1s"                                     # unused since v0.4.0; still parsed
 auto_update = true                                    # download new releases ahead of a restart
 interface  = "chat"                                   # a new session's agent: "chat" or "terminal"
 
+sbx            = "/opt/sbx/bin/sbx"                   # unset: PATH, then ~/.docker/sbx/bin/sbx
+sandbox_cpus   = 4                                    # unset: every host CPU
+sandbox_memory = "8g"                                 # unset: half the host's memory
+
 skills     = ["ship-pr"]                               # copied into every session
+
+[credentials.claude]                                  # one table per credential
+kind    = "claude-code-oauth"                         # see below
+command = "tr -d '\r\n' < /home/me/.config/hura/tokens/claude"
+
+[credentials.azure-devops]
+kind = "azure-devops-pat"
+ref  = "op://Work/ado-pat-encoded/credential"         # or a reference, not a command
 
 [[mcp]]                                               # one table per MCP server
 name = "jira"                                         # see docs/mcp.md
-url  = "http://mcp-atlassian:9000/mcp"                # ... a server you run
+url  = "http://host.docker.internal:9001/mcp"         # ... a server you run
 
 [[mcp]]
 name    = "sentry"                                    # ... or one hurad runs
@@ -41,17 +52,17 @@ explicit choice in the create form. `hurad config` prints what is in force with
 ## Editing it from the window
 
 **settings** in the desktop application's header writes the five keys that are
-about what a new session starts with -- `branch_prefix`, `base`, `policy`,
+about what a new session starts with: `branch_prefix`, `base`, `policy`,
 `providers` and `auto_update`. The server's file, not the client's: a work
 branch is named the same way whether the session was started from the window or
 from `hurad new`, and a window keeping its own prefix would be a second
 convention that disagrees with the first. See [desktop.md](desktop.md#settings).
 
 The rest of the file is not editable from there, and the omissions are the
-point. `repo_roots` and `skills` are paths on the server;
-`[[mcp]]` is a list of tables, each one a decision about what
-an agent of yours can reach, and the integrations screen already says so about
-the MCP half.
+point. `repo_roots`, `skills` and `sbx` are paths on the server;
+`[credentials.*]` and `[[mcp]]` are tables, each one a decision about what an
+agent of yours can reach, and the integrations screen already says so about the
+MCP half.
 
 **The file is edited, not regenerated.** Each key is found and replaced where it
 stands, so every comment `hurad config --init` wrote is still there afterwards --
@@ -77,10 +88,65 @@ unknown field `polciy`, expected one of `gateway`, `repo`, `base`, `policy`, ...
 
 The one exception is `hurad doctor`, which is the command you reach for when
 something is wrong: it reports the error as a failed check and carries on with
-the defaults. It also checks the `providers` you named still exist at the
-gateway, since a stale name is the quietest failure here -- the form does not
-tick it, the sandbox comes up without the credential, and the clone fails for
-what looks like an authentication problem several steps later.
+the defaults. It also checks that every name in `providers` is a
+`[credentials.NAME]` table in the same file, since a stale name is the quietest
+failure here: the form does not tick it, the sandbox comes up without the
+credential, and the clone fails for what looks like an authentication problem
+several steps later.
+
+## Credentials
+
+One `[credentials.NAME]` table per credential a session may be given. The name
+is yours, and it is what `providers`, `--provider` and the create form's boxes
+use. Each table has a `kind`, and exactly one of `command` or `ref`:
+
+| `kind` | what it is | sent to | the sandbox sees |
+| --- | --- | --- | --- |
+| `claude-code-oauth` | the token `claude setup-token` prints | `api.anthropic.com`, `platform.claude.com` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| `azure-devops-pat` | an Azure DevOps personal access token | `dev.azure.com` | `AZURE_DEVOPS_PAT` |
+| `github` | a GitHub token | `github.com`, `api.github.com` | `GITHUB_TOKEN` |
+
+`command` is run on this machine, in a shell, and what it prints is the value.
+`ref` is a 1Password `op://` reference or an AWS Secrets Manager ARN, which the
+runtime resolves on this machine. **hura never reads the value.** Creating a session
+with a credential ticked gives that session's sandbox a secret of its own, made
+from the same `command` or `ref`, and puts a random placeholder in the variable
+in the last column. The runtime's proxy writes the real value over the
+placeholder in the headers of requests to the kind's hosts, and nowhere else:
+not in a query string or a body, and not on any other host. A token printed
+inside the sandbox, or sent to a host the agent was talked into, is the
+placeholder.
+
+The runtime runs a `command` from a temporary directory of its own, so give
+paths in full; `~` and a relative path are not guaranteed to mean what they do
+in your shell. Strip the trailing newline (the `tr -d '\r\n'` above), which
+would otherwise end up in a header.
+
+An Azure DevOps PAT is HTTP Basic with an empty user, so what belongs in the
+header is `base64(":" + PAT)`. A `command` prints the PAT itself and hura wraps
+it so the runtime stores the encoded form. A `ref` cannot be wrapped, so for
+Azure DevOps it has to name a secret that already holds the encoded form.
+
+A session gets at most one credential of each kind, because each kind has one
+variable for its placeholder; a create naming two is refused. Removing the
+session's sandbox removes its secrets. [git-hosts.md](git-hosts.md) is how the
+git side uses them.
+
+## Other keys
+
+`policy` is a template name, or a path to a template file of your own in the
+same TOML shape as the built-in ones (`hurad policies` lists those). An
+OpenShell policy (`.yaml`) is refused with an explanation, because its shape
+does not carry over; [policy.md](policy.md) has the rules.
+
+`sbx` is the Docker Sandboxes CLI, for when it is neither on `PATH` nor where
+its installer puts it. `sandbox_cpus` and `sandbox_memory` (`"8g"`, `"512m"`)
+size each session's sandbox. Unset, the runtime gives every sandbox every host
+CPU and half the host's memory, which is generous for one session and too much
+for several at once.
+
+`gateway` named the OpenShell gateway sessions ran on. Nothing reads it now; it
+is still accepted, and ignored, so an existing file keeps loading.
 
 `refresh` is one number rather than six because the intervals underneath it are
 measured and related to each other; it scales all of them, so `"4s"` polls a
@@ -116,9 +182,11 @@ is not the machine with the window on it.
 `worktree_root` configured worktree sessions, which have been removed. It is
 still accepted, and ignored, so an existing file keeps loading.
 
-Two things are deliberately *not* in this file. **Secrets** are named here and
-stored in `$XDG_STATE_HOME/hura/secrets.json`, because a config file is the kind
-of thing people copy between machines and paste into an issue. And **uploaded
+Two things are deliberately *not* in this file. **Secret values** are not: a
+credential is a command or a reference, and a managed MCP server's secrets are
+named here and stored in `$XDG_STATE_HOME/hura/secrets.json`, because a config
+file is the kind of thing people copy between machines and paste into an
+issue. And **uploaded
 skills** are not listed at all: what a client has pushed into the server's
 library is a directory listing rather than a decision, and a second list to keep
 in step with it would only ever be wrong. See [mcp.md](mcp.md) and

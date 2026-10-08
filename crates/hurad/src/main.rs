@@ -129,7 +129,7 @@ enum Command {
     /// Start a session: create a sandbox, clone the repo, cut a work branch.
     New(NewArgs),
 
-    /// List sessions, reconciled against the gateway.
+    /// List sessions, reconciled against the sandbox runtime.
     #[command(alias = "list")]
     Ls,
 
@@ -307,11 +307,11 @@ struct NewArgs {
     #[arg(long)]
     base: Option<String>,
 
-    /// Policy to apply: a template name, or a path to a YAML file.
+    /// Policy to apply: a template name, or a path to a template file (TOML).
     ///
     /// Defaults to `policy` in the config file, else `feature-work`. See
     /// `hurad policies` for the templates; a spec containing a `/` or ending in
-    /// `.yaml` is always read as a path.
+    /// `.toml` is always read as a path.
     #[arg(long)]
     policy: Option<String>,
 
@@ -324,8 +324,8 @@ struct NewArgs {
     ///
     /// Each set of toolchains is its own image variant, layered onto the base
     /// image and built on first use; `hurad toolchains` lists them. A toolchain
-    /// also opens its package registry for the binary that fetches from it, and
-    /// for nothing else in the sandbox.
+    /// also opens its package registry for reading, on this session's sandbox
+    /// and no other.
     #[arg(long = "toolchain", value_delimiter = ',')]
     toolchains: Vec<String>,
 
@@ -512,9 +512,9 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 /// The server a command should talk to, if any.
 ///
 /// `None` is the ordinary case: this machine's own sandboxes, through the
-/// gateway, exactly as before. The flag is what turns `hura` into a client of
-/// something else -- which is also the second implementation of the protocol,
-/// and the reason it exists before there is a user interface.
+/// sandbox runtime, exactly as before. The flag is what turns `hura` into a
+/// client of something else, which is also the second implementation of the
+/// protocol, and the reason it exists before there is a user interface.
 fn server(flag: Option<&str>) -> Result<Option<remote::Remote>, Box<dyn std::error::Error>> {
     let Some(name) = flag else {
         return Ok(None);
@@ -570,7 +570,7 @@ fn cmd_remotes(forget: Option<&str>) -> Fallible {
     Ok(())
 }
 
-/// The same four commands, asked of a server instead of the gateway.
+/// The same four commands, asked of a server instead of the sandbox runtime.
 ///
 /// Each one prints through the same helper the local path does, so the two
 /// cannot drift into showing the same session differently.
@@ -1398,7 +1398,7 @@ fn serve(opts: Serve) -> Fallible {
                 eprintln!("hurad: {warning}");
             }
         }
-        // Not fatal. The gateway can come back, and a server that refuses to
+        // Not fatal. The runtime can come back, and a server that refuses to
         // start without it is one you cannot reach to find out why.
         Err(e) => eprintln!("hurad: the sandbox runtime did not answer at startup: {e}"),
     }
@@ -1462,10 +1462,9 @@ fn serve(opts: Serve) -> Fallible {
     Ok(())
 }
 
-/// How often every session's feed is read into its record. A sixth of the
-/// six minutes the gateway's window lasts at rest, which leaves room for a
-/// burst of connections, a package restore say, to shorten it a great deal.
-/// One `openshell logs` per session, about 13ms each.
+/// How often every session's feed is read into its record. The runtime's log
+/// starts again whenever its daemon does, so this is how much of it a restart
+/// can take before anything has kept it. One `sbx policy log` per session.
 const FEED_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Keep every live session's allow/deny feed, whether or not a window is

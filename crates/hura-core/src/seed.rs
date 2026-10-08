@@ -6,7 +6,7 @@
 //! the host process: quitting the TUI mid-clone -- and the create thread is
 //! detached, so quitting is enough -- killed it and left a sandbox holding 69MB
 //! of a 238MB repository, no `HEAD`, and a record that still said `seeding`.
-//! Nothing in the gateway log, because nothing failed; the client simply went
+//! Nothing in the policy log, because nothing failed; the client simply went
 //! away.
 //!
 //! Now the host writes a script into the sandbox, starts it with `setsid`, and
@@ -53,12 +53,12 @@ fn host_git_identity() -> (String, String) {
 
 /// How many times the clone is attempted before the seeding gives up.
 ///
-/// Three because the failure this exists for is a race that is over in
-/// milliseconds, and a second attempt has already missed it; the third is for
+/// Three because the failure this was made for was a race over in
+/// milliseconds, which a second attempt had already missed; the third is for
 /// the ordinary flaky network the first two were not.
 const CLONE_ATTEMPTS: u32 = 3;
-/// How long to wait between attempts. Long enough that a gateway settling after
-/// a fresh sandbox has settled, short enough not to be felt.
+/// How long to wait between attempts. Long enough for a fresh sandbox's network
+/// to have settled, short enough not to be felt.
 const CLONE_RETRY_SECS: u32 = 2;
 
 /// The clone-and-branch half of seeding, without a shebang or a `set`.
@@ -69,8 +69,8 @@ const CLONE_RETRY_SECS: u32 = 2;
 /// quoting -- have one home.
 ///
 /// The clone is retried, which nothing else in the seeder is, because it is the
-/// one step that runs while the sandbox is still brand new -- and OpenShell
-/// 0.0.110 can deny that first connection for a reason that has nothing to do
+/// one step that runs while the sandbox is still brand new, and OpenShell
+/// 0.0.110 could deny that first connection for a reason that had nothing to do
 /// with the policy:
 ///
 /// ```text
@@ -79,15 +79,16 @@ const CLONE_RETRY_SECS: u32 = 2;
 ///   Failed to stat /usr/bin/dash: No such file or directory (os error 2)
 /// ```
 ///
-/// A network rule is granted to a binary *and its ancestry*, and the gateway
-/// re-reads each ancestor's executable before it allows the connection. `dash`
-/// is in that ancestry -- it is `/bin/sh`, and [`launch`] starts the seeder with
-/// one -- and the launching shell exits about a tenth of a second after the
-/// clone begins, which is roughly when git opens its first connection. Lose that
-/// race and the ancestor's executable cannot be read, the connection is denied,
-/// and git reports the refused CONNECT as `response 403`. It is transient: the
-/// same clone, run again a second later, is allowed. Without a retry a race
-/// nobody can see costs the whole session, which is what it did.
+/// Its network rules were granted to a binary *and its ancestry*, and it
+/// re-read each ancestor's executable before it allowed the connection. `dash`
+/// was in that ancestry, as the `/bin/sh` that [`launch`] starts the seeder
+/// with, and the launching shell exits about a tenth of a second after the
+/// clone begins, which is roughly when git opens its first connection. Losing
+/// that race meant the ancestor's executable could not be read, the connection
+/// was denied, and git reported the refused CONNECT as `response 403`. It was
+/// transient: the same clone, run again a second later, was allowed. The
+/// sandbox runtime's rules are per sandbox, with no ancestry to check, but a
+/// race nobody can see should never cost the whole session, so the retry stays.
 pub(crate) fn clone_and_branch(session: &Session, paths: &Paths) -> String {
     let (name, email) = host_git_identity();
 
@@ -130,7 +131,7 @@ cd {repo}
 git config user.name {gname}
 git config user.email {gemail}
 # Persist the credential header in the clone, so a later push or fetch needs no
-# special casing. Safe: the value is the gateway's placeholder, not the secret,
+# special casing. Safe: the value is the runtime's placeholder, not the secret,
 # and it is meaningless outside this sandbox.
 if [ -n "$git_auth" ]; then
   git config "http.extraHeader" "$auth_header"
@@ -161,7 +162,7 @@ fn meta_write_command(meta_json: &str, paths: &Paths) -> String {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SeedError {
-    /// Whatever the session's backend said, such as an unreachable gateway.
+    /// Whatever the session's backend said, such as an unreachable runtime.
     #[error(transparent)]
     Backend(#[from] crate::backend::Error),
     #[error("seeding failed (exit {code}): {stderr}")]
@@ -385,16 +386,17 @@ pub fn parse_seed_state(text: &str) -> SeedState {
 /// What a failed seeding says to whoever asked for the session.
 ///
 /// A denied connection is the one failure that reads as something else
-/// entirely. The gateway refuses the CONNECT, git reports `response 403`, and a
-/// 403 from a git host means an expired token to anyone who has ever seen one
-/// -- so the reader goes looking for a credential when the answer is a policy
-/// rule. The reason the gateway gives exists in exactly one place, the events
-/// feed, so say which feed rather than leaving the 403 to be interpreted.
+/// entirely. The sandbox's proxy refuses the CONNECT, git reports `response
+/// 403`, and a 403 from a git host means an expired token to anyone who has
+/// ever seen one, so the reader goes looking for a credential when the answer
+/// is a policy rule. The reason the runtime gives exists in exactly one place,
+/// the events feed, so say which feed rather than leaving the 403 to be
+/// interpreted.
 pub fn failure_message(session: &str, why: &str) -> String {
     let mut msg = format!("seeding failed: {why}");
     if why.contains("CONNECT tunnel failed") {
         msg.push_str(&format!(
-            ". That 403 is the gateway denying the connection, not the host refusing it; \
+            ". That 403 is the sandbox's policy denying the connection, not the host refusing it; \
              `hurad events {session}` names the rule and the reason"
         ));
     }
@@ -771,10 +773,10 @@ mkdir -p "$dest/.git"
         )
     }
 
-    /// The gateway can deny the *first* connection of a brand-new sandbox over a
-    /// race in its ancestor check, and that denial is gone a second later. The
-    /// clone has to survive it: without the retry, a race nobody can see costs
-    /// the whole session.
+    /// OpenShell could deny the *first* connection of a brand-new sandbox over a
+    /// race in its ancestor check, and that denial was gone a second later. The
+    /// clone has to survive one like it: without the retry, a race nobody can
+    /// see costs the whole session.
     #[test]
     fn a_denied_first_clone_is_retried() {
         let (ok, _stderr, attempts) = run_clone("clone-retry", 1);

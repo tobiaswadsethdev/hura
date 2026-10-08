@@ -72,7 +72,7 @@ export function SettingsScreen({
         setDraft(v.settings);
       })
       .catch((e) => live && setError(messageOf(e)));
-    // Not fatal on its own: the text fields work without it, and a gateway
+    // Not fatal on its own: the text fields work without it, and a runtime
     // that cannot be reached is exactly when somebody wants to look at this
     // screen. The two choosers say so where they would have been.
     api.newOptions(server).then(
@@ -223,7 +223,7 @@ export function SettingsScreen({
                 ]}
               />
             </label>
-            {/* A policy set to a YAML path is a perfectly good answer and one
+            {/* A policy set to a file path is a perfectly good answer and one
                 no chooser can offer, so it is shown rather than silently
                 replaced by the first template in the list. */}
             {draft.policy && !(options?.policies ?? []).some((p) => p.spec === draft.policy) && (

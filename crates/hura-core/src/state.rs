@@ -27,12 +27,12 @@ pub fn dir() -> PathBuf {
 
 /// `%LOCALAPPDATA%\hura`.
 ///
-/// Windows has no server in it -- there is no gateway and no Docker daemon to
-/// reach -- so the only thing that lands here is the desktop application's
-/// list of paired servers. `LocalAppData` rather than `AppData\Roaming` for
-/// the reason the module exists: roaming is the half of a profile that follows
-/// a user to another machine, and a pairing token is a login to one particular
-/// host.
+/// Windows has no server in it, since the sandbox runtime and the Docker daemon
+/// it would reach are on the Linux side, so the only thing that lands here is
+/// the desktop application's list of paired servers. `LocalAppData` rather
+/// than `AppData\Roaming` for the reason the module exists: roaming is the half
+/// of a profile that follows a user to another machine, and a pairing token is
+/// a login to one particular host.
 #[cfg(windows)]
 pub fn dir() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")

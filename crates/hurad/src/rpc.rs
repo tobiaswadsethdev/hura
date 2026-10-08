@@ -5,7 +5,7 @@
 //! behaviour that exists here and not there would be one the terminal cannot
 //! do, which is how two front ends start disagreeing about what a session is.
 //!
-//! Nothing here is async. The core talks to the gateway by running a
+//! Nothing here is async. The core talks to the sandbox runtime by running a
 //! subprocess, so every one of these blocks for a few hundred milliseconds;
 //! [`crate::serve`] is what keeps that off the runtime's threads.
 
@@ -381,7 +381,7 @@ fn repo_list() -> Outcome {
 /// What is known about the repository a client has picked.
 ///
 /// The provider half fails softly, like the list in [`ops::new_options`]: a
-/// gateway that cannot be reached leaves nothing ticked, which is a form you
+/// list that cannot be read leaves nothing ticked, which is a form you
 /// can still fill in, rather than an error against a question that was mostly
 /// about git.
 fn inspect(backends: &Backends, path: &str, branch: Option<&str>) -> Outcome {
@@ -427,8 +427,8 @@ fn inspect(backends: &Backends, path: &str, branch: Option<&str>) -> Outcome {
 ///
 /// Everything that can be judged from the request is judged here, so a name
 /// with a slash in it or a toolchain nobody has heard of comes back as an error
-/// against the request that caused it. What is left is tens of seconds of
-/// gateway and network, and that runs on a thread: the states it passes through
+/// against the request that caused it. What is left is seconds of sandbox
+/// runtime and network, and that runs on a thread: the states it passes through
 /// are on the session, and the session is already polled.
 fn create(new: hura_core::ops::NewSession) -> Outcome {
     let cfg = match config::Config::load() {
@@ -530,7 +530,7 @@ pub fn backends() -> Backends {
 
 /// Look a session up by name, and answer for it.
 ///
-/// The lookup is against the cache rather than the gateway, which is what
+/// The lookup is against the cache rather than the runtime, which is what
 /// `require_session` in the CLI does too: the cache is reconciled by `Ls`, and
 /// a name that is not in it is a client asking about something that has gone.
 fn with_session(name: &str, f: impl FnOnce(&Session) -> Result<Reply, Failure>) -> Outcome {

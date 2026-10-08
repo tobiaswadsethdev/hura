@@ -78,7 +78,7 @@ export function Tabs({
   active: string;
   /// Why the session failed, when its sandbox is still there to look into.
   /// Above the tabs rather than in place of them, unlike a dead session's:
-  /// a clone the gateway denied is explained in the events pane, and the
+  /// a clone the sandbox denied is explained in the events pane, and the
   /// reason says to go and look there.
   failure?: string | null;
   onActivate: (key: string) => void;

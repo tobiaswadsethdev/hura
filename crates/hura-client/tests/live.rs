@@ -1,7 +1,7 @@
 //! Tests that need a paired server and a real session.
 //!
-//! `#[ignore]`d, like the gateway contract tests in `openshell-client`: the
-//! suite stays hermetic for anyone without a gateway, and these are run by hand
+//! `#[ignore]`d, like the runtime contract tests in `sbx-client`: the suite
+//! stays hermetic for anyone without a sandbox runtime, and these are run by hand
 //! when the streaming half changes.
 //!
 //! ```sh
@@ -50,9 +50,9 @@ fn wait_for<T>(
 
 /// The channel this whole increment is for: bytes out of the agent's tmux.
 ///
-/// The pty is at the sandbox end, so nothing on this side needs a terminal --
+/// The pty is at the sandbox end, so nothing on this side needs a terminal,
 /// which is the property that lets a server host it at all, and the one worth
-/// checking against a real gateway rather than assuming.
+/// checking against a real sandbox rather than assuming.
 #[test]
 #[ignore = "needs a paired server and a live session"]
 fn a_terminal_channel_produces_the_agents_screen() {
@@ -92,9 +92,9 @@ fn a_terminal_channel_produces_the_agents_screen() {
     );
 }
 
-/// Closing a terminal must detach, not kill. A killed `exec --tty` wedges the
-/// exec path for the sandbox, so the check is that the *next* channel still
-/// works -- which it cannot if the first one broke the path.
+/// Closing a terminal must detach, not kill. A killed `exec --tty` wedged the
+/// exec path under OpenShell, so the check is that the *next* channel still
+/// works, which it cannot if the first one broke the sandbox.
 #[test]
 #[ignore = "needs a paired server and a live session"]
 fn a_terminal_can_be_opened_again_after_being_closed() {

@@ -8,7 +8,7 @@
 //!
 //! **A file that cannot be read is an error, not a shrug.** A typo'd key or a
 //! misspelled policy name that silently did nothing would be the same failure as
-//! a gateway reporting a policy it is not enforcing: the tool would say one thing
+//! a sandbox reporting a policy it is not enforcing: the tool would say one thing
 //! and do another. So unknown keys are rejected, a policy name that is not a
 //! template is rejected, and every command except `hura doctor` refuses to run
 //! until the file is fixed. `doctor` is the command you reach for when something

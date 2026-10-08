@@ -5,8 +5,8 @@ import type { Facts } from "./Facts";
  * What is known about the repository a client has picked.
  *
  * The git facts, and the credentials to tick. Both are answers about *this*
- * repository and both cost something to work out -- subprocesses for one, the
- * gateway and the session cache for the other -- so they are asked for
+ * repository and both cost something to work out (subprocesses for one, the
+ * config and the session cache for the other), so they are asked for
  * together, once, about the repository actually picked.
  */
 export type Picked = { facts: Facts, 

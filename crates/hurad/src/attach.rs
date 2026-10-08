@@ -16,11 +16,11 @@ use hura_core::session::Session;
 
 /// Hand the terminal to the agent, and take it back afterwards.
 ///
-/// **The terminal has to be put in raw mode here**, because nothing else does
-/// it. `openshell sandbox exec --tty` allocates a pty at the *sandbox* end and
-/// leaves the local one exactly as it found it -- measured against 0.0.110:
-/// `ICANON`, `ECHO`, `ISIG` and `ICRNL` are all still set while the exec runs.
-/// A cooked terminal cannot drive a full-screen program:
+/// **The terminal is put in raw mode here**, rather than left to the exec.
+/// `openshell sandbox exec --tty` allocated a pty at the *sandbox* end and left
+/// the local one exactly as it found it, measured against 0.0.110: `ICANON`,
+/// `ECHO`, `ISIG` and `ICRNL` were all still set while the exec ran. A cooked
+/// terminal cannot drive a full-screen program:
 ///
 /// * input is line-buffered, so arrow keys reach the agent in a batch when
 ///   Enter is pressed, if at all -- a question with options cannot be answered;
@@ -43,9 +43,9 @@ pub fn interactively(
     let _raw = RawMode::enter();
     let argv = ops::attach_argv(backends.for_session(session), session, &session.tmux)
         .map_err(std::io::Error::other)?;
-    // Not `.output()` and never killed: the child must exit on its own, because
-    // killing an `exec --tty` wedges the exec path for that sandbox until it is
-    // recreated.
+    // Not `.output()` and never killed: the child exits on its own when the
+    // person detaches. Killing an `exec --tty` wedged the exec path under
+    // OpenShell; the runtime survives it, but detaching is still the gentler.
     Command::new(&argv[0]).args(&argv[1..]).status()
 }
 

@@ -1,6 +1,6 @@
-//! The local session cache, and reconciling it against the gateway.
+//! The local session cache, and reconciling it against the sandbox runtime.
 //!
-//! The cache is only ever a cache. The gateway knows which sandboxes exist and
+//! The cache is only ever a cache. The runtime knows which sandboxes exist and
 //! each sandbox carries its own metadata, so losing this file costs nothing but
 //! a round trip. That is what makes a crashed TUI able to re-adopt live work.
 //!
@@ -133,7 +133,7 @@ fn lock_path() -> PathBuf {
 /// two processes each doing load-modify-save without it lose one of the two
 /// changes, and the loser is whichever finished first. Held for the length of a
 /// file read and a rename -- microseconds -- so nothing waits on it meaningfully.
-/// Slow work (a gateway call, an exec) belongs outside.
+/// Slow work (a call to the runtime, an exec) belongs outside.
 pub fn update<T>(f: impl FnOnce(&mut Store) -> T) -> io::Result<T> {
     update_at(Store::default_path(), lock_path(), f)
 }
@@ -196,9 +196,9 @@ pub enum Status {
 /// What reconciling the cache against live sandboxes produced.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Reconciliation {
-    /// Cached sessions with state corrected against the gateway.
+    /// Cached sessions with state corrected against the runtime.
     pub sessions: Vec<Session>,
-    /// Session names present at the gateway but missing from the cache. Their
+    /// Session names present in the runtime but missing from the cache. Their
     /// metadata has to be read out of the sandbox before they can be added.
     pub orphans: Vec<String>,
     /// Sessions whose sandbox has disappeared.
@@ -212,24 +212,24 @@ pub struct Reconciliation {
 
 /// How long a record may sit in `creating` with no sandbox behind it.
 ///
-/// [`crate::ops::create`] writes the record before it asks the gateway for
+/// [`crate::ops::create`] writes the record before it asks the runtime for
 /// anything, so that a session appears in every client's list the moment it is
-/// asked for rather than however many seconds the gateway takes to answer. That
+/// asked for rather than however many seconds the runtime takes to answer. That
 /// makes "cached but not live" the normal shape of a young create rather than a
 /// dead session, and this is how long "young" lasts. Generous: creating a
-/// sandbox is a gateway round trip and, the first time an image variant is
+/// sandbox is a round trip to the runtime and, the first time an image variant is
 /// used, a docker build behind it.
 const CREATING_GRACE: u64 = 15 * 60;
 
-/// Correct cached state against what the gateway reports.
+/// Correct cached state against what the runtime reports.
 ///
-/// Pure so it can be tested without a gateway. State is only changed where the
+/// Pure so it can be tested without a runtime. State is only changed where the
 /// evidence is unambiguous: an absent sandbox, an explicitly failed one, or a
 /// sandbox that has come back after being marked dead. Anything else is left
 /// alone, because a create may still be in flight.
 ///
-/// `removed` is the set of names [`crate::removed`] holds -- sessions destroyed
-/// whose sandbox the gateway has not finished taking away. None of them is an
+/// `removed` is the set of names [`crate::removed`] holds: sessions destroyed
+/// whose sandbox the runtime has not finished taking away. None of them is an
 /// orphan, whatever phase it is reporting: adopting one writes the record back
 /// that `destroy` just dropped, and the session someone removed returns to the
 /// list a second later with its old task and its old branch.
@@ -245,7 +245,7 @@ pub fn reconcile(
 
     for mut session in cached {
         match by_name.get(session.sandbox.as_str()) {
-            // A record written by a create that has not asked the gateway for
+            // A record written by a create that has not asked the runtime for
             // anything yet. Absence is what `creating` *means* here, so it is
             // not evidence of anything -- but only for as long as a create
             // plausibly takes, or a create whose process died in that window
@@ -289,14 +289,13 @@ pub fn reconcile(
                 }
                 // A sandbox that is not running yet, under a record that claims
                 // it is. Only reachable for a session whose create finished
-                // long ago -- a create of its own waits for `Ready` before it
-                // seeds -- which leaves a gateway restart, or a sandbox the
-                // gateway is bringing back. Left as `Ready` it is a row the user
-                // can click, and every exec behind it fails with the gateway's
-                // own `is not ready (phase: Provisioning)`. `Creating` is what
-                // it actually is, and the states in flight are left alone for
-                // the reason `in_flight_states_are_left_alone` gives: a create
-                // in another process owns them.
+                // long ago, since a create of its own waits for the sandbox
+                // before it seeds, which leaves a sandbox the runtime is
+                // bringing back. Left as `Ready` it is a row the user can click,
+                // and every exec behind it fails. `Creating` is what it actually
+                // is, and the states in flight are left alone for the reason
+                // `in_flight_states_are_left_alone` gives: a create in another
+                // process owns them.
                 Status::Starting
                     if matches!(session.state, State::Ready | State::Idle | State::Dead) =>
                 {
@@ -318,7 +317,7 @@ pub fn reconcile(
         let Some(name) = &sb.session else {
             continue;
         };
-        // A session someone destroyed, whose sandbox the gateway is still
+        // A session someone destroyed, whose sandbox the runtime is still
         // carrying. Never an orphan -- see the doc comment -- and worth saying
         // so, because "still there" is what keeps its tombstone alive.
         if removed.contains(name.as_str()) {
@@ -491,7 +490,7 @@ mod tests {
         assert_eq!(r.dead, vec!["a"]);
     }
 
-    /// A create writes its record before the gateway has been asked for a
+    /// A create writes its record before the runtime has been asked for a
     /// sandbox, so that the session shows up the instant it is asked for. For
     /// that window "no sandbox" is what `creating` means, not a death -- and a
     /// refresh runs every second, so getting this wrong would kill every new
@@ -550,7 +549,7 @@ mod tests {
         assert_eq!(r.sessions[0].state, State::Ready);
     }
 
-    /// A create the gateway refused leaves a failed record and no sandbox, and
+    /// A create the runtime refused leaves a failed record and no sandbox, and
     /// the next refresh turns that into `dead`. The reason has to come through:
     /// it is what the window shows in place of panes that have nothing to read.
     #[test]
@@ -601,10 +600,9 @@ mod tests {
         assert_eq!(r.sessions[0].state, State::Seeding);
     }
 
-    /// Regression: a record saying `ready` over a sandbox the gateway has not
+    /// Regression: a record saying `ready` over a sandbox the runtime has not
     /// finished bringing up is a row the user can click, and every exec behind
-    /// it -- the agent terminal above all -- fails with the gateway's own
-    /// `is not ready (phase: Provisioning)`.
+    /// it, the agent terminal above all, fails.
     #[test]
     fn a_provisioning_sandbox_is_not_reported_ready() {
         let live = [sandbox("hura-a", Status::Starting, Some("a"))];
@@ -622,7 +620,7 @@ mod tests {
         assert_eq!(
             r.orphans,
             vec!["b"],
-            "b exists at the gateway but not in cache"
+            "b exists in the runtime but not in cache"
         );
     }
 
@@ -658,15 +656,14 @@ mod tests {
     #[test]
     fn a_removed_session_is_never_adopted_back() {
         // The bug this pair of tests exists for. `destroy` drops the record and
-        // the gateway takes its time; the sandbox is still listed, still
-        // labelled, and no longer in the cache -- which is the exact shape of an
-        // orphan. Adopting it put the removed session straight back in the list,
+        // the runtime takes its time; the sandbox is still listed and no longer
+        // in the cache, which is the exact shape of an orphan. Adopting it put the removed session straight back in the list,
         // so creating a fresh one under the same name was then refused as a
         // duplicate: removing a session and starting it again looked like hura
         // insisting on resuming the old one.
         //
-        // `Ready` rather than `Deleting` on purpose: `Deleting` was already
-        // skipped, and the phase the gateway reports in the seconds after a
+        // `Running` rather than `Deleting` on purpose: `Deleting` was already
+        // skipped, and the status the runtime reports in the seconds after a
         // delete is not something this side gets to decide.
         let live = [sandbox("hura-a", Status::Running, Some("a"))];
         let removed = BTreeSet::from(["a".to_string()]);
@@ -679,7 +676,7 @@ mod tests {
 
     #[test]
     fn a_sandbox_that_has_finally_gone_stops_lingering() {
-        // The other half: nothing at the gateway means the tombstone has done
+        // The other half: nothing in the runtime means the tombstone has done
         // its job, and `removed::keep_only` reads the empty list as permission
         // to drop it.
         let removed = BTreeSet::from(["a".to_string()]);

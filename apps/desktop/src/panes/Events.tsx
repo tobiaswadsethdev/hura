@@ -1,4 +1,4 @@
-// The allow/deny feed: every decision the gateway made, and what to do about
+// The allow/deny feed: every decision the sandbox made, and what to do about
 // one.
 //
 // The pane with no equivalent in an ADE built on git worktrees, and the reason
@@ -8,7 +8,7 @@
 // Two readings of one feed. **Endpoints** folds it by destination, because the
 // question a denial asks is "should this be reachable?" and that is a question
 // about `docs.rs:443`, not about the fourteenth time the agent tried it. **Log**
-// is the feed as the gateway said it, newest first, for when the order is the
+// is the feed as the runtime said it, newest first, for when the order is the
 // point. Both offer the same two changes beside the evidence: open an endpoint,
 // or close one that is open, for this session or for every new session too. A
 // change is to the whole sandbox, since its rules are not about one program.
@@ -37,7 +37,7 @@ import type { Route } from "../gen/Route";
 import type { View as PolicyView } from "../gen/View";
 
 /// How often the feed is re-read. The worktree list's interval, but never
-/// faster than this: a logs call per second per open pane is the gateway being
+/// faster than this: a log call per second per open pane is the runtime being
 /// watched rather than used.
 const FLOOR_MS = 2000;
 
@@ -125,7 +125,7 @@ export function EventsPane({
   }, [read, refreshMs]);
 
   // Once, and then from what every change answers with. A policy read is a
-  // gateway call, and the policy only changes when somebody changes it.
+  // runtime call, and the policy only changes when somebody changes it.
   useEffect(() => {
     let live = true;
     api.policy(server, name).then(
@@ -145,7 +145,7 @@ export function EventsPane({
   if (!feed) return <Waiting />;
   // The note stays, and it is the qualifier that earns it: this is the
   // *recent* log rather than every decision ever made, so an empty feed is
-  // not a claim that the gateway has never denied anything.
+  // not a claim that the sandbox has never denied anything.
   if (feed.length === 0) return <Empty icon={Events} note="no decisions in the recent log" />;
 
   const toneOf = (g: Group) => toneFor(g, standing(g.endpoint));
@@ -456,8 +456,8 @@ function LogRow({ event: e, ...actions }: { event: FeedEvent } & Actions) {
 }
 
 /// A decision, as the shield the policy pane and the menus draw it: a tick for
-/// let through, a bar for refused, and the plain information glyph for the
-/// gateway saying something that decides nothing.
+/// let through, a bar for refused, and the plain information glyph for a line
+/// that decides nothing.
 function Verdict({ verdict }: { verdict: FeedEvent["verdict"] }) {
   if (verdict === "Denied") return <Revoke className="verdict-glyph denied" aria-label="denied" />;
   if (verdict === "Allowed") return <Grant className="verdict-glyph allowed" aria-label="allowed" />;
@@ -887,10 +887,10 @@ function hostMatches(resource: string, endpoint: string): boolean {
   return h === pattern;
 }
 
-/// The gateway's reason when no rule names the endpoint at all. It repeats the
-/// endpoint the line above it names, so the endpoint's row drops it -- the row
-/// already says `not in policy` -- and the log says it in four words, with the
-/// gateway's own on hover and in "Copy line".
+/// OpenShell's reason when no rule named the endpoint at all, on events kept
+/// from then. It repeats the endpoint the line above it names, so the
+/// endpoint's row drops it, since the row already says `not in policy`, and the
+/// log says it in four words, with the original on hover and in "Copy line".
 const GENERIC = /^endpoint \S+ is not allowed by any policy$/;
 
 /// The verdict an endpoint's row wears: its last decision, unless the policy
@@ -924,9 +924,11 @@ function lineOf(e: FeedEvent): string {
     .join("  ");
 }
 
-/// `/usr/bin/node(812) -> registry.npmjs.org:443`, the gateway's L4 line.
+/// `/usr/bin/node(812) -> registry.npmjs.org:443`, OpenShell's L4 line, which
+/// events kept from then still carry.
 const OPEN = /^(.*?)(\(\d+\))? -> (\S+)$/;
-/// `GET github.com:443/owner/repo.git/info/refs`, its L7 one.
+/// `GET github.com:443/owner/repo.git/info/refs`, its L7 one, and the shape a
+/// request the runtime judged is given too.
 const REQUEST = /^([A-Z]+) [^/\s]+(\/\S*)?$/;
 
 /// An event as its endpoint's row needs it: the endpoint is the row, so what
@@ -958,7 +960,7 @@ function routeText(r: Route): string {
 }
 
 /// An event as the log shows it: the program by name and an arrow, with the
-/// gateway's own line, path and all, on hover and in "Copy line".
+/// line as it was recorded, path and all, on hover and in "Copy line".
 function pretty(e: FeedEvent): string {
   const open = OPEN.exec(e.subject);
   return open ? `${base(open[1])}${open[2] ?? ""} → ${open[3]}` : e.subject;
@@ -987,8 +989,8 @@ function base(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
-/// UTC, matching the terminal's feed. A denial is compared against a gateway
-/// log, and both being in the same zone is what makes that possible.
+/// UTC, matching the terminal's feed. A denial is compared against the other
+/// feed, and both being in the same zone is what makes that possible.
 function clock(at: number): string {
   return new Date(at * 1000).toISOString().slice(11, 19);
 }

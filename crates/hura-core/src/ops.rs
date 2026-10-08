@@ -1,7 +1,7 @@
 //! Operations shared by the CLI, the TUI and the server.
 //!
-//! Everything here takes a [`Backend`] -- the place a session runs -- rather
-//! than a gateway client, so the scripts ask it where an exec goes and where
+//! Everything here takes a [`Backend`], the place a session runs, rather than a
+//! runtime client, so the scripts ask it where an exec goes and where
 //! the files are instead of naming `/sandbox/repo` and the image's tmux.
 
 use std::collections::BTreeSet;
@@ -43,7 +43,7 @@ pub struct Refreshed {
     pub warnings: Vec<String>,
 }
 
-/// Reconcile the cache against the gateway, adopt orphans, and persist.
+/// Reconcile the cache against the sandbox runtime, adopt orphans, and persist.
 /// [`refresh`], optionally repairing records left mid-lifecycle.
 ///
 /// `repair` re-reads the metadata of any session whose record still says
@@ -62,7 +62,7 @@ pub fn refresh_with(
     backends: &Backends,
     repair: bool,
 ) -> Result<Refreshed, Box<dyn std::error::Error>> {
-    // Asked before the lock is taken: the gateway call is the slow part, and
+    // Asked before the lock is taken: the runtime call is the slow part, and
     // holding a lock across it would stall a create in another process for no
     // reason.
     //
@@ -78,7 +78,7 @@ pub fn refresh_with(
 
     // Tombstones outlive the removal that wrote them only for as long as the
     // thing they name does: anything tombstoned and no longer reported by the
-    // gateway has finally gone, and the tombstone can go with it.
+    // runtime has finally gone, and the tombstone can go with it.
     removed::keep_only(&rec.lingering.iter().cloned().collect::<BTreeSet<_>>());
     let merged = rec.sessions.clone();
     out.sessions = store::update(|store| {
@@ -192,11 +192,10 @@ pub struct ToolchainChoice {
     pub summary: String,
 }
 
-/// One credential provider the gateway knows about.
+/// One credential a new session may be given, from the config file.
 ///
-/// Flattened for the same reason [`policy::View`] exists: `openshell_client`'s
-/// own types belong to a `0.0.x` project, and putting them on the wire would
-/// make their churn protocol churn.
+/// A name and a kind and nothing more: the value is the sandbox runtime's to
+/// resolve, and never travels.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderChoice {
@@ -220,7 +219,7 @@ pub struct NewOptions {
     /// yet would be a form you cannot use to start writing one.
     pub toolchains: Vec<ToolchainChoice>,
     pub providers: Vec<ProviderChoice>,
-    /// Why the provider list is empty, when it is. An unreachable gateway is a
+    /// Why the provider list is empty, when it is. A failure to list them is a
     /// fact about the server worth showing beside the field rather than a list
     /// that is simply blank.
     pub providers_error: Option<String>,
@@ -277,10 +276,10 @@ pub fn toolchain_choices() -> Vec<ToolchainChoice> {
         .collect()
 }
 
-/// Build [`NewOptions`] from the config file and the gateway.
+/// Build [`NewOptions`] from the config file and the backend.
 ///
 /// The provider list is the only part that can fail, and it fails softly: a
-/// gateway that cannot be reached leaves the field empty with a reason attached,
+/// list that cannot be read leaves the field empty with a reason attached,
 /// rather than refusing to open a form whose other five fields are fine.
 pub fn new_options(backends: &Backends, cfg: &crate::config::Config) -> NewOptions {
     let configured = cfg.policy();
@@ -306,8 +305,8 @@ pub fn new_options(backends: &Backends, cfg: &crate::config::Config) -> NewOptio
 /// What is known about the repository a client has picked.
 ///
 /// The git facts, and the credentials to tick. Both are answers about *this*
-/// repository and both cost something to work out -- subprocesses for one, the
-/// gateway and the session cache for the other -- so they are asked for
+/// repository and both cost something to work out (subprocesses for one, the
+/// config and the session cache for the other), so they are asked for
 /// together, once, about the repository actually picked.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -447,7 +446,7 @@ impl NewSession {
     /// `taken` is the names already in use. A derived name steps around them,
     /// because the sandbox a name owns is one per machine, not one per project:
     /// the same task started in two projects derives the same name, and the
-    /// second used to be refused by the gateway for a clash nobody typed. A
+    /// second used to be refused by the runtime for a clash nobody typed. A
     /// name the client sent is left as it is -- it is theirs to be wrong about,
     /// and [`create`] says so.
     pub fn into_draft(
@@ -633,8 +632,8 @@ pub struct Created {
 /// checked first, so a bad name or an unknown policy fails while nothing exists
 /// yet, and every failure afterwards leaves a record saying what happened.
 ///
-/// [`Backend::place`] makes the sandbox, [`Backend::configure`] imposes what
-/// the gateway can be told to impose, and the seeder's first step is
+/// [`Backend::place`] makes the sandbox, [`Backend::configure`] imposes the
+/// rules every session starts with, and the seeder's first step is
 /// [`Backend::fetch_script`].
 ///
 /// The sandbox image is deliberately *not* built here. `image::build` streams
@@ -664,13 +663,13 @@ pub fn create(
     }
 
     // A first look for a name clash, so an obvious mistake fails before a
-    // sandbox exists. Not a lock: the gateway refuses a duplicate sandbox name
+    // sandbox exists. Not a lock: the runtime refuses a duplicate sandbox name
     // anyway, which is the check that actually holds.
     match Store::load().map_err(|e| e.to_string())?.get(&draft.name) {
         // The wreckage of a create that failed, which owns the name until
-        // someone takes it away. Deliberately left behind -- it is the only
-        // trace of a sandbox that may exist at the gateway but was never
-        // seeded, and without it `hurad rm` has nothing to name -- so it is not
+        // someone takes it away. Deliberately left behind, since it is the only
+        // trace of a sandbox that may exist in the runtime but was never
+        // seeded, and without it `hurad rm` has nothing to name. So it is not
         // dropped here either: taking the name silently would strand whatever
         // it still owns.
         //
@@ -699,9 +698,9 @@ pub fn create(
 
     let mut s = record(draft);
 
-    // Written before the gateway is asked for anything, because until there is
+    // Written before the runtime is asked for anything, because until there is
     // a record there is nothing for a client to show: creating a sandbox is
-    // seconds of gateway, and a window that stays empty for those seconds looks
+    // seconds of runtime, and a window that stays empty for those seconds looks
     // like the request was lost rather than like work in progress. The record
     // says `creating`, which is exactly what it is, and
     // [`crate::store::reconcile`] knows not to read the missing sandbox behind
@@ -710,8 +709,8 @@ pub fn create(
 
     progress(Step::Place);
     // Each failure is recorded, reason and all, before being returned. A
-    // `Failed` record is the only trace of a sandbox that may exist at the
-    // gateway but was never seeded, and without it that sandbox is invisible to
+    // `Failed` record is the only trace of a sandbox that may exist in the
+    // runtime but was never seeded, and without it that sandbox is invisible to
     // `hura rm`.
     if let Err(e) = backend.place(&mut s, draft) {
         return Err(fail(s, e.to_string(), &mut warnings));
@@ -726,7 +725,7 @@ pub fn create(
     // directory` about a session that is being created perfectly well.
     //
     // The window was always here and used to be microseconds; imposing MCP
-    // endpoints made it a `policy update --wait`, which is seconds. Saving here
+    // endpoints made it a runtime call per rule, which is far longer. Saving here
     // closes it: a record in `creating` is one the repair pass knows to leave
     // alone until the seeder has something to say. This is an update rather than
     // the first write -- the record went in above -- and what it adds is what
@@ -958,8 +957,8 @@ fi
 
 /// The diff between a session's work and the branch it started from.
 ///
-/// One exec, because exec on a sandbox is serialised: a second concurrent call
-/// waits behind the first, so each pane costs exactly one round trip.
+/// One exec, because each is a round trip of about a third of a second, so
+/// each pane costs exactly one.
 ///
 /// Three sections, because none of them alone is the answer. `diff base...HEAD`
 /// is committed work measured from the merge-base, so commits landing on the
@@ -1105,21 +1104,20 @@ pub fn events(backend: &dyn Backend, session: &Session) -> Result<Vec<events::Ev
         .events(session)
         .map_err(|e| format!("could not read the log: {e}"))?;
     // Merged into what this session has already shown rather than replacing it:
-    // the gateway's window is a couple of minutes wide at these poll intervals,
-    // and the feed is meant to be a record. Newest first comes back from the
-    // merge, so the pane still reads as a feed.
+    // the runtime's log starts again whenever its daemon does, and the feed is
+    // meant to be a record. Newest first comes back from the merge, so the pane
+    // still reads as a feed.
     Ok(events::merge_kept(&session.name, fresh))
 }
 
 /// Read every live session's log into its kept feed.
 ///
-/// The gateway's log is a window, and at the status channel's two-second
-/// polls its own execs fill it in about six minutes. The only thing that read
-/// it was the events pane, and only while it was the dock's open tab: a denial
-/// made while you were in the files, in another worktree, or away from the
-/// window scrolled out before anything saw it, and the feed looked as if it had
-/// stopped. `hurad serve` calls this on a timer, so the record is kept whoever
-/// is looking, and the pane draws from it as before.
+/// The runtime's log starts again whenever its daemon does. If the only thing
+/// that read it were the events pane, and only while it was the dock's open
+/// tab, a denial made while you were in the files, in another worktree, or away
+/// from the window could be gone before anything saw it. `hurad serve` calls
+/// this on a timer, so the record is kept whoever is looking, and the pane
+/// draws from it as before.
 ///
 /// Failures are not reported. A sandbox that cannot be read has usually just
 /// gone, the next refresh marks it dead, and the pane says why when opened.
@@ -1294,10 +1292,9 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
 /// The argv that attaches a terminal to a session, ready to be spawned under a
 /// pty.
 ///
-/// One definition for `hura attach`, the TUI's agent pane and the desktop's
-/// terminal channel. Where the session runs decides what that argv is -- an
-/// `openshell sandbox exec --tty` for one backend, the shell itself for the
-/// other -- and neither caller has to know which it got.
+/// One definition for `hura attach` and the desktop's terminal channel. Where
+/// the session runs decides what that argv is (an `sbx exec --interactive
+/// --tty` for the sandbox), and neither caller has to know which it got.
 pub fn attach_argv(
     backend: &dyn Backend,
     session: &Session,
@@ -1459,7 +1456,7 @@ pub fn kill_shell(backend: &dyn Backend, session: &Session, tmux: &str) -> Resul
 /// What destroying a session did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Destroyed {
-    /// The gateway deleted the sandbox.
+    /// The runtime deleted the sandbox.
     Sandbox,
     /// There was no sandbox left to delete; only the record went.
     RecordOnly,
@@ -1471,7 +1468,7 @@ pub enum Destroyed {
 /// asked for -- and so the TUI cannot leave behind a record the CLI would then
 /// report as a session whose sandbox has died.
 ///
-/// A sandbox the gateway has never heard of is the desired end state rather than
+/// A sandbox the runtime has never heard of is the desired end state rather than
 /// a failure: that is the case for a session left behind by a create that died
 /// before provisioning, and refusing to remove the record would make it
 /// permanent. The name is resolved through the cache with a fall back to the
@@ -1494,7 +1491,7 @@ pub fn destroy(backends: &Backends, name: &str) -> Result<Destroyed, String> {
         .cloned();
 
     // Written before any backend is asked, not after: the window this closes
-    // opens the moment the gateway starts deleting, and a tombstone written
+    // opens the moment the runtime starts deleting, and a tombstone written
     // after a delete that takes seconds to be accepted is a tombstone written
     // after the refresh it exists to stop. See [`crate::removed`].
     removed::remember(name);
@@ -1526,9 +1523,9 @@ pub fn destroy(backends: &Backends, name: &str) -> Result<Destroyed, String> {
 
 /// Everything one round trip per session is worth spending an exec on.
 ///
-/// Kept together deliberately. Exec on a sandbox is serialised gateway-side, so
-/// two separate polls would not just double the traffic -- they would queue
-/// behind each other. One script, one round trip, both answers.
+/// Kept together deliberately. Each exec on a sandbox is a round trip of about
+/// a third of a second, so two separate polls would double what every poll
+/// costs. One script, one round trip, both answers.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 // `PartialEq` so a stream can tell a poll that changed from one that did not,
 // which is the difference between a frame and silence. Not `Eq`: the usage
@@ -1643,7 +1640,7 @@ printf '
 /// Split the poll script's output and interpret each part.
 ///
 /// Separate from [`poll`] so it can be tested against captured output without a
-/// gateway.
+/// sandbox.
 fn parse_poll(stdout: &str, now: u64) -> Poll {
     let (stat_part, rest) = match stdout.split_once(status::STATUS_MARKER) {
         Some(split) => split,
@@ -2018,7 +2015,7 @@ mod tests {
 
     /// The same task in a second project derives the same name, and a sandbox
     /// name is one per machine. The second gets a counter rather than a clash
-    /// at the gateway -- but a name the client typed is theirs and is kept.
+    /// in the runtime, but a name the client typed is theirs and is kept.
     #[test]
     fn a_derived_name_that_is_taken_gets_a_counter_and_a_typed_one_does_not() {
         let cfg = crate::config::Config::default();

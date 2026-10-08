@@ -26,8 +26,9 @@ pub enum Verdict {
     Neutral,
 }
 
-/// Severity as the gateway grades it. Anything above `Info` is worth colouring:
-/// the `tls: terminate` deprecation only ever appeared as a `Med`.
+/// Severity as OpenShell graded it. The sandbox runtime grades nothing, so its
+/// events are all `Info`; the rest are for events kept from before, and
+/// anything above `Info` is still worth colouring.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
@@ -49,7 +50,7 @@ impl Severity {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Event {
-    /// Epoch seconds. The gateway prints fractional seconds; the fraction is
+    /// Epoch seconds. The runtime writes fractional seconds; the fraction is
     /// dropped because the feed shows a wall-clock time, not a duration.
     // `number`, not the `bigint` ts-rs assumes for a u64: serde_json writes it
     // as a JSON number and `JSON.parse` reads one back, so `bigint` would be a
@@ -193,12 +194,12 @@ fn read_kept(path: &Path) -> Vec<Event> {
 ///
 /// Those were cut at the first `]` inside a reason, and what followed became
 /// more of the subject: `/usr/bin/curl(8898) -> api.github.com:443  , cmdline:
-/// ). S...]`. They are on disk, and the denials they record have long left the
-/// gateway's window, so mending them as they are read is the only way they
+/// ). S...]`. They are on disk, and the denials they record have long left
+/// OpenShell's window, so mending them as they are read is the only way they
 /// can still be allowed. The tail always begins with whitespace and then the
-/// `,` or `]` that followed a nested group, which no subject the gateway
-/// writes has. Mended, they also match the same lines read again, so a
-/// denial still in the window is not kept twice.
+/// `,` or `]` that followed a nested group, which no subject OpenShell wrote
+/// had. Mended, they also matched the same lines read again, so a denial
+/// still in the window was not kept twice.
 fn mended(subject: &str) -> &str {
     subject
         .char_indices()
@@ -460,7 +461,7 @@ fn requested(rule: &str) -> Option<(String, String)> {
 
 /// The rule that decided, when one did: `local:ID` out of
 /// `denied: rule "local:ID" matched op(...)`. A refusal because nothing matched
-/// names no rule, which is `None` here as `-` was in the gateway's log.
+/// names no rule, which is `None` here as `-` was in OpenShell's log.
 fn deciding_rule(rule: &str) -> Option<String> {
     let quoted = rule.split("rule \"").nth(1)?;
     let id = quoted.split('"').next()?;
@@ -647,7 +648,7 @@ mod tests {
         ] {
             assert_eq!(mended(kept), meant);
         }
-        // What the gateway writes is left exactly as it is.
+        // What OpenShell wrote is left exactly as it was.
         for fine in [
             "/usr/bin/curl(79) -> pastebin.com:443",
             "GET httpbin.org:443/ip",

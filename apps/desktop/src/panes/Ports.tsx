@@ -24,8 +24,8 @@
 // stopped from the process list under the ports instead.
 //
 // A port that is not in the list can still be typed: a server bound to one
-// interface rather than to loopback is not listed, because the gateway cannot
-// forward to it, and the error from trying says so better than its absence.
+// interface rather than to loopback is not listed, because a relay cannot
+// reach it, and the error from trying says so better than its absence.
 
 import { useCallback, useEffect, useState } from "react";
 

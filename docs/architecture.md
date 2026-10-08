@@ -31,22 +31,24 @@ has the decisions and the increments that got here; this is the map.
                                   |
                               Sandboxed
                                   |
-   SessionStore            openshell-client
+   SessionStore              sbx-client
    (~/.config/hura/         (CLI subprocess)
     sessions.json)                |
-                    openshell gateway (docker driver)
+                   Docker Sandboxes daemon (sbx)
+                   and its proxy, on this machine
                            |
         +------------------+-------------------+
         |                  |                   |
-    sandbox A          sandbox B           sandbox C
+    microVM A          microVM B           microVM C
    clone+agent        clone+agent         clone+agent
+   +Docker Engine     +Docker Engine      +Docker Engine
 ```
 
 Five crates, and an application:
 
 | | |
 | --- | --- |
-| `crates/openshell-client` | everything the rest of the tool knows about OpenShell, behind one trait. OpenShell is a fast-moving `0.0.x` project, so version churn lands in one file -- and the trait is what lets the gRPC API replace the subprocess later without touching callers |
+| `crates/sbx-client` | everything the rest of the tool knows about Docker Sandboxes, behind one trait, so a change in the CLI's surface lands in one file. Measured rather than read off its documentation; the module comment says what was measured. Sessions ran on OpenShell before this, through a crate of the same shape |
 | `crates/hura-core` | everything `hura` *does*: sessions, policy, events, seeding. No renderer may appear in it, which is what lets something other than a terminal sit on top |
 | `crates/hura-proto` | one definition of every message on the wire, so a server and a client cannot drift. Built on `hura-core`, because the types it carries are the core's own rather than a second set kept in step by hand |
 | `crates/hurad` | the whole Linux side: the clap CLI, and the server behind TLS, one token check and `/rpc`. Async only where it has to be -- everything it calls is blocking and goes to `spawn_blocking`. `crates/hura` carried the CLI and a ratatui TUI beside it until v0.4.0, when two front ends onto one set of sessions stopped earning their keep |
@@ -63,10 +65,10 @@ Everything is in `hura-core` unless the second column says otherwise.
 | Module | What it owns |
 | --- | --- |
 | `main.rs` | *(hura)* the clap CLI, and dispatch into `ops` |
-| `ops.rs` | the operations the CLI and the window both need, so neither reimplements the other. Everything here takes a `Backend` rather than a gateway client |
-| `backend.rs` | *where* a session runs, as a trait, so the scripts never name the gateway. `backend/sandboxed.rs` is the one implementation. There used to be a second, a `git worktree` on the server with no isolation; it was removed to keep one of everything |
+| `ops.rs` | the operations the CLI and the window both need, so neither reimplements the other. Everything here takes a `Backend` rather than a runtime client |
+| `backend.rs` | *where* a session runs, as a trait, so the scripts never name the runtime. `backend/sandboxed.rs` is the one implementation: making a sandbox, its rules, its secrets, finding hura's among the runtime's. There used to be a second, a `git worktree` on the server with no isolation; it was removed to keep one of everything |
 | `session.rs` | what a session *is*: identity, the derived branch and sandbox names, and the metadata record written inside the sandbox |
-| `store.rs` | the local cache and its reconciliation against the gateway; every write is locked |
+| `store.rs` | the local cache and its reconciliation against the sandboxes that exist; every write is locked |
 | `removed.rs` | the names of destroyed sessions, kept until the sandbox behind them has actually gone. Deletion is asynchronous, and a sandbox still listed with its record already dropped is the exact shape of an orphan worth adopting -- so without this a removed session came back on the next refresh, and the name could not be used again |
 | `seed.rs` | the detached script that clones, cuts the branch, writes the record and starts the agent |
 | `status.rs` | what the agent is doing, from hooks and from its screen |
@@ -76,7 +78,8 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `events.rs` | the allow/deny feed, merged and kept on disk per session |
 | `forge.rs` | which git host a session works against, derived from the repo URL |
 | `tracker.rs` | reading tickets from GitHub, Azure DevOps and Jira over REST, with a token handed in -- the desktop application calls it with its own, and the server never does. The parsers are pure and tested against captured answers, because reading somebody else's JSON is the part that is easy to get wrong quietly |
-| `image.rs` | the sandbox image, with its whole build context embedded in the binary |
+| `image.rs` | the sandbox image, with its whole build context embedded in the binary; built by Docker and loaded into the runtime's own store |
+| `credentials.rs` | the credentials a session can be given, and the sandbox-scoped secret each becomes. hura holds a command or a reference, never a value |
 | `toolchain.rs` | the toolchains, their image variants, and the registry each one opens |
 | `skills.rs` | packing host skills into a session, and the server-side library a client pushes its own into |
 | `mcp.rs` | MCP servers on the host, and the endpoints granted for them. `mcp/managed.rs` is the half `hurad` runs itself: an image and a port instead of a url, the container's lifecycle, and what Docker says about it |
@@ -126,17 +129,21 @@ renderer that cannot link Rust at all, and reaches the core only through
 `hura-proto`. That is a stricter test than the one it replaced.
 
 
-**Nothing that paints does I/O.** Every gateway call is a subprocess round trip
+**Nothing that paints does I/O.** Every runtime call is a subprocess round trip
 costing hundreds of milliseconds, so none of them happen on a path that draws.
 The window reaches them over `/rpc`, and `hurad` runs each on `spawn_blocking`. A
-feature that needs to ask the gateway something adds an op, not a call in a
+feature that needs to ask the runtime something adds an op, not a call in a
 handler that renders.
 
 **The sandbox is the source of truth.** Seeding writes
 `/sandbox/.hura/meta.json`, so a session describes itself and survives losing the
-local cache. Labels carry identity only -- the gateway restricts label values to
-Kubernetes rules, at most 63 characters of `[A-Za-z0-9._-]`, which cannot hold a
-repo URL or a branch name with a `/` in it.
+local cache. The runtime has no labels, so a sandbox's name is its identity:
+`hura-<session>`, which says both that it is hura's and which session it is.
+
+A sandbox stops when the runtime's daemon does, and any exec starts it again. So
+nothing that only *looks* at a session execs into a stopped one: a refresh reads
+it as idle, and it is started by being opened, when the status poll brings its
+agent back if it had one. See `seed::resume_check`.
 
 The local cache is disposable: each session's record lives inside its own
 sandbox, so deleting `~/.config/hura/sessions.json` and running `hurad ls`
@@ -162,18 +169,18 @@ reason git gave. A seeder still running is left alone, however long it takes.
 
 ## Tests
 
-The suite is hermetic on purpose, so a contributor with no gateway can still
-change almost anything:
+The suite is hermetic on purpose, so a contributor with no sandbox runtime can
+still change almost anything:
 
 * pane classification runs against real captures in `crates/hura-core/tests/panes/`,
   included at compile time by `status.rs`;
 
-What that cannot cover is the gateway contract, which lives in ignored tests in
-`crates/openshell-client/tests/live.rs` and needs a live gateway and Docker.
-They create and delete real sandboxes labelled `hura.test`, one at a time:
+What that cannot cover is the runtime's contract, which lives in ignored tests
+in `crates/sbx-client/tests/live.rs` and needs a signed-in `sbx` and KVM. They
+create and remove real sandboxes named `hura-test-*`, one at a time:
 
 ```sh
-cargo test -p openshell-client -- --ignored --test-threads=1
+cargo test -p sbx-client -- --ignored --test-threads=1
 ```
 
 [CONTRIBUTING.md](../CONTRIBUTING.md) has the rest of the development loop.

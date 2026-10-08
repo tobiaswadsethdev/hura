@@ -7,9 +7,9 @@ import type { Usage } from "./Usage";
 /**
  * Everything one round trip per session is worth spending an exec on.
  *
- * Kept together deliberately. Exec on a sandbox is serialised gateway-side, so
- * two separate polls would not just double the traffic -- they would queue
- * behind each other. One script, one round trip, both answers.
+ * Kept together deliberately. Each exec on a sandbox is a round trip of about
+ * a third of a second, so two separate polls would double what every poll
+ * costs. One script, one round trip, both answers.
  */
 export type Poll = { stat: DiffStat | null, status: Report | null, 
 /**

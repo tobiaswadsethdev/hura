@@ -111,7 +111,7 @@ export function IntegrationsScreen({
             {/* The warning that used to live in a document nobody re-reads,
                 at the moment somebody is looking at the thing it is about. */}
             <p className="warn">
-              An MCP server is something the agent can do with your credentials. The gateway sees
+              An MCP server is something the agent can do with your credentials. The sandbox sees
               every call as <code>POST /mcp</code>, so there is no finer rule than granting the
               endpoint: a server that can transition Jira issues means a sandboxed agent can
               transition Jira issues. Fine for Jira; a filesystem or Docker server would be a

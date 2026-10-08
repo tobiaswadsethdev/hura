@@ -14,12 +14,12 @@
 //!
 //! ## Every command is `(async)`, and it has to be
 //!
-//! **Tauri runs a synchronous command on the main thread** -- the one pumping
-//! the window's messages -- and every command in this file is blocking I/O: a
-//! TLS round trip to `hurad`, which may itself shell out to the gateway CLI. The
-//! session list is re-read every three seconds and each read is an
-//! `openshell sandbox list` on the other end, so the window spent a large part
-//! of every second not pumping anything.
+//! **Tauri runs a synchronous command on the main thread**, the one pumping
+//! the window's messages, and every command in this file is blocking I/O: a
+//! TLS round trip to `hurad`, which may itself shell out to the sandbox
+//! runtime's CLI. The session list is re-read every three seconds and each
+//! read is an `sbx ls` on the other end, so the window spent a large part of
+//! every second not pumping anything.
 //!
 //! Windows says so out loud: the title bar gains *(not responding)* and the
 //! window stops repainting. WebKitGTK on Linux has no such watchdog, which is

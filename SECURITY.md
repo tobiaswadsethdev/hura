@@ -14,7 +14,7 @@ Useful things to include, roughly in order of usefulness:
 
 * what a sandboxed agent could reach, read or write that it should not have;
 * the smallest reproduction you have -- a policy template, a repo URL, a task;
-* `hura doctor` output, which pins the versions of every moving part;
+* `hurad doctor` output, which pins the versions of every moving part;
 * whether the problem is in `hura` or in something under it (see below).
 
 This is an early project maintained in spare time. You will get an
@@ -28,38 +28,53 @@ Anything where `hura` itself is the weak link:
   than what the policy pane shows;
 * the `w`/`t` widen, the endpoint chooser, or the global allow/block lists
   opening more than they say they do;
-* credentials reaching a place they should not -- a sandbox filesystem, a log,
-  the events feed, a session record, an image layer, your shell history;
+* credentials reaching a place they should not: a sandbox filesystem, a log,
+  the events feed, a session record, an image layer, your shell history, or a
+  session the credential was not ticked for;
 * seeding, publishing or the image build executing something a repository, a
   branch name or a task prompt controls;
-* the TUI or CLI trusting sandbox-controlled data -- captured screens, metadata
-  records, seed state -- in a way that escapes back onto the host.
+* the window or CLI trusting sandbox-controlled data (captured screens, metadata
+  records, seed state, the ports a sandbox listens on) in a way that escapes
+  back onto the host.
 
 ## What is not
 
-* **OpenShell, Docker and the kernel.** If the gateway enforces less than it
-  reports, that belongs upstream at
-  [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell). Tell us too, so the
-  version can be pinned or documented around, but upstream is the fix.
+* **Docker Sandboxes, Docker and the hypervisor.** If the sandbox runtime
+  enforces less than it reports, that belongs upstream at
+  [docker/sbx-releases](https://github.com/docker/sbx-releases/issues). Tell us
+  too, so the version can be pinned or documented around, but upstream is the
+  fix.
 * **The agent doing what it was asked.** An agent that rewrites your branch or
   writes bad code inside its own sandbox is working as designed; the sandbox is
   the boundary, not the agent's judgement.
 
 ## Known limits, by design
 
-Two of these are deliberate trades rather than bugs, and both are documented
-where they are configured:
+These are deliberate trades rather than bugs, and each is documented where it
+is configured:
 
-* **MCP servers are a hole in the sandbox**, and the gateway can only see them
-  as `POST /mcp`. An agent given a Jira server can do anything that server can
-  do, with the host's credentials. That is a fine trade for a work item and a
-  terrible one for a filesystem or Docker MCP server on the host --
+* **The VM is the boundary, not the agent's user.** Inside its sandbox the agent
+  has sudo and its own Docker Engine, which is what lets it build and run
+  containers. What it cannot do is leave the VM or reach what its rules do not
+  allow, and that is what the runtime enforces, outside the VM.
+* **Rules are per sandbox, not per program.** Anything in a session can reach
+  what the session's rules allow, not only the program the rule was written
+  for. Sessions ran on OpenShell, which bound rules to binaries, before this;
+  [docs/policy.md](docs/policy.md) says what that costs.
+* **A host that echoes headers echoes the credential.** A credential is swapped
+  into the headers of requests to its hosts, so one of them that reflects
+  request headers in its response would show it to the agent. The credential
+  kinds hura knows go only to their own APIs, which do not.
+* **MCP servers are a hole in the sandbox**, and the runtime's proxy can only
+  see them as `POST /mcp`. An agent given a Jira server can do anything that
+  server can do, with the host's credentials. That is a fine trade for a work
+  item and a terrible one for a filesystem or Docker MCP server on the host;
   [docs/mcp.md](docs/mcp.md) spells this out.
 * **Auto mode.** Agents run with Claude Code's `auto` permission mode, which is
   the whole reason several sessions can run unattended. It is only defensible
   because of the sandbox: see [docs/sandbox-image.md](docs/sandbox-image.md).
-* **Bind mounts are never default.** They can negate filesystem isolation, and
-  `hura` does not create sessions with them.
+* **No host directory is mounted.** A session clones its repository inside the
+  sandbox, and `hura` creates no sandbox with a workspace from this machine.
 
 If you find that one of these costs more than it is documented to cost, that is
 a report worth making.

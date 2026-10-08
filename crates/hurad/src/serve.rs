@@ -6,10 +6,10 @@
 //! everything else.
 //!
 //! **The core is blocking and this is not.** Every dispatch runs a subprocess
-//! against the gateway for a few hundred milliseconds, so each one goes to
-//! [`tokio::task::spawn_blocking`] rather than onto a runtime thread. Without
-//! that, two clients and one slow `openshell` call are enough to stall the
-//! whole server, including the `/version` that would have explained why.
+//! against the sandbox runtime for a few hundred milliseconds, so each one goes
+//! to [`tokio::task::spawn_blocking`] rather than onto a runtime thread. Without
+//! that, two clients and one slow `sbx` call are enough to stall the whole
+//! server, including the `/version` that would have explained why.
 
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};

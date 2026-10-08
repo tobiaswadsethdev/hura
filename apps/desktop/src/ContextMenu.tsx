@@ -34,7 +34,7 @@ export type MenuItem =
   | {
       label: string;
       icon?: React.ComponentType<{ "aria-hidden"?: boolean }>;
-      /// A short qualifier, right-aligned and dim: which binary, which list.
+      /// A short qualifier, right-aligned and dim: which endpoint, which list.
       hint?: string;
       /// Red, and only for the things that cannot be taken back.
       danger?: boolean;

@@ -1,16 +1,16 @@
 # Installing hura
 
 There are two things to install and they do not go in the same place. **`hurad`
-runs where the sandboxes are**, which is Linux, because the isolation is
-kernel-enforced. **The desktop application runs where you are sitting**, which
-may be the same machine or may be Windows -- it makes requests of an `hurad` and
-needs no gateway, no Docker and no tmux of its own.
+runs where the sandboxes are**, which is Linux with KVM, because every session is
+a microVM. **The desktop application runs where you are sitting**, which may be
+the same machine or may be Windows. It makes requests of an `hurad` and needs no
+sandbox runtime, no Docker and no tmux of its own.
 
 `hura` was a second Linux binary until v0.4.0, carrying this CLI and a terminal
 interface beside it. It folded into `hurad`: every command it had, `hurad` has,
 and the window is the interactive surface now. Upgrading from v0.3.1 or earlier
-means running `install.sh` once -- `hura update` cannot cross the rename,
-because there is no longer an `hura` for it to replace itself with.
+means running `install.sh` once. `hura update` cannot cross the rename, because
+there is no longer an `hura` for it to replace itself with.
 
 Most of this page is the first half. [The desktop
 application](#the-desktop-application) at the end is the second, and is all that
@@ -18,65 +18,112 @@ a Windows machine needs.
 
 ## Prerequisites
 
-Linux with systemd and a Docker daemon. Verified on Arch on WSL2; nothing here
-is portable to macOS, because the isolation is kernel-enforced.
+Linux with systemd, KVM and Docker. Verified on Arch on WSL2, where KVM is
+available through nested virtualization; nothing here is portable to macOS.
 
 | | |
 | --- | --- |
-| [OpenShell](https://github.com/NVIDIA/OpenShell) | 0.0.110 -- CLI, gateway and sandbox helper |
-| Docker | server 29.x, reachable by your user |
+| KVM | `/dev/kvm` usable by your user. On WSL2 it is there when nested virtualization is, which Windows 11 has on by default |
+| [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) | `sbx` v0.47 or newer, signed in. Each session is one of its sandboxes |
+| Docker | server 29.x, reachable by your user. It builds the sandbox image, which the sandbox runtime cannot |
 | tmux | on the host, for `hurad attach` |
-| Rust | 1.89 or newer -- only to build `hurad` yourself (edition 2024, let-chains, `File::lock`) |
+| Rust | 1.89 or newer, only to build `hurad` yourself (edition 2024, let-chains, `File::lock`) |
 
-`hurad doctor` checks every one of them, plus the sandbox image and whether
-systemd lingering is enabled, and says what to do about whatever is missing:
+`hurad doctor` checks every one of them, plus the sandbox image, the runtime's own
+health, its policy and whether systemd lingering is enabled, and says what to do
+about whatever is missing:
 
 ```
-[  ok  ] version      hurad 0.4.0, newest
-[  ok  ] openshell    openshell 0.0.110
-[  ok  ] gateway      https://127.0.0.1:17670 0.0.110 (authenticated)
-[  ok  ] docker       server 29.6.0
-[  ok  ] tmux         tmux 3.6b
+[  ok  ] sbx          v0.47.0 (daemon v0.47.0)
+[  ok  ] sbx checks   13 passed
+[  ok  ] sbx policy   deny-all: only what a session's rules allow gets out
+[  ok  ] sbx daemon   sbx-daemon.service
+[  ok  ] docker       server 29.7.2
+[  ok  ] tmux         tmux 3.7c
 [  ok  ] linger       enabled
-[  ok  ] image        hura-base:latest built, claude 2.1.246
+[  ok  ] image        hura-sandbox:latest built, claude 2.1.293
+[  ok  ] templates    1 loaded
 ```
 
 ## Installing the pieces
 
-**OpenShell.** OpenShell's own `install.sh` supports dpkg and rpm only; on
-anything else install the release tarballs into `~/.local/bin`, which needs no
-root. The gateway runs as a systemd *user* service:
+**Docker Sandboxes.** Docker's own, under its own licence, and it wants a Docker
+sign-in, which is why hura's installer does not install it for you. Docker
+documents it for Ubuntu, but its release tarball is static, installs without
+root, and runs on Arch as well:
 
 ```sh
-systemctl --user enable --now openshell-gateway
-openshell gateway add https://127.0.0.1:17670 --local --name openshell
-openshell status                       # -> Connected, Authenticated (mTLS)
-sudo loginctl enable-linger $USER      # WSL: or the gateway dies with your shell
+# DockerSandboxes-linux-amd64.tar.gz from https://github.com/docker/sbx-releases/releases
+mkdir sbx-dl && tar -xzf DockerSandboxes-linux-amd64.tar.gz -C sbx-dl
+sbx-dl/docker-sbx/install.sh           # installs to ~/.docker/sbx
+export PATH="$HOME/.docker/sbx/bin:$PATH"
 ```
 
-The tarball names, checksums and the unit file are in
-[manual-loop.md](manual-loop.md) and
-[openshell-gateway.service](openshell-gateway.service).
-
-**Providers.** One per credential the agents need. The profiles are in
-`providers/`; `--credential KEY` reads the value from the environment at create
-time and stores it in gateway state, so the shell that ran it can be closed:
+`hurad` finds it there without the `PATH` change, which matters under systemd,
+where a user service's `PATH` does not include it. Then sign in and choose the
+policy every session's rules assume:
 
 ```sh
-openshell provider profile import --file providers/claude-code-oauth.yaml
-read -rs -p "paste token: " CLAUDE_CODE_OAUTH_TOKEN   # `claude setup-token`
-export CLAUDE_CODE_OAUTH_TOKEN
-openshell provider create --name claude-oauth \
-        --type claude-code-oauth --credential CLAUDE_CODE_OAUTH_TOKEN
+sbx login                              # prints a code and a URL to confirm it at
+sbx policy init deny-all               # nothing leaves a sandbox unless a rule says so
 ```
 
-`read` needs a TTY, so that has to be a real terminal. For Azure DevOps, do the
-same with `providers/azure-devops-pat.yaml` (see [Git hosts](git-hosts.md)).
+`deny-all` is the one to pick. A session's template is a list of allows, which
+only decides something on a runtime that refuses everything else; `balanced`
+would add a baseline of hosts to every session, and `allow-all` would make the
+rules decorative. `hurad doctor` says which is in force.
 
-**`hurad` itself.** The policy templates and the whole image recipe -- Dockerfile,
-status hook, Claude settings -- are compiled into the binary, so it needs
-nothing from this tree at runtime except the provider profiles above, which the
-`openshell` CLI reads directly. That is what makes a one-line install possible:
+**Its daemon, as a unit of its own.** The runtime starts its daemon the first
+time anything calls `sbx`, inside whatever made that call. When that is `hurad`
+running as a systemd service, the daemon is in `hurad`'s cgroup, and restarting
+`hurad` (which `hurad update` asks you to do) takes the daemon and every sandbox
+with it. So it gets its own unit, [sbx-daemon.service](sbx-daemon.service):
+
+```sh
+cp docs/sbx-daemon.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now sbx-daemon
+sudo loginctl enable-linger $USER      # WSL: or the daemon stops with your shell
+```
+
+Under it the daemon is its own unit's process, in its own cgroup; that was
+measured, not assumed.
+
+**Credentials.** One `[credentials.NAME]` table in `~/.config/hura/config.toml`
+per credential the agents need, naming where its value comes from. hura never
+reads the value: a session the credential is ticked for gets a secret of its own
+from the runtime, which runs the command itself, and the sandbox only ever holds
+a placeholder. A file only you can read is the simplest source:
+
+```sh
+mkdir -p ~/.config/hura/tokens && chmod 700 ~/.config/hura/tokens
+umask 077
+cat > ~/.config/hura/tokens/claude          # the token `claude setup-token` printed
+cat > ~/.config/hura/tokens/azure-devops    # an Azure DevOps PAT, if you use one
+```
+
+```toml
+[credentials.claude]
+kind = "claude-code-oauth"
+command = "tr -d '\r\n' < /home/me/.config/hura/tokens/claude"
+
+[credentials.azure-devops]
+kind = "azure-devops-pat"
+command = "tr -d '\r\n' < /home/me/.config/hura/tokens/azure-devops"
+```
+
+Two details in those commands are load-bearing. The path is absolute, because
+the runtime runs the command from a temporary directory of its own, so `~` and a
+relative path are not guaranteed to mean what they do in your shell. And `tr`
+strips the newline that `cat >` leaves at the end of the file, which would
+otherwise end up inside an HTTP header. `command` can be any shell command that
+prints the value (`pass show`, `op read`); `ref` takes a 1Password or AWS
+Secrets Manager reference instead. [configuration.md](configuration.md) has the
+kinds, and [git-hosts.md](git-hosts.md) the Azure DevOps details.
+
+**`hurad` itself.** The policy templates and the whole image recipe (Dockerfile,
+status hook, Claude settings) are compiled into the binary, so it needs nothing
+from this tree at runtime. That is what makes a one-line install possible:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/install.sh | sh
@@ -88,11 +135,11 @@ match**, puts `hurad` in `~/.local/bin`, and finishes by running `hurad doctor` 
 the prerequisites above are named rather than discovered one at a time.
 
 It does not remove an `hura` left over from an earlier install. Deleting a
-binary somebody may still have running is not an installer's decision -- but
-nothing updates it any more, and `hurad` is what to run. Read
-it first if you would rather not pipe a script into a shell -- it is
-[install.sh](../install.sh) in this repository, and downloading it and running
-it separately works exactly the same.
+binary somebody may still have running is not an installer's decision, but
+nothing updates it any more, and `hurad` is what to run. Read it first if you
+would rather not pipe a script into a shell: it is [install.sh](../install.sh) in
+this repository, and downloading it and running it separately works exactly the
+same.
 
 Three things it takes, as flags or environment variables:
 
@@ -113,29 +160,29 @@ cargo install --git https://github.com/tobiaswadsethdev/hura hurad --locked   # 
 Then:
 
 ```sh
-hurad image build                      # also happens on first `hurad new`
+hurad image build                      # also happens on the first `hurad new`
 hurad doctor
 ```
 
-Start something: `hurad new --repo <url> --task "..."`. For a picker and a form
-instead of flags, that is [the desktop application](#the-desktop-application),
-which is the interactive surface -- there was a terminal interface here until
-v0.4.0, and [desktop.md](desktop.md) is what replaced it.
+`hurad image build` builds `hura-sandbox:latest` with Docker and then loads it
+into the sandbox runtime's own image store, which is where a sandbox is made
+from; [sandbox-image.md](sandbox-image.md) is what is in it.
 
-There is a desktop workspace as well, and it talks to a server rather than to
-the gateway directly -- so it works whether the sandboxes are on this machine or
-another one. It is the next section; [desktop.md](desktop.md) is what the window
-does once it is running.
+Start something: `hurad new --repo <url> --task "..." --provider claude`. For a
+picker and a form instead of flags, that is [the desktop
+application](#the-desktop-application), which is the interactive surface. There
+was a terminal interface here until v0.4.0, and [desktop.md](desktop.md) is what
+replaced it.
 
-If you would rather see each step yourself before trusting a tool with it,
-[manual-loop.md](manual-loop.md) is the whole loop run by hand, against the
-versions it was verified on.
+The desktop workspace talks to a server rather than to the sandboxes directly,
+so it works whether they are on this machine or another one. It is the next
+section; [desktop.md](desktop.md) is what the window does once it is running.
 
 ## The desktop application
 
 A window onto an `hurad`. It holds no sandboxes and starts none itself: it dials
 a server, pins that server's certificate, and asks. So the machine it runs on
-needs none of the prerequisites above -- and the server it dials can be this
+needs none of the prerequisites above, and the server it dials can be this
 machine, a box on the LAN, or the Linux side of the same laptop.
 
 Whichever platform, the last step is the same: **the window pairs with a server
@@ -182,8 +229,8 @@ the frontend from Vite's dev server, and that is what starts it; running
 ### Windows
 
 There is no `hurad` for Windows and there is not meant to be. The CLI drives
-Docker, tmux and a gateway, and none of those are on that side; what runs there
-is the window, which pairs itself. This is the arrangement the server was built
+Docker, tmux and the sandbox runtime, and none of those are on that side; what
+runs there is the window, which pairs itself. This is the arrangement the server was built
 for: Linux in WSL doing the work, the window out on Windows.
 
 Download the installer for the release you want from the [releases

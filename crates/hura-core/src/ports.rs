@@ -2,19 +2,19 @@
 //!
 //! Read from `/proc/net/tcp` and `/proc/net/tcp6` by the status poll, which is
 //! already an exec every couple of seconds: a second exec to ask the same
-//! sandbox one more question would queue behind the first, since execs are
-//! serialised gateway-side. The script keeps only the listening sockets' local
+//! sandbox one more question would be another third of a second on every
+//! poll. The script keeps only the listening sockets' local
 //! addresses, so what comes back is a few short lines however many connections
 //! the agent has open.
 //!
-//! Only what a forward can reach is kept. The gateway forwards to loopback and
+//! Only what a forward can reach is kept. A relay carries to loopback and
 //! nothing else, so a socket bound to one loopback or to every address is a
 //! preview, and a socket bound to one particular interface is not.
 
 use serde::{Deserialize, Serialize};
 
-/// The two addresses a forward may target. Not a free string: the gateway
-/// only forwards to loopback, and a client naming any other host would be
+/// The two addresses a forward may target. Not a free string: a relay only
+/// carries to loopback, and a client naming any other host would be
 /// asking the server to dial somewhere on its behalf.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -122,11 +122,10 @@ pub struct Owner {
     /// Whether the socket was traced to this process, or the process was
     /// picked because its command line names the port.
     ///
-    /// Usually a guess, and that is the sandbox rather than a shortcut here:
-    /// it runs under `ptrace_scope=1`, which lets a process read another's
-    /// descriptors only if it is that process's ancestor -- and an exec is
-    /// never the ancestor of the agent's dev server. Measured: `readlink` on
-    /// another process's `fd/3` is refused, and so is `ss -p`'s netlink.
+    /// Certain for anything running as the sandbox's user: the VM has no
+    /// Yama, so an exec reads the descriptors of a dev server it did not
+    /// start (measured against v0.47.0). A server started with `sudo` keeps
+    /// its descriptors from the exec, and is the guess.
     pub certain: bool,
 }
 
@@ -220,8 +219,7 @@ pub fn parse_sandbox(out: &str) -> Found {
     let procs = section(PROCS_MARKER, None);
 
     // inode -> pid, from `ls -l`'s `/proc/123/fd:` headers and its
-    // `... 5 -> socket:[2576303]` lines -- which, under the sandbox's ptrace
-    // rules, are usually there without their targets.
+    // `... 5 -> socket:[2576303]` lines, which a root process's are without.
     let mut by_inode = std::collections::HashMap::<&str, u32>::new();
     let mut pid: Option<u32> = None;
     for line in fds.lines() {
@@ -399,8 +397,8 @@ mod tests {
         format!("{PROCS_MARKER}\nself 200 998\n{lines}")
     }
 
-    /// The sandbox as it really answers: no descriptor targets, so the owner
-    /// is a guess from the command line -- and says so.
+    /// No descriptor targets, as for a server started with `sudo`: the owner
+    /// is a guess from the command line, and says so.
     #[test]
     fn without_descriptors_the_owner_is_guessed_from_the_command_line() {
         let out = format!(

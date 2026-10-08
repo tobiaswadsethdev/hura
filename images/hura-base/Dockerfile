@@ -118,13 +118,14 @@ RUN printf '%s\n' \
 # The template sets no locale at all. Under OpenShell the gateway also stripped
 # the image's environment from every exec, so a tmux client it started had
 # neither; the sandbox runtime passes `ENV` through, but the tmux conf and
-# `ops::attach_script` still say it so nothing depends on which one ran. A tmux client that does not believe it is
-# on a UTF-8 terminal draws with the DEC line-drawing set and replaces every
-# character it cannot map with `_`, which is what Claude Code's banner, its box
-# rules and its `⏸` and `❯` glyphs turned into. `ENV` here fixes anything started
-# from the image; `set-environment` in the tmux conf above fixes the agent's own
-# process, whose environment comes from the tmux server; and `ops::attach_script`
-# exports it a third time for the client, which is the one the gateway strips.
+# `ops::attach_script` still say it so nothing depends on which one ran. A tmux
+# client that does not believe it is on a UTF-8 terminal draws with the DEC
+# line-drawing set and replaces every character it cannot map with `_`, which is
+# what Claude Code's banner, its box rules and its `⏸` and `❯` glyphs turned
+# into. `ENV` here fixes anything started from the image; `set-environment` in
+# the tmux conf above fixes the agent's own process, whose environment comes
+# from the tmux server; and `ops::attach_script` exports it a third time for the
+# client, which is the one OpenShell stripped.
 #
 # `default-terminal` and `terminal-features RGB` are the colour half. Inside tmux
 # a pane's TERM decides how many colours the agent thinks it has, and RGB has to
@@ -144,8 +145,8 @@ ENV LANG=C.UTF-8 \
 #
 # Set twice on purpose. `ENV` covers anything started in the sandbox, including a
 # shell someone opens by hand; the same variable in `settings.json` is what
-# actually reaches the agent, because the gateway does not pass the image's
-# environment through to an exec.
+# Claude Code reads whatever its environment, which mattered under OpenShell,
+# whose exec passed none of the image's through.
 ENV DISABLE_AUTOUPDATER=1
 
 # Skip Claude Code's first-run onboarding, and turn copy-on-select off.
@@ -207,11 +208,12 @@ RUN chmod 0755 /usr/local/bin/hura-status /usr/local/bin/hura-usage \
 # protocol to each other, so the pair is chosen together rather than each being
 # whatever was newest. Optional dependencies are left out: they are the SDK's
 # own copy of Claude Code for every platform, and the host points it at
-# /usr/local/bin/claude instead, which is the binary the policy grants the API
-# to. Peer dependencies are left out too; the SDK bundles what it imports.
+# /usr/local/bin/claude instead, which is the one installed and pinned above.
+# Peer dependencies are left out too; the SDK bundles what it imports.
 #
-# Root-owned, like the claude binary, so the agent cannot rewrite the process
-# that answers its permission prompts.
+# Root-owned, like the claude binary. The agent has sudo in its VM, so this
+# keeps an accident from rewriting the process that answers its permission
+# prompts rather than a determined agent; the VM is the boundary.
 COPY hura-agent.mjs /usr/local/lib/hura-agent/hura-agent.mjs
 RUN set -eu; \
     claude_version="$(claude --version | awk '{print $1}')"; \

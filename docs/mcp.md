@@ -3,23 +3,25 @@
 The agents can be given MCP servers, and the servers run **on the host, in their
 own containers, holding their own credentials**. Nothing about Jira or Azure
 DevOps ever lands on a sandbox filesystem; the sandbox is granted one endpoint
-per server, and the grant is per-binary like every other rule here:
+per server. A server on this machine is published on `127.0.0.1`, the sandbox
+names it `host.docker.internal`, the sandbox runtime's proxy takes that to this
+machine's loopback, and the session gets a rule allowing `localhost` at that
+port. Measured from inside a session, against a server on `127.0.0.1:9123`:
 
 ```
-claude → POST http://mcp-azure-devops:9001/mcp   ALLOWED  [policy:allow_mcp_azure_devops_9001]
-curl   → POST http://mcp-azure-devops:9001/mcp   DENIED   [binary '/usr/bin/curl' not allowed]
+with the rule      POST http://host.docker.internal:9123/mcp   200
+without it         POST http://host.docker.internal:9123/mcp   403  Approval required for localhost:9123
 ```
 
-Same host, same port, different binary -- measured from inside a session, not
-described. Claude Code 2.x is a native binary, so `/usr/local/bin/claude` is a
-rule only the agent satisfies. That is sharper than the registry rules in
-`net-open.yaml`, where npm's kernel-resolved exe is `/usr/bin/node` and the rule
-cannot tell an agent from anything else JavaScript in the sandbox.
+**The grant is to the whole sandbox.** A sandbox's rules are about where a
+request goes, not which program sent it, so anything in the session can reach a
+server it is given, not only the agent. The window's policy pane says the same
+under every session's rules.
 
 ## Two shapes: one you run, one the server runs
 
-Name them in the config file, one table each. A table has either a `url` -- a
-server somebody else operates -- or an `image`, which makes it **managed**:
+Name them in the config file, one table each. A table has either a `url` (a
+server somebody else operates) or an `image`, which makes it **managed**:
 `hurad` starts the container, restarts it, holds its secrets and can say what it
 is doing.
 
@@ -33,19 +35,20 @@ args    = ["--transport", "streamable-http", "--port", "9000"]
 env     = { JIRA_URL = "https://your-org.atlassian.net", JIRA_USERNAME = "you@example.com" }
 secrets = ["JIRA_API_TOKEN"]              # names; the values live on the server
 
-# Yours: a url, exactly as before. Nothing here starts or stops it.
+# Yours: a url. Nothing here starts or stops it.
 [[mcp]]
 name = "azure-devops"
-url  = "http://mcp-azure-devops:9001/mcp"
+url  = "http://host.docker.internal:9001/mcp"
 transport = "http"                        # or "sse"; http is the default
 ```
 
-**A managed entry has no url, and that is the point.** It is reachable at
-`http://hura-mcp-<name>:<port>/mcp` because the thing that named the container is
-the thing that joined it to the gateway's network -- so the two mistakes a
-hand-written url invites, a name no sandbox can resolve and a `localhost` that
-means the sandbox itself, are not reachable from there. Nothing is published on
-the host: only sandboxes on that network need to reach it.
+**A managed entry has no url, and that is the point.** `hurad` publishes the
+container on `127.0.0.1:<port>` and derives its url,
+`http://host.docker.internal:<port>/mcp`, from the same port, so the two
+mistakes a hand-written url invites (a container name no sandbox can resolve,
+and a `localhost` that means the sandbox itself) cannot happen. It is published
+on loopback only, so nothing else on the network reaches it. Each managed entry
+needs a port of its own, and the config file is refused when two share one.
 
 The keys that belong to a managed entry are refused beside a `url` rather than
 ignored, and an entry with both is refused outright -- it would be a url
@@ -101,9 +104,9 @@ The states are worth knowing, because two of them look like health and are not:
 
 | | |
 | --- | --- |
-| `running` | up, and on the gateway's network -- the only sense in which a sandbox can reach it |
+| `running` | up, and published on `127.0.0.1` at its port, the only sense in which a sandbox can reach it |
 | `crashing` | started, exited, started again. `--restart unless-stopped` means Docker reports a container it is restarting as *running*, so this is measured from the restart count and shows the container's last output |
-| `detached` | running, but not on the `openshell-docker` network. Fine in `docker ps`, unreachable from every sandbox |
+| `detached` | running, but not published on `127.0.0.1` at its port. Fine in `docker ps`, unreachable from every sandbox. A container started before sessions moved to Docker Sandboxes looks like this, and `hurad` recreates it when it starts |
 | `stopped` | it exists and is not running, with its last output |
 | `absent` | never started, or stopped from here |
 | `external` | a `url` entry: whoever runs it started it, and this server has no say |
@@ -112,28 +115,29 @@ The states are worth knowing, because two of them look like health and are not:
 
 Everything below is the `url` shape: your container, your `docker run`, your
 problem when the host reboots. It is still the right answer for a server that
-needs more than an image and a port -- a shim, a mount, a second process -- and
+needs more than an image and a port (a shim, a mount, a second process), and
 it is what the managed shape was measured against.
 
 The url is what the **sandbox** sees, which is not what your browser sees.
-`localhost` in there is the sandbox itself and is refused when the file is read,
-because it is correct on the host, wrong in the sandbox, and invisible until an
-agent is running. Two addresses work instead:
+`localhost` and `127.0.0.1` in there are the sandbox itself, and are refused
+when the file is read, because they are correct on the host, wrong in the
+sandbox, and invisible until an agent is running. A sandbox cannot reach a
+container on this machine by its name either: it is a microVM, not a container
+on any of this machine's Docker networks. What works:
 
-* **the container's name**, when it has joined the gateway's own Docker network
-  with `--network openshell-docker`. Docker's embedded DNS resolves it even
-  though the sandbox has no DNS of its own, because the proxy does the
-  resolving -- and nothing is published on the host at all. This is the shape to
-  prefer, and the one a managed entry gives you without asking.
-* **`host.openshell.internal`**, which every sandbox already has in `/etc/hosts`
-  pointing at the bridge gateway, for a server that is not in a container or is
-  in one that cannot join another network. Publish to the bridge address rather
-  than to `127.0.0.1`, or the sandbox cannot reach it.
+* **`host.docker.internal` and a port published on `127.0.0.1`**, for anything
+  on this machine, in a container or not. The runtime's proxy takes that name
+  to this machine's loopback, and the session's rule names `localhost` and the
+  port. This is the shape a managed entry gives you without asking.
+  `host.openshell.internal`, from before the move to Docker Sandboxes, is still
+  recognised as the same thing; change it when convenient.
+* **a host name of its own**, for a server on another machine, which the session
+  is given a rule for like any other host.
 
 Jira and Confluence, with the credentials staying in the container:
 
 ```sh
-docker run -d --name mcp-atlassian --network openshell-docker \
+docker run -d --name mcp-atlassian -p 127.0.0.1:9000:9000 \
   -e JIRA_URL=https://your-org.atlassian.net \
   -e JIRA_USERNAME=you@example.com -e JIRA_API_TOKEN="$JIRA_API_TOKEN" \
   ghcr.io/sooperset/mcp-atlassian:latest --transport streamable-http --port 9000
@@ -145,49 +149,52 @@ the base64 of `:<pat>` -- it decodes the value and drops everything up to the
 first colon, which is Azure DevOps' usual empty-username Basic auth:
 
 ```sh
-docker run -d --name mcp-azure-devops --network openshell-docker \
+docker run -d --name mcp-azure-devops -p 127.0.0.1:9001:9001 \
   -e PERSONAL_ACCESS_TOKEN="$(printf ':%s' "$AZURE_DEVOPS_PAT" | base64 -w0)" \
   node:22-alpine npx -y supergateway \
     --stdio "npx -y @azure-devops/mcp <org> -a pat" \
     --outputTransport streamableHttp --port 9001 --stateful
 ```
 
-Both serve `/mcp`. The Azure DevOps one was run against a real session while
-writing this -- the agent reported `azure-devops: ... ✔ Connected`, with Azure
-DevOps MCP 2.9.0 answering behind the shim, and the denial above is `curl` in
-that same sandbox. The Atlassian one was started and answered on `/mcp` with
+Both serve `/mcp`, and their urls are `http://host.docker.internal:9000/mcp`
+and `http://host.docker.internal:9001/mcp`. The Azure DevOps one was run against
+a real session when this page was first written (the agent reported
+`azure-devops: ... ✔ Connected`, with Azure DevOps MCP 2.9.0 answering behind
+the shim). The Atlassian one was started and answered on `/mcp` with
 placeholder credentials; its own flags are documented by that image.
 
-Registration happens **inside the sandbox, before the agent starts** -- the
+Registration happens **inside the sandbox, before the agent starts**: the
 seeder runs `claude mcp add --scope user` as its own `mcp` step, because the
 agent reads its servers at startup and registering them afterwards would leave
-the first session of every sandbox without tools. The endpoints are opened in
-one `policy update` at creation, so the rules are loaded before anything can use
-them. A session records the servers it was created with, and the facts pane
+the first session of every sandbox without tools. The endpoints are opened by
+one rule added when the sandbox is created, so it is in force before anything
+can use them. A session records the servers it was created with, and the facts pane
 lists them by name; changing the file changes the next session, not a running
 one.
 
-`hurad doctor` checks each of them, because a container that is not running -- or
-one running but not attached to the gateway's network -- produces a session whose
-agent reports its tools as **needing authentication**, which sends you looking in
-entirely the wrong direction:
+`hurad doctor` checks each of them, because a server that is not running, or
+one running where no sandbox can reach it, produces a session whose agent
+reports its tools as **needing authentication**, which sends you looking in
+entirely the wrong direction. A managed entry is asked of the same code the
+integrations screen uses, so a check that passes here cannot disagree with a
+screen that says something is wrong. One of your own named as
+`host.docker.internal` is connected to on `127.0.0.1` at its port. And a url
+naming one of this machine's containers is said to be unreachable outright:
 
 ```
-[ warn ] mcp          jira: there is no container named `mcp-atlassian`, so no sandbox can resolve that url
-         fix: a managed one starts from the window's integrations screen; one of your own can be attached with `docker network connect openshell-docker <container>`, or its url fixed in the config file
+[ warn ] mcp          jira: `mcp-atlassian` is a container here, and a sandbox cannot reach containers by name; publish it on 127.0.0.1:9000 and use `http://host.docker.internal:9000`
+         fix: a managed one starts from the window's integrations screen; one of your own is published on 127.0.0.1 and named as `host.docker.internal` in its url
 ```
-
-A managed entry is asked of the same code the integrations screen uses, so a
-check that passes here cannot disagree with a screen that says something is
-wrong.
 
 **What this costs.** An MCP server is a hole in the sandbox, and worth being
-plain about -- which is why the sentence below is also in the window, beside the
-list, rather than only here where nobody re-reads it: the agent gains everything the server can do, using the host's
-credentials, and the gateway can only see it as `POST /mcp`. Every MCP call is
-the same request shape, so the method/path rules that make the git endpoints
-sharp buy nothing here -- a server that can transition Jira issues means a
-sandboxed agent can transition Jira issues. That is a fine trade for Jira and
+plain about, which is why the sentence below is also in the window, beside the
+list, rather than only here where nobody re-reads it: the agent gains
+everything the server can do, using the host's credentials, and the proxy can
+only see it as `POST /mcp`. Every MCP call is the same request shape, so the
+method/path rules that make the git endpoints sharp buy nothing here: a server
+that can transition Jira issues means a sandboxed agent can transition Jira
+issues. And since the grant is to the whole sandbox, so does anything else
+running in the session. That is a fine trade for Jira and
 Azure DevOps, whose blast radius is a work item. It is a terrible one for a
 filesystem or Docker MCP server on the host, which would be a straight sandbox
 escape, and hura cannot tell the difference for you.

@@ -258,7 +258,7 @@ pub fn read_only(hosts: Vec<String>) -> RuleSpec {
 /// The policy pane's content, as facts rather than as text.
 ///
 /// Introduced when a second thing had to draw it. `render` used to build marked
-/// up text straight out of the gateway's reply, which is fine for one renderer
+/// up text straight out of the runtime's reply, which is fine for one renderer
 /// and wrong for two: a web view would have had to parse the terminal's markup
 /// back into structure it never should have lost, and the wire would have
 /// carried a rendering rather than an answer.

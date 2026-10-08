@@ -425,7 +425,7 @@ mod tests {
         assert!(Route::checked("GET", "/a/%2e").is_err());
         assert!(Route::checked("GET", "/a/../b").is_err());
         assert!(Route::checked("GET", "/a b").is_err());
-        // A colon was the gateway's to refuse; the runtime takes it.
+        // A colon was OpenShell's to refuse; the runtime takes it.
         assert!(Route::checked("GET", "/a:b").is_ok());
     }
 

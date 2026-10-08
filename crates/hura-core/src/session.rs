@@ -186,7 +186,7 @@ pub fn derive_name(task: &str, repo: &str) -> Option<String> {
 /// `api-server`, `api-server-2`, `api-server-3`.
 ///
 /// The base is shortened to make room for the suffix rather than the suffix being
-/// dropped, because the gateway's name budget is the hard part and a name that no
+/// dropped, because the name budget is the hard part and a name that no
 /// longer fits it would be refused three steps later. Unlike [`slugify`], which
 /// drops whole words, this cuts mid-word if it has to: `fix-the-readm-2` still
 /// reads as a variant of the same thing, where `fix-the-2` would not.
@@ -210,7 +210,7 @@ pub fn unique_name(base: &str, taken: &[String]) -> String {
     base.to_string()
 }
 
-/// The provider profile type carrying an agent's credential.
+/// The credential kind carrying an agent's sign-in.
 ///
 /// Used to preselect a provider in the create form: a session started without
 /// the agent's credential comes up to a login prompt, which is a poor way to
@@ -222,7 +222,7 @@ pub fn agent_provider_type(agent: &str) -> Option<&'static str> {
     }
 }
 
-/// Validate a session name against both our rules and the gateway's.
+/// Validate a session name against both our rules and the runtime's.
 pub fn validate_name(name: &str) -> Result<(), NameError> {
     if name.is_empty() {
         return Err(NameError::Empty);
@@ -414,11 +414,11 @@ pub struct Session {
     pub created_at: u64,
     pub state: State,
     /// Why the session failed, in the words of whatever refused it: the
-    /// gateway turning down a create, a clone the seeder gave up on.
+    /// runtime turning down a create, a clone the seeder gave up on.
     ///
     /// On the record because the record is the only thing a window reads. A
     /// create on `hurad` runs on a thread whose one way to speak is its own
-    /// terminal, so without this a sandbox the gateway refused showed up as a
+    /// terminal, so without this a sandbox the runtime refused showed up as a
     /// `dead` row whose panes each said `sandbox not found`, and the reason
     /// was on a screen nobody was looking at.
     ///
@@ -485,7 +485,7 @@ mod tests {
     /// A record written while there were worktree sessions still reads: the
     /// `backend` and `workdir` fields it carries are ignored rather than being
     /// a deserialization error that reads as a corrupt cache. A worktree
-    /// record is then one whose sandbox the gateway has never heard of, which
+    /// record is then one whose sandbox the runtime has never heard of, which
     /// a refresh marks dead and `hurad rm` removes.
     #[test]
     fn a_record_from_a_worktree_session_still_reads() {
@@ -528,7 +528,7 @@ mod tests {
         assert_eq!(unique_name("api-server", &taken), "api-server-3");
     }
 
-    /// The suffix has to fit inside the gateway's budget, or the name it produces
+    /// The suffix has to fit inside the name budget, or the name it produces
     /// is refused three steps later.
     #[test]
     fn the_counter_fits_the_name_limit() {
@@ -544,7 +544,7 @@ mod tests {
         assert!(next.ends_with("-2"), "{next}");
     }
 
-    /// Shortening the stem can leave it ending in a dash, which the gateway's
+    /// Shortening the stem can leave it ending in a dash, which the runtime's
     /// name rules reject.
     #[test]
     fn the_shortened_stem_never_ends_in_a_dash() {

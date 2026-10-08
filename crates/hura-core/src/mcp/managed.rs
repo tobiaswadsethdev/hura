@@ -10,11 +10,11 @@
 //! restarts it, and can say what it is doing.
 //!
 //! The URL is derived rather than configured, and that is the point: a managed
-//! server is reachable at `http://hura-mcp-<name>:<port>/mcp` because this module
-//! is what named the container and what joined it to the gateway's network. The
-//! two mistakes that shape used to invite -- a container on the default bridge
-//! that no sandbox can resolve, and a `localhost` URL that means the sandbox
-//! itself -- are unreachable from here.
+//! server is reachable at `http://host.docker.internal:<port>/mcp` because this
+//! module is what published the container on `127.0.0.1` at that port. The two
+//! mistakes that shape used to invite, a container by a name no sandbox can
+//! resolve and a `localhost` URL that means the sandbox itself, are unreachable
+//! from here.
 //!
 //! **What runs in the container is not sandboxed by anything.** It is an
 //! ordinary container on the host's Docker daemon, holding the credential it was

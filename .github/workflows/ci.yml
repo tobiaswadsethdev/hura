@@ -37,8 +37,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # The suite is hermetic: no gateway, no Docker, no network. The tests that
-      # need a live gateway are #[ignore]d and are not run here.
+      # The suite is hermetic: no sandbox runtime, no Docker, no network. The
+      # tests that need a live one are #[ignore]d and are not run here.
       - name: Tests
         run: cargo test --workspace
 
@@ -80,8 +80,8 @@ jobs:
 
   # The client half has to compile for Windows, because the desktop application
   # runs there and `hura-core` is underneath it. Only the client half: there is no
-  # gateway, no Docker daemon and no tmux on that side, so `hurad` remains a
-  # Linux program and is not built here.
+  # sandbox runtime, no Docker daemon and no tmux on that side, so `hurad`
+  # remains a Linux program and is not built here.
   #
   # A check rather than a build, and only these three crates, because what it is
   # guarding against is one `use std::os::unix::fs` -- which costs seconds to
