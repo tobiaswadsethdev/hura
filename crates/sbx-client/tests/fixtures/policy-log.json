@@ -1,0 +1,64 @@
+{
+  "blocked_hosts": [
+    {
+      "host": "github.com:443",
+      "vm_name": "hura-spike-a",
+      "proxy_type": "transparent",
+      "rule": "l7 enforcement unavailable",
+      "last_seen": "2026-10-08T12:03:33.707242463+02:00",
+      "since": "2026-10-08T12:03:33.707242463+02:00",
+      "count_since": 1,
+      "reason": "HTTP policy requires L7 enforcement, which is unavailable for transparent connections"
+    },
+    {
+      "host": "api.github.com:443",
+      "vm_name": "hura-spike-a",
+      "proxy_type": "forward",
+      "rule": "no applicable policies for op(action=http:request:get, via=net:connect:tcp, resource=http:endpoint[http:domain[net:domain:api.github.com:443,http:path:/users/octocat]])",
+      "last_seen": "2026-10-08T12:03:33.683462451+02:00",
+      "since": "2026-10-08T12:03:33.683462451+02:00",
+      "count_since": 1,
+      "reason": "No matching allow rule (default deny)"
+    },
+    {
+      "host": "github.com:443",
+      "vm_name": "hura-spike-a",
+      "proxy_type": "forward",
+      "rule": "denied: rule \"local:148582d1-e89d-4118-9083-63ab6db02a4a\" matched op(action=http:request:post, via=net:connect:tcp, resource=http:domain[net:domain:github.com:443,http:path:/octocat/Hello-World.git/git-receive-pack])",
+      "last_seen": "2026-10-08T12:03:33.597935991+02:00",
+      "since": "2026-10-08T12:03:33.597935991+02:00",
+      "count_since": 1,
+      "reason": "Denied by local rule"
+    },
+    {
+      "host": "example.com:443",
+      "vm_name": "hura-spike-a",
+      "proxy_type": "forward",
+      "rule": "no applicable policies for op(action=net:connect:tcp, resource=net:domain:example.com:443)",
+      "last_seen": "2026-10-08T12:03:33.519533222+02:00",
+      "since": "2026-10-08T12:03:33.519533222+02:00",
+      "count_since": 1,
+      "reason": "No matching allow rule (default deny)"
+    }
+  ],
+  "allowed_hosts": [
+    {
+      "host": "raw.githubusercontent.com:443",
+      "vm_name": "hura-spike-a",
+      "proxy_type": "forward-bypass",
+      "rule": "",
+      "last_seen": "2026-10-08T12:03:33.563941087+02:00",
+      "since": "2026-10-08T12:03:33.563941087+02:00",
+      "count_since": 1
+    },
+    {
+      "host": "github.com:443",
+      "vm_name": "hura-spike-a",
+      "proxy_type": "forward",
+      "rule": "l7-required",
+      "last_seen": "2026-10-08T12:03:33.417090017+02:00",
+      "since": "2026-10-08T12:03:33.417090017+02:00",
+      "count_since": 1
+    }
+  ]
+}

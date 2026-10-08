@@ -1,0 +1,20 @@
+{
+  "sandboxes": [
+    {
+      "name": "hura-spike-a",
+      "id": "04accde6-b36c-490e-93bd-fcb762e7bc79",
+      "agent": "shell",
+      "status": "stopped",
+      "last_used_at": "2026-10-08T09:54:54.468417962Z",
+      "created_at": "2026-10-08T09:34:03Z"
+    },
+    {
+      "name": "hura-spike-b",
+      "id": "66357f11-9284-4eb4-93a2-5ce1b6f4c5af",
+      "agent": "shell",
+      "status": "stopped",
+      "last_used_at": "2026-10-08T09:38:56.877130719Z",
+      "created_at": "2026-10-08T09:37:31Z"
+    }
+  ]
+}
