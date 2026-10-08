@@ -91,8 +91,7 @@ The code has a voice, and matching it is most of what review here is about.
 
 Commit messages: a short imperative summary, then a body explaining the
 reasoning if the change is not obvious. `git log` here is a record of decisions
-rather than a list of files touched, and [PLAN.md](PLAN.md) tracks the larger
-increments.
+rather than a list of files touched.
 
 ## Releasing
 
