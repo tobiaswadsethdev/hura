@@ -75,11 +75,11 @@ interface: Interface,
 created_at: number, state: State, 
 /**
  * Why the session failed, in the words of whatever refused it: the
- * gateway turning down a create, a clone the seeder gave up on.
+ * runtime turning down a create, a clone the seeder gave up on.
  *
  * On the record because the record is the only thing a window reads. A
  * create on `hurad` runs on a thread whose one way to speak is its own
- * terminal, so without this a sandbox the gateway refused showed up as a
+ * terminal, so without this a sandbox the runtime refused showed up as a
  * `dead` row whose panes each said `sandbox not found`, and the reason
  * was on a screen nobody was looking at.
  *

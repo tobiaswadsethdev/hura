@@ -1,8 +1,8 @@
 //! Git, as the working copy inside a sandbox sees it.
 //!
-//! Every one of these is an exec, and execs against one sandbox are serialised,
-//! so this is deliberately a small number of coarse calls rather than a git
-//! library's worth of fine ones.
+//! Every one of these is an exec, about a third of a second each, so this is
+//! deliberately a small number of coarse calls rather than a git library's
+//! worth of fine ones.
 //!
 //! **The agent is editing while you look at this.** That is the fact that
 //! shapes the interface: a status is a snapshot that is already slightly out of
@@ -224,7 +224,7 @@ pub struct FileDiff {
 
 /// Fetch both sides of one file's diff.
 ///
-/// One exec, not two: they are serialised per sandbox, and a diff of a file is
+/// One exec, not two: each is a third of a second, and a diff of a file is
 /// the sort of thing someone clicks through twenty of.
 pub fn file_diff(
     backend: &dyn Backend,

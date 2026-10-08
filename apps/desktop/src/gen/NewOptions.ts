@@ -19,7 +19,7 @@ export type NewOptions = { policies: Array<PolicyChoice>,
  */
 toolchains: Array<ToolchainChoice>, providers: Array<ProviderChoice>, 
 /**
- * Why the provider list is empty, when it is. An unreachable gateway is a
+ * Why the provider list is empty, when it is. A failure to list them is a
  * fact about the server worth showing beside the field rather than a list
  * that is simply blank.
  */

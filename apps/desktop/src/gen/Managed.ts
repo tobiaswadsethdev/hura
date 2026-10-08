@@ -11,10 +11,11 @@ export type Managed = {
  */
 image: string, 
 /**
- * The port the server listens on *inside* the container. Nothing is
- * published to the host: a sandbox reaches it by container name on the
- * gateway's network, and publishing it would put an authenticated MCP
- * server on the host's interfaces for no one's benefit.
+ * The port the server listens on inside the container, and the one it is
+ * published on here, on `127.0.0.1` only: a sandbox reaches it as
+ * `host.docker.internal`, which the sandbox runtime takes to this
+ * machine's loopback. Loopback rather than every interface, so an
+ * authenticated MCP server is not on the network for anyone else.
  */
 port: number, 
 /**

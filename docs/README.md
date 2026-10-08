@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| [install.md](install.md) | prerequisites, the OpenShell gateway, providers, `hurad` itself, and the desktop application on Linux and Windows |
+| [install.md](install.md) | prerequisites, Docker Sandboxes, credentials, `hurad` itself, and the desktop application on Linux and Windows |
 | [desktop.md](desktop.md) | the desktop workspace: projects and worktrees, files, git, the editor, the review |
 | [configuration.md](configuration.md) | `~/.config/hura/config.toml`, and which default wins |
 | [policy.md](policy.md) | the rules being enforced, the audit feed, and acting on a denial |
@@ -14,8 +14,7 @@
 | [server.md](server.md) | running `hurad`, pairing a client on another machine, and what a token is worth |
 | [sandbox-image.md](sandbox-image.md) | what the image bakes in, and why the agent runs in auto mode |
 | [architecture.md](architecture.md) | the crates, the modules, and three rules worth knowing before changing them |
-| [manual-loop.md](manual-loop.md) | the whole thing run by hand, with the versions it was verified against |
-| [openshell-gateway.service](openshell-gateway.service) | the systemd user unit for the gateway |
+| [sbx-daemon.service](sbx-daemon.service) | the systemd user unit for the sandbox runtime's daemon |
 
 Contributing is covered in [CONTRIBUTING.md](../CONTRIBUTING.md); the entry
 point for everything is the [README](../README.md).

@@ -11,19 +11,19 @@
 # version is deliberately not a build arg: the manifest is indexed by channel,
 # and resolving is how the newest patch of that channel is found.
 #
-# Ubuntu 24.04 in the base image already carries every native dependency the SDK
-# needs -- libicu74, libssl3t64, libstdc++6, zlib1g -- so there is no apt-get in
-# this layer at all. libicu is checked rather than assumed: without it the SDK
+# The Ubuntu in the base image already carries every native dependency the SDK
+# needs (libicu, libssl3t64, libstdc++6, zlib1g), so there is no apt-get in this
+# layer at all. libicu is checked rather than assumed, by any version, since
+# each Ubuntu release moves it (74 on 24.04, 78 on 26.04): without it the SDK
 # starts and then fails on the first culture-aware call, which is a bad way to
 # find out.
 #
 # The symlink at the end puts `dotnet` on the PATH the base image already has,
-# rather than adding a directory to PATH. `ENV PATH` would not reach the agent --
-# the gateway does not pass the image's environment through to an exec -- and the
-# alternative is teaching tmux.conf about PATH, which is a second place to be
-# wrong. The symlink is invisible to the policy either way: the gateway matches
-# the kernel-resolved `/proc/<pid>/exe`, so a rule for dotnet has to name
-# `/usr/local/dotnet/dotnet`. `toolchain.rs` does, and a test keeps them in step.
+# rather than adding a directory to PATH. `ENV PATH` did not reach the agent
+# under OpenShell, whose exec passed none of the image's environment through,
+# and a symlink works however the environment arrives, with nothing in
+# tmux.conf to keep in step. The policy does not mind either way: its rules are
+# for the whole sandbox, not for one program in it.
 ARG DOTNET_CHANNEL=9.0
 RUN set -eu; \
     arch="$(dpkg --print-architecture)"; \
@@ -32,7 +32,7 @@ RUN set -eu; \
         arm64) rid=linux-arm64 ;; \
         *) echo "no dotnet sdk for architecture $arch" >&2; exit 1 ;; \
     esac; \
-    dpkg -s libicu74 >/dev/null 2>&1 \
+    dpkg -l 'libicu[0-9]*' 2>/dev/null | grep -q '^ii' \
         || { echo "libicu is gone from the base image; the sdk needs it" >&2; exit 1; }; \
     meta="https://builds.dotnet.microsoft.com/dotnet/release-metadata/$DOTNET_CHANNEL/releases.json"; \
     curl -fsSL --retry 3 -o /tmp/releases.json "$meta"; \
@@ -60,7 +60,7 @@ RUN set -eu; \
 #
 # /usr/local is read-only to the sandbox user by design, and the SDK wants to
 # write on first run: a CLI home for its own state, a package cache for restore.
-# Both default to somewhere under $HOME, which here is /sandbox and writable, so
+# Both default to somewhere under $HOME, which here is /home/agent and writable, so
 # this is less about making it work than about saying it out loud -- a restore
 # writes gigabytes, and which directory that is belongs beside the toolchain.
 #
@@ -85,16 +85,16 @@ RUN set -eu; \
 # shell someone opens by hand, and `set-environment` in tmux.conf is what reaches
 # the agent, whose environment comes from the tmux server the seeder starts.
 ENV DOTNET_ROOT=/usr/local/dotnet \
-    DOTNET_CLI_HOME=/sandbox/.dotnet \
-    NUGET_PACKAGES=/sandbox/.nuget/packages \
+    DOTNET_CLI_HOME=/home/agent/.dotnet \
+    NUGET_PACKAGES=/home/agent/.nuget/packages \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
     NUGET_CERT_REVOCATION_MODE=offline
 
 RUN printf '%s\n' \
         'set-environment -g DOTNET_ROOT /usr/local/dotnet' \
-        'set-environment -g DOTNET_CLI_HOME /sandbox/.dotnet' \
-        'set-environment -g NUGET_PACKAGES /sandbox/.nuget/packages' \
+        'set-environment -g DOTNET_CLI_HOME /home/agent/.dotnet' \
+        'set-environment -g NUGET_PACKAGES /home/agent/.nuget/packages' \
         'set-environment -g DOTNET_CLI_TELEMETRY_OPTOUT 1' \
         'set-environment -g DOTNET_NOLOGO 1' \
         'set-environment -g NUGET_CERT_REVOCATION_MODE offline' \

@@ -272,7 +272,7 @@ export default function App() {
   // would be worse than not subscribing at all.
   //
   // Not a dead session's: there is no sandbox to poll, and the server would
-  // ask the gateway about it every two seconds for as long as the row is
+  // ask the runtime about it every two seconds for as long as the row is
   // listed, to hear `sandbox not found` each time.
   const names = sessions
     .filter((s) => s.state !== "dead")
@@ -345,8 +345,8 @@ export default function App() {
 
   /// Ask for the list until the new session is in it.
   ///
-  /// `create` answers as soon as the request is accepted -- the sandbox is
-  /// seconds of gateway after that, on the server's own thread -- so the record
+  /// `create` answers as soon as the request is accepted, and the sandbox is
+  /// seconds of runtime after that, on the server's own thread, so the record
   /// appears a moment later and the ordinary poll is seconds away again. Left
   /// to the timer, the sidebar stays exactly as it was for those seconds and a
   /// click that worked looks like one that did not.
@@ -453,7 +453,7 @@ export default function App() {
     session?.state === "creating" ||
     session?.state === "seeding";
   // Selected and never going to be ready: its sandbox is gone, or was never
-  // made. Every pane would ask the gateway about it and draw `sandbox not
+  // made. Every pane would ask the runtime about it and draw `sandbox not
   // found`, which says what is missing and not why, so they are not mounted
   // and the reason is shown instead.
   const gone = session?.state === "dead";
@@ -755,7 +755,7 @@ export default function App() {
 
           {preparing ? (
             // The create's own progress, said once in the middle: the steps
-            // are seconds of gateway and then however long the clone takes,
+            // are seconds of runtime and then however long the clone takes,
             // and a spinner with the step beside it is all there is to know.
             <Empty size="page" icon={Working} note={preparingNote(session)} />
           ) : gone && session ? (

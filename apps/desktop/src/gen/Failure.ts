@@ -6,7 +6,7 @@ import type { FailureKind } from "./FailureKind";
  *
  * A message and a kind, rather than only a message: a client showing a
  * stale-session error wants to drop it from the list, and one showing a
- * gateway error wants to keep it and say the gateway is unreachable. Matching
+ * runtime error wants to keep it and say the runtime is unreachable. Matching
  * on rendered English to tell those apart is how a client ends up wrong.
  */
 export type Failure = { kind: FailureKind, 

@@ -14,6 +14,7 @@
 mod attach;
 mod auth;
 mod forward;
+mod relay;
 mod rpc;
 mod serve;
 mod stream;
@@ -31,7 +32,6 @@ use hura_core::{
     toolchain, update,
 };
 use hura_proto::{DEFAULT_PORT, Pairing};
-use openshell_client::CliClient;
 
 use auth::Tokens;
 use config::Config;
@@ -43,13 +43,9 @@ use store::Store;
 #[command(
     name = "hurad",
     version,
-    about = "Parallel coding agents in OpenShell sandboxes, and the server for them"
+    about = "Parallel coding agents in Docker Sandboxes, and the server for them"
 )]
 struct Cli {
-    /// Gateway name to operate on (defaults to the active one).
-    #[arg(long, global = true)]
-    gateway: Option<String>,
-
     /// Ask a paired `hurad` instead of this machine's own sandboxes.
     ///
     /// `--server` alone when one server is paired, `--server=<name>` otherwise;
@@ -121,11 +117,19 @@ enum Command {
     Skills,
     /// Check that everything hura depends on is present and working.
     Doctor,
+    /// Carry a port inside a session's sandbox to a loopback port here. Run by
+    /// the server for each preview; not for typing.
+    #[command(hide = true)]
+    Relay {
+        sandbox: String,
+        port: u16,
+        host: String,
+    },
 
     /// Start a session: create a sandbox, clone the repo, cut a work branch.
     New(NewArgs),
 
-    /// List sessions, reconciled against the gateway.
+    /// List sessions, reconciled against the sandbox runtime.
     #[command(alias = "list")]
     Ls,
 
@@ -141,7 +145,7 @@ enum Command {
         name: String,
     },
 
-    /// Print the policy the gateway is enforcing for a session.
+    /// Print the rules on a session's sandbox.
     Policy {
         /// Session name.
         name: String,
@@ -236,8 +240,8 @@ enum Command {
     /// them, and a list you can only read is a list that rots.
     ///
     /// This records the rule for sandboxes started from now on. It does not
-    /// touch a session that is already running -- that is `policy update`
-    /// through the gateway, and it needs a live sandbox to update.
+    /// touch a session that is already running; the window's events pane does
+    /// that, for one session at a time.
     Endpoints {
         /// Put an endpoint on the allow list, e.g. `crates.io:443`.
         #[arg(long, value_name = "ENDPOINT")]
@@ -246,11 +250,6 @@ enum Command {
         /// Put an endpoint on the block list.
         #[arg(long, value_name = "ENDPOINT", conflicts_with = "allow")]
         block: Option<String>,
-
-        /// Restrict an `--allow` to one binary. Repeatable; every binary when
-        /// omitted, which is the widest the gateway can express.
-        #[arg(long = "binary", value_name = "PATH", requires = "allow")]
-        binaries: Vec<String>,
 
         /// Narrow an `--allow` to one method and path glob, e.g.
         /// `GET /org/_packaging/feed/nuget/v3/**`, or a bare path for GET.
@@ -308,11 +307,11 @@ struct NewArgs {
     #[arg(long)]
     base: Option<String>,
 
-    /// Policy to apply: a template name, or a path to a YAML file.
+    /// Policy to apply: a template name, or a path to a template file (TOML).
     ///
     /// Defaults to `policy` in the config file, else `feature-work`. See
     /// `hurad policies` for the templates; a spec containing a `/` or ending in
-    /// `.yaml` is always read as a path.
+    /// `.toml` is always read as a path.
     #[arg(long)]
     policy: Option<String>,
 
@@ -325,8 +324,8 @@ struct NewArgs {
     ///
     /// Each set of toolchains is its own image variant, layered onto the base
     /// image and built on first use; `hurad toolchains` lists them. A toolchain
-    /// also opens its package registry for the binary that fetches from it, and
-    /// for nothing else in the sandbox.
+    /// also opens its package registry for reading, on this session's sandbox
+    /// and no other.
     #[arg(long = "toolchain", value_delimiter = ',')]
     toolchains: Vec<String>,
 
@@ -351,7 +350,7 @@ enum ImageAction {
     Build {
         /// Toolchain to layer in. Repeatable, or comma-separated.
         ///
-        /// Builds `hura-base:<toolchains>` on top of the base image, building the
+        /// Builds `hura-sandbox:<toolchains>` on top of the base image, building the
         /// base first if it is missing. Without this, the base image itself is
         /// built, which is what a session with no toolchain runs.
         #[arg(long = "toolchain", value_delimiter = ',')]
@@ -395,15 +394,9 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut client = CliClient::new();
-    // The flag first, the file second: a gateway named on the command line is
-    // about this command, and the file is about every other one.
-    if let Some(g) = cli.gateway.clone().or_else(|| cfg.gateway.clone()) {
-        client = client.with_gateway(g);
-    }
-    // Every command that works on a session goes through this rather than the
-    // client.
-    let backends = Backends::from_client(Box::new(client.clone()));
+    // Every command that works on a session goes through this rather than a
+    // client of its own.
+    let backends = Backends::from_config(&cfg);
 
     // Read out before the match, which moves `cli.command`.
     let chosen = cli.server.clone();
@@ -425,8 +418,13 @@ fn main() -> ExitCode {
         Some(Command::Secrets) => list_secrets(),
         Some(Command::Secret { name, forget }) => secret(&name, forget),
         Some(Command::Skills) => list_skills(),
+        Some(Command::Relay {
+            sandbox,
+            port,
+            host,
+        }) => relay::run(&sandbox, port, &host).map_err(Into::into),
         Some(Command::Doctor) => {
-            let mut checks = doctor::run(&client, &loaded);
+            let mut checks = doctor::run(backends.sandboxed(), &loaded);
             // Appended here rather than inside `doctor::run`, because both need
             // things the core does not have: the protocol's port, and a client
             // for it.
@@ -495,9 +493,8 @@ fn main() -> ExitCode {
         Some(Command::Endpoints {
             allow,
             block,
-            binaries,
             paths,
-        }) => cmd_endpoints(allow.as_deref(), block.as_deref(), binaries, &paths),
+        }) => cmd_endpoints(allow.as_deref(), block.as_deref(), &paths),
         Some(Command::Rm { names }) => cmd_rm(&backends, names),
     };
 
@@ -515,9 +512,9 @@ type Fallible = Result<(), Box<dyn std::error::Error>>;
 /// The server a command should talk to, if any.
 ///
 /// `None` is the ordinary case: this machine's own sandboxes, through the
-/// gateway, exactly as before. The flag is what turns `hura` into a client of
-/// something else -- which is also the second implementation of the protocol,
-/// and the reason it exists before there is a user interface.
+/// sandbox runtime, exactly as before. The flag is what turns `hura` into a
+/// client of something else, which is also the second implementation of the
+/// protocol, and the reason it exists before there is a user interface.
 fn server(flag: Option<&str>) -> Result<Option<remote::Remote>, Box<dyn std::error::Error>> {
     let Some(name) = flag else {
         return Ok(None);
@@ -573,7 +570,7 @@ fn cmd_remotes(forget: Option<&str>) -> Fallible {
     Ok(())
 }
 
-/// The same four commands, asked of a server instead of the gateway.
+/// The same four commands, asked of a server instead of the sandbox runtime.
 ///
 /// Each one prints through the same helper the local path does, so the two
 /// cannot drift into showing the same session differently.
@@ -915,11 +912,39 @@ fn cmd_config(cfg: &Config, init: bool, path_only: bool) -> Fallible {
         println!("{} {:<12} {}", if set { "*" } else { "-" }, key, value);
     };
     row(
-        "gateway",
-        cfg.gateway.is_some(),
-        cfg.gateway
+        "sbx",
+        cfg.sbx.is_some(),
+        cfg.sbx
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| sbx_client::locate().display().to_string()),
+    );
+    row(
+        "sandbox_cpus",
+        cfg.sandbox_cpus.is_some(),
+        cfg.sandbox_cpus
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "(every host CPU)".into()),
+    );
+    row(
+        "sandbox_memory",
+        cfg.sandbox_memory.is_some(),
+        cfg.sandbox_memory
             .clone()
-            .unwrap_or_else(|| "(the active one)".into()),
+            .unwrap_or_else(|| "(half the host's memory)".into()),
+    );
+    row(
+        "credentials",
+        !cfg.credentials().is_empty(),
+        if cfg.credentials().is_empty() {
+            "(none; add [credentials.NAME] tables)".into()
+        } else {
+            cfg.credentials()
+                .iter()
+                .map(|c| format!("{} ({})", c.name, c.kind.name()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
     );
     row(
         "repo",
@@ -976,8 +1001,8 @@ fn cmd_config(cfg: &Config, init: bool, path_only: bool) -> Fallible {
             cfg.mcp()
                 .iter()
                 .map(|e| {
-                    // A managed entry's url is derived from the container this
-                    // server starts, so what is worth printing is the image it
+                    // A managed entry's url is derived from the port this server
+                    // publishes, so what is worth printing is the image it
                     // runs; an external one is a url somebody else operates.
                     match &e.managed {
                         Some(m) => format!("{} -> {} (managed)", e.name(), m.image),
@@ -1091,37 +1116,20 @@ fn cmd_policy(backends: &Backends, name: &str, widen: bool, tighten: bool) -> Fa
     let backend = backends.for_session(&session);
 
     // The change first, so what is printed below is the policy that came back
-    // from applying it rather than the one from before. `repolicy` waits for
-    // the gateway to load the rules, so this is not a race.
-    let rev = if widen || tighten {
-        let preset = &policy::REGISTRIES;
-        let update = match widen {
-            true => preset.widen(),
-            false => preset.tighten(),
-        };
-        let rev = ops::repolicy(backend, &session, &update)?;
-        println!(
-            "{} {}",
-            if widen {
-                "widened to"
-            } else {
-                "tightened from"
-            },
-            preset.label
-        );
-        rev
+    // from applying it rather than the one from before. A rule applies to the
+    // next request, so this is not a race.
+    let view = if widen {
+        let view = ops::widen(backend, &session)?;
+        println!("widened to {}", policy::REGISTRIES.label);
+        view
+    } else if tighten {
+        let view = ops::tighten(backend, &session)?;
+        println!("tightened from {}", policy::REGISTRIES.label);
+        view
     } else {
         ops::policy(backend, &session)?
     };
-
-    // Empty on a read failure rather than fatal: the reason to run this command
-    // is the sandbox's own rules, and losing them to an unreadable convenience
-    // file would be the wrong trade. The section is omitted when the lists are
-    // empty, so a failure reads the same as never having used the feature --
-    // which is why `hurad endpoints`, where the lists are edited, reports it
-    // instead.
-    let lists = endpoints::Lists::load().unwrap_or_default();
-    print_policy(&policy::View::of(&rev, session.policy.as_deref(), &lists));
+    print_policy(&view);
     Ok(())
 }
 
@@ -1146,8 +1154,15 @@ fn print_events(events: &[events::Event]) {
             events::Verdict::Denied => "DENY",
             events::Verdict::Neutral => "-",
         };
+        // The runtime counts a decision rather than logging it each time, so
+        // one line can stand for many.
+        let times = if e.count > 1 {
+            format!("  x{}", e.count)
+        } else {
+            String::new()
+        };
         println!(
-            "{}  {:<5}  {:<16} {}{}",
+            "{}  {:<5}  {:<16} {}{times}{}",
             e.clock_utc(),
             verdict,
             e.class,
@@ -1189,12 +1204,7 @@ fn cmd_attach(backends: &Backends, name: &str) -> Fallible {
 /// Through [`endpoints::update_at`] rather than a load/modify/save here,
 /// because that takes the lock file the window's own writes take: two processes
 /// editing this at once is not exotic when one of them is a server.
-fn cmd_endpoints(
-    allow: Option<&str>,
-    block: Option<&str>,
-    binaries: Vec<String>,
-    paths: &[String],
-) -> Fallible {
+fn cmd_endpoints(allow: Option<&str>, block: Option<&str>, paths: &[String]) -> Fallible {
     let path = endpoints::Lists::default_path();
     if let Some(endpoint) = allow {
         let routes = paths
@@ -1206,9 +1216,9 @@ fn cmd_endpoints(
             .collect::<Result<Vec<_>, _>>()?;
         endpoints::update_at(&path, path.with_extension("lock"), |l| {
             if routes.is_empty() {
-                l.allow(endpoint, binaries)
+                l.allow(endpoint)
             } else {
-                l.allow_routes(endpoint, binaries, routes)
+                l.allow_routes(endpoint, routes)
             }
         })?;
         println!("{endpoint} is on the allow list");
@@ -1223,18 +1233,10 @@ fn cmd_endpoints(
         return Ok(());
     }
     for a in &lists.allow {
-        let who = match a.binaries.is_empty() {
-            true => "any binary".to_string(),
-            false => a.binaries.join(" "),
-        };
-        println!("{:<7} {:<32} {who}", "allow", a.endpoint);
+        println!("{:<7} {}", "allow", a.endpoint);
     }
     for r in &lists.routes {
-        let who = match r.binaries.is_empty() {
-            true => "the rule already naming it".to_string(),
-            false => r.binaries.join(" "),
-        };
-        println!("{:<7} {:<32} {who}", "allow", r.endpoint);
+        println!("{:<7} {}", "allow", r.endpoint);
         for route in &r.routes {
             println!("{:<7} {:<32} only {route}", "", "");
         }
@@ -1396,9 +1398,9 @@ fn serve(opts: Serve) -> Fallible {
                 eprintln!("hurad: {warning}");
             }
         }
-        // Not fatal. The gateway can come back, and a server that refuses to
+        // Not fatal. The runtime can come back, and a server that refuses to
         // start without it is one you cannot reach to find out why.
-        Err(e) => eprintln!("hurad: the gateway did not answer at startup: {e}"),
+        Err(e) => eprintln!("hurad: the sandbox runtime did not answer at startup: {e}"),
     }
 
     // The managed MCP containers, brought up with the server that owns them.
@@ -1460,10 +1462,9 @@ fn serve(opts: Serve) -> Fallible {
     Ok(())
 }
 
-/// How often every session's feed is read into its record. A sixth of the
-/// six minutes the gateway's window lasts at rest, which leaves room for a
-/// burst of connections, a package restore say, to shorten it a great deal.
-/// One `openshell logs` per session, about 13ms each.
+/// How often every session's feed is read into its record. The runtime's log
+/// starts again whenever its daemon does, so this is how much of it a restart
+/// can take before anything has kept it. One `sbx policy log` per session.
 const FEED_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Keep every live session's allow/deny feed, whether or not a window is

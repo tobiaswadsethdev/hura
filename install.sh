@@ -5,9 +5,11 @@
 #
 # It fetches the newest release for this machine, checks it against the
 # published SHA256SUMS, and puts `hurad` somewhere on PATH. Nothing else: the
-# prerequisites it needs at runtime -- OpenShell, its gateway, Docker, tmux --
-# are what `hurad doctor` is for, and it is run at the end to say which of them
-# are missing.
+# prerequisites it needs at runtime (Docker Sandboxes, Docker to build images,
+# tmux) are what `hurad doctor` is for, and it is run at the end to say which
+# of them are missing and how to install them. Docker Sandboxes in particular
+# is Docker's, under its own licence and with a Docker sign-in, so it is not
+# something this script installs on anyone's behalf.
 #
 # `hura` was a second binary here until v0.4.0, when it folded into this one.
 # An `hura` still on the PATH is not upgraded and not removed: it is left where

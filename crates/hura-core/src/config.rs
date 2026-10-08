@@ -8,7 +8,7 @@
 //!
 //! **A file that cannot be read is an error, not a shrug.** A typo'd key or a
 //! misspelled policy name that silently did nothing would be the same failure as
-//! a gateway reporting a policy it is not enforcing: the tool would say one thing
+//! a sandbox reporting a policy it is not enforcing: the tool would say one thing
 //! and do another. So unknown keys are rejected, a policy name that is not a
 //! template is rejected, and every command except `hura doctor` refuses to run
 //! until the file is fixed. `doctor` is the command you reach for when something
@@ -53,7 +53,8 @@ pub struct Config {
     /// and "this is what you asked for".
     pub present: bool,
 
-    /// Gateway to talk to, when `--gateway` does not say.
+    /// The OpenShell gateway sessions used to run on. Nothing reads it since
+    /// they moved to Docker Sandboxes; still parsed so existing files load.
     pub gateway: Option<String>,
     /// Repository a `hura new` without `--repo` clones, and the row the TUI's
     /// picker opens on.
@@ -62,8 +63,20 @@ pub struct Config {
     pub base: Option<String>,
     /// Policy template name, or a path to a YAML file.
     pub policy: Option<String>,
-    /// Credential providers attached to a new session.
+    /// Credentials a new session is given unless the create form says
+    /// otherwise, by name from [`Self::credentials`].
     pub providers: Option<Vec<String>>,
+    /// Every credential a session may be given, from `[credentials.NAME]`.
+    pub credentials: Vec<crate::credentials::Credential>,
+    /// Whole CPUs per session sandbox. Unset is the runtime's default, which
+    /// is every host CPU for every sandbox.
+    pub sandbox_cpus: Option<u32>,
+    /// Memory per session sandbox, as `8g` or `512m`. Unset is the runtime's
+    /// default, half the host's memory for every sandbox.
+    pub sandbox_memory: Option<String>,
+    /// The `sbx` binary, when it is neither on `PATH` nor where its installer
+    /// puts it.
+    pub sbx: Option<PathBuf>,
     /// Where the TUI's picker looks for repositories. Replaces the built-in
     /// roots rather than adding to them, like `HURA_REPO_ROOTS`, which still wins.
     pub repo_roots: Option<Vec<PathBuf>>,
@@ -157,13 +170,13 @@ impl Config {
         // A policy that is neither a template nor a path is a typo, and finding
         // out at create time -- after a sandbox exists -- is finding out late.
         if let Some(spec) = &raw.policy
-            && !looks_like_path(spec)
+            && !policy::looks_like_path(spec)
             && policy::find(spec).is_none()
         {
             return Err(invalid(
                 "policy",
                 format!(
-                    "`{spec}` is not a template; expected one of {}, or a path to a YAML file",
+                    "`{spec}` is not a template; expected one of {}, or a path to a template file",
                     names()
                 ),
             ));
@@ -304,7 +317,66 @@ impl Config {
                     mcp::Error::DuplicateName(resolved.name().to_string()).to_string(),
                 ));
             }
+            // A managed server is published on its own port here, so two on one
+            // port would leave the second unable to start.
+            if let Some(port) = resolved.managed.as_ref().map(|m| m.port)
+                && let Some(other) = mcp
+                    .iter()
+                    .find(|e| e.managed.as_ref().is_some_and(|m| m.port == port))
+            {
+                return Err(invalid(
+                    "mcp",
+                    format!(
+                        "`{}` and `{}` both run on port {port}, and each is published on \
+                         its own port on this machine; give one another port",
+                        other.name(),
+                        resolved.name()
+                    ),
+                ));
+            }
             mcp.push(resolved);
+        }
+
+        let mut credentials = Vec::new();
+        for (name, c) in raw.credentials.unwrap_or_default() {
+            let named = |message: String| invalid("credentials", format!("`{name}`: {message}"));
+            let kind = crate::credentials::Kind::parse(&c.kind).ok_or_else(|| {
+                named(format!(
+                    "`{}` is not a kind of credential; expected one of {}",
+                    c.kind,
+                    crate::credentials::Kind::ALL.map(|k| k.name()).join(", ")
+                ))
+            })?;
+            let source = match (blank_to_none(c.command), blank_to_none(c.reference)) {
+                (Some(cmd), None) => crate::credentials::Source::Command(cmd),
+                (None, Some(r)) => crate::credentials::Source::Ref(r),
+                (Some(_), Some(_)) => {
+                    return Err(named("has both `command` and `ref`; say which".into()));
+                }
+                (None, None) => {
+                    return Err(named(
+                        "says nowhere to get the value from; give it a `command` or a `ref`".into(),
+                    ));
+                }
+            };
+            credentials.push(crate::credentials::Credential { name, kind, source });
+        }
+
+        if raw.sandbox_cpus == Some(0) {
+            return Err(invalid(
+                "sandbox_cpus",
+                "a sandbox needs at least one CPU".into(),
+            ));
+        }
+        let sandbox_memory = blank_to_none(raw.sandbox_memory);
+        if let Some(m) = &sandbox_memory {
+            let (digits, unit) = m.split_at(m.trim_end_matches(['m', 'g', 'M', 'G']).len());
+            if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) || unit.len() > 1 {
+                return Err(invalid(
+                    "sandbox_memory",
+                    format!("`{m}` is not an amount of memory; write it as `8g` or `512m`"),
+                ));
+            }
         }
 
         Ok(Config {
@@ -315,6 +387,10 @@ impl Config {
             base: raw.base,
             policy: raw.policy,
             providers: raw.providers,
+            credentials,
+            sandbox_cpus: raw.sandbox_cpus,
+            sandbox_memory,
+            sbx: raw.sbx.map(|p| expand_tilde(&p)),
             repo_roots: raw
                 .repo_roots
                 .map(|list| list.iter().map(|p| expand_tilde(p)).collect()),
@@ -342,6 +418,15 @@ impl Config {
     /// The providers a new session gets when nothing else says.
     pub fn providers(&self) -> &[String] {
         self.providers.as_deref().unwrap_or(&[])
+    }
+
+    /// Every credential a session may be given.
+    pub fn credentials(&self) -> &[crate::credentials::Credential] {
+        &self.credentials
+    }
+
+    pub fn credential(&self, name: &str) -> Option<&crate::credentials::Credential> {
+        self.credentials.iter().find(|c| c.name == name)
     }
 
     /// What a work branch is named under.
@@ -402,6 +487,22 @@ struct Raw {
     tracker: Option<serde::de::IgnoredAny>,
     branch_prefix: Option<String>,
     interface: Option<String>,
+    /// `[credentials.NAME]` tables. Ordered by name so the create form lists
+    /// them the same way every time.
+    credentials: Option<std::collections::BTreeMap<String, RawCredential>>,
+    sandbox_cpus: Option<u32>,
+    sandbox_memory: Option<String>,
+    sbx: Option<PathBuf>,
+}
+
+/// One `[credentials.NAME]` table.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCredential {
+    kind: String,
+    command: Option<String>,
+    #[serde(rename = "ref")]
+    reference: Option<String>,
 }
 
 /// One `[[mcp]]` table, before it is checked. Its own struct so a misspelled key
@@ -472,12 +573,6 @@ impl std::error::Error for Error {
             _ => None,
         }
     }
-}
-
-/// The same rule `policy::resolve` uses, so validation and resolution cannot
-/// disagree about what is a path.
-fn looks_like_path(spec: &str) -> bool {
-    spec.contains('/') || spec.ends_with(".yaml") || spec.ends_with(".yml")
 }
 
 fn names() -> String {
@@ -724,7 +819,9 @@ mod tests {
     #[test]
     fn the_example_documents_every_key() {
         for key in [
-            "gateway",
+            "sbx",
+            "sandbox_cpus",
+            "sandbox_memory",
             "repo",
             "base",
             "policy",
@@ -743,6 +840,34 @@ mod tests {
             EXAMPLE.contains("# [[mcp]]"),
             "the example does not show `[[mcp]]`"
         );
+        assert!(
+            EXAMPLE.contains("# [credentials."),
+            "the example does not show `[credentials.NAME]`"
+        );
+    }
+
+    /// The example's own tables, uncommented, are a config file that loads.
+    #[test]
+    fn the_example_s_credentials_load() {
+        let text: String = EXAMPLE
+            .lines()
+            .skip_while(|l| !l.starts_with("# [credentials.claude]"))
+            .take_while(|l| l.starts_with('#'))
+            .map(|l| l.trim_start_matches('#').trim_start())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let c = parse(&text).unwrap();
+        assert_eq!(c.credentials().len(), 2);
+        assert_eq!(
+            c.credential("azure-devops").unwrap().kind,
+            crate::credentials::Kind::AzureDevOpsPat
+        );
+    }
+
+    /// A file written before sessions moved to Docker Sandboxes still loads.
+    #[test]
+    fn a_retired_gateway_still_parses() {
+        parse("gateway = \"default\"\n").expect("a retired key is accepted and ignored");
     }
 
     #[test]
@@ -833,8 +958,8 @@ mod tests {
         .unwrap();
         let e = &c.mcp()[0];
         assert!(e.is_managed());
-        assert_eq!(e.server.url, "http://hura-mcp-sentry:9000/mcp");
-        assert_eq!(e.server.endpoint, "hura-mcp-sentry:9000");
+        assert_eq!(e.server.url, "http://host.docker.internal:9000/mcp");
+        assert_eq!(e.server.endpoint, "host.docker.internal:9000");
         let m = e.managed.as_ref().unwrap();
         assert_eq!(m.image, "ghcr.io/example/mcp-sentry:1.4");
         assert_eq!(m.secrets, ["SENTRY_TOKEN"]);
@@ -901,7 +1026,7 @@ mod tests {
         let msg = e.to_string();
         assert!(msg.contains("jira"), "names the entry: {msg}");
         assert!(
-            msg.contains("host.openshell.internal"),
+            msg.contains("host.docker.internal"),
             "says what to use: {msg}"
         );
     }
@@ -936,5 +1061,28 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.to_string().contains("already the name"), "{e}");
+    }
+
+    #[test]
+    fn two_managed_servers_cannot_share_a_port() {
+        let e = parse(
+            r#"
+            [[mcp]]
+            name = "jira"
+            image = "ghcr.io/example/mcp-jira:1"
+            port = 9000
+
+            [[mcp]]
+            name = "sentry"
+            image = "ghcr.io/example/mcp-sentry:1"
+            port = 9000
+            "#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("jira") && e.contains("sentry") && e.contains("9000"),
+            "{e}"
+        );
     }
 }

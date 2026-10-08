@@ -5,8 +5,8 @@
 // repository" -- and the question worth asking when you start work is the one
 // that varies, which is what the worktree is for.
 //
-// The repositories are the **server's**. A checkout only ever names a remote --
-// the sandbox clones `origin` over the gateway either way -- but which
+// The repositories are the **server's**. A checkout only ever names a remote,
+// since the sandbox clones `origin` through its own proxy either way, but which
 // checkouts exist is a fact about the machine that will do the cloning, and
 // `repo_roots` is configured there.
 

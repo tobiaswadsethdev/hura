@@ -15,8 +15,8 @@
 //!
 //! Requests are named for what a *client* wants, not for the function that
 //! serves them, which is why there is no `Refresh`: reconciling the cache
-//! against the gateway is how the server answers [`Request::Ls`], and a client
-//! has no way to want one without the other.
+//! against the sandbox runtime is how the server answers [`Request::Ls`], and a
+//! client has no way to want one without the other.
 
 use serde::{Deserialize, Serialize};
 
@@ -49,15 +49,15 @@ use hura_core::skills::Upload as SkillUpload;
 /// variant does not need a bump: an older server answers an unknown request
 /// with [`Failure::unsupported`], which is a better error than a version check
 /// would have produced anyway.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 /// The port `hurad` listens on unless told otherwise.
 ///
 /// Here rather than in the server because three things need to agree about it:
 /// the server that binds it, `hurad pair` which puts it in the string, and
-/// `hura doctor`, which tells a Windows user what to dial. Next to the gateway's
-/// own 17670 so the pair are memorable together, and out of the ephemeral range
-/// so it can be bound reliably.
+/// `hura doctor`, which tells a Windows user what to dial. Chosen beside
+/// OpenShell's gateway on 17670, when sessions ran there, and out of the
+/// ephemeral range so it can be bound reliably.
 pub const DEFAULT_PORT: u16 = 17671;
 
 /// What `GET /version` answers, to anyone, without a token.
@@ -106,32 +106,30 @@ impl Hello {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum Request {
-    /// Every session, reconciled against the gateway first.
+    /// Every session, reconciled against the sandbox runtime first.
     Ls,
     /// What the agent is doing, and how far the working copy has moved.
     Poll { name: String },
     /// The three diff sections, as a marked-up body.
     Diff { name: String },
-    /// The policy the gateway is enforcing for a session.
+    /// The rules on a session's sandbox, and the global lists said against
+    /// them.
     Policy { name: String },
     /// The allow/deny feed, newest first.
     Events { name: String },
-    /// Open an endpoint to a running session for the named binaries -- what
-    /// the events pane offers beside a denial. `everywhere` puts it on the
-    /// global allow list as well, so every new session starts with it.
+    /// Open an endpoint to a running session, what the events pane offers
+    /// beside a denial. `everywhere` puts it on the global allow list as well,
+    /// so every new session starts with it.
     ///
-    /// Answers with [`Reply::Policy`], re-read: the gateway may have folded the
-    /// change into a rule of its own naming, and the pane should say what the
+    /// Answers with [`Reply::Policy`], re-read, so the pane says what the
     /// sandbox has rather than what was asked for.
     Allow {
         name: String,
         endpoint: String,
-        binaries: Vec<String>,
         everywhere: bool,
     },
-    /// [`Request::Allow`] narrowed to methods and paths: the binaries may
-    /// reach those on the endpoint and nothing else on it. Answers with
-    /// [`Reply::Policy`].
+    /// [`Request::Allow`] narrowed to methods and paths: those on the endpoint
+    /// and nothing else on it. Answers with [`Reply::Policy`].
     ///
     /// A request of its own rather than a field on `Allow`, because an older
     /// server would read `Allow` with a field it does not know as an allow of
@@ -139,12 +137,11 @@ pub enum Request {
     AllowPaths {
         name: String,
         endpoint: String,
-        binaries: Vec<String>,
         routes: Vec<Route>,
         everywhere: bool,
     },
-    /// Remove an endpoint from a running session, for every binary.
-    /// `everywhere` puts it on the global block list as well. Answers with
+    /// Deny an endpoint to a running session, whatever opens it. `everywhere`
+    /// puts it on the global block list as well. Answers with
     /// [`Reply::Policy`].
     Block {
         name: String,
@@ -154,6 +151,9 @@ pub enum Request {
     /// Take an endpoint off the global lists. The session is named only so the
     /// answer can be its [`Reply::Policy`]; its sandbox is not touched.
     Unlist { name: String, endpoint: String },
+    /// Remove one of a session's own rules, by the id the policy names it by.
+    /// Answers with [`Reply::Policy`].
+    RemoveRule { name: String, id: String },
     /// The projects on this server: the repositories someone has said they are
     /// working on, which is what the worktrees are grouped under.
     Projects,
@@ -170,7 +170,7 @@ pub enum Request {
     Repos,
     /// What is known about one of them: git's account of the drift and the
     /// toolchains it points at, and the credentials a session here should
-    /// start with. Costs subprocesses and a gateway call, so it is asked once,
+    /// start with. Costs subprocesses and a runtime call, so it is asked once,
     /// about the repository actually picked, rather than for every row.
     Inspect {
         path: String,
@@ -360,6 +360,7 @@ impl Request {
             | Request::AllowPaths { name, .. }
             | Request::Block { name, .. }
             | Request::Unlist { name, .. }
+            | Request::RemoveRule { name, .. }
             | Request::GitStatus { name }
             | Request::GitDiff { name, .. }
             | Request::Git { name, .. }
@@ -433,13 +434,10 @@ pub enum Reply {
     },
     /// The policy as facts, not as a rendering.
     ///
-    /// A `PolicyView` rather than the gateway's own `PolicyRevision`, which
-    /// keeps `openshell-client` off the wire entirely. That matters more than
-    /// it sounds: those types belong to a `0.0.x` project, and putting them in
-    /// the protocol would make their churn protocol churn. The view also
-    /// carries the two things the revision does not -- the template the session
-    /// was created from, and the global lists -- so a client has everything the
-    /// pane needs from one request.
+    /// hura's own view rather than the sandbox runtime's rules as it lists
+    /// them, so a change in the runtime's output is not a protocol change. The
+    /// view also carries what the runtime does not know: the template the
+    /// session was created from, and the global lists.
     Policy(PolicyView),
     Events {
         events: Vec<Event>,
@@ -518,7 +516,7 @@ impl From<Poll> for Reply {
 ///
 /// A message and a kind, rather than only a message: a client showing a
 /// stale-session error wants to drop it from the list, and one showing a
-/// gateway error wants to keep it and say the gateway is unreachable. Matching
+/// runtime error wants to keep it and say the runtime is unreachable. Matching
 /// on rendered English to tell those apart is how a client ends up wrong.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -532,9 +530,11 @@ pub struct Failure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FailureKind {
-    /// No session by that name, on the server or at the gateway.
+    /// No session by that name, on the server or where sessions run.
     NoSuchSession,
-    /// The gateway refused, or could not be reached at all.
+    /// Where sessions run refused, or could not be reached at all. Named for
+    /// the OpenShell gateway sessions used to run on; the name is on the wire,
+    /// so it stays.
     Gateway,
     /// A request this server does not have, which is what an older server says
     /// to a newer client rather than failing to parse it.
@@ -646,7 +646,6 @@ mod tests {
                 Request::Allow {
                     name: "a".into(),
                     endpoint: "docs.rs:443".into(),
-                    binaries: vec!["/usr/bin/node".into()],
                     everywhere: false,
                 },
                 "allow",
@@ -655,7 +654,6 @@ mod tests {
                 Request::AllowPaths {
                     name: "a".into(),
                     endpoint: "pkgs.dev.azure.com:443".into(),
-                    binaries: vec!["/usr/share/dotnet/dotnet".into()],
                     routes: vec![Route {
                         method: "GET".into(),
                         path: "/feed/**".into(),
@@ -671,6 +669,13 @@ mod tests {
                     everywhere: true,
                 },
                 "block",
+            ),
+            (
+                Request::RemoveRule {
+                    name: "a".into(),
+                    id: "fda93cfc".into(),
+                },
+                "remove-rule",
             ),
             (Request::Ports { name: "a".into() }, "ports"),
             (
@@ -830,22 +835,21 @@ mod tests {
         assert_ne!(DEFAULT_PORT, 17670, "that is the openshell gateway");
     }
 
-    /// The policy reply carries a view, and the view carries the two things the
-    /// gateway's own revision does not: the template, and the global lists.
+    /// The policy reply carries a view, and the view carries what the sandbox
+    /// runtime does not know: the template, and the global lists.
     #[test]
-    fn a_policy_reply_carries_a_view_and_not_a_revision() {
+    fn a_policy_reply_carries_a_view() {
         let view = PolicyView {
             template: Some("feature-work".into()),
-            revision: hura_core::policy::Revision {
-                version: 1,
-                active_version: 1,
-                settled: true,
-                source: None,
-                hash: None,
-            },
-            network: Some(Vec::new()),
+            rules: vec![hura_core::policy::Rule {
+                id: "fda93cfc".into(),
+                allow: true,
+                hosts: vec!["github.com:443".into()],
+                methods: vec!["POST".into()],
+                path: Some("/**/git-receive-pack".into()),
+                global: false,
+            }],
             lists: None,
-            locked: None,
         };
         let out: Outcome = Reply::Policy(view.clone()).into();
 

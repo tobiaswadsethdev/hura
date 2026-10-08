@@ -15,12 +15,6 @@ export type RouteAllow = {
  */
 endpoint: string, 
 /**
- * Kernel-resolved binary paths. Who gets the routes when no rule names
- * the endpoint yet; when one does, the routes join it and these have to
- * be among the binaries it already grants. See [`routes_update`].
- */
-binaries: Array<string>, 
-/**
  * Never empty. Sorted, without repeats.
  */
 routes: Array<Route>, };

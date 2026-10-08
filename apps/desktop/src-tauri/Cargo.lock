@@ -1634,7 +1634,7 @@ dependencies = [
 name = "hura-core"
 version = "0.22.0"
 dependencies = [
- "openshell-client",
+ "sbx-client",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -2633,15 +2633,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "openshell-client"
-version = "0.22.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3291,6 +3282,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "sbx-client"
+version = "0.22.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

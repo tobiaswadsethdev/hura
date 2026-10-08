@@ -6,11 +6,9 @@
 # needs the second and third of those and not the first, so the layer records
 # what is already there instead of downloading it again.
 #
-# Asserted rather than assumed. If a future base image drops node -- or moves it
-# off /usr/bin, which would silently break `npm_registry`'s binary rule, since
-# the gateway matches the kernel-resolved interpreter and not /usr/bin/npm --
-# this fails the build with the reason, rather than producing a `hura-base:node`
-# with no node in it.
+# Asserted rather than assumed. If a future base image drops node, or moves it
+# off /usr/bin where the rest of the image expects it, this fails the build with
+# the reason, rather than producing a `hura-base:node` with no node in it.
 RUN set -eu; \
     test -x /usr/bin/node || { echo "the base image no longer has /usr/bin/node" >&2; exit 1; }; \
     test -x /usr/bin/npm  || { echo "the base image no longer has /usr/bin/npm" >&2; exit 1; }; \

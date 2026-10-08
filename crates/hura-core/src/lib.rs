@@ -24,6 +24,7 @@ pub mod backend;
 pub mod chat;
 pub mod comments;
 pub mod config;
+pub mod credentials;
 pub mod doctor;
 pub mod endpoints;
 pub mod events;

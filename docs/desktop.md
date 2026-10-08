@@ -61,8 +61,8 @@ server I can talk to" would be one implementation and one place a mistake is
 silent.
 
 **The screen is there because the machine holding the window may have no `hurad`
-on it.** On Windows there is none to install: the CLI drives Docker, tmux and a
-gateway, which are on the Linux side. Requiring a terminal to pair would have
+on it.** On Windows there is none to install: the CLI drives Docker, tmux and the
+sandbox runtime, which are on the Linux side. Requiring a terminal to pair would have
 made the Windows client depend on a program that cannot run there.
 
 What it does with the string is what `connect` does. It parses it, dials the
@@ -286,9 +286,9 @@ on the same menu.
 
 **Where it runs.** Not in this window, and not on the server: the image carries
 `hura-agent`, a small process that runs Claude Code through the Agent SDK
-*inside the sandbox*, using the image's own `claude`. So the binary that reaches
-the API is still the one the policy grants it to, and the credential is still
-the one the gateway injects. It lives in the agent's tmux session and keeps every
+*inside the sandbox*, using the image's own `claude`. So what reaches the API
+still goes out under the session's rules, and the credential is still a
+placeholder the sandbox runtime swaps for the token on the way out. It lives in the agent's tmux session and keeps every
 conversation's transcript on disk there, which is why a window opened later, a
 second window, or one that lost its connection is sent the whole conversation
 and carries on from it. It also writes the status and usage files a terminal
@@ -312,34 +312,35 @@ reading from a terminal when a conversation will not start.
 The dock's **events** view is the allow/deny feed, re-read on the window's
 refresh interval, in two readings:
 
-- **endpoints** folds it by destination -- `docs.rs:443`, how many times it was
-  denied and allowed, by which binaries, whether the policy opens it *now*, and
-  which global list it is on. Expanding a row shows its recent decisions.
-- **log** is the feed in order: time, verdict, what it was about, and why.
+- **endpoints** folds it by destination: `docs.rs:443`, how many times it was
+  denied and allowed, whether the policy opens it *now*, and which global list
+  it is on. Expanding a row shows its recent decisions.
+- **log** is the feed in order: time, verdict, what it was about, and why. The
+  runtime counts rather than lists, so a line stands for every time the same
+  thing happened, with `×3` beside it.
 
 The chips above both filter to all, denied or allowed.
 
 Right-click an endpoint (or a log line naming one) to change what the session
 may reach:
 
-- **Allow in this session** opens it, for full access, to the binaries that
-  were refused -- applied at once, and the row flips to *open now*.
+- **Allow in this session** opens the whole host, applied at once, and the row
+  flips to *open*.
 - **Allow in every new session too** does the same and puts it on the global
   allow list.
-- **Allow…** is there when more than one binary was refused, to choose which.
 - **Allow only some paths…** opens the same panel on *only these paths*: a
   method and a path glob per row, so a package feed can be opened without the
   rest of its host. A URL pasted into a row is cut down to its path.
 - **Allow this path…** replaces the two one-click allows on a denial that a
   rule's own paths made. It names the request it refused, and the panel starts
   from that request instead of handing over the whole host.
-- **Block…** removes an endpoint the policy opens, for **every** binary in the
-  sandbox -- git included, if it is git's -- so it asks under the row first,
-  with the same *every new session too* option.
+- **Block…** denies an endpoint the policy opens, for everything in the sandbox
+  (git included, if it is git's), so it asks under the row first, with the
+  same *every new session too* option.
 
-The policy pane's own endpoints and list entries have menus as well: block an
-endpoint, take an entry off a list. See [policy.md](policy.md#acting-on-a-denial)
-for what each change means at the gateway.
+The policy pane has menus as well: block a host, remove a rule, take an entry
+off a list. See [policy.md](policy.md#acting-on-a-denial) for what each change
+does to the session's rules.
 
 ## Previews
 
@@ -352,11 +353,12 @@ that one. A port the list does not show can be typed in.
 
 It goes through the paired connection, not around it. The window listens on
 this machine's loopback and carries each connection to `hurad` as a channel on
-the websocket it already has open; `hurad` runs one `openshell forward
-service` per port, shared by every connection to it and stopped after two idle
-minutes. So a preview works wherever the window can reach the server -- WSL on
-NAT networking, a server across a VPN -- and the dev server is reachable from
-this machine alone, never from the network.
+the websocket it already has open; `hurad` runs one relay per port, a `socat`
+inside the sandbox that the sandbox runtime publishes on the server's loopback,
+shared by every connection to it and stopped after two idle minutes. So a
+preview works wherever the window can reach the server (WSL on NAT networking,
+a server across a VPN), and the dev server is reachable from this machine alone,
+never from the network.
 
 The status poll is what finds the ports: it reads the sandbox's listening
 sockets from `/proc/net/tcp` in the same exec that reads the agent's state, so
@@ -379,21 +381,12 @@ then `KILL` two seconds later, after asking. The agent and its tmux are listed
 and cannot be killed from here -- that is ending the session, which is what
 destroying the worktree is for.
 
-Which process holds a port is usually a guess, and the pane marks it with a
-`?`. The sandbox lets one process read another's descriptors only if it is
-that process's ancestor (`ptrace_scope=1`), and the exec asking never is, so a
-socket cannot be traced to its owner -- measured: `readlink` on another
-process's descriptor and `ss -p` are both refused. The owner shown is the one
-process whose command line names the port, when exactly one does. A server
-that does not name its port, such as `vite`, has no owner shown; stop it from
-the process list.
-
-One limit, which belongs to the forward rather than to hura: a service closing
-its end of a connection is not passed on (measured against openshell 0.0.110 --
-the reply arrives whole and the socket stays open). A browser never notices,
-because a dev server says how long its answer is. A client that reads until
-the server hangs up -- an HTTP/1.0 request with no length in the reply -- waits
-until it gives up.
+Which process holds a port is read from the processes' own descriptors, which
+the poll can see for anything running as the sandbox's user. A server started
+with `sudo` cannot be read that way, and its owner is a guess, marked with a
+`?`: the one process whose command line names the port, when exactly one does.
+A root server that does not name its port has no owner shown; stop it from the
+process list.
 
 ## What it is spending
 
@@ -419,7 +412,7 @@ dangerous ones are red and last.
 | changed file | open diff, stage or unstage, copy path, discard changes |
 | file | open or expand, copy path, copy name |
 | endpoint, log line | allow, block, copy endpoint, copy line |
-| policy endpoint, list entry | block, remove from the list, copy |
+| policy host, rule, list entry | block, remove the rule, remove from the list, copy |
 
 Two actions stay on the row as well, shown on hover: **+** on a project, because
 starting a worktree has no other door, and stage/unstage on a changed file,
@@ -731,7 +724,7 @@ repository question -- the project is the standing answer to that one, and what
 is left is the part that differs between one worktree and the next.
 
 The repositories in the picker are the **server's**. A checkout only ever names
-a remote -- the sandbox clones `origin` over the gateway either way -- but which
+a remote (the sandbox clones `origin` over the network either way), but which
 checkouts exist is a fact about the machine that will do the cloning, and
 `repo_roots` is configured there. So `Repos` and `Inspect` are requests like any
 other, and a window pointed at a server on another continent lists that server's
@@ -751,9 +744,10 @@ enforced by where the decisions live rather than by care:
   `ops::preselect_providers`, which moved into the core when this form needed
   it. A session without the agent's credential comes up to a login prompt and
   one without the repository host's cannot clone a private repository, so both
-  are ticked where the type identifies exactly one provider; where it does not,
-  the providers the last session for that host was given break the tie. A
-  config file naming providers replaces the rule rather than adding to it.
+  are ticked where the kind identifies exactly one credential; where it does
+  not, the credentials the last session for that host was given break the tie.
+  A config file naming them in `providers` replaces the rule rather than adding
+  to it.
 * **The base branch is the checkout's own.** `Inspect` resolves it server-side
   when the request does not name one, which is what `None` on that request has
   always meant. Unresolved, `base_on_remote` reports every branch as missing

@@ -1,6 +1,6 @@
-//! The local session cache, and reconciling it against the gateway.
+//! The local session cache, and reconciling it against the sandbox runtime.
 //!
-//! The cache is only ever a cache. The gateway knows which sandboxes exist and
+//! The cache is only ever a cache. The runtime knows which sandboxes exist and
 //! each sandbox carries its own metadata, so losing this file costs nothing but
 //! a round trip. That is what makes a crashed TUI able to re-adopt live work.
 //!
@@ -20,9 +20,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-use openshell_client::{Phase, Sandbox};
-
-use crate::session::{self, LABEL_SESSION, Session, State};
+use crate::session::{self, Session, State};
 
 #[derive(Debug, Default)]
 pub struct Store {
@@ -135,7 +133,7 @@ fn lock_path() -> PathBuf {
 /// two processes each doing load-modify-save without it lose one of the two
 /// changes, and the loser is whichever finished first. Held for the length of a
 /// file read and a rename -- microseconds -- so nothing waits on it meaningfully.
-/// Slow work (a gateway call, an exec) belongs outside.
+/// Slow work (a call to the runtime, an exec) belongs outside.
 pub fn update<T>(f: impl FnOnce(&mut Store) -> T) -> io::Result<T> {
     update_at(Store::default_path(), lock_path(), f)
 }
@@ -170,12 +168,37 @@ pub fn update_at<T>(
     result
 }
 
+/// A sandbox as reconciling sees it, whatever runs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Live {
+    pub sandbox: String,
+    /// The session it belongs to, when it is one of hura's. `None` for a
+    /// sandbox that only shares the naming convention.
+    pub session: Option<String>,
+    pub status: Status,
+}
+
+/// Where a live sandbox is in its life.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    Running,
+    /// On its way up, and not ready to run anything yet.
+    Starting,
+    /// Stopped with its files kept. Any exec starts it again, which is why
+    /// nothing that only looks at a session may exec into one.
+    Stopped,
+    Deleting,
+    Error,
+    /// Something this build does not name, left alone.
+    Other(String),
+}
+
 /// What reconciling the cache against live sandboxes produced.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Reconciliation {
-    /// Cached sessions with state corrected against the gateway.
+    /// Cached sessions with state corrected against the runtime.
     pub sessions: Vec<Session>,
-    /// Session names present at the gateway but missing from the cache. Their
+    /// Session names present in the runtime but missing from the cache. Their
     /// metadata has to be read out of the sandbox before they can be added.
     pub orphans: Vec<String>,
     /// Sessions whose sandbox has disappeared.
@@ -189,40 +212,40 @@ pub struct Reconciliation {
 
 /// How long a record may sit in `creating` with no sandbox behind it.
 ///
-/// [`crate::ops::create`] writes the record before it asks the gateway for
+/// [`crate::ops::create`] writes the record before it asks the runtime for
 /// anything, so that a session appears in every client's list the moment it is
-/// asked for rather than however many seconds the gateway takes to answer. That
+/// asked for rather than however many seconds the runtime takes to answer. That
 /// makes "cached but not live" the normal shape of a young create rather than a
 /// dead session, and this is how long "young" lasts. Generous: creating a
-/// sandbox is a gateway round trip and, the first time an image variant is
+/// sandbox is a round trip to the runtime and, the first time an image variant is
 /// used, a docker build behind it.
 const CREATING_GRACE: u64 = 15 * 60;
 
-/// Correct cached state against what the gateway reports.
+/// Correct cached state against what the runtime reports.
 ///
-/// Pure so it can be tested without a gateway. State is only changed where the
+/// Pure so it can be tested without a runtime. State is only changed where the
 /// evidence is unambiguous: an absent sandbox, an explicitly failed one, or a
 /// sandbox that has come back after being marked dead. Anything else is left
 /// alone, because a create may still be in flight.
 ///
-/// `removed` is the set of names [`crate::removed`] holds -- sessions destroyed
-/// whose sandbox the gateway has not finished taking away. None of them is an
+/// `removed` is the set of names [`crate::removed`] holds: sessions destroyed
+/// whose sandbox the runtime has not finished taking away. None of them is an
 /// orphan, whatever phase it is reporting: adopting one writes the record back
 /// that `destroy` just dropped, and the session someone removed returns to the
 /// list a second later with its old task and its old branch.
 pub fn reconcile(
     cached: Vec<Session>,
-    live: &[Sandbox],
+    live: &[Live],
     removed: &BTreeSet<String>,
 ) -> Reconciliation {
-    let by_name: BTreeMap<&str, &Sandbox> = live.iter().map(|s| (s.name.as_str(), s)).collect();
+    let by_name: BTreeMap<&str, &Live> = live.iter().map(|s| (s.sandbox.as_str(), s)).collect();
     let now = session::now_epoch();
 
     let mut out = Reconciliation::default();
 
     for mut session in cached {
         match by_name.get(session.sandbox.as_str()) {
-            // A record written by a create that has not asked the gateway for
+            // A record written by a create that has not asked the runtime for
             // anything yet. Absence is what `creating` *means* here, so it is
             // not evidence of anything -- but only for as long as a create
             // plausibly takes, or a create whose process died in that window
@@ -235,11 +258,11 @@ pub fn reconcile(
                 }
                 session.state = State::Dead;
             }
-            Some(sb) => match sb.phase {
+            Some(sb) => match sb.status {
                 // Deletion is asynchronous: the sandbox stays listed as
                 // `Deleting` for a while, and treating that as alive leaves a
                 // removed session showing as healthy.
-                Phase::Deleting => {
+                Status::Deleting => {
                     if session.state != State::Dead {
                         out.dead.push(session.name.clone());
                     }
@@ -247,25 +270,33 @@ pub fn reconcile(
                 }
                 // Said only where nothing more particular has been: a create
                 // that recorded why it failed knows more than the phase does.
-                Phase::Error => {
+                Status::Error => {
                     session.state = State::Failed;
                     session.failure.get_or_insert_with(|| {
-                        format!("the gateway reports its sandbox `{}` in `Error`", sb.name)
+                        format!("its sandbox `{}` reports an error", sb.sandbox)
                     });
                 }
-                Phase::Stopped => session.state = State::Idle,
-                Phase::Ready if session.state == State::Dead => session.state = State::Ready,
+                // A stopped sandbox keeps its files and starts again on the
+                // next exec, so the session is resting rather than gone.
+                Status::Stopped
+                    if matches!(session.state, State::Ready | State::Idle | State::Dead) =>
+                {
+                    session.state = State::Idle;
+                }
+                // Started again, by whatever exec'd into it first.
+                Status::Running if matches!(session.state, State::Dead | State::Idle) => {
+                    session.state = State::Ready;
+                }
                 // A sandbox that is not running yet, under a record that claims
                 // it is. Only reachable for a session whose create finished
-                // long ago -- a create of its own waits for `Ready` before it
-                // seeds -- which leaves a gateway restart, or a sandbox the
-                // gateway is bringing back. Left as `Ready` it is a row the user
-                // can click, and every exec behind it fails with the gateway's
-                // own `is not ready (phase: Provisioning)`. `Creating` is what
-                // it actually is, and the states in flight are left alone for
-                // the reason `in_flight_states_are_left_alone` gives: a create
-                // in another process owns them.
-                Phase::Provisioning | Phase::Starting
+                // long ago, since a create of its own waits for the sandbox
+                // before it seeds, which leaves a sandbox the runtime is
+                // bringing back. Left as `Ready` it is a row the user can click,
+                // and every exec behind it fails. `Creating` is what it actually
+                // is, and the states in flight are left alone for the reason
+                // `in_flight_states_are_left_alone` gives: a create in another
+                // process owns them.
+                Status::Starting
                     if matches!(session.state, State::Ready | State::Idle | State::Dead) =>
                 {
                     session.state = State::Creating;
@@ -283,10 +314,10 @@ pub fn reconcile(
 
     let known: Vec<&str> = out.sessions.iter().map(|s| s.name.as_str()).collect();
     for sb in live {
-        let Some(name) = sb.labels.get(LABEL_SESSION) else {
+        let Some(name) = &sb.session else {
             continue;
         };
-        // A session someone destroyed, whose sandbox the gateway is still
+        // A session someone destroyed, whose sandbox the runtime is still
         // carrying. Never an orphan -- see the doc comment -- and worth saying
         // so, because "still there" is what keeps its tombstone alive.
         if removed.contains(name.as_str()) {
@@ -302,7 +333,13 @@ pub fn reconcile(
         // Kept as well as the tombstone above rather than replaced by it: this
         // one also covers a sandbox removed by something that is not this tool,
         // which leaves no tombstone at all.
-        if sb.phase == Phase::Deleting {
+        if sb.status == Status::Deleting {
+            continue;
+        }
+        // Adopting one means reading its record out of it, and an exec starts
+        // a stopped sandbox. One that was stopped is adopted once something
+        // has started it again, rather than started here by a refresh.
+        if sb.status != Status::Running {
             continue;
         }
         if !known.contains(&name.as_str()) {
@@ -315,26 +352,14 @@ pub fn reconcile(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use openshell_client::{Phase, Sandbox};
-
     use super::*;
-    use crate::session::{LABEL_MANAGED, Session};
+    use crate::session::Session;
 
-    fn sandbox(name: &str, phase: Phase, session_label: Option<&str>) -> Sandbox {
-        let mut labels = BTreeMap::new();
-        labels.insert(LABEL_MANAGED.to_string(), "true".to_string());
-        if let Some(s) = session_label {
-            labels.insert(LABEL_SESSION.to_string(), s.to_string());
-        }
-        Sandbox {
-            id: format!("id-{name}"),
-            name: name.to_string(),
-            phase,
-            created_at: "2026-08-21 14:15:56".to_string(),
-            labels,
-            workspace: "default".to_string(),
+    fn sandbox(name: &str, status: Status, session: Option<&str>) -> Live {
+        Live {
+            sandbox: name.to_string(),
+            session: session.map(str::to_string),
+            status,
         }
     }
 
@@ -347,7 +372,7 @@ mod tests {
     /// [`super::reconcile`] with nothing tombstoned, which is what every case
     /// below except the two about tombstones is about. Shadows the real one so
     /// those cases stay one argument wide.
-    fn reconcile(cached: Vec<Session>, live: &[Sandbox]) -> Reconciliation {
+    fn reconcile(cached: Vec<Session>, live: &[Live]) -> Reconciliation {
         super::reconcile(cached, live, &BTreeSet::new())
     }
 
@@ -453,7 +478,7 @@ mod tests {
     /// must not report an error.
     #[test]
     fn a_sandbox_being_deleted_is_not_an_orphan() {
-        let live = vec![sandbox("hura-gone", Phase::Deleting, Some("gone"))];
+        let live = vec![sandbox("hura-gone", Status::Deleting, Some("gone"))];
         let out = reconcile(vec![], &live);
         assert!(out.orphans.is_empty(), "{:?}", out.orphans);
     }
@@ -465,7 +490,7 @@ mod tests {
         assert_eq!(r.dead, vec!["a"]);
     }
 
-    /// A create writes its record before the gateway has been asked for a
+    /// A create writes its record before the runtime has been asked for a
     /// sandbox, so that the session shows up the instant it is asked for. For
     /// that window "no sandbox" is what `creating` means, not a death -- and a
     /// refresh runs every second, so getting this wrong would kill every new
@@ -496,7 +521,7 @@ mod tests {
     fn deleting_phase_counts_as_dead() {
         // Regression: a deleted sandbox lingers in `Deleting` and used to keep
         // reporting the last cached state, so `ls` showed it as ready.
-        let live = [sandbox("hura-a", Phase::Deleting, Some("a"))];
+        let live = [sandbox("hura-a", Status::Deleting, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(r.sessions[0].state, State::Dead);
         assert_eq!(r.dead, vec!["a"]);
@@ -504,14 +529,14 @@ mod tests {
 
     #[test]
     fn stopped_sandbox_reads_as_idle() {
-        let live = [sandbox("hura-a", Phase::Stopped, Some("a"))];
+        let live = [sandbox("hura-a", Status::Stopped, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(r.sessions[0].state, State::Idle);
     }
 
     #[test]
     fn error_phase_overrides_cached_state() {
-        let live = [sandbox("hura-a", Phase::Error, Some("a"))];
+        let live = [sandbox("hura-a", Status::Error, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(r.sessions[0].state, State::Failed);
         assert!(r.dead.is_empty());
@@ -519,12 +544,12 @@ mod tests {
 
     #[test]
     fn returning_sandbox_revives_a_dead_session() {
-        let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
+        let live = [sandbox("hura-a", Status::Running, Some("a"))];
         let r = reconcile(vec![session("a", State::Dead)], &live);
         assert_eq!(r.sessions[0].state, State::Ready);
     }
 
-    /// A create the gateway refused leaves a failed record and no sandbox, and
+    /// A create the runtime refused leaves a failed record and no sandbox, and
     /// the next refresh turns that into `dead`. The reason has to come through:
     /// it is what the window shows in place of panes that have nothing to read.
     #[test]
@@ -542,10 +567,10 @@ mod tests {
     /// The phase is a reason when there is no better one, and only then.
     #[test]
     fn an_error_phase_says_so_unless_the_record_knows_more() {
-        let live = [sandbox("hura-a", Phase::Error, Some("a"))];
+        let live = [sandbox("hura-a", Status::Error, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         let said = r.sessions[0].failure.as_deref().unwrap_or_default();
-        assert!(said.contains("`Error`"), "{said}");
+        assert!(said.contains("reports an error"), "{said}");
 
         let mut known = session("a", State::Failed);
         known.failure = Some("seeding failed: fatal: repository not found".into());
@@ -559,7 +584,7 @@ mod tests {
     /// A session that comes back is not the one the reason was about.
     #[test]
     fn a_revived_session_drops_its_reason() {
-        let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
+        let live = [sandbox("hura-a", Status::Running, Some("a"))];
         let mut gone = session("a", State::Dead);
         gone.failure = Some("the gateway reports its sandbox `hura-a` in `Error`".into());
         let r = reconcile(vec![gone], &live);
@@ -570,18 +595,17 @@ mod tests {
     #[test]
     fn in_flight_states_are_left_alone() {
         // A create still running must not be clobbered into Ready.
-        let live = [sandbox("hura-a", Phase::Provisioning, Some("a"))];
+        let live = [sandbox("hura-a", Status::Starting, Some("a"))];
         let r = reconcile(vec![session("a", State::Seeding)], &live);
         assert_eq!(r.sessions[0].state, State::Seeding);
     }
 
-    /// Regression: a record saying `ready` over a sandbox the gateway has not
+    /// Regression: a record saying `ready` over a sandbox the runtime has not
     /// finished bringing up is a row the user can click, and every exec behind
-    /// it -- the agent terminal above all -- fails with the gateway's own
-    /// `is not ready (phase: Provisioning)`.
+    /// it, the agent terminal above all, fails.
     #[test]
     fn a_provisioning_sandbox_is_not_reported_ready() {
-        let live = [sandbox("hura-a", Phase::Provisioning, Some("a"))];
+        let live = [sandbox("hura-a", Status::Starting, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(r.sessions[0].state, State::Creating);
     }
@@ -589,38 +613,59 @@ mod tests {
     #[test]
     fn unknown_managed_sandbox_is_an_orphan() {
         let live = [
-            sandbox("hura-a", Phase::Ready, Some("a")),
-            sandbox("hura-b", Phase::Ready, Some("b")),
+            sandbox("hura-a", Status::Running, Some("a")),
+            sandbox("hura-b", Status::Running, Some("b")),
         ];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(
             r.orphans,
             vec!["b"],
-            "b exists at the gateway but not in cache"
+            "b exists in the runtime but not in cache"
         );
     }
 
     #[test]
     fn managed_sandbox_without_a_session_label_is_ignored() {
-        let live = [sandbox("hura-weird", Phase::Ready, None)];
+        let live = [sandbox("hura-weird", Status::Running, None)];
         let r = reconcile(vec![], &live);
         assert!(r.orphans.is_empty());
+    }
+
+    /// Reading a stopped orphan's record would start it, so it waits until
+    /// something else has.
+    #[test]
+    fn a_stopped_sandbox_is_not_adopted_until_it_runs() {
+        let stopped = [sandbox("hura-a", Status::Stopped, Some("a"))];
+        assert!(reconcile(vec![], &stopped).orphans.is_empty());
+        let running = [sandbox("hura-a", Status::Running, Some("a"))];
+        assert_eq!(reconcile(vec![], &running).orphans, ["a"]);
+    }
+
+    /// A sandbox stopped by its runtime and started again by an exec is the
+    /// session it was.
+    #[test]
+    fn a_stopped_session_is_ready_again_once_its_sandbox_runs() {
+        let stopped = [sandbox("hura-a", Status::Stopped, Some("a"))];
+        let r = reconcile(vec![session("a", State::Ready)], &stopped);
+        assert_eq!(r.sessions[0].state, State::Idle);
+        let running = [sandbox("hura-a", Status::Running, Some("a"))];
+        let r = reconcile(r.sessions, &running);
+        assert_eq!(r.sessions[0].state, State::Ready);
     }
 
     #[test]
     fn a_removed_session_is_never_adopted_back() {
         // The bug this pair of tests exists for. `destroy` drops the record and
-        // the gateway takes its time; the sandbox is still listed, still
-        // labelled, and no longer in the cache -- which is the exact shape of an
-        // orphan. Adopting it put the removed session straight back in the list,
+        // the runtime takes its time; the sandbox is still listed and no longer
+        // in the cache, which is the exact shape of an orphan. Adopting it put the removed session straight back in the list,
         // so creating a fresh one under the same name was then refused as a
         // duplicate: removing a session and starting it again looked like hura
         // insisting on resuming the old one.
         //
-        // `Ready` rather than `Deleting` on purpose: `Deleting` was already
-        // skipped, and the phase the gateway reports in the seconds after a
+        // `Running` rather than `Deleting` on purpose: `Deleting` was already
+        // skipped, and the status the runtime reports in the seconds after a
         // delete is not something this side gets to decide.
-        let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
+        let live = [sandbox("hura-a", Status::Running, Some("a"))];
         let removed = BTreeSet::from(["a".to_string()]);
 
         let r = super::reconcile(vec![], &live, &removed);
@@ -631,7 +676,7 @@ mod tests {
 
     #[test]
     fn a_sandbox_that_has_finally_gone_stops_lingering() {
-        // The other half: nothing at the gateway means the tombstone has done
+        // The other half: nothing in the runtime means the tombstone has done
         // its job, and `removed::keep_only` reads the empty list as permission
         // to drop it.
         let removed = BTreeSet::from(["a".to_string()]);

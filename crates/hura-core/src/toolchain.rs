@@ -15,26 +15,15 @@
 //! **A toolchain is three things, not one.** The install is the obvious part. The
 //! other two are why this is a module rather than a longer Dockerfile:
 //!
-//! * an **image variant**, tagged by the toolchains in it -- `hura-base:dotnet`,
-//!   `hura-base:dotnet-rust` -- layered onto the base image, so docker shares the
+//! * an **image variant**, tagged by the toolchains in it -- `hura-sandbox:dotnet`,
+//!   `hura-sandbox:dotnet-rust` -- layered onto the base image, so docker shares the
 //!   base's several gigabytes and a Rust session does not carry the .NET SDK;
-//! * the **registry endpoints** it cannot work without, each bound to the binary
-//!   that reaches it, imposed on the session that asked for the toolchain and on
-//!   no other. `net-open.yaml` already argues the other half of this: an endpoint
-//!   granted to a sandbox with no binary that can use it is decoration, and it
-//!   named crates.io as exactly that. This is where crates.io arrives, alongside
-//!   a cargo that can reach it.
-//!
-//! The binary paths below are **kernel-resolved** paths, not what is on `PATH`.
-//! The gateway matches `/proc/<pid>/exe`, so a symlink in `/usr/local/bin` is
-//! invisible to it and an interpreted wrapper resolves to its interpreter --
-//! which is why npm's rule names `/usr/bin/node`. Getting one wrong produces a
-//! denial naming a path the policy appears to contain, and the tests here check
-//! each one against the Dockerfile layer that installs it.
+//! * the **registry endpoints** it cannot work without, opened for reading on
+//!   the session that asked for the toolchain and on no other.
 
 use std::path::Path;
 
-use openshell_client::PolicyUpdate;
+use sbx_client::RuleSpec;
 
 use crate::session::IMAGE_REPO;
 
@@ -43,9 +32,6 @@ use crate::session::IMAGE_REPO;
 pub struct Registry {
     pub host: &'static str,
     pub port: u16,
-    /// Kernel-resolved paths of the binaries granted this endpoint. Never empty:
-    /// an endpoint rule with no binaries grants nothing.
-    pub binaries: &'static [&'static str],
 }
 
 /// A toolchain installable into a sandbox image.
@@ -66,15 +52,6 @@ pub struct Toolchain {
     pub markers: &'static [&'static str],
 }
 
-/// The access class a registry endpoint is granted.
-///
-/// `read-only` rather than an allow-list of paths, and rather than `full`, for
-/// the reason `net-open.yaml` spells out: a registry fetch is thousands of
-/// unpredictable paths, so an allow-list would either be wrong or be `/**`, and
-/// "GET anything here, write nothing" is what is actually meant. Publishing a
-/// package is not something a sandboxed agent should be able to do by accident.
-const ACCESS: &str = "read-only";
-
 /// The toolchains, in the order that decides an image tag.
 ///
 /// Alphabetical, and the order is load-bearing: [`tag`] joins the slugs in this
@@ -89,10 +66,6 @@ pub const TOOLCHAINS: [Toolchain; 3] = [
         registries: &[Registry {
             host: "api.nuget.org",
             port: 443,
-            // The muxer, at its real path. `/usr/local/bin/dotnet` is a symlink
-            // to this and the kernel reports the target, so naming the symlink
-            // would deny every restore.
-            binaries: &["/usr/local/dotnet/dotnet"],
         }],
         // A solution or any project file. `global.json` catches the repository
         // that pins an SDK version without a project at its root.
@@ -112,11 +85,6 @@ pub const TOOLCHAINS: [Toolchain; 3] = [
         registries: &[Registry {
             host: "registry.npmjs.org",
             port: 443,
-            // node, not npm: `/usr/bin/npm` is a JavaScript file behind a
-            // `#!/usr/bin/env node` line, so the kernel-resolved exe is the
-            // interpreter. Listing `/usr/bin/npm` denies every install with a
-            // message naming a path you can see is in the policy.
-            binaries: &["/usr/bin/node"],
         }],
         markers: &["package.json"],
     },
@@ -131,12 +99,10 @@ pub const TOOLCHAINS: [Toolchain; 3] = [
             Registry {
                 host: "index.crates.io",
                 port: 443,
-                binaries: &["/usr/local/rust/bin/cargo"],
             },
             Registry {
                 host: "static.crates.io",
                 port: 443,
-                binaries: &["/usr/local/rust/bin/cargo"],
             },
         ],
         markers: &["Cargo.toml"],
@@ -226,15 +192,15 @@ pub fn tag(chains: &[&'static Toolchain]) -> String {
 
 /// The Dockerfile for a variant image: the base, plus one layer per toolchain.
 ///
-/// `FROM hura-base:latest` rather than a longer base Dockerfile with conditional
+/// `FROM hura-sandbox:latest` rather than a longer base Dockerfile with conditional
 /// steps, so the several gigabytes of base image are built once and shared by
 /// every variant -- and so a variant's build is only ever the toolchains asked
 /// for. It also keeps one thing true that a conditional build would quietly
 /// break: the base image is what a session with no toolchain runs, byte for byte.
 ///
-/// `USER root` and back again, because the base image ends as the sandbox user
+/// `USER root` and back again, because the base image ends as the `agent` user
 /// and every layer here installs into `/usr/local`. Ending anywhere else would
-/// hand the agent a root shell.
+/// start every session as root.
 pub fn dockerfile(chains: &[&'static Toolchain]) -> String {
     let mut out = String::from("# syntax=docker/dockerfile:1\n");
     out.push_str(
@@ -254,7 +220,7 @@ pub fn dockerfile(chains: &[&'static Toolchain]) -> String {
         out.push_str(chain.layer.trim_end());
         out.push_str("\n\n");
     }
-    out.push_str("USER sandbox\n");
+    out.push_str("USER agent\n");
     out
 }
 
@@ -339,41 +305,26 @@ fn matches(marker: &str, name: &str) -> bool {
     }
 }
 
-/// The policy updates opening these toolchains' registries.
+/// The rule opening these toolchains' registries, for reading.
 ///
-/// One update per distinct binary list, for the constraint that shapes
-/// [`crate::endpoints::Lists::updates`] too: `--binary` applies to *every*
-/// `--add-endpoint` in an invocation, so merging cargo's endpoints with dotnet's
-/// would let cargo reach nuget and dotnet reach crates.io. Two calls at six
-/// seconds each is the price of the rules meaning what they say.
-///
-/// `rule_name` is left unset: the gateway rejects it for a multi-endpoint update
-/// and its own derived name is the clearer of the two anyway.
-pub fn updates(chains: &[&'static Toolchain]) -> Vec<PolicyUpdate> {
-    let mut groups: Vec<(Vec<String>, Vec<String>)> = Vec::new();
-    for registry in chains.iter().flat_map(|t| t.registries) {
-        let binaries: Vec<String> = registry.binaries.iter().map(|b| (*b).to_string()).collect();
-        let endpoint = format!("{}:{}:{ACCESS}:rest:enforce", registry.host, registry.port);
-        match groups.iter_mut().find(|(b, _)| *b == binaries) {
-            Some((_, endpoints)) if endpoints.contains(&endpoint) => {}
-            Some((_, endpoints)) => endpoints.push(endpoint),
-            None => groups.push((binaries, vec![endpoint])),
+/// Read-only rather than an allow-list of paths, and rather than open: a
+/// registry fetch is thousands of unpredictable paths, so an allow-list would
+/// either be wrong or be `/**`, and "read anything here, write nothing" is
+/// what is actually meant. Publishing a package is not something a sandboxed
+/// agent should be able to do by accident. One rule for all of them, since a
+/// rule is for the whole sandbox and not for one toolchain's program.
+pub fn rules(chains: &[&'static Toolchain]) -> Vec<RuleSpec> {
+    let mut hosts: Vec<String> = Vec::new();
+    for r in chains.iter().flat_map(|t| t.registries) {
+        let endpoint = format!("{}:{}", r.host, r.port);
+        if !hosts.contains(&endpoint) {
+            hosts.push(endpoint);
         }
     }
-
-    groups
-        .into_iter()
-        .map(|(binaries, add_endpoints)| PolicyUpdate {
-            add_endpoints,
-            binaries,
-            rule_name: None,
-            // The agent is started by the seeder moments later and a build is
-            // often the first thing it does, so returning before the rules load
-            // would be a denial in the feed with a working policy behind it.
-            wait: true,
-            ..Default::default()
-        })
-        .collect()
+    if hosts.is_empty() {
+        return Vec::new();
+    }
+    vec![crate::policy::read_only(hosts)]
 }
 
 #[cfg(test)]
@@ -419,8 +370,8 @@ mod tests {
             tag(&resolve(&owned).unwrap())
         };
         assert_eq!(of(&[]), crate::session::IMAGE, "no toolchain, no variant");
-        assert_eq!(of(&["dotnet"]), "hura-base:dotnet");
-        assert_eq!(of(&["dotnet", "rust"]), "hura-base:dotnet-rust");
+        assert_eq!(of(&["dotnet"]), "hura-sandbox:dotnet");
+        assert_eq!(of(&["dotnet", "rust"]), "hura-sandbox:dotnet-rust");
         assert_eq!(
             of(&["rust", "dotnet"]),
             of(&["dotnet", "rust"]),
@@ -454,7 +405,7 @@ mod tests {
             "the layers install into /usr/local"
         );
         assert!(
-            df.trim_end().ends_with("USER sandbox"),
+            df.trim_end().ends_with("USER agent"),
             "a variant must end as the sandbox user:\n{df}"
         );
         // The manifest's directory is not in the base image, and no layer owns
@@ -491,98 +442,30 @@ mod tests {
         }
     }
 
-    /// The one thing about this that is easy to get wrong and impossible to see:
-    /// the gateway matches the kernel-resolved binary, so every path in a
-    /// registry rule has to be the path the layer actually installs to. A
-    /// mismatch denies every fetch while naming a path the policy appears to
-    /// hold.
+    /// cargo needs both crates.io hosts and dotnet needs nuget, each for
+    /// reading only, and asking for two toolchains is one rule.
     #[test]
-    fn every_registry_binary_is_a_path_its_layer_installs() {
-        for chain in TOOLCHAINS {
-            for registry in chain.registries {
-                assert!(
-                    !registry.binaries.is_empty(),
-                    "{} grants {} to nothing",
-                    chain.name,
-                    registry.host
-                );
-                for binary in registry.binaries {
-                    assert!(
-                        binary.starts_with('/'),
-                        "`{binary}` is not an absolute path"
-                    );
-                    assert!(
-                        chain.layer.contains(binary),
-                        "the {} layer never mentions `{binary}`, so either the \
-                         install moved or the rule is for a path that is not there",
-                        chain.name
-                    );
-                    // Symlinks are invisible to the gateway: it reports the
-                    // target. A rule naming the convenience symlink would deny
-                    // everything.
-                    assert!(
-                        !binary.starts_with("/usr/local/bin/"),
-                        "`{binary}` is the symlink, not the resolved binary"
-                    );
-                }
-            }
-        }
-    }
-
-    /// The rules have to mean what they say: cargo may reach crates.io and
-    /// dotnet may reach nuget, and neither may reach the other's.
-    #[test]
-    fn endpoints_are_granted_only_to_their_own_toolchains_binaries() {
+    fn registries_are_opened_for_reading() {
         let chains = resolve(&["dotnet".to_string(), "rust".to_string()]).unwrap();
-        let updates = updates(&chains);
-        assert_eq!(updates.len(), 2, "one call per binary list: {updates:#?}");
-
-        for update in &updates {
-            assert!(update.wait, "a build may be the first thing the agent does");
-            assert!(update.remove_endpoints.is_empty(), "nothing is taken away");
-            assert!(
-                update.rule_name.is_none(),
-                "the gateway rejects a name on a multi-endpoint update"
-            );
-        }
-
-        let for_binary = |binary: &str| -> Vec<String> {
-            updates
-                .iter()
-                .filter(|u| u.binaries.iter().any(|b| b == binary))
-                .flat_map(|u| u.add_endpoints.clone())
-                .collect()
-        };
-
-        let cargo = for_binary("/usr/local/rust/bin/cargo");
+        let rules = rules(&chains);
+        assert_eq!(rules.len(), 1, "{rules:#?}");
         assert_eq!(
-            cargo.len(),
-            2,
-            "the sparse index and the downloads: {cargo:?}"
+            rules[0].resources,
+            [
+                "api.nuget.org:443",
+                "index.crates.io:443",
+                "static.crates.io:443"
+            ]
         );
-        assert!(cargo.iter().all(|e| e.contains("crates.io")), "{cargo:?}");
-        assert!(
-            !cargo.iter().any(|e| e.contains("nuget")),
-            "cargo must not reach nuget: {cargo:?}"
-        );
-
-        let dotnet = for_binary("/usr/local/dotnet/dotnet");
-        assert_eq!(dotnet, ["api.nuget.org:443:read-only:rest:enforce"]);
-
-        // Read-only, and enforced: a sandboxed agent publishing a package is
-        // not a thing this should make possible by accident.
-        for update in &updates {
-            for endpoint in &update.add_endpoints {
-                assert!(endpoint.ends_with(":read-only:rest:enforce"), "{endpoint}");
-            }
-        }
+        assert_eq!(rules[0].methods, crate::policy::READ_METHODS);
+        assert_eq!(rules[0].path.as_deref(), Some("/**"));
     }
 
     /// The other half of "one set, one image": asking for nothing must cost
     /// nothing, not an empty variant build.
     #[test]
     fn no_toolchains_means_no_variant_and_no_updates() {
-        assert!(updates(&[]).is_empty());
+        assert!(rules(&[]).is_empty());
         assert_eq!(tag(&[]), crate::session::IMAGE);
     }
 
@@ -651,10 +534,8 @@ mod tests {
         assert!(!matches("Cargo.toml", "Cargo.toml.orig"));
     }
 
-    /// A registry granted to a session that has no binary able to use it is the
-    /// "unreachable decoration" `net-open.yaml` refuses to ship. The inverse is
-    /// worse: a toolchain with no registry cannot fetch a dependency, which is
-    /// most of the reason to have it.
+    /// A toolchain with no registry cannot fetch a dependency, which is most of
+    /// the reason to have it.
     #[test]
     fn every_toolchain_can_reach_a_registry() {
         for chain in TOOLCHAINS {

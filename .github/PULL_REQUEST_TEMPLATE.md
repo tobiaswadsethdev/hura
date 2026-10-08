@@ -9,8 +9,8 @@
 
 ## How it was checked
 
-<!-- Tests you added or changed. If it cannot be tested without a live gateway,
-     say what you ran by hand and what you saw. -->
+<!-- Tests you added or changed. If it cannot be tested without a live sandbox
+     runtime, say what you ran by hand and what you saw. -->
 
 - [ ] `cargo test --workspace` passes
 - [ ] `cargo fmt --all --check` is clean

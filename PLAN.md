@@ -2438,3 +2438,142 @@ for free, with nothing persisted client-side.
   the new thing rather than the working one.
 - **OpenShell 0.0.x churn now reaches a GUI too**, which is a slower thing to
   repair than a pane. Unchanged mitigation: all of it stays behind one trait.
+
+# Pivot: Docker Sandboxes
+
+Running Docker inside a session became a requirement, and OpenShell cannot do it
+on any of its drivers. Its workload seccomp filter refuses `mount`,
+`pivot_root`, `setns` and `CLONE_NEWUSER`, and it rejects UID 0, with no knob
+that relaxes either (read in the v0.1.2 source). Docker Sandboxes (`sbx`) give
+each sandbox a microVM with a Docker Engine of its own, and nothing in it has a
+way to the host's.
+
+The trade, accepted with eyes open: **network rules are per sandbox, not per
+binary.** A rule names a destination (a host, a glob, a port, a CIDR) and
+optionally a method and a path on it, and a deny outranks every allow. It cannot
+name the program making the request, and the agent has sudo inside its VM, so it
+could not be enforced if it could be said. The wall is the VM.
+
+## Locked decisions
+
+| Decision | Choice | Why |
+| --- | --- | --- |
+| Cutover | Replace on a branch, one release, `openshell-client` deleted | Two runtimes behind the trait would be two answers to every question again, which is what removing the worktree backend undid. A session still on OpenShell is finished or pushed before upgrading |
+| Credentials | Per session, from a reference | Each `[credentials.<name>]` names a host command or a 1Password/AWS reference. A session gets a sandbox-scoped secret only for the credentials ticked for it; the runtime resolves the reference and hura never sees a value. Global secrets were rejected because their placeholder reaches every sandbox |
+| The image | `FROM docker/sandbox-templates:shell-docker`, tagged `hura-sandbox` | Keeps the runtime's labels, so the VM starts its Docker Engine. A new tag leaves an OpenShell `hura-base` alone |
+| Block | A real deny | The runtime has one, where OpenShell could only take an allow away |
+
+## Measured on sbx v0.47.0 (WSL2 + KVM, 2026-10-08)
+
+| Fact | Consequence |
+|---|---|
+| Create takes 31 s on a cold image and about 8 s from a loaded template. `exec` takes about 0.3 s, and execs run in parallel | No serialisation behind one gateway. Polls stay as they were |
+| The workload is `agent` (UID 1000) with sudo and the docker group; PID 1 is `tini` | `/sandbox` is made and owned by `agent`, so hura's paths stay; only home-relative ones move to `/home/agent` |
+| `create shell` with no path mounts nothing from the host | Safe to create from `$HOME` under systemd |
+| `docker save` + `sbx template load` of a 5 GB image takes about 27 s | The image build loads the template, and every existence check compares image ids |
+| A `--sandbox` allow beats the global `deny-all`. `**.` is needed for subdomains. A path-level deny on an allowed host works. Changes apply live | Templates and lists become per-sandbox rules |
+| The runtime refuses a deny that names exactly what an allow names, and an allow a broader rule covers ("Already covered") | Block withdraws the session's allows of the endpoint first; allow lifts its denies first |
+| A client that ignores `HTTPS_PROXY` is proxied transparently, except to hosts with method or path rules | Documented. Nested containers need `-e HTTPS_PROXY` for path-ruled hosts |
+| The inner dockerd goes through the same rules. Docker Hub needs four hosts | `--widen` opens them with npm and PyPI |
+| `policy log --json` is aggregated by host and rule, with a count and first and last seen. HTTP denials carry the method and path | Events carry `count` and `last`; the feed upserts rather than appends |
+| A custom secret's placeholder is replaced in any request header to its hosts, never in a query or body and never to another host | Azure DevOps stores `base64(":"+PAT)` and git sends `Authorization: Basic <placeholder>`. Claude gets `CLAUDE_CODE_OAUTH_TOKEN=<placeholder>`, and `ANTHROPIC_API_KEY` is unset |
+| `ports --publish` binds this machine's loopback but reaches only a server bound beyond the sandbox's own loopback | `hurad relay`: a `socat` in the sandbox on a reserved port, published once and reused, since unpublishing comes back on the next publish |
+| A sandbox stops itself 30 s after its last session leaves, unless `sbx run -d` has detached it | Every session sandbox is detached right after create |
+| `sbx daemon restart` stops every sandbox, and **any exec starts a stopped one** | Polls skip stopped sandboxes. A sandbox is resumed when opened, and the agent restarted with `claude --continue` behind two markers |
+| The daemon starts in its caller's cgroup | `sbx-daemon.service`, so restarting `hurad` does not take every sandbox with it |
+| `sbx` keeps its state under the XDG directories | `sbx-client` unsets them on every call, so a development `hurad` with private XDG directories still finds the one daemon and sign-in |
+| Names of 63 characters are accepted; `rm` takes the sandbox's rules and secrets with it | Sandboxes are `hura-<session>`, and nothing needs cleaning up beside `rm` |
+| No Yama in the VM: another process's descriptors are readable when it runs as `agent` | A port's owner is known rather than guessed, except for a root server |
+| A server's close passes through the relay (an HTTP/1.0 reply with no length ends at once) | The half-close limit of `openshell forward` is gone |
+
+## Increments
+
+The order kept the suite green at every step.
+
+### Pivot 0: the trait owns its types
+
+`Backend` returned OpenShell's `ExecOutput`, policy revisions and providers.
+It now returns hura's own: `ExecOutput`, `events()`, `providers()` as
+`ProviderChoice`, and `health()`, so the swap is one implementation rather than
+every caller.
+
+### Pivot 1: `sbx-client`
+
+A blocking client over the CLI, behind a trait with a fake, parsing JSON
+fixtures captured from the real thing. Seven ignored live tests settle the
+facts the design leans on: name length, `rm` cleanup, `/sandbox` surviving a
+daemon restart, 300 KiB over `exec -i`, publish behaviour.
+
+### Pivot 2: the image
+
+Rebuilt on `shell-docker`, which already carries git, node, python, `uv`, `gh`,
+socat and docker; hura adds tmux, Claude Code and `hura-agent`. `image.rs` saves the
+built image and loads it as the runtime's template.
+
+### Pivot 3: the backend
+
+Sandboxes are created, waited on and detached; templates are TOML in
+`policies/`; credentials become sandbox-scoped secrets with random
+placeholders. Payloads (the seed script, the task, skills, review prompts, chat
+messages) go over stdin, which lifts the 128 KiB single-argument cap the old
+`sh -c` payloads were under. Reconcile reads the runtime's statuses and never
+wakes a stopped sandbox.
+
+### Pivot 4: policy
+
+`policy::View` is the rules as the runtime lists them, each with an id, and
+`RemoveRule` is how any change is taken back. Allow and block are the
+withdraw-then-add pairs above. The proto drops binaries from allows and lists
+(version 4), and the desktop's policy pane is a card per host.
+
+### Pivot 5: MCP through loopback
+
+A managed MCP container publishes `127.0.0.1:<port>`, and the session reaches it
+as `http://host.docker.internal:<port>/mcp` under a rule for `localhost:<port>`.
+Two managed servers on one port are refused at config load.
+
+### Pivot 6: events
+
+Rows come from the runtime's aggregated log, each with a count and a last-seen
+time. The merge on disk and the stream both upsert, so a count going up reaches
+the window. The OpenShell log parser is deleted.
+
+### Pivot 7: OpenShell goes
+
+`openshell-client`, the provider YAML, the gateway unit and `--gateway` are
+deleted; a config `gateway` key is accepted and ignored. `hurad doctor` runs
+`sbx diagnose`, checks the global policy (a global `**` allow fails, other
+global allows warn), the daemon's unit and that the loaded template is the built
+image. The docs are rewritten for the new model, and `docs/manual-loop.md`,
+the OpenShell contract of increment 0, is retired.
+
+Verified end to end against a development `hurad`: a session created and cloned
+in about 8 s; the Claude subscription token working through its placeholder;
+Azure DevOps clone, `git push --dry-run` and the pull request API through a
+per-session PAT; allow, block and allow again on one host answering 200, 403,
+200; widen and tighten; a preview and an MCP server through the relay and
+loopback; and an agent resumed after a daemon restart.
+
+## What was lost
+
+- Per-binary rules, and per-binary events. A denial names its host and, for a
+  host with path rules, the method and path.
+- A non-root agent and read-only system paths inside the sandbox. The agent
+  has sudo; the VM is the boundary.
+- Agents stop on a daemon restart. Resume covers it, from the conversation the
+  agent left.
+- Openness. `sbx` is proprietary, needs a Docker sign-in, and supports Ubuntu
+  officially on Linux (the tarball works elsewhere).
+
+## Risks
+
+- **A runtime at 0.x that is not ours.** Its behaviour was measured rather than
+  read, and the measurements are in this section and in `sbx-client`'s live
+  tests, which is where a change would show first.
+- **The `deny-all` listing quirk.** The global `default-deny-all` rule can drop
+  out of `sbx policy ls` while unmatched traffic is still refused ("Approval
+  required"). `hurad doctor` reads the listing, so it can report a gap that is
+  not there.
+- **Secrets in headers only.** A tool that sends a credential in a query string
+  or a body gets the placeholder, not the value. Both forges and the model API
+  take headers, which is why it holds today.

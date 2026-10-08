@@ -121,8 +121,8 @@ jobs:
           if-no-files-found: error
 
   # The desktop application for Windows, which is the one platform where there
-  # is nothing else to install: `hurad` needs a gateway, a Docker daemon and
-  # tmux, so the Windows side is the window and nothing but the window. It
+  # is nothing else to install: `hurad` needs the sandbox runtime, a Docker
+  # daemon and tmux, so the Windows side is the window and nothing but the window. It
   # pairs with a server from its own connect dialog rather than from a CLI --
   # see docs/desktop.md -- which is what makes an installer on its own useful.
   #

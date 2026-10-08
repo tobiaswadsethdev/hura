@@ -1,0 +1,26 @@
+# readonly-explore: clone and read. No push, and no model API.
+#
+# For a session that only looks: the repository can be fetched from either
+# host and nothing can be written back. The agent has no route to the model
+# API either, so this is for a person exploring a checkout in a shell rather
+# than for an agent. See feature-work.toml for what the keys mean.
+
+[[rule]]
+hosts = ["github.com:443"]
+methods = ["GET"]
+path = "/**/info/refs*"
+
+[[rule]]
+hosts = ["github.com:443"]
+methods = ["POST"]
+path = "/**/git-upload-pack"
+
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["GET"]
+path = "/**/info/refs*"
+
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["POST"]
+path = "/**/git-upload-pack"

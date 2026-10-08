@@ -1361,25 +1361,10 @@ main { display: flex; flex: 1; min-height: 0; }
    paths line up under each other. */
 .policy .l7 { margin: 3px 0 2px 10px; padding-left: 8px; border-left: 1px solid var(--line); }
 .policy .l7 > li { display: flex; gap: 8px; font-family: var(--font-mono); font-size: 11px; line-height: 17px; color: var(--dim); }
-.policy .l7 .method { width: 34px; flex: none; color: var(--text); }
+.policy .l7 .method { min-width: 34px; flex: none; color: var(--text); }
 .policy .l7 .path { min-width: 0; overflow-wrap: anywhere; }
 .policy .l7 .deny .method, .policy .l7 .deny-word { color: var(--bad); }
 .policy .l7 .deny-word { margin-left: auto; }
-/* Who the rule lets out, by name. */
-.programs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
-  color: var(--dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-.programs > .lucide { color: var(--dimmer); }
-.programs .program { cursor: default; }
 /* allow and block, as the events feed's two shields in its two colours. */
 .policy .lists > li { padding: 2px 0; }
 .policy .lists .lucide.allow { color: var(--ok); flex: none; }
@@ -1392,7 +1377,7 @@ main { display: flex; flex: 1; min-height: 0; }
 
 /* The traffic pane: the allow/deny feed, folded by endpoint or read as a log.
 
-   The old feed was every column of the gateway's line in one wrapping flex
+   The old feed was every column of OpenShell's line in one wrapping flex
    row, which at sidebar widths meant three lines per event with the rule name
    floating alone at the right of the third. So the line is taken apart: what
    it was about (the host, large, in mono), when (right-aligned, small), and
@@ -1676,6 +1661,10 @@ main { display: flex; flex: 1; min-height: 0; }
 .entry-head .verdict-glyph { margin-top: 2px; }
 :is(.traffic-log, .ep-log) .clock { color: var(--dimmer); flex: none; font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
 .entry-head .clock { margin-left: auto; line-height: 18px; }
+/* How many decisions one row stands for: the runtime counts rather than lists. */
+:is(.traffic-log, .ep-log) .times { flex: none; color: var(--dim); font-family: var(--font-mono); font-size: 11px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.entry-head .times { margin-left: auto; }
+.entry-head .times + .clock { margin-left: 6px; }
 :is(.traffic-log, .ep-log) .class { color: var(--dimmer); flex: none; font-family: var(--font-mono); font-size: 11px; }
 .traffic-log .subject {
   min-width: 0;
@@ -1687,7 +1676,7 @@ main { display: flex; flex: 1; min-height: 0; }
 }
 /* Paths wrap at their slashes -- see `breakable` -- and not mid-word. */
 .traffic-log .subject, .ep-log .what { overflow-wrap: normal; word-break: normal; }
-/* An event about no endpoint is the gateway saying something in a sentence. */
+/* An event about no endpoint is the runtime saying something in a sentence. */
 .traffic-log .subject.prose { font-family: var(--font-ui); font-size: 12px; color: var(--dim); }
 .entry-why { display: flex; flex-wrap: wrap; gap: 2px 8px; margin: 1px 0 0 20px; }
 :is(.traffic-log, .ep-log) .rule { color: var(--dim); font-family: var(--font-mono); font-size: 11px; }

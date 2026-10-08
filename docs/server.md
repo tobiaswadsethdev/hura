@@ -5,16 +5,16 @@ something else drive them: another machine on the network, a cloud box, or --
 the case this was built for -- a Linux server inside WSL with the window out on
 Windows. One binary does both, which is why `hurad` with no subcommand listens.
 
-The sessions are the same sessions. One gateway, one cache, one set of
+The sessions are the same sessions. One sandbox runtime, one cache, one set of
 sandboxes, whether the thing asking is a terminal on that machine or a client
 somewhere else.
 
 ```
    Windows                          WSL / a VM / a box on the LAN
-   +-----------+                    +-----------------------------+
-   |  hura      |  TLS, one token    |  hurad  ->  openshell gateway|
-   |  (client) | -----------------> |            -> sandboxes     |
-   +-----------+                    +-----------------------------+
+   +-----------+                    +--------------------------------------+
+   |  hura     |  TLS, one token    |  hurad  ->  Docker Sandboxes daemon  |
+   |  (client) | -----------------> |             -> sandboxes (microVMs)  |
+   +-----------+                    +--------------------------------------+
 ```
 
 ## Pairing
@@ -68,8 +68,8 @@ sitting in rather than a request; the desktop application's terminal is the
 remote equivalent and it works over the connection.
 
 Reading is `/rpc`, one request and one answer. The three things a client wants
-*told* -- the agent's screen, the gateway's decisions as it makes them, and the
-terminal -- are a websocket on `/ws`, multiplexed by channel, because polling
+*told* (the agent's screen, the sandbox's policy decisions as they are made, and
+the terminal) are a websocket on `/ws`, multiplexed by channel, because polling
 them would be a handshake per session per second to hear that nothing had
 changed.
 
@@ -186,13 +186,13 @@ moved or a token that was revoked shows up:
 
 ## What this costs
 
-**An authenticated client can create containers on the server's host, which
-makes a token equivalent to a login to that machine.** That is not a
-qualification, it is the shape of the thing: the point of the server is to start
-sandboxes, and starting sandboxes is a privileged act. Treat a pairing string
-the way you would treat an SSH private key.
+**An authenticated client can create sandboxes, which are microVMs, on the
+server's host, which makes a token equivalent to a login to that machine.**
+That is not a qualification, it is the shape of the thing: the point of the
+server is to start sandboxes, and starting sandboxes is a privileged act. Treat
+a pairing string the way you would treat an SSH private key.
 
-It goes one step further than containers, in two ways worth naming. A client
+It goes one step further than sandboxes, in two ways worth naming. A client
 may start, restart and stop the **managed MCP containers** this server runs, and store the secrets
 they are given -- names and values in, names only ever out; see
 [mcp.md](mcp.md). And a client can read your **tickets**, which means this
@@ -229,14 +229,15 @@ machines.
 
 ## Running it under systemd
 
-Same shape as the gateway's own unit, as a user service:
+A user service, ordered after the sandbox runtime's daemon, which has a unit
+of its own ([install.md](install.md#installing-the-pieces) is that one):
 
 ```ini
 # ~/.config/systemd/user/hurad.service
 [Unit]
 Description=hura server
-After=openshell-gateway.service
-Wants=openshell-gateway.service
+After=sbx-daemon.service
+Wants=sbx-daemon.service
 
 [Service]
 ExecStart=%h/.local/bin/hurad serve
@@ -251,8 +252,15 @@ systemctl --user enable --now hurad
 loginctl enable-linger "$USER"    # so it survives logging out
 ```
 
-`hurad` does not fail to start when the gateway is down: a server you cannot
-reach is a server that cannot tell you why. It says so and carries on.
+The daemon has to be that unit rather than something `hurad` starts. The
+runtime starts its daemon on the first `sbx` call, in the caller's cgroup, so a
+daemon `hurad` started would be part of `hurad`'s service, and `systemctl --user
+restart hurad` (which `hurad update` asks for) would stop it and every sandbox
+with it. `hurad doctor` warns when `sbx-daemon.service` is not active.
+
+`hurad` does not fail to start when the sandbox runtime is down: a server you
+cannot reach is a server that cannot tell you why. It says so (`the sandbox
+runtime did not answer at startup`) and carries on.
 
 ---
 

@@ -13,10 +13,19 @@ import type { Verdict } from "./Verdict";
  */
 export type FeedEvent = { target: Target | null, 
 /**
- * Epoch seconds. The gateway prints fractional seconds; the fraction is
+ * Epoch seconds. The runtime writes fractional seconds; the fraction is
  * dropped because the feed shows a wall-clock time, not a duration.
  */
 at: number, 
+/**
+ * How many times it has happened, which the runtime counts. One for an
+ * event kept before it counted.
+ */
+count: number, 
+/**
+ * When it last happened, as epoch seconds; `at` for one seen once.
+ */
+last: number, 
 /**
  * `NET:OPEN`, `HTTP:GET`, `CONFIG:VALIDATED`.
  */

@@ -5,7 +5,7 @@
 //! behaviour that exists here and not there would be one the terminal cannot
 //! do, which is how two front ends start disagreeing about what a session is.
 //!
-//! Nothing here is async. The core talks to the gateway by running a
+//! Nothing here is async. The core talks to the sandbox runtime by running a
 //! subprocess, so every one of these blocks for a few hundred milliseconds;
 //! [`crate::serve`] is what keeps that off the runtime's threads.
 
@@ -14,12 +14,8 @@ use std::path::Path;
 use hura_core::backend::{Backend, Backends};
 use hura_core::session::Session;
 use hura_core::store::Store;
-use hura_core::{
-    chat, comments, config, endpoints, files, git, image, ops, policy, projects, repos, secrets,
-    skills,
-};
+use hura_core::{chat, comments, config, files, git, image, ops, projects, repos, secrets, skills};
 use hura_proto::{Failure, GitOp, McpOp, Outcome, Reply, Request};
-use openshell_client::CliClient;
 
 /// Answer one request.
 ///
@@ -41,22 +37,18 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
         Request::Allow {
             name,
             endpoint,
-            binaries,
             everywhere,
         } => with_session(&name, |s| {
-            let backend = backends.for_session(s);
-            let revision = ops::allow(backend, s, &endpoint, &binaries, &[], everywhere)
-                .map_err(Failure::failed)?;
-            Ok(policy_view(&revision, s))
+            ops::allow(backends.for_session(s), s, &endpoint, &[], everywhere)
+                .map(Reply::Policy)
+                .map_err(Failure::failed)
         }),
         Request::AllowPaths {
             name,
             endpoint,
-            binaries,
             routes,
             everywhere,
         } => with_session(&name, |s| {
-            let backend = backends.for_session(s);
             // Never an allow of the whole host: that is `Allow`, and an empty
             // list here is a client that lost the paths on the way.
             if routes.is_empty() {
@@ -64,19 +56,23 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                     "no paths named to allow on {endpoint}"
                 )));
             }
-            let revision = ops::allow(backend, s, &endpoint, &binaries, &routes, everywhere)
-                .map_err(Failure::failed)?;
-            Ok(policy_view(&revision, s))
+            ops::allow(backends.for_session(s), s, &endpoint, &routes, everywhere)
+                .map(Reply::Policy)
+                .map_err(Failure::failed)
         }),
         Request::Block {
             name,
             endpoint,
             everywhere,
         } => with_session(&name, |s| {
-            let backend = backends.for_session(s);
-            let revision =
-                ops::block(backend, s, &endpoint, everywhere).map_err(Failure::failed)?;
-            Ok(policy_view(&revision, s))
+            ops::block(backends.for_session(s), s, &endpoint, everywhere)
+                .map(Reply::Policy)
+                .map_err(Failure::failed)
+        }),
+        Request::RemoveRule { name, id } => with_session(&name, |s| {
+            ops::remove_rule(backends.for_session(s), s, &id)
+                .map(Reply::Policy)
+                .map_err(Failure::failed)
         }),
         Request::Unlist { name, endpoint } => with_session(&name, |s| {
             ops::unlist(&endpoint).map_err(Failure::failed)?;
@@ -385,7 +381,7 @@ fn repo_list() -> Outcome {
 /// What is known about the repository a client has picked.
 ///
 /// The provider half fails softly, like the list in [`ops::new_options`]: a
-/// gateway that cannot be reached leaves nothing ticked, which is a form you
+/// list that cannot be read leaves nothing ticked, which is a form you
 /// can still fill in, rather than an error against a question that was mostly
 /// about git.
 fn inspect(backends: &Backends, path: &str, branch: Option<&str>) -> Outcome {
@@ -408,16 +404,8 @@ fn inspect(backends: &Backends, path: &str, branch: Option<&str>) -> Outcome {
         Vec::new()
     } else {
         let origin = checkout.origin.clone();
-        let choices: Vec<ops::ProviderChoice> = backends
-            .gateway()
-            .providers()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|p| ops::ProviderChoice {
-                name: p.name,
-                kind: p.kind,
-            })
-            .collect();
+        let choices: Vec<ops::ProviderChoice> =
+            backends.sandboxed().providers().unwrap_or_default();
         let sessions: Result<Vec<Session>, _> =
             Store::load().map(|s| s.list().into_iter().cloned().collect());
         let used = match (&origin, &sessions) {
@@ -439,8 +427,8 @@ fn inspect(backends: &Backends, path: &str, branch: Option<&str>) -> Outcome {
 ///
 /// Everything that can be judged from the request is judged here, so a name
 /// with a slash in it or a toolchain nobody has heard of comes back as an error
-/// against the request that caused it. What is left is tens of seconds of
-/// gateway and network, and that runs on a thread: the states it passes through
+/// against the request that caused it. What is left is seconds of sandbox
+/// runtime and network, and that runs on a thread: the states it passes through
 /// are on the session, and the session is already polled.
 fn create(new: hura_core::ops::NewSession) -> Outcome {
     let cfg = match config::Config::load() {
@@ -520,16 +508,9 @@ fn ls(backends: &Backends) -> Outcome {
 
 /// The policy pane's contents.
 fn policy(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
-    let revision = ops::policy(backend, session).map_err(Failure::gateway)?;
-    Ok(policy_view(&revision, session))
-}
-
-fn policy_view(revision: &openshell_client::PolicyRevision, session: &Session) -> Reply {
-    Reply::Policy(policy::View::of(
-        revision,
-        session.policy.as_deref(),
-        &lists(),
-    ))
+    ops::policy(backend, session)
+        .map(Reply::Policy)
+        .map_err(Failure::gateway)
 }
 
 fn events(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
@@ -539,21 +520,17 @@ fn events(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
 
 /// The backend, as this server holds it.
 ///
-/// Built per use rather than kept in a `static`: a `CliClient` is a path and two
-/// options, and building it costs a config read. What that buys is an `hurad` that picks up an edited `config.toml`
-/// without a restart, which is the same promise every other read here makes.
+/// Built per use rather than kept in a `static`: a client is a path, and
+/// building one costs a config read. What that buys is an `hurad` that picks up
+/// an edited `config.toml` without a restart, which is the same promise every
+/// other read here makes.
 pub fn backends() -> Backends {
-    let cfg = config::Config::load().unwrap_or_default();
-    let mut client = CliClient::default();
-    if let Some(g) = &cfg.gateway {
-        client = client.with_gateway(g.clone());
-    }
-    Backends::from_client(Box::new(client))
+    Backends::from_config(&config::Config::load().unwrap_or_default())
 }
 
 /// Look a session up by name, and answer for it.
 ///
-/// The lookup is against the cache rather than the gateway, which is what
+/// The lookup is against the cache rather than the runtime, which is what
 /// `require_session` in the CLI does too: the cache is reconciled by `Ls`, and
 /// a name that is not in it is a client asking about something that has gone.
 fn with_session(name: &str, f: impl FnOnce(&Session) -> Result<Reply, Failure>) -> Outcome {
@@ -568,15 +545,6 @@ fn with_session(name: &str, f: impl FnOnce(&Session) -> Result<Reply, Failure>) 
         Ok(reply) => reply.into(),
         Err(failure) => failure.into(),
     }
-}
-
-/// The global allow and block lists, for the policy reply.
-///
-/// Empty on a read failure rather than fatal, for the reason `hura policy` does
-/// the same: the point of asking is the sandbox's own rules, and losing them to
-/// an unreadable convenience file is the wrong trade.
-fn lists() -> endpoints::Lists {
-    endpoints::Lists::load().unwrap_or_default()
 }
 
 /// A sandbox's ports: what is listening and who holds it, from the sandbox;

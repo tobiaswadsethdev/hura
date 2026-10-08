@@ -1,9 +1,9 @@
 //! Git repositories on the *host*, for starting a session from one.
 //!
-//! Everything here runs on the machine running `hura`, not inside a sandbox --
+//! Everything here runs on the machine running `hura`, not inside a sandbox,
 //! the only module that does. A local repository is a way of *naming* a remote,
-//! not a source of code: the sandbox still clones from `origin` over the
-//! gateway, so what is read here is the remote URL, the current branch, and how
+//! not a source of code: the sandbox still clones from `origin` through its own
+//! proxy, so what is read here is the remote URL, the current branch, and how
 //! far the working copy has drifted from what the sandbox will get.
 //!
 //! The metadata is read straight out of `.git` rather than by running git.
@@ -378,7 +378,7 @@ pub struct Facts {
     pub unpushed: Option<usize>,
     /// Whether `origin/<branch>` exists. A branch that has never been pushed
     /// cannot be cloned from, so the form falls back to the remote's default
-    /// branch rather than handing the gateway a clone that will fail.
+    /// branch rather than handing the sandbox a clone that will fail.
     pub base_on_remote: bool,
     /// Toolchains the checkout looks like it needs, by name. See
     /// [`crate::toolchain::detect`]: the form ticks these rather than asking

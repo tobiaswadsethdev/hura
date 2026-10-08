@@ -1,16 +1,17 @@
 //! The allow/deny feed.
 //!
-//! `openshell logs <sandbox>` emits OCSF lines for every policy decision the
-//! supervisor makes. "The agent tried to reach pastebin.com and was denied", as
-//! a live event, is the thing this tool can show that claude-squad structurally
-//! cannot -- so it gets a pane.
+//! The sandbox runtime's proxy logs every decision it makes about a session's
+//! traffic. "The agent tried to reach pastebin.com and was denied", as a live
+//! event, is the thing this tool can show that claude-squad structurally
+//! cannot, so it gets a pane.
 //!
-//! Kept on disk per session, because the gateway's window is too small to be a
-//! record; see [`merge_kept`].
+//! The runtime counts rather than lists: one row per host and rule since its
+//! daemon started, with when it was first and last seen and how often. Each row
+//! is one [`Event`] here, at its first sighting, and a row seen again updates
+//! the event's count rather than adding another; see [`merge_kept`].
 //!
-//! This is a gateway call rather than an exec, which matters: it does not
-//! contend with the serialised per-sandbox exec budget the diff and poll panes
-//! share, so the feed can refresh on its own timer without delaying anything.
+//! Kept on disk per session, because the runtime's log starts again every time
+//! its daemon does and is no record; see [`merge_kept`].
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,8 +26,9 @@ pub enum Verdict {
     Neutral,
 }
 
-/// Severity as the gateway grades it. Anything above `Info` is worth colouring:
-/// the `tls: terminate` deprecation only ever appeared as a `Med`.
+/// Severity as OpenShell graded it. The sandbox runtime grades nothing, so its
+/// events are all `Info`; the rest are for events kept from before, and
+/// anything above `Info` is still worth colouring.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
@@ -40,16 +42,6 @@ pub enum Severity {
 }
 
 impl Severity {
-    fn parse(s: &str) -> Self {
-        match s {
-            "INFO" => Severity::Info,
-            "MED" => Severity::Medium,
-            "HIGH" => Severity::High,
-            "CRIT" | "CRITICAL" => Severity::Critical,
-            _ => Severity::Other,
-        }
-    }
-
     pub fn is_notable(self) -> bool {
         self > Severity::Info
     }
@@ -58,7 +50,7 @@ impl Severity {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Event {
-    /// Epoch seconds. The gateway prints fractional seconds; the fraction is
+    /// Epoch seconds. The runtime writes fractional seconds; the fraction is
     /// dropped because the feed shows a wall-clock time, not a duration.
     // `number`, not the `bigint` ts-rs assumes for a u64: serde_json writes it
     // as a JSON number and `JSON.parse` reads one back, so `bigint` would be a
@@ -66,6 +58,15 @@ pub struct Event {
     // until the year 285000000.
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub at: u64,
+    /// How many times it has happened, which the runtime counts. One for an
+    /// event kept before it counted.
+    #[serde(default = "one")]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub count: u64,
+    /// When it last happened, as epoch seconds; `at` for one seen once.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub last: u64,
     /// `NET:OPEN`, `HTTP:GET`, `CONFIG:VALIDATED`.
     pub class: String,
     pub severity: Severity,
@@ -76,6 +77,10 @@ pub struct Event {
     /// and is normalised to `None`.
     pub policy: Option<String>,
     pub reason: Option<String>,
+}
+
+fn one() -> u64 {
+    1
 }
 
 /// How many events to keep per session on disk.
@@ -100,16 +105,11 @@ fn kept_path(session: &str) -> PathBuf {
 
 /// Add what was just fetched to what was already known, and keep the result.
 ///
-/// The gateway's log is a rolling window and hura is the thing making it roll:
-/// every exec it takes to read a sandbox writes three lines of its own, so at the
-/// intervals of increment 17 a 1500-line window covers about two minutes and held
-/// *one* event worth showing. Closing the tool and opening it again therefore
-/// looked like the feed had been cleared -- and for anything older than those two
-/// minutes, it had been.
-///
-/// So the feed is now ours to keep. Each fetch is merged into a file per session,
-/// deduplicated, and trimmed; the pane draws the union. Losing the file costs the
-/// history and nothing else, like the session cache beside it.
+/// The runtime's log starts again every time its daemon does, so the feed is
+/// ours to keep. Each fetch is merged into a file per session and trimmed; the
+/// pane draws the union. An event already kept takes the fetched one's count
+/// and last sighting, since the runtime counts on in the same row. Losing the
+/// file costs the history and nothing else, like the session cache beside it.
 pub fn merge_kept(session: &str, fetched: Vec<Event>) -> Vec<Event> {
     // Across the read and the write. `hurad` merges from more than one thread,
     // its own collector and whichever pane is open, and two merges interleaved
@@ -119,20 +119,34 @@ pub fn merge_kept(session: &str, fetched: Vec<Event>) -> Vec<Event> {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let path = kept_path(session);
     let mut all = read_kept(&path);
-    let mut known: std::collections::HashSet<(u64, String, String)> =
-        all.iter().map(identity).collect();
+    let mut known: std::collections::HashMap<(u64, String, String), usize> = all
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (identity(e), i))
+        .collect();
 
-    let mut added = false;
+    let mut changed = false;
     for e in fetched {
-        // Inserted as they are taken, because one window can carry the same line
-        // twice -- two identical execs inside the timestamp's resolution -- and a
-        // set that only knows the file would keep both.
-        if known.insert(identity(&e)) {
-            all.push(e);
-            added = true;
+        // Looked up as they are taken, because one fetch can carry the same
+        // event twice, and a map that only knows the file would keep both.
+        match known.get(&identity(&e)) {
+            Some(&i) => {
+                let kept = &mut all[i];
+                if e.count > kept.count || e.last > kept.last {
+                    kept.count = kept.count.max(e.count);
+                    kept.last = kept.last.max(e.last);
+                    kept.reason = e.reason.or(kept.reason.take());
+                    changed = true;
+                }
+            }
+            None => {
+                known.insert(identity(&e), all.len());
+                all.push(e);
+                changed = true;
+            }
         }
     }
-    if !added && !all.is_empty() {
+    if !changed && !all.is_empty() {
         return newest_first(all);
     }
 
@@ -149,8 +163,8 @@ pub fn merge_kept(session: &str, fetched: Vec<Event>) -> Vec<Event> {
     newest_first(all)
 }
 
-/// What makes two events the same event. The gateway's own line, in effect: a
-/// timestamp plus what it was about.
+/// What makes two events the same event: when it was first seen, and what it
+/// was about.
 fn identity(e: &Event) -> (u64, String, String) {
     e.key()
 }
@@ -180,12 +194,12 @@ fn read_kept(path: &Path) -> Vec<Event> {
 ///
 /// Those were cut at the first `]` inside a reason, and what followed became
 /// more of the subject: `/usr/bin/curl(8898) -> api.github.com:443  , cmdline:
-/// ). S...]`. They are on disk, and the denials they record have long left the
-/// gateway's window, so mending them as they are read is the only way they
+/// ). S...]`. They are on disk, and the denials they record have long left
+/// OpenShell's window, so mending them as they are read is the only way they
 /// can still be allowed. The tail always begins with whitespace and then the
-/// `,` or `]` that followed a nested group, which no subject the gateway
-/// writes has. Mended, they also match the same lines read again, so a
-/// denial still in the window is not kept twice.
+/// `,` or `]` that followed a nested group, which no subject OpenShell wrote
+/// had. Mended, they also matched the same lines read again, so a denial
+/// still in the window was not kept twice.
 fn mended(subject: &str) -> &str {
     subject
         .char_indices()
@@ -220,32 +234,25 @@ pub fn forget_kept(session: &str) {
 /// The endpoint an event was about, when it was about one.
 ///
 /// This is what makes the feed actionable rather than only readable: a denial
-/// names a host, a port and usually the binary that reached for it, which is
-/// exactly the shape `policy update` takes. Everything else in the pane is
-/// prose.
+/// names a host and a port, which is exactly what an allow or a block takes.
+/// Everything else in the pane is prose.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Target {
-    /// `pastebin.com:443`. The unit `--add-endpoint` and `--remove-endpoint`
-    /// both address, so the whole feature is expressed in these.
+    /// `pastebin.com:443`, the unit an allow and a block both address.
     pub endpoint: String,
-    /// The kernel-resolved path the connection came from, when the line names
-    /// one. Absent for a bare L7 decision, which judges a method and a path --
-    /// and absent is load-bearing: an endpoint rule with
-    /// no binaries grants nothing, so an allow with nothing to bind to is
-    /// refused rather than issued.
-    pub binary: Option<String>,
 }
 
 impl Event {
     /// What this event was about, as an endpoint.
     ///
-    /// Three shapes come back on one feed and all three have to be read:
+    /// Three shapes have to be read: the two the runtime's log becomes, and
+    /// the one events kept from before it still carry:
     ///
     /// ```text
-    /// /usr/bin/curl(79) -> pastebin.com:443     an L4 decision, with a binary
-    /// GET httpbin.org:443/ip                    an L7 decision, with a path
-    /// host.openshell.internal:17670             a bare authority
+    /// POST github.com:443/o/r.git/git-receive-pack   a request, by its path
+    /// example.com:443                                a connection
+    /// /usr/bin/curl(79) -> pastebin.com:443          kept from before
     /// ```
     ///
     /// Anything else -- a `CONFIG:VALIDATED` warning is a whole English
@@ -256,13 +263,12 @@ impl Event {
     pub fn target(&self) -> Option<Target> {
         let subject = self.subject.trim();
 
-        // `/usr/bin/curl(79) -> pastebin.com:443`, and the L7 decision with a
-        // binary in front of it, `/usr/bin/curl(5180) -> GET github.com/`.
-        if let Some((left, right)) = subject.split_once(" -> ") {
+        // `/usr/bin/curl(79) -> pastebin.com:443`, and the request with a
+        // program in front of it, `/usr/bin/curl(5180) -> GET github.com/`.
+        if let Some((_, right)) = subject.split_once(" -> ") {
             let right = request(right).unwrap_or(right);
             return Some(Target {
                 endpoint: self.endpoint_of(right)?,
-                binary: binary_path(left),
             });
         }
 
@@ -270,13 +276,11 @@ impl Event {
         if let Some(authority) = request(subject) {
             return Some(Target {
                 endpoint: self.endpoint_of(authority)?,
-                binary: None,
             });
         }
 
         Some(Target {
             endpoint: host_port(subject)?,
-            binary: None,
         })
     }
 
@@ -373,16 +377,6 @@ fn host_port(s: &str) -> Option<String> {
     (port != 0).then(|| format!("{host}:{port}"))
 }
 
-/// `/usr/bin/curl(79)` -> `/usr/bin/curl`.
-///
-/// Absolute paths only: the policy matches on the kernel-resolved `/proc/<pid>/exe`,
-/// so anything that is not one is not a path the gateway would accept.
-fn binary_path(s: &str) -> Option<String> {
-    let path = s.trim();
-    let path = path.rsplit_once('(').map_or(path, |(p, _)| p).trim();
-    path.starts_with('/').then(|| path.to_string())
-}
-
 impl Event {
     /// `HH:MM:SS` in local time, for the feed's left column.
     ///
@@ -401,216 +395,121 @@ impl Event {
     }
 }
 
-/// Bracketed groups the log line puts before the payload.
-const LEADING_GROUPS: usize = 4;
-
-/// Parse the log output of `openshell logs` into policy decisions.
+/// The decisions in a Docker Sandboxes policy log, as events.
 ///
-/// Non-OCSF lines are dropped. They are the supervisor's own tracing, at a
-/// level of detail (`Resolved policy binary symlink via container filesystem`)
-/// that belongs in a bug report rather than a feed.
-pub fn parse(logs: &str) -> Vec<Event> {
-    logs.lines()
-        .filter_map(parse_line)
-        .filter(is_worth_showing)
-        .collect()
+/// The runtime counts rather than lists: one row per host and rule since its
+/// daemon started, with when it was first and last seen. Each row becomes one
+/// event at its first sighting, so a row seen again is the same event. The
+/// subject takes a shape [`Event::target`] already reads: `METHOD host:port/path`
+/// for a request the proxy judged by its method and path, `host:port` for a
+/// connection. Name lookups are left out; every connection already has a row
+/// of its own, and the lookups are the half nobody acts on.
+pub fn from_sbx(log: &sbx_client::PolicyLog) -> Vec<Event> {
+    let rows = log
+        .blocked_hosts
+        .iter()
+        .map(|e| (e, Verdict::Denied))
+        .chain(log.allowed_hosts.iter().map(|e| (e, Verdict::Allowed)));
+    let mut out: Vec<Event> = rows
+        .filter(|(e, _)| e.proxy_type != "network" && !e.host.ends_with(".docker.internal"))
+        .filter_map(|(e, verdict)| {
+            let at = epoch_of(&e.since)?;
+            let request = requested(&e.rule);
+            let (class, subject) = match &request {
+                Some((method, path)) => (
+                    format!("HTTP:{method}"),
+                    format!("{method} {}{path}", e.host),
+                ),
+                None => ("NET:OPEN".to_string(), e.host.clone()),
+            };
+            Some(Event {
+                at,
+                count: e.count_since.max(1),
+                last: epoch_of(&e.last_seen).unwrap_or(at).max(at),
+                class,
+                severity: Severity::Info,
+                verdict,
+                subject,
+                policy: deciding_rule(&e.rule),
+                reason: e.reason.clone().filter(|r| !r.is_empty()),
+            })
+        })
+        .collect();
+    out.sort_by_key(|e| std::cmp::Reverse(e.at));
+    out
 }
 
-/// Whether an event belongs in an allow/deny feed.
-///
-/// Both halves of this were found by building the pane and watching a real
-/// denial scroll off the top within a second.
-///
-/// `hura` polls once a second and every poll opens an exec. Each exec logs an
-/// ssh relay open, an `SSH:OPEN ALLOWED`, a relay close, and a pair of
-/// `CONFIG:APPLYING`/`CONFIG:BUILT` lines as Landlock is applied to the new
-/// process -- five events per second, every one of them the observer rather
-/// than the observed.
-///
-/// So: keep the decisions, and keep anything the gateway graded above routine
-/// -- that second clause is what preserves `CONFIG:VALIDATED [MED]`, which is
-/// the only channel the gateway has for saying a policy key is deprecated, and
-/// is how the `tls: terminate` removal was found. Everything else is startup
-/// chatter or `hura` looking at the sandbox.
-fn is_worth_showing(e: &Event) -> bool {
-    if e.class.starts_with("SSH:") || e.subject.contains("ssh relay") {
-        return false;
-    }
-    e.verdict != Verdict::Neutral || e.severity.is_notable()
-}
-
-fn parse_line(line: &str) -> Option<Event> {
-    let rest = line.trim();
-
-    // [timestamp] [source] [level] [logger] then the payload.
-    let mut groups = Vec::with_capacity(LEADING_GROUPS);
-    let mut cursor = rest;
-    for _ in 0..LEADING_GROUPS {
-        let inner = cursor.strip_prefix('[')?;
-        let (group, after) = inner.split_once(']')?;
-        groups.push(group.trim());
-        cursor = after.trim_start();
-    }
-    // Only OCSF lines are policy decisions.
-    if groups[3] != "ocsf" {
+/// The method and path out of a judged request, from the operation the log
+/// names: `op(action=http:request:post, ..., http:path:/o/r.git/git-receive-pack])`.
+fn requested(rule: &str) -> Option<(String, String)> {
+    let action = rule.split("action=http:request:").nth(1)?;
+    let method: String = action
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect();
+    if method.is_empty() {
         return None;
     }
-    // The fraction is real precision, but the feed shows a clock time.
-    let at = groups[0].split('.').next()?.parse::<u64>().ok()?;
+    let path = rule.split("http:path:").nth(1)?;
+    let path: String = path
+        .chars()
+        .take_while(|c| !matches!(c, ']' | ','))
+        .collect();
+    path.starts_with('/')
+        .then(|| (method.to_ascii_uppercase(), path))
+}
 
-    // CLASS:ACTIVITY [SEV] payload
-    let (class, after) = cursor.split_once(' ')?;
-    if !class.contains(':') {
-        return None;
-    }
-    let after = after.trim_start();
-    let (severity, payload) = match after.strip_prefix('[').and_then(|s| s.split_once(']')) {
-        Some((sev, tail)) => (Severity::parse(sev.trim()), tail.trim()),
-        // A shape this build has not seen. Kept rather than dropped: an
-        // unparsed decision is still a decision.
-        None => (Severity::Other, after),
+/// The rule that decided, when one did: `local:ID` out of
+/// `denied: rule "local:ID" matched op(...)`. A refusal because nothing matched
+/// names no rule, which is `None` here as `-` was in OpenShell's log.
+fn deciding_rule(rule: &str) -> Option<String> {
+    let quoted = rule.split("rule \"").nth(1)?;
+    let id = quoted.split('"').next()?;
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+/// Epoch seconds from an RFC 3339 time, as the runtime writes them:
+/// `2026-10-08T11:34:44.903534058+02:00` or with a `Z`. The fraction is
+/// dropped, for the reason [`Event::at`] gives.
+fn epoch_of(stamp: &str) -> Option<u64> {
+    let (date, rest) = stamp.split_once('T')?;
+    let mut ymd = date.splitn(3, '-').map(|p| p.parse::<i64>().ok());
+    let (y, m, d) = (ymd.next()??, ymd.next()??, ymd.next()??);
+    let (clock, offset) = if let Some(c) = rest.strip_suffix('Z') {
+        (c, 0)
+    } else {
+        let at = rest.rfind(['+', '-'])?;
+        let (c, off) = rest.split_at(at);
+        let sign = if off.starts_with('-') { -1 } else { 1 };
+        let (oh, om) = off[1..].split_once(':')?;
+        (
+            c,
+            sign * (oh.parse::<i64>().ok()? * 3600 + om.parse::<i64>().ok()? * 60),
+        )
     };
-
-    let mut event = Event {
-        at,
-        class: class.to_string(),
-        severity,
-        verdict: Verdict::Neutral,
-        subject: String::new(),
-        policy: None,
-        reason: None,
-    };
-    fill_payload(&mut event, payload);
-    Some(event)
-}
-
-/// Split `ALLOWED <subject> [policy:x engine:y] [reason:z]` into its parts.
-fn fill_payload(event: &mut Event, payload: &str) {
-    let mut subject = String::new();
-    let mut cursor = payload;
-
-    // The verdict, when there is one, is the first word.
-    for (word, verdict) in [("ALLOWED", Verdict::Allowed), ("DENIED", Verdict::Denied)] {
-        if let Some(tail) = cursor.strip_prefix(word) {
-            event.verdict = verdict;
-            cursor = tail.trim_start();
-            break;
-        }
-    }
-
-    // Then free text up to the first bracketed group, and the groups after it.
-    while !cursor.is_empty() {
-        match cursor.find('[') {
-            Some(start) => {
-                subject.push_str(&cursor[..start]);
-                let after = &cursor[start + 1..];
-                // The gateway truncates long reasons with a trailing `...` and
-                // no closing bracket, so an unterminated group is normal.
-                let (group, tail) = match closing(after) {
-                    Some(end) => (&after[..end], &after[end + 1..]),
-                    None => (after, ""),
-                };
-                absorb_group(event, group);
-                cursor = tail;
-            }
-            None => {
-                subject.push_str(cursor);
-                break;
-            }
-        }
-    }
-    // Only if there is something to set. An event whose whole description
-    // lives in a `msg:` group has no free text at all, and assigning the empty
-    // accumulator would throw away what `absorb_group` already recovered.
-    let subject = subject.trim();
-    if !subject.is_empty() {
-        event.subject = strip_scheme(subject);
-    }
-}
-
-/// Where the group that `after` is the inside of ends: the `]` that closes it,
-/// counting the brackets nested in it. `None` when nothing does.
-///
-/// Nesting is ordinary. A binary refused for an endpoint some rule does name
-/// is explained as `[reason:binary '/usr/bin/curl' not allowed in policy
-/// 'github_rest_api' (ancestors: [...], cmdline: [...]). ...]`, and a tunnel
-/// cut by a policy change carries `[captured_generation:5 ...]`. Stopping at
-/// the first `]` cut those reasons short and took the rest for more of the
-/// subject, so `api.github.com:443` came out as `api.github.com:443  ,
-/// cmdline: ). S...]`, which is no endpoint, and the pane could not offer to
-/// allow the very denials that most need it.
-fn closing(after: &str) -> Option<usize> {
-    let mut depth = 0usize;
-    for (i, c) in after.char_indices() {
-        match c {
-            '[' => depth += 1,
-            ']' if depth == 0 => return Some(i),
-            ']' => depth -= 1,
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Drop the `http://` an L7 decision carries.
-///
-/// The gateway logs the request it inspected, and after TLS termination that
-/// request is plaintext HTTP inside the sandbox -- so `http://github.com:443`
-/// is accurate about what the proxy saw and actively misleading about what left
-/// the machine. Seven columns of a narrow pane spent inviting the reader to
-/// wonder whether their traffic is in the clear.
-fn strip_scheme(subject: &str) -> String {
-    subject.replace("http://", "")
-}
-
-fn absorb_group(event: &mut Event, group: &str) {
-    if let Some(reason) = group.strip_prefix("reason:") {
-        event.reason = Some(reason.trim().to_string());
-        return;
-    }
-    // `msg:` carries the whole description for events with no subject of their
-    // own, so it becomes the subject rather than being thrown away.
-    if let Some(msg) = group.strip_prefix("msg:") {
-        if event.subject.is_empty() {
-            event.subject = msg.trim().to_string();
-        }
-        return;
-    }
-    // `[policy:github_git engine:opa]` is one group holding two fields.
-    for field in group.split_whitespace() {
-        if let Some(p) = field.strip_prefix("policy:")
-            && p != "-"
-        {
-            event.policy = Some(p.to_string());
-        }
-    }
+    let clock = clock.split('.').next()?;
+    let mut hms = clock.splitn(3, ':').map(|p| p.parse::<i64>().ok());
+    let (hh, mm, ss) = (hms.next()??, hms.next()??, hms.next()??);
+    // Days since the epoch from a civil date: Howard Hinnant's algorithm.
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let secs = days * 86_400 + hh * 3600 + mm * 60 + ss - offset;
+    u64::try_from(secs).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Captured verbatim from `openshell logs` on 0.0.110, by exercising an
-    /// allowed and a denied path from inside a sandbox running
-    /// `policies/feature-work.yaml`.
-    const LOG: &str = r#"[1787568598.279] [sandbox] [OCSF ] [ocsf] CONFIG:VALIDATED [MED] L7 policy validation warning: claude_code.endpoints[0]: 'tls: terminate' is deprecated; TLS termination is now automatic. Use 'tls: skip' to disable.
-[1787568645.144] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] [msg:ssh relay open (channel_id=8802c05b-c736-409b-8904-25d2a0231d57, target=unix:/run/openshell/ssh.sock)]
-[1787568645.145] [sandbox] [OCSF ] [ocsf] SSH:OPEN [INFO] ALLOWED
-[1787568645.329] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED /usr/lib/git-core/git-remote-http(72) -> github.com:443 [policy:github_git engine:opa]
-[1787568645.379] [sandbox] [OCSF ] [ocsf] HTTP:GET [INFO] ALLOWED GET http://github.com:443/octocat/Hello-World.git/info/refs [policy:github_git engine:l7]
-[1787568645.883] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(79) -> pastebin.com:443 [policy:- engine:opa] [reason:endpoint pastebin.com:443 is not allowed by any policy]
-[1787568980.997] [sandbox] [OCSF ] [ocsf] HTTP:GET [MED] DENIED GET http://httpbin.org:443/ip [policy:strict engine:l7] [reason:L7_REQUEST deny GET httpbin.org:443/ip reason=GET /ip not permitted by policy]
-[1787568688.750] [sandbox] [INFO ] [openshell_supervisor_network::opa] Resolved policy binary symlink via container filesystem: original=/usr/lib/git-core/git-remote-https pid=56
-[1787568598.674] [gateway] [INFO ] [openshell_server::grpc::policy] applied policy revision
-[1787568688.958] [sandbox] [OCSF ] [ocsf] CONFIG:APPLYING [INFO] Applying Landlock filesystem sandbox [abi:V2 compat:BestEffort ro:7 rw:4]
-[1787568688.958] [sandbox] [OCSF ] [ocsf] CONFIG:BUILT [INFO] Landlock ruleset built [rules_applied:10 skipped:1]
-[1787568598.690] [sandbox] [OCSF ] [ocsf] PROC:LAUNCH [INFO] sleep(56)
-[1787568598.705] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] host.openshell.internal:17670
-"#;
-
     fn ev(at: u64, subject: &str) -> Event {
         Event {
             at,
+            count: 1,
+            last: at,
             class: "NET:OPEN".into(),
             severity: Severity::Info,
             verdict: Verdict::Allowed,
@@ -663,40 +562,57 @@ mod tests {
         }
     }
 
-    /// The feed has to survive the tool closing, which is what it could not do:
-    /// the gateway's window is about two minutes wide at these poll intervals, so
-    /// anything older than that was gone -- and reopening looked like a wipe.
+    /// The feed has to survive the runtime's daemon starting again, which
+    /// takes its log with it.
     #[test]
-    fn kept_events_outlive_the_window_they_came_from() {
+    fn kept_events_outlive_the_log_they_came_from() {
         let _home = Home::new("events-keep");
 
-        // A first look, which is all the gateway still had.
-        let first = merge_kept("s", vec![ev(100, "curl -> a"), ev(200, "curl -> b")]);
+        let first = merge_kept(
+            "s",
+            vec![ev(100, "a.example.com:443"), ev(200, "b.example.com:443")],
+        );
         assert_eq!(first.len(), 2);
         assert_eq!(first[0].at, 200, "newest first, like a feed");
 
-        // Later, the window has rolled: only the newest is still in it, plus one
-        // that has happened since.
-        let second = merge_kept("s", vec![ev(200, "curl -> b"), ev(300, "curl -> c")]);
+        // Later, the log has started again: only one of them is still in it,
+        // plus one that has happened since.
+        let second = merge_kept(
+            "s",
+            vec![ev(200, "b.example.com:443"), ev(300, "c.example.com:443")],
+        );
         let times: Vec<u64> = second.iter().map(|e| e.at).collect();
         assert_eq!(times, vec![300, 200, 100], "the old one is still there");
 
-        // And a fetch that returns nothing at all -- an unreachable gateway, a
-        // window with no events in it -- must not empty the feed.
-        let third = merge_kept("s", vec![]);
-        assert_eq!(third.len(), 3);
+        // And a fetch that returns nothing at all must not empty the feed.
+        assert_eq!(merge_kept("s", vec![]).len(), 3);
     }
 
+    /// The runtime counts on in the same row, so the kept event takes the new
+    /// count and last sighting rather than a second row appearing.
     #[test]
-    fn the_same_event_is_never_kept_twice() {
-        let _home = Home::new("events-dedupe");
-        merge_kept("s", vec![ev(100, "curl -> a")]);
-        let again = merge_kept("s", vec![ev(100, "curl -> a"), ev(100, "curl -> a")]);
-        assert_eq!(again.len(), 1);
+    fn a_counted_event_is_updated_rather_than_kept_twice() {
+        let _home = Home::new("events-count");
+        merge_kept("s", vec![ev(100, "a.example.com:443")]);
+        let mut again = ev(100, "a.example.com:443");
+        again.count = 4;
+        again.last = 160;
+        let kept = merge_kept("s", vec![again.clone(), again]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!((kept[0].count, kept[0].last), (4, 160));
 
-        // And twice inside one fetch, which nothing on the file can catch.
-        let once = merge_kept("t", vec![ev(100, "curl -> a"), ev(100, "curl -> a")]);
-        assert_eq!(once.len(), 1, "a window carrying the same line twice");
+        // An older reading never winds it back.
+        let stale = ev(100, "a.example.com:443");
+        assert_eq!(merge_kept("s", vec![stale])[0].count, 4);
+    }
+
+    /// Events kept before the runtime counted read as seen once.
+    #[test]
+    fn an_event_kept_before_counts_reads_as_once() {
+        let old = r#"{"at":1787568645,"class":"NET:OPEN","severity":"Info","verdict":"Denied","subject":"/usr/bin/curl(79) -> pastebin.com:443","policy":null,"reason":null}"#;
+        let e: Event = serde_json::from_str(old).unwrap();
+        assert_eq!(e.count, 1);
+        assert_eq!(e.target().unwrap().endpoint, "pastebin.com:443");
     }
 
     #[test]
@@ -713,182 +629,6 @@ mod tests {
 
         forget_kept("s");
         assert!(merge_kept("s", vec![]).is_empty(), "nothing is left");
-    }
-
-    #[test]
-    fn keeps_only_ocsf_policy_decisions() {
-        let events = parse(LOG);
-        // Everything that is not a decision is dropped: the two plain-tracing
-        // lines, the two ssh-relay events, the Landlock pair, the process
-        // launch and the supervisor's own connection to the gateway. The
-        // deprecation warning survives on severity alone.
-        let classes: Vec<&str> = events.iter().map(|e| e.class.as_str()).collect();
-        assert_eq!(
-            classes,
-            vec![
-                "CONFIG:VALIDATED",
-                "NET:OPEN",
-                "HTTP:GET",
-                "NET:OPEN",
-                "HTTP:GET"
-            ]
-        );
-    }
-
-    /// Landlock is applied to every process the sandbox launches, which
-    /// includes every exec hura makes to poll it. Two events per poll, forever.
-    #[test]
-    fn the_feed_excludes_routine_landlock_chatter() {
-        for line in LOG
-            .lines()
-            .filter(|l| l.contains("Landlock") || l.contains("PROC:LAUNCH"))
-        {
-            let e = parse_line(line).expect("it parses");
-            assert_eq!(e.verdict, Verdict::Neutral);
-            assert!(!is_worth_showing(&e), "{line} must not reach the feed");
-        }
-    }
-
-    /// The feed exists to show this line. Every field of it has to survive.
-    #[test]
-    fn parses_a_denial_in_full() {
-        let denial = parse(LOG)
-            .into_iter()
-            .find(|e| e.subject.contains("pastebin"))
-            .expect("the denial");
-        assert_eq!(denial.verdict, Verdict::Denied);
-        assert_eq!(denial.class, "NET:OPEN");
-        assert_eq!(denial.severity, Severity::Medium);
-        assert!(denial.severity.is_notable());
-        assert_eq!(denial.subject, "/usr/bin/curl(79) -> pastebin.com:443");
-        assert_eq!(
-            denial.reason.as_deref(),
-            Some("endpoint pastebin.com:443 is not allowed by any policy")
-        );
-        // `policy:-` means nothing matched, which is not a rule called "-".
-        assert_eq!(denial.policy, None);
-    }
-
-    #[test]
-    fn parses_an_allow_and_credits_the_rule() {
-        let allow = parse(LOG)
-            .into_iter()
-            .find(|e| e.subject.contains("git-remote-http"))
-            .expect("the allow");
-        assert_eq!(allow.verdict, Verdict::Allowed);
-        assert_eq!(allow.policy.as_deref(), Some("github_git"));
-        assert_eq!(
-            allow.subject,
-            "/usr/lib/git-core/git-remote-http(72) -> github.com:443"
-        );
-        assert!(allow.reason.is_none());
-        assert!(!allow.subject.contains("http://"));
-        assert!(!allow.severity.is_notable());
-    }
-
-    /// An L7 decision names a method and a path, not a binary. Both shapes come
-    /// back on the same feed and both have to read correctly.
-    #[test]
-    fn parses_an_l7_path_denial() {
-        let e = parse(LOG)
-            .into_iter()
-            .find(|e| e.subject.contains("httpbin"))
-            .expect("the l7 denial");
-        assert_eq!(e.verdict, Verdict::Denied);
-        assert_eq!(e.class, "HTTP:GET");
-        // No scheme: the request the proxy inspected was plaintext, but the
-        // connection out of the sandbox was not, and `http://` reads as a
-        // claim about the latter.
-        assert_eq!(e.subject, "GET httpbin.org:443/ip");
-        assert_eq!(e.policy.as_deref(), Some("strict"));
-        assert!(
-            e.reason
-                .as_deref()
-                .unwrap()
-                .contains("not permitted by policy")
-        );
-    }
-
-    /// A configuration warning decides nothing but is the only channel the
-    /// gateway has for telling you a policy key is deprecated -- which is how
-    /// the `tls: terminate` removal was found in the first place.
-    #[test]
-    fn a_config_warning_is_neutral_but_notable() {
-        let e = &parse(LOG)[0];
-        assert_eq!(e.verdict, Verdict::Neutral);
-        assert_eq!(e.severity, Severity::Medium);
-        assert!(e.subject.contains("'tls: terminate' is deprecated"));
-        assert!(e.policy.is_none());
-    }
-
-    /// hura polls once a second and every poll opens an exec, which logs three
-    /// events of its own. Without the filter the feed shows nothing else.
-    #[test]
-    fn the_feed_excludes_hura_watching_the_sandbox() {
-        for line in LOG
-            .lines()
-            .filter(|l| l.contains("ssh relay") || l.contains("SSH:OPEN"))
-        {
-            let e = parse_line(line).expect("it parses");
-            assert!(!is_worth_showing(&e), "{line} must not reach the feed");
-        }
-    }
-
-    #[test]
-    fn a_truncated_reason_still_parses() {
-        // The gateway cuts long reasons off mid-word, leaving the group
-        // unterminated. Requiring a closing bracket would drop the event.
-        let line = "[1787568645.883] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/pip(9) -> pypi.org:443 [policy:- engine:opa] [reason:binary not allowed. SYMLINK ...";
-        let e = parse_line(line).expect("an event");
-        assert_eq!(e.verdict, Verdict::Denied);
-        assert_eq!(e.subject, "/usr/bin/pip(9) -> pypi.org:443");
-        assert!(
-            e.reason
-                .as_deref()
-                .unwrap()
-                .starts_with("binary not allowed")
-        );
-    }
-
-    /// Captured verbatim from `openshell logs` on 0.0.110: an agent's fetch
-    /// refused because `github_rest_api` names the endpoint for other binaries.
-    /// The reason has brackets of its own, and stopping at the first `]` left
-    /// a subject with no endpoint in it, so the pane had nothing to allow.
-    #[test]
-    fn a_reason_with_brackets_inside_stays_the_reason() {
-        let line = "[1791358393.418] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/local/bin/claude(1702) -> api.github.com:443 [policy:- engine:opa] [reason:binary '/usr/local/bin/claude' not allowed in policy 'github_rest_api' (ancestors: [/usr/bin/bash -> /usr/bin/tmux -> /opt/openshell/bin/openshell-sandbox], cmdline: [/etc/tmux.conf, /sandbox/repo, /sandbox]). SYMLINK HINT: the binary path is the kernel-re...]";
-        let e = parse_line(line).expect("an event");
-        assert_eq!(
-            e.subject,
-            "/usr/local/bin/claude(1702) -> api.github.com:443"
-        );
-        let reason = e.reason.as_deref().unwrap();
-        assert!(
-            reason.ends_with("SYMLINK HINT: the binary path is the kernel-re..."),
-            "{reason}"
-        );
-        assert_eq!(
-            e.target(),
-            Some(Target {
-                endpoint: "api.github.com:443".into(),
-                binary: Some("/usr/local/bin/claude".into()),
-            })
-        );
-    }
-
-    /// Cut off inside a nested group, the reason runs to the end of the line
-    /// rather than taking the subject with it.
-    #[test]
-    fn a_reason_truncated_inside_a_nested_group_still_parses() {
-        let line = "[1791358393.418] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(8898) -> api.github.com:443 [policy:- engine:opa] [reason:binary '/usr/bin/curl' not allowed in policy 'github_rest_api' (ancestors: [/usr/bin/bash -> /usr/lo...]";
-        let e = parse_line(line).expect("an event");
-        assert_eq!(e.subject, "/usr/bin/curl(8898) -> api.github.com:443");
-        assert!(
-            e.reason
-                .as_deref()
-                .unwrap()
-                .contains("(ancestors: [/usr/bin/bash")
-        );
     }
 
     /// Subjects kept before the parser counted brackets come back readable,
@@ -908,7 +648,7 @@ mod tests {
         ] {
             assert_eq!(mended(kept), meant);
         }
-        // What the gateway writes is left exactly as it is.
+        // What OpenShell wrote is left exactly as it was.
         for fine in [
             "/usr/bin/curl(79) -> pastebin.com:443",
             "GET httpbin.org:443/ip",
@@ -919,182 +659,147 @@ mod tests {
     }
 
     #[test]
-    fn malformed_lines_are_dropped_rather_than_panicking() {
-        for line in [
-            "",
-            "   ",
-            "not a log line at all",
-            "[1787568645.883] [sandbox]",
-            "[nan] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED x",
-            "[1787568645.883] [sandbox] [OCSF ] [ocsf] noclass payload",
-            "[1787568645.883] [sandbox] [OCSF ] [ocsf]",
-        ] {
-            assert!(parse_line(line).is_none(), "{line:?} must not parse");
-        }
-        assert!(parse("").is_empty());
-    }
-
-    #[test]
     fn formats_a_clock_time() {
         // 1787568645 is 10:50:45 UTC; only the time of day is shown.
-        let e = &parse(LOG)[1];
-        assert_eq!(e.at, 1_787_568_645);
+        let e = ev(1_787_568_645, "x");
         assert_eq!(e.clock_utc(), "10:50:45");
         // Midnight must render as 00:00:00 rather than 24:00:00.
-        let midnight = Event {
-            at: 1_787_529_600,
-            ..e.clone()
-        };
-        assert_eq!(midnight.clock_utc(), "00:00:00");
+        assert_eq!(ev(1_787_529_600, "x").clock_utc(), "00:00:00");
     }
 
     /// The feed is only actionable if a line can be turned back into the
-    /// endpoint it was about. Both decision shapes have to yield one, and the
-    /// L4 shape has to yield the binary too -- an endpoint rule with no
-    /// binaries grants nothing.
+    /// endpoint it was about, in every shape it comes in.
     #[test]
     fn a_decision_yields_the_endpoint_it_was_about() {
-        let events = parse(LOG);
-
-        let denial = events
-            .iter()
-            .find(|e| e.subject.contains("pastebin"))
-            .unwrap();
-        assert_eq!(
-            denial.target(),
-            Some(Target {
-                endpoint: "pastebin.com:443".into(),
-                binary: Some("/usr/bin/curl".into()),
-            })
-        );
-
-        let allow = events
-            .iter()
-            .find(|e| e.subject.contains("git-remote-http"))
-            .unwrap();
-        assert_eq!(
-            allow.target(),
-            Some(Target {
-                endpoint: "github.com:443".into(),
-                binary: Some("/usr/lib/git-core/git-remote-http".into()),
-            })
-        );
-
-        // An L7 decision judges a method and a path, so it names no binary --
-        // which is the case the pane has to refuse an allow for.
-        let l7 = events
-            .iter()
-            .find(|e| e.subject.contains("httpbin"))
-            .unwrap();
-        assert_eq!(
-            l7.target(),
-            Some(Target {
-                endpoint: "httpbin.org:443".into(),
-                binary: None,
-            })
-        );
+        for (subject, endpoint) in [
+            (
+                "POST github.com:443/o/r.git/git-receive-pack",
+                "github.com:443",
+            ),
+            ("example.com:443", "example.com:443"),
+            ("/usr/bin/curl(79) -> pastebin.com:443", "pastebin.com:443"),
+            ("/usr/bin/node(7) -> GET docs.rs:443/tokio", "docs.rs:443"),
+        ] {
+            assert_eq!(
+                ev(1, subject).target().unwrap().endpoint,
+                endpoint,
+                "{subject}"
+            );
+        }
     }
 
-    /// A plain-HTTP request carries the binary on the left and no port on the
-    /// right; the port is in the reason. Seen on 0.0.110 as `curl
-    /// http://github.com/`.
+    /// A plain-HTTP request may carry no port in its authority; the port is in
+    /// the reason, which is only believed about the same host.
     #[test]
-    fn a_request_with_a_binary_takes_its_port_from_the_reason() {
-        let mut e = ev(1, "/usr/bin/curl(5180) -> GET github.com/");
+    fn a_request_takes_its_port_from_the_reason() {
+        let mut e = ev(1, "GET github.com/");
         e.reason = Some("endpoint github.com:80 is not allowed by any policy".into());
-        assert_eq!(
-            e.target(),
-            Some(Target {
-                endpoint: "github.com:80".into(),
-                binary: Some("/usr/bin/curl".into()),
-            })
-        );
-
-        // A reason about another host is not believed.
+        assert_eq!(e.target().unwrap().endpoint, "github.com:80");
         e.reason = Some("endpoint pastebin.com:80 is not allowed by any policy".into());
         assert_eq!(e.target(), None);
-
-        // With the port in the authority, the reason is not needed.
-        let e = ev(1, "/usr/bin/node(7) -> GET docs.rs:443/tokio");
-        assert_eq!(e.target().unwrap().endpoint, "docs.rs:443");
     }
 
-    /// A bare authority is how the supervisor's own connections are logged, and
-    /// it is a perfectly good endpoint.
-    #[test]
-    fn a_bare_authority_is_an_endpoint() {
-        let e = ev(1, "host.openshell.internal:17670");
-        assert_eq!(
-            e.target(),
-            Some(Target {
-                endpoint: "host.openshell.internal:17670".into(),
-                binary: None,
-            })
-        );
-    }
-
-    /// The whole risk of this parse: a subject that is prose must not become a
-    /// policy change. `CONFIG:VALIDATED` carries an English sentence with
-    /// colons in it, and there is exactly one keystroke between a match here
-    /// and a rule at the gateway.
+    /// The whole risk of this: a subject that is prose must not become a
+    /// policy change, and there is one click between a match here and a rule.
     #[test]
     fn prose_is_never_mistaken_for_an_endpoint() {
-        let warning = &parse(LOG)[0];
-        assert!(warning.subject.contains("deprecated"));
-        assert_eq!(warning.target(), None, "{}", warning.subject);
-
         for subject in [
             "",
             "sleep(56)",
             "applied policy revision",
+            "L7 policy validation warning: 'tls: terminate' is deprecated",
             // A single-label host: nothing worth reaching from a sandbox, and
             // allowing it would be allowing a word.
             "localhost:443",
-            // A port that is not one.
             "pastebin.com:https",
             "pastebin.com:0",
             "pastebin.com:99999",
             // A lowercase first word is not an HTTP method, so this is prose.
             "get httpbin.org:443/ip",
-            // Three words is prose too, whatever the last one looks like.
             "denied reaching pastebin.com:443",
         ] {
             assert_eq!(ev(1, subject).target(), None, "{subject:?}");
         }
     }
 
-    /// A relative path is not what the gateway matches on -- the policy is
-    /// checked against the kernel-resolved `/proc/<pid>/exe` -- so a subject
-    /// carrying one yields the endpoint without a binary rather than a binary
-    /// the gateway would reject.
-    #[test]
-    fn only_an_absolute_path_counts_as_a_binary() {
-        let e = ev(1, "curl(79) -> pastebin.com:443");
-        let t = e.target().unwrap();
-        assert_eq!(t.endpoint, "pastebin.com:443");
-        assert_eq!(t.binary, None);
-    }
-
     /// The pane holds on to a selected event across a refetch, and the feed
     /// grows at the top, so the handle cannot be a row index.
     #[test]
     fn the_key_identifies_an_event_across_a_refetch() {
-        let a = ev(100, "curl -> a");
-        let b = ev(100, "curl -> b");
+        let a = ev(100, "a.example.com:443");
+        let b = ev(100, "b.example.com:443");
         assert_ne!(a.key(), b.key(), "same second, different subject");
         assert_eq!(a.key(), a.clone().key());
-        // And it is the same notion of sameness the kept file dedupes on, or
-        // the cursor would follow an event the merge had discarded.
+        // The same notion of sameness the kept file merges on, or the cursor
+        // would follow an event the merge had folded away.
         assert_eq!(a.key(), identity(&a));
     }
 
     #[test]
     fn severity_orders_so_notable_means_above_info() {
-        assert!(Severity::parse("MED").is_notable());
-        assert!(Severity::parse("HIGH").is_notable());
-        assert!(Severity::parse("CRIT").is_notable());
-        assert!(!Severity::parse("INFO").is_notable());
-        // An unknown grade must not be silently downgraded to routine.
-        assert!(Severity::parse("WHATEVER").is_notable());
+        assert!(Severity::Medium.is_notable());
+        assert!(Severity::Critical.is_notable());
+        assert!(!Severity::Info.is_notable());
+    }
+
+    /// The log the runtime keeps, read into the feed's own events: a refused
+    /// request by its method and path, a refused connection by its endpoint,
+    /// and the lookups left out.
+    #[test]
+    fn the_runtime_log_reads_as_events() {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sbx-client/tests/fixtures/policy-log.json"
+        ))
+        .unwrap();
+        let log: sbx_client::PolicyLog = serde_json::from_str(&text).unwrap();
+        let events = from_sbx(&log);
+        assert!(
+            events
+                .iter()
+                .all(|e| !e.subject.contains(".docker.internal"))
+        );
+
+        let push = events
+            .iter()
+            .find(|e| e.class == "HTTP:POST" && e.subject.contains("git-receive-pack"))
+            .expect("the refused push");
+        assert_eq!(push.verdict, Verdict::Denied);
+        assert_eq!(
+            push.subject,
+            "POST github.com:443/octocat/Hello-World.git/git-receive-pack"
+        );
+        assert_eq!(
+            push.policy.as_deref(),
+            Some("local:148582d1-e89d-4118-9083-63ab6db02a4a")
+        );
+        assert_eq!(push.target().unwrap().endpoint, "github.com:443");
+        assert!(push.count >= 1 && push.last >= push.at);
+
+        let refused = events
+            .iter()
+            .find(|e| e.subject == "example.com:443")
+            .expect("the refused connection");
+        assert_eq!(refused.class, "NET:OPEN");
+        assert_eq!(refused.policy, None);
+        assert_eq!(refused.target().unwrap().endpoint, "example.com:443");
+
+        assert!(events.iter().any(|e| e.verdict == Verdict::Allowed));
+        assert!(
+            events.windows(2).all(|w| w[0].at >= w[1].at),
+            "newest first"
+        );
+    }
+
+    #[test]
+    fn runtime_timestamps_are_read_in_their_own_offset() {
+        assert_eq!(epoch_of("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(epoch_of("2026-10-08T09:34:44Z"), Some(1_791_452_084));
+        assert_eq!(
+            epoch_of("2026-10-08T11:34:44.903534058+02:00"),
+            Some(1_791_452_084)
+        );
+        assert_eq!(epoch_of("2026-10-08T04:34:44-05:00"), Some(1_791_452_084));
+        assert_eq!(epoch_of("yesterday"), None);
     }
 }

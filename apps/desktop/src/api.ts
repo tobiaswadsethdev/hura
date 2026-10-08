@@ -110,23 +110,21 @@ export const api = {
   // Changing what a running session may reach. Each answers with the policy
   // re-read, so the panes say what the sandbox has rather than what was asked.
   // `everywhere` also writes the global list every new session starts from.
-  allow: (server: string, name: string, endpoint: string, binaries: string[], everywhere: boolean) =>
-    invoke<PolicyView>("allow", { server, name, endpoint, binaries, everywhere }),
+  allow: (server: string, name: string, endpoint: string, everywhere: boolean) =>
+    invoke<PolicyView>("allow", { server, name, endpoint, everywhere }),
   // Only these methods and paths of the endpoint. A request of its own, so an
   // older `hurad` refuses it rather than opening the whole host.
-  allowPaths: (
-    server: string,
-    name: string,
-    endpoint: string,
-    binaries: string[],
-    routes: Route[],
-    everywhere: boolean,
-  ) => invoke<PolicyView>("allow_paths", { server, name, endpoint, binaries, routes, everywhere }),
+  allowPaths: (server: string, name: string, endpoint: string, routes: Route[], everywhere: boolean) =>
+    invoke<PolicyView>("allow_paths", { server, name, endpoint, routes, everywhere }),
+  // A deny, which outranks every allow on the sandbox.
   block: (server: string, name: string, endpoint: string, everywhere: boolean) =>
     invoke<PolicyView>("block", { server, name, endpoint, everywhere }),
   // Off the global lists only; no sandbox is touched.
   unlist: (server: string, name: string, endpoint: string) =>
     invoke<PolicyView>("unlist", { server, name, endpoint }),
+  // One of the session's own rules, by its id: how any change here is undone.
+  removeRule: (server: string, name: string, id: string) =>
+    invoke<PolicyView>("remove_rule", { server, name, id }),
   diff: (server: string, name: string) => invoke<string>("diff", { server, name }),
 
   // The working copy, read-only: the agent owns it. One directory at a time,

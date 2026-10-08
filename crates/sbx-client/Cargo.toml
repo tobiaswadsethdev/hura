@@ -1,11 +1,11 @@
 [package]
-name = "openshell-client"
+name = "sbx-client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "A typed client for the OpenShell CLI"
+description = "A typed client for the Docker Sandboxes CLI"
 
 [dependencies]
 serde.workspace = true

@@ -97,7 +97,6 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
-  SquareTerminal,
   Terminal as TerminalGlyph,
   Ticket,
   TriangleAlert,
@@ -168,7 +167,7 @@ export const Record = Info;
 export const Ports = Globe;
 
 // The events pane's two readings of one feed: folded by endpoint, the way a
-// tree folds files under a folder, or flat, as the gateway said it.
+// tree folds files under a folder, or flat, as the runtime said it.
 export const ByEndpoint = ListTree;
 export const AsLog = List;
 
@@ -232,8 +231,7 @@ export const Agent = Bot;
 export const Chat = MessagesSquare;
 /// Sending a message. An arrow up, which is where the message goes.
 export const Send = ArrowUp;
-/// A shell, in the menu that opens either. Not `Program`'s square: that is a
-/// binary a policy names, and this is a prompt to type at.
+/// A shell, in the menu that opens either: a prompt to type at.
 export const Shell = TerminalGlyph;
 /// This window, as opposed to the server it talks to.
 export const Desktop = Monitor;
@@ -243,9 +241,6 @@ export const Desktop = Monitor;
 export const Repo = FolderGit2;
 /// The sandbox itself, the box everything else is inside.
 export const Sandbox = Box;
-/// A program a policy rule names: the rule grants it, and only it, the
-/// endpoints beside it.
-export const Program = SquareTerminal;
 
 // The about screen.
 /// A newer release is on offer. The header's badge and the screen's button.

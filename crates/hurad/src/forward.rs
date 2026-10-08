@@ -2,9 +2,9 @@
 //!
 //! The client listens and turns each connection it accepts into a port
 //! channel -- see [`hura_proto::stream::Channel::Port`]. This end needs a way
-//! into the sandbox for each of them, and that is `openshell forward service`:
-//! it binds a loopback port here, travels over the gateway's gRPC path, and
-//! serves any number of connections until it is killed.
+//! into the sandbox for each of them, and that is `hurad relay`: it binds a
+//! loopback port here, carries it to the port inside the sandbox, and serves
+//! any number of connections until it is stopped.
 //!
 //! **One forward per port, shared.** A browser opens half a dozen connections
 //! to load one page, and a process per connection would be a second of startup
@@ -12,9 +12,9 @@
 //! connection to a port, leased by every connection after it, and stopped once
 //! nothing has used it for [`IDLE`].
 //!
-//! Killing one is safe, unlike an `exec --tty`: the forward is its own gRPC
-//! stream and not the exec path, so a stopped preview does not wedge the
-//! sandbox for the polls and terminals that come after it.
+//! Stopping one is safe: the relay stops its `socat` on the way out, and the
+//! published port it leaves behind refuses connections until the next relay
+//! on it, so a stopped preview is in the way of nothing that comes after it.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -120,8 +120,8 @@ pub async fn acquire(session: &Session, port: u16, host: Loopback) -> Result<Lea
         .clone();
 
     let mut guard = slot.lock().await;
-    // A forward whose process has gone -- the sandbox was recreated, the
-    // gateway restarted -- is started again rather than handed out.
+    // A forward whose process has gone, because the sandbox was recreated or
+    // the runtime restarted, is started again rather than handed out.
     let alive = match guard.as_mut() {
         Some(running) => matches!(running.child.try_wait(), Ok(None)),
         None => false,
@@ -327,9 +327,13 @@ async fn reap() {
 mod tests {
     use super::*;
 
-    /// Captured from `openshell forward service` 0.0.110, colour and all.
+    /// What `hurad relay` says, captured from a real one, and before it what
+    /// `openshell forward service` 0.0.110 said, colour and all: the relay
+    /// kept the line so the parser did not have to change.
     #[test]
     fn the_bound_port_is_read_from_what_the_cli_says() {
+        let relay = "Forwarding 127.0.0.1:44620 -> 127.0.0.1:8124 in sandbox hura-e2e-claude";
+        assert_eq!(bound_port(relay), Some(44620));
         let line = "\x1b[1m\x1b[32m✓\x1b[39m\x1b[0m Forwarding 127.0.0.1:38076 -> 127.0.0.1:8000 in sandbox fwd-probe via gRPC";
         assert_eq!(bound_port(line), Some(38076));
         let v6 = "✓ Forwarding 127.0.0.1:38608 -> ::1:8001 in sandbox s via gRPC";
@@ -353,7 +357,7 @@ mod tests {
         "a reload after reading should not restart it"
     );
 
-    /// Against a real gateway: a sandbox with something listening, reached
+    /// Against a real sandbox: one with something listening, reached
     /// through a forward, by several connections at once that share it.
     ///
     /// ```text
@@ -403,5 +407,12 @@ mod tests {
             .unwrap();
         let reply = String::from_utf8_lossy(&buf[..n]);
         assert!(reply.starts_with("HTTP/1."), "{reply}");
+    }
+
+    /// What `hurad relay` says is what this reads the port from.
+    #[test]
+    fn the_relay_announces_its_port_in_words_this_reads() {
+        let line = crate::relay::announce(44620, "127.0.0.1", 5173, "hura-a");
+        assert_eq!(bound_port(&line), Some(44620));
     }
 }

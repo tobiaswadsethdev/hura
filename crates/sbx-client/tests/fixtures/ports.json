@@ -1,0 +1,20 @@
+[
+  {
+    "host_ip": "127.0.0.1",
+    "host_port": 44622,
+    "sandbox_port": 8080,
+    "protocol": "tcp4"
+  },
+  {
+    "host_ip": "127.0.0.1",
+    "host_port": 44623,
+    "sandbox_port": 8081,
+    "protocol": "tcp4"
+  },
+  {
+    "host_ip": "127.0.0.1",
+    "host_port": 44624,
+    "sandbox_port": 8081,
+    "protocol": "tcp4"
+  }
+]

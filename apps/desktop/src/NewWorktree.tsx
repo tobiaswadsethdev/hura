@@ -147,7 +147,7 @@ function Form({
 
   // The repository has already answered two of these questions, so the form
   // arrives with them answered rather than asking. It costs subprocesses and a
-  // gateway call on the server, which is why it happens once, here, and not for
+  // runtime call on the server, which is why it happens once, here, and not for
   // every row of the picker.
   useEffect(() => {
     let live = true;
@@ -165,7 +165,7 @@ function Form({
         // in state stand.
         if (picked.providers.length > 0) setProviders(picked.providers);
         // A branch that has never been pushed cannot be cloned from, so the
-        // remote's default is used instead of handing the gateway a clone that
+        // remote's default is used instead of handing the sandbox a clone that
         // is going to fail.
         if (!picked.facts.base_on_remote) setBase("");
       })
@@ -340,11 +340,11 @@ function Form({
           ))}
           {options.providers_error && (
             <span className="error" title={options.providers_error}>
-              gateway unreachable
+              could not list credentials
             </span>
           )}
           {options.providers.length === 0 && !options.providers_error && (
-            <span className="hint">none on the gateway</span>
+            <span className="hint">none configured</span>
           )}
         </PickRow>
 

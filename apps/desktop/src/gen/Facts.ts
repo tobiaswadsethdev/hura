@@ -21,7 +21,7 @@ unpushed: number | null,
 /**
  * Whether `origin/<branch>` exists. A branch that has never been pushed
  * cannot be cloned from, so the form falls back to the remote's default
- * branch rather than handing the gateway a clone that will fail.
+ * branch rather than handing the sandbox a clone that will fail.
  */
 base_on_remote: boolean, 
 /**

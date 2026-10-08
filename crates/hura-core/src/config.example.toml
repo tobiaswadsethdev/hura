@@ -4,9 +4,15 @@
 #
 # Written by `hura config --init`. `hura config` shows what is in force.
 
-# Gateway to talk to. Unset means the active one, as `openshell gateway list`
-# reports it. `--gateway` overrides this.
-# gateway = "default"
+# The Docker Sandboxes CLI, when it is neither on PATH nor where its installer
+# puts it (~/.docker/sbx/bin/sbx).
+# sbx = "/opt/sbx/bin/sbx"
+
+# Whole CPUs and memory for each session's sandbox. Unset, the runtime gives
+# every sandbox every host CPU and half the host's memory, which is generous for
+# one session and too much for several at once.
+# sandbox_cpus = 4
+# sandbox_memory = "8g"
 
 # Repository a `hura new` with no --repo clones. The TUI's picker opens on this
 # one too, when it finds it -- a filter away from anything else, rather than a
@@ -17,18 +23,35 @@
 # always what you want; set it for a repository that develops off something else.
 # base = "develop"
 
-# Policy applied to a new session: a template name, or a path to a YAML file.
+# Policy applied to a new session: a template name, or a path to a template file
+# of your own (TOML, in the shape of policies/feature-work.toml).
 # `hura policies` lists the templates.
 # policy = "feature-work"
 
-# Credential providers attached to a new session, by name; `openshell provider
-# list` shows what exists. Providers are per organisation, not per forge, so a
-# work repository and a personal one need one each.
+# Credentials a new session is given, by name from the [credentials.*] tables
+# below. Credentials are per organisation, not per forge, so a work repository
+# and a personal one need one each.
 #
 # Setting this replaces the create form's guesswork with your answer: the form
-# normally ticks the agent's credential and the repository host's when the type
+# normally ticks the agent's credential and the repository host's when the kind
 # names exactly one, and this says so outright instead.
-# providers = ["claude-oauth", "azure-pat"]
+# providers = ["claude", "azure-devops"]
+
+# The credentials a session may be given, one table each. `kind` is
+# "claude-code-oauth" (a `claude setup-token` token), "azure-devops-pat" or
+# "github". The value comes from `command`, run on this machine in a shell, or
+# from `ref`, a 1Password op:// reference or an AWS Secrets Manager ARN. hura
+# never reads it: a session the credential is ticked for gets a secret of its
+# own from the sandbox runtime, which runs the command itself and swaps the
+# value into requests to the kind's hosts. Inside the sandbox there is only a
+# placeholder. An Azure DevOps command prints the PAT itself; hura encodes it.
+# [credentials.claude]
+# kind = "claude-code-oauth"
+# command = "tr -d '\r\n' < /home/me/.config/hura/tokens/claude"
+#
+# [credentials.azure-devops]
+# kind = "azure-devops-pat"
+# command = "tr -d '\r\n' < /home/me/.config/hura/tokens/azure-devops"
 
 # Where the create form's picker looks for repositories, replacing the usual
 # places (the working directory and its parent, ~/dev, ~/src, ~/code, ~/projects,
@@ -58,33 +81,32 @@
 # not reach github at all.
 # auto_update = true
 
-# MCP servers the agent gets, one table each. They run on the host -- in their
-# own containers, holding their own credentials -- and the sandbox is granted one
-# endpoint each, reachable only by the agent binary. Nothing else in the sandbox
-# can talk to them, and no token ever lands on the sandbox filesystem.
+# MCP servers the agent gets, one table each. They run on the host, in their own
+# containers holding their own credentials, and the session is granted one
+# endpoint each. No token ever lands on the sandbox filesystem.
 #
 # The url is what the *sandbox* sees, which is not what your browser sees:
-# `localhost` in there is the sandbox itself and is refused outright. Use the
-# container's name when it has joined the gateway's own docker network
-# (`--network openshell-docker`, nothing published), or `host.openshell.internal`
-# for a port published on the host. `transport` is "http" (the default) or "sse".
+# `localhost` in there is the sandbox itself and is refused outright. A server
+# on this machine is published on 127.0.0.1 and named as `host.docker.internal`,
+# which the sandbox runtime takes to this machine's loopback; a sandbox cannot
+# reach a container by its name. `transport` is "http" (the default) or "sse".
 #
 # Applies to sessions created after the change; existing ones keep what they were
 # made with. See the MCP section of the README for the docker side.
 # [[mcp]]
 # name = "jira"
-# url = "http://mcp-atlassian:9000/mcp"
+# url = "http://host.docker.internal:9000/mcp"
 #
 # [[mcp]]
 # name = "azure-devops"
-# url = "http://mcp-azure-devops:9001/mcp"
+# url = "http://host.docker.internal:9001/mcp"
 # transport = "http"
 #
 # A table with an `image` instead of a `url` is *managed*: hurad starts the
-# container, keeps it on the gateway's network, restarts it, and holds its
-# secrets. Its url is derived -- http://hura-mcp-<name>:<port>/mcp -- which is
+# container, publishes it on 127.0.0.1 at its port, restarts it, and holds its
+# secrets. Its url is derived, http://host.docker.internal:<port>/mcp, which is
 # why there is none to write, and why the two ways a hand-written one goes wrong
-# cannot happen. `secrets` names environment variables whose values live in the
+# cannot happen. Each managed server needs a port of its own. `secrets` names environment variables whose values live in the
 # server's own store, never here: `printf %s "$TOKEN" | hurad secret <NAME>`.
 # The integrations screen in the window has the same buttons as `hurad mcp`.
 # [[mcp]]

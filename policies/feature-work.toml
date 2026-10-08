@@ -1,0 +1,61 @@
+# feature-work: clone, agent, push. Nothing else leaves the sandbox.
+#
+# Each [[rule]] is one network rule on the session's sandbox. `hosts` takes a
+# host, a glob (`*.example.com` is one label, `**.example.com` any number) or
+# an IP, each with an optional `:port`. A rule with no `methods` opens the host
+# for any request; with `methods` it opens only those methods on `path`, and
+# the proxy inspects every request to hold it to that. `decision = "deny"`
+# makes the rule a refusal, which outranks any allow.
+#
+# Rules are per sandbox, not per program: anything in the session that sends a
+# request to one of these hosts is held to the same rules. A host with method
+# rules is only reachable through the sandbox's proxy, which every tool here
+# uses by its HTTPS_PROXY variable; a client that ignores it is refused there.
+
+# The model API. Credentialed by the session's claude credential, if it has one.
+[[rule]]
+hosts = ["api.anthropic.com:443", "platform.claude.com:443"]
+
+# git over smart HTTP, read and write.
+[[rule]]
+hosts = ["github.com:443"]
+methods = ["GET"]
+path = "/**/info/refs*"
+
+[[rule]]
+hosts = ["github.com:443"]
+methods = ["POST"]
+path = "/**/git-upload-pack"
+
+[[rule]]
+hosts = ["github.com:443"]
+methods = ["POST"]
+path = "/**/git-receive-pack"
+
+# Azure DevOps serves git and its REST API from one host. The paths are
+# anchored on their tail, so the project level between organisation and
+# repository (/{org}/{project}/_git/{repo}/info/refs) does not matter.
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["GET"]
+path = "/**/info/refs*"
+
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["POST"]
+path = "/**/git-upload-pack"
+
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["POST"]
+path = "/**/git-receive-pack"
+
+# A pull request is a plain REST POST, made with curl.
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["GET", "POST"]
+path = "/**/_apis/**"
+
+# GitHub's REST API, for gh.
+[[rule]]
+hosts = ["api.github.com:443"]

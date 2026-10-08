@@ -72,7 +72,7 @@ export function SettingsScreen({
         setDraft(v.settings);
       })
       .catch((e) => live && setError(messageOf(e)));
-    // Not fatal on its own: the text fields work without it, and a gateway
+    // Not fatal on its own: the text fields work without it, and a runtime
     // that cannot be reached is exactly when somebody wants to look at this
     // screen. The two choosers say so where they would have been.
     api.newOptions(server).then(
@@ -223,7 +223,7 @@ export function SettingsScreen({
                 ]}
               />
             </label>
-            {/* A policy set to a YAML path is a perfectly good answer and one
+            {/* A policy set to a file path is a perfectly good answer and one
                 no chooser can offer, so it is shown rather than silently
                 replaced by the first template in the list. */}
             {draft.policy && !(options?.policies ?? []).some((p) => p.spec === draft.policy) && (
@@ -234,10 +234,12 @@ export function SettingsScreen({
 
             <fieldset>
               <legend>credentials</legend>
-              {!options && <p className="hint">asking the gateway…</p>}
+              {!options && <p className="hint">reading the credentials…</p>}
               {options?.providers_error && <p className="error">{options.providers_error}</p>}
               {options && options.providers.length === 0 && !options.providers_error && (
-                <p className="hint">the gateway has no credential providers</p>
+                <p className="hint">
+                  none configured: add a <code>[credentials.NAME]</code> table to the server's config file
+                </p>
               )}
               <div className="pills">
                 {(options?.providers ?? []).map((p) => (

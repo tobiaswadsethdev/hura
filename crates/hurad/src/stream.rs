@@ -2,16 +2,16 @@
 //!
 //! Each channel is a task producing [`ServerFrame`]s into one queue, and a
 //! single writer drains that queue onto the socket. That shape is what keeps
-//! the terminal responsive while an events poll is waiting on the gateway: the
+//! the terminal responsive while an events poll is waiting on the runtime: the
 //! slow channel blocks itself and nothing else.
 //!
 //! **Polling lives here, not in the client.** A client that asked `/rpc` for
 //! events every second would spend a TLS handshake per session per second to be
-//! told nothing had changed. The server is next to the gateway, so it does the
-//! asking and sends only what is new -- which is also the only way a second
-//! client watching the same session does not double the load on it.
+//! told nothing had changed. The server is next to the sandbox runtime, so it
+//! does the asking and sends only what is new, which is also the only way a
+//! second client watching the same session does not double the load on it.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -25,11 +25,11 @@ use hura_core::store::Store;
 use hura_proto::stream::{Channel, ChannelId, ClientFrame, ServerFrame, bytes};
 use tokio::sync::mpsc;
 
-/// How often a feed or a status channel asks the gateway.
+/// How often a feed or a status channel asks the sandbox runtime.
 ///
 /// Slower than the terminal interface's own second, deliberately. Each of these
-/// is an exec against the sandbox, execs are serialised gateway-side, and a
-/// server may be answering several clients about several sessions at once --
+/// is an exec against the sandbox, about a third of a second each, and a
+/// server may be answering several clients about several sessions at once,
 /// where the TUI was one process watching one machine.
 const POLL: Duration = Duration::from_secs(2);
 
@@ -181,10 +181,10 @@ impl ChannelHandle {
 
 /// `Ctrl-b d`: what a person types to leave a tmux session.
 ///
-/// The alternative would be killing the exec, and that is the one thing this
-/// must not do. Killing an `openshell exec --tty` wedges the exec path for that
-/// sandbox until it is recreated -- the session survives but nothing can reach
-/// it again, including the poll that would have told you so.
+/// The alternative would be killing the exec. Under OpenShell that wedged the
+/// exec path for the sandbox until it was recreated, so leaving the way a
+/// person does became the rule. The sandbox runtime does not wedge, measured,
+/// so it is now only the gentler of the two.
 const DETACH: &[u8] = b"\x02d";
 
 async fn open(
@@ -256,9 +256,9 @@ const HOST_WAIT_EVERY: Duration = Duration::from_secs(1);
 /// One conversation in a chat session, from the host inside the sandbox.
 ///
 /// Reached through the same forward a preview uses: the host listens on a
-/// loopback port in there, and a forward is the gateway's way to that. Unlike
-/// a terminal's `exec --tty`, a forward is safe to stop, so nothing here has to
-/// be careful about how the channel ends.
+/// loopback port in there, and a forward is a `hurad relay` to that. A forward
+/// is safe to stop, so nothing here has to be careful about how the channel
+/// ends.
 ///
 /// The host can be missing for a while, and the channel waits it out rather
 /// than closing: through seeding, since the seeder is what starts it, and
@@ -534,10 +534,11 @@ async fn pipe(
 /// The allow/deny feed, as decisions are made.
 ///
 /// The first frame carries the recent log and every frame after it carries the
-/// difference, keyed on what the core already considers the same event -- so a
-/// decision the gateway's window reports twice is sent once.
+/// difference, keyed on what the core already considers the same event. The
+/// runtime counts on in one row, so an event is sent again when its count or
+/// its last sighting moves, and a client keeps the newest it was sent for a key.
 async fn events(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>) {
-    let mut seen: HashSet<(u64, String, String)> = HashSet::new();
+    let mut seen: HashMap<(u64, String, String), (u64, u64)> = HashMap::new();
 
     loop {
         let s = session.clone();
@@ -550,7 +551,10 @@ async fn events(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>)
 
         match fetched {
             Ok(all) => {
-                let fresh: Vec<Event> = all.into_iter().filter(|e| seen.insert(e.key())).collect();
+                let fresh: Vec<Event> = all
+                    .into_iter()
+                    .filter(|e| seen.insert(e.key(), (e.count, e.last)) != Some((e.count, e.last)))
+                    .collect();
                 if !fresh.is_empty()
                     && out
                         .send(ServerFrame::Events { id, events: fresh })
@@ -615,18 +619,16 @@ async fn status(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>)
 
 /// The agent's terminal.
 ///
-/// The same `exec --tty` and the same shell that `hura attach` runs -- one
-/// definition, in `ops::attach_script`, so an embedded terminal and a terminal
+/// The same `exec --tty` and the same shell that `hura attach` runs, from one
+/// definition in `ops::attach_script`, so an embedded terminal and a terminal
 /// on the machine itself cannot end up attaching differently.
 ///
-/// **It runs under a pty on *this* side, and it has to.** `openshell sandbox
-/// exec --tty` allocates a pty at the sandbox end, which is enough for the
-/// process in there to have a terminal -- `tty` reports one, `test -t 0`
-/// succeeds -- but the CLI will not proxy interactively through plain pipes.
-/// Measured against 0.0.110: with stdin closed it writes the 600-odd bytes of
-/// tmux's redraw and carries on; with stdin an open pipe it writes nothing at
-/// all, whether or not anything has been sent to it. The channel opens, the
-/// child runs, and no byte ever arrives.
+/// **It runs under a pty on *this* side, and it has to.** An interactive exec
+/// allocates a pty at the sandbox end, which is enough for the process in there
+/// to have a terminal, but the CLI that carries it wants a terminal here too.
+/// Measured against OpenShell 0.0.110, whose CLI would not proxy through plain
+/// pipes: with stdin an open pipe it wrote nothing at all. The channel opened,
+/// the child ran, and no byte ever arrived.
 ///
 /// So the pty is local as well, and the child is spawned into it exactly as a
 /// terminal emulator would. That is what `interactive_exec_argv` is shaped for:
@@ -634,9 +636,8 @@ async fn status(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>)
 ///
 /// Resizing is then the pty's own, rather than an exec running
 /// `tmux resize-window`. Better in two ways: the client's size reaches tmux the
-/// way any terminal's does, and there is no second exec to queue behind this
-/// one -- execs are serialised per sandbox, so an exec issued while the attach
-/// is holding the path is an exec that waits for it to finish.
+/// way any terminal's does, and there is no second exec, a third of a second
+/// each, for every change of size.
 async fn terminal(
     id: ChannelId,
     session: Session,
@@ -727,7 +728,7 @@ fn pty_worker(
 ) {
     use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 
-    // The backend decides what attaching *is*: an `openshell sandbox exec
+    // The backend decides what attaching *is*: an `sbx exec --interactive
     // --tty` into the sandbox's tmux, spawned under the pty below exactly as a
     // terminal emulator would.
     let backends = crate::rpc::backends();
@@ -736,12 +737,11 @@ fn pty_worker(
         return;
     };
 
-    // A sandbox that is not running yet refuses the exec, and the refusal goes
-    // to the pty -- so the gateway's own `sandbox 'hura-x' is not ready (phase:
-    // Provisioning)` was drawn into the pane as though the agent had said it,
-    // and then the terminal closed. `ops::create` no longer leaves a session in
-    // that state, but a gateway restart still can, and a tab is opened by
-    // clicking rather than by creating.
+    // A sandbox that cannot run the exec refuses it, and the refusal goes to
+    // the pty, where it was drawn into the pane as though the agent had said
+    // it before the terminal closed. `ops::create` does not leave a session in
+    // that state, but the runtime can, and a tab is opened by clicking rather
+    // than by creating.
     //
     // One `true` is the whole test: it is the same exec the attach is about to
     // do, so nothing can be ready for this and not for that. A sandbox that is
@@ -812,7 +812,7 @@ fn pty_worker(
 
     let mut command = CommandBuilder::new(&argv[0]);
     command.args(&argv[1..]);
-    // The gateway passes nothing of the image's environment through, and tmux
+    // Said here rather than left to the image or the runtime, since tmux
     // needs to know it is talking to something. `ops::attach_script` sets the
     // locale inside; this is the outside half.
     command.env("TERM", "xterm-256color");
@@ -875,9 +875,9 @@ fn pty_worker(
 mod tests {
     use super::*;
 
-    /// The one thing a terminal channel must never do is kill its exec: that
-    /// wedges the exec path for the whole sandbox. The detach sequence is what
-    /// replaces it, and it is `Ctrl-b d`.
+    /// A terminal channel leaves the way a person does rather than killing its
+    /// exec, which wedged the whole sandbox under OpenShell. The detach
+    /// sequence is what replaces the kill, and it is `Ctrl-b d`.
     #[test]
     fn the_detach_sequence_is_the_one_tmux_answers_to() {
         assert_eq!(DETACH, b"\x02d");

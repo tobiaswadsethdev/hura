@@ -7,7 +7,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::time::Duration;
 
-use openshell_client::OpenShell;
+use crate::backend::Backend;
 
 use crate::config::{self, Config};
 use crate::mcp;
@@ -76,48 +76,13 @@ fn probe(argv: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn check_openshell() -> Check {
-    match probe(&["openshell", "--version"]) {
-        Some(v) => Check::ok("openshell", v),
-        None => Check::fail(
-            "openshell",
-            "not on PATH",
-            "install from the release tarballs into ~/.local/bin; OpenShell's own \
-             install.sh supports dpkg/rpm only",
-        ),
-    }
-}
-
-fn check_gateway(client: &dyn OpenShell) -> Check {
-    match client.status() {
-        Ok(st) if st.is_connected() => Check::ok(
-            "gateway",
-            format!(
-                "{} {} ({})",
-                st.server, st.version, st.authentication.status
-            ),
-        ),
-        Ok(st) => Check::fail(
-            "gateway",
-            format!("reachable but status is `{}`", st.status),
-            "systemctl --user status openshell-gateway",
-        ),
-        Err(e) => Check::fail(
-            "gateway",
-            e.to_string(),
-            "systemctl --user enable --now openshell-gateway && \
-             openshell gateway add https://127.0.0.1:17670 --local --name openshell",
-        ),
-    }
-}
-
 fn check_docker() -> Check {
     match probe(&["docker", "version", "--format", "{{.Server.Version}}"]) {
         Some(v) if !v.is_empty() => Check::ok("docker", format!("server {v}")),
         _ => Check::fail(
             "docker",
             "daemon not reachable",
-            "start Docker; the gateway auto-selects kubernetes > podman > docker",
+            "start Docker; it builds the sandbox image, which the sandbox runtime cannot",
         ),
     }
 }
@@ -134,14 +99,14 @@ fn check_tmux() -> Check {
 }
 
 /// WSL in particular: without lingering the user manager exits with the last
-/// shell, taking the gateway and every running sandbox with it.
+/// shell, taking the sandbox runtime's daemon and every running sandbox with it.
 fn check_linger() -> Check {
     let user = std::env::var("USER").unwrap_or_default();
     match probe(&["loginctl", "show-user", &user]) {
         Some(out) if out.contains("Linger=yes") => Check::ok("linger", "enabled"),
         Some(_) => Check::warn(
             "linger",
-            "disabled: the gateway dies when your last shell exits",
+            "disabled: the sandbox runtime stops when your last shell exits",
             format!("sudo loginctl enable-linger {user}"),
         ),
         None => Check::warn(
@@ -180,6 +145,130 @@ fn check_version() -> Check {
 }
 
 /// A built image is the difference between a ~1s and a ~minute session.
+/// The sandbox runtime's client, at the binary the config names if it names
+/// one.
+fn sbx_client(config: &Result<Config, config::Error>) -> sbx_client::CliClient {
+    let client = sbx_client::CliClient::new();
+    match config.as_ref().ok().and_then(|c| c.sbx.as_ref()) {
+        Some(bin) => client.with_bin(bin),
+        None => client,
+    }
+}
+
+/// The runtime's own checks, said only where one is not passing: sign-in,
+/// virtualization, storage and its daemon are each something hura cannot
+/// work around, and the runtime already knows how to ask about them.
+fn check_sbx_diagnose(sbx: &sbx_client::CliClient) -> Vec<Check> {
+    let Ok(found) = sbx.diagnose() else {
+        // Not installed, or not answering: the `sbx` check above says which.
+        return Vec::new();
+    };
+    let failing: Vec<String> = found
+        .iter()
+        .filter(|d| d.status == "fail")
+        .map(|d| format!("{}: {}", d.name.to_ascii_lowercase(), d.message))
+        .collect();
+    if failing.is_empty() {
+        return vec![Check::ok("sbx checks", format!("{} passed", found.len()))];
+    }
+    vec![Check::fail(
+        "sbx checks",
+        failing.join("; "),
+        "sbx diagnose",
+    )]
+}
+
+/// Whether the runtime lets anything out of every sandbox on its own.
+///
+/// Every session's policy is a list of allows, which only means something on a
+/// runtime that refuses what no rule allows: its deny-all preset. The other
+/// presets add global allows, every host for `allow-all` and a baseline of
+/// model providers, registries and code hosts for `balanced`, which every
+/// session then has beyond its own rules. Measured: the deny-all preset is not
+/// always listed as a rule of its own, so what is checked is the absence of
+/// global allows, not the presence of a deny.
+fn check_sbx_policy(sbx: &sbx_client::CliClient) -> Check {
+    let Ok(rules) = sbx.all_rules() else {
+        return Check::ok("sbx policy", "not checked: the runtime is not answering");
+    };
+    let global_allows: Vec<&sbx_client::Rule> = rules
+        .iter()
+        .filter(|r| !r.is_scoped() && r.is_network() && r.decision == sbx_client::Decision::Allow)
+        .collect();
+    if global_allows.is_empty() {
+        return Check::ok(
+            "sbx policy",
+            "deny-all: only what a session's rules allow gets out",
+        );
+    }
+    let fix = "sbx policy reset, and choose deny-all (it stops running sandboxes)";
+    if global_allows
+        .iter()
+        .any(|r| r.resources.iter().any(|x| x == "**"))
+    {
+        return Check::fail(
+            "sbx policy",
+            "the runtime allows every host to every sandbox, so no session's rules decide anything",
+            fix,
+        );
+    }
+    let hosts: usize = global_allows.iter().map(|r| r.resources.len()).sum();
+    Check::warn(
+        "sbx policy",
+        format!(
+            "the runtime allows {hosts} hosts to every sandbox, beyond each session's own rules"
+        ),
+        fix,
+    )
+}
+
+/// Whether the runtime's daemon runs under a unit of its own.
+///
+/// Started by the first `sbx` call instead, it lives in the cgroup of whatever
+/// made that call, and when that was `hurad` under systemd, restarting `hurad`
+/// (which `hurad update` asks for) takes the daemon and every sandbox with it.
+fn check_sbx_daemon_unit() -> Check {
+    match probe(&["systemctl", "--user", "is-active", "sbx-daemon"]) {
+        Some(state) if state == "active" => Check::ok("sbx daemon", "sbx-daemon.service"),
+        _ => Check::warn(
+            "sbx daemon",
+            "not running as its own unit, so restarting hurad can stop every sandbox",
+            "install docs/sbx-daemon.service to ~/.config/systemd/user, then \
+             systemctl --user enable --now sbx-daemon",
+        ),
+    }
+}
+
+/// Whether the runtime holds the image Docker built, for the base and each
+/// variant there is. A session is made from the runtime's copy, so one that
+/// is missing or older is what a new session runs. Loaded by the next create,
+/// so this is a warning about the minute that create will spend.
+fn check_template() -> Vec<Check> {
+    let tags: Vec<String> = std::iter::once(crate::session::IMAGE.to_string())
+        .chain(crate::image::variants())
+        .filter(|t| crate::image::exists_tag(t))
+        .collect();
+    let stale: Vec<&String> = tags.iter().filter(|t| !crate::image::loaded(t)).collect();
+    if tags.is_empty() {
+        return Vec::new();
+    }
+    if stale.is_empty() {
+        return vec![Check::ok("templates", format!("{} loaded", tags.len()))];
+    }
+    vec![Check::warn(
+        "templates",
+        format!(
+            "not loaded into the sandbox runtime as built: {}",
+            stale
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        "the next session that needs one loads it; or hurad image build",
+    )]
+}
+
 fn check_image() -> Check {
     if crate::image::exists() {
         // An image from an older hura works, but reports no agent status, and
@@ -249,7 +338,7 @@ fn check_image() -> Check {
 /// not a problem to report -- unlike the base image, which every session needs.
 ///
 /// The staleness half is the part worth a check. A variant is `FROM
-/// hura-base:latest`, so rebuilding the base for a newer agent leaves every
+/// hura-sandbox:latest`, so rebuilding the base for a newer agent leaves every
 /// variant behind it, and nothing about that looks wrong from outside: sessions
 /// start, the toolchain works, and the agent is whatever version it was when the
 /// variant was built.
@@ -282,7 +371,7 @@ fn check_toolchains() -> Option<Check> {
             ),
             // One command per variant, because each is its own build. The tag's
             // toolchains are joined with `-` and `--toolchain` takes them
-            // comma-separated, so `hura-base:dotnet-rust` turns back into
+            // comma-separated, so `hura-sandbox:dotnet-rust` turns back into
             // `--toolchain dotnet,rust`.
             rebuild_commands(&stale).join("; "),
         ));
@@ -312,40 +401,27 @@ fn check_toolchains() -> Option<Check> {
 
 /// How long to wait for a published MCP port to answer.
 ///
-/// It is on the loopback bridge, so a server that is up answers in microseconds
-/// and anything slower is a firewall or a wrong address. Short enough that a
-/// misconfigured entry does not make `doctor` feel broken.
+/// It is on this machine's loopback, so a server that is up answers in
+/// microseconds and anything slower is a firewall or a wrong address. Short
+/// enough that a misconfigured entry does not make `doctor` feel broken.
 const MCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Whether the MCP servers the config names are actually there.
 ///
-/// The quietest failure this feature has: a container that is not running, or
-/// one running but not attached to the gateway's network, produces a session
-/// whose agent comes up with a tool it cannot reach -- and the agent reports
-/// that as "needs authentication", which sends anyone looking in the wrong
-/// direction entirely.
+/// The quietest failure this feature has: a server that is not running, or one
+/// running where no sandbox can reach it, produces a session whose agent comes
+/// up with a tool it cannot reach, and the agent reports that as "needs
+/// authentication", which sends anyone looking in the wrong direction entirely.
 ///
 /// Three shapes, checked differently because they fail differently. A
 /// **managed** entry is asked of [`mcp::statuses`], which is the same answer the
-/// window's integrations screen shows -- one implementation, so a check that
-/// passes here cannot disagree with a screen that says something is wrong. An
-/// external **container name** is asked about through Docker, since the host
-/// cannot reach it by name at all -- only sandboxes on that network can. An
-/// external **published port** is connected to, on the bridge gateway address
-/// the sandbox will use rather than on `localhost`, because a container
-/// published to `127.0.0.1` only is exactly the mistake that looks fine from the
-/// host and is unreachable from a sandbox.
+/// window's integrations screen shows: one implementation, so a check that
+/// passes here cannot disagree with a screen that says something is wrong. One
+/// of your own reached **through this machine** is connected to on
+/// `127.0.0.1`, where the sandbox runtime takes `host.docker.internal`. And
+/// one named by **a container's name** is said to be unreachable outright: a
+/// sandbox cannot resolve the names of this machine's containers.
 fn check_mcp(entries: &[mcp::Entry]) -> Check {
-    // Also the answer to "is Docker there at all": without the network there is
-    // no address to connect to and no point asking about containers, and the
-    // docker check above has already said why. Saying it a second time here
-    // would be two failures for one cause.
-    let Some(bridge) = bridge_gateway() else {
-        return Check::ok(
-            "mcp",
-            "not checked: the openshell docker network is not there",
-        );
-    };
     let mut problems: Vec<String> = Vec::new();
     let live = mcp::statuses(entries);
 
@@ -354,15 +430,15 @@ fn check_mcp(entries: &[mcp::Entry]) -> Check {
         let problem = if entry.is_managed() {
             status.problem.clone()
         } else if s.via_host() {
-            (!port_open(&bridge, port_of(s))).then(|| {
+            (!port_open("127.0.0.1", port_of(s))).then(|| {
                 format!(
-                    "nothing is listening on {bridge}:{}, which is where `{}` points from inside a sandbox",
+                    "nothing is listening on 127.0.0.1:{}, which is where `{}` points from inside a sandbox",
                     port_of(s),
                     s.host()
                 )
             })
         } else {
-            container_problem(s.host())
+            container_problem(s.host(), port_of(s))
         };
         if let Some(p) = problem {
             problems.push(format!("{}: {p}", s.name));
@@ -381,59 +457,23 @@ fn check_mcp(entries: &[mcp::Entry]) -> Check {
         "mcp",
         problems.join("; "),
         format!(
-            "a managed one starts from the window's integrations screen; \
-             one of your own can be attached with \
-             `docker network connect {} <container>`, or its url fixed in the \
-             config file",
-            mcp::NETWORK
+            "a managed one starts from the window's integrations screen; one of your \
+             own is published on 127.0.0.1 and named as `{}` in its url",
+            mcp::HOST_ALIAS
         ),
     )
 }
 
-/// What is wrong with the container an MCP url names, if anything.
-///
-/// Only ever called once Docker is known to be answering, so `inspect` failing
-/// means the container does not exist -- which is the most likely thing to be
-/// wrong, and the one a sandbox reports as an MCP server that needs
-/// authentication.
-fn container_problem(name: &str) -> Option<String> {
-    let Some(out) = probe(&[
-        "docker",
-        "inspect",
-        name,
-        "--format",
-        "{{.State.Running}} {{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}",
-    ]) else {
-        return Some(format!(
-            "there is no container named `{name}`, so no sandbox can resolve that url"
-        ));
-    };
-    let mut parts = out.split_whitespace();
-    let running = parts.next() == Some("true");
-    let networks: Vec<&str> = parts.collect();
-    if !running {
-        return Some(format!("container `{name}` is not running"));
-    }
-    if !networks.contains(&mcp::NETWORK) {
-        return Some(format!(
-            "container `{name}` is not on the `{}` network, so no sandbox can resolve it",
-            mcp::NETWORK
-        ));
-    }
-    None
-}
-
-/// The address `host.openshell.internal` resolves to inside a sandbox.
-fn bridge_gateway() -> Option<String> {
-    probe(&[
-        "docker",
-        "network",
-        "inspect",
-        mcp::NETWORK,
-        "--format",
-        "{{(index .IPAM.Config 0).Gateway}}",
-    ])
-    .filter(|ip| !ip.is_empty())
+/// Whether an MCP url names one of this machine's containers, which no
+/// sandbox can resolve. `None` for any other host, which is somewhere a
+/// sandbox can be given a rule for.
+fn container_problem(name: &str, port: &str) -> Option<String> {
+    probe(&["docker", "inspect", name, "--format", "{{.Name}}"])?;
+    Some(format!(
+        "`{name}` is a container here, and a sandbox cannot reach containers by name; \
+         publish it on 127.0.0.1:{port} and use `http://{}:{port}`",
+        mcp::HOST_ALIAS
+    ))
 }
 
 fn port_of(s: &mcp::Server) -> &str {
@@ -598,24 +638,21 @@ fn own_addresses() -> Vec<String> {
     out
 }
 
-pub fn run(client: &dyn OpenShell, config: &Result<Config, config::Error>) -> Vec<Check> {
-    let mut checks = vec![
-        check_version(),
-        check_config(config),
-        check_openshell(),
-        check_gateway(client),
-        check_docker(),
-        check_tmux(),
-        check_linger(),
-        check_image(),
-    ];
+pub fn run(backend: &dyn Backend, config: &Result<Config, config::Error>) -> Vec<Check> {
+    let mut checks = vec![check_version(), check_config(config), backend.health()];
+    let sbx = sbx_client(config);
+    checks.extend(check_sbx_diagnose(&sbx));
+    checks.push(check_sbx_policy(&sbx));
+    checks.push(check_sbx_daemon_unit());
+    checks.extend([check_docker(), check_tmux(), check_linger(), check_image()]);
+    checks.extend(check_template());
     checks.extend(check_toolchains());
     // Only when the file names some, since the check is about the file being
     // right rather than about providers existing.
     if let Ok(cfg) = config
         && !cfg.providers().is_empty()
     {
-        checks.push(check_config_providers(client, cfg.providers()));
+        checks.push(check_config_providers(backend, cfg.providers()));
     }
     // Same reasoning: the check is about the file being right, so it only runs
     // when the file says something.
@@ -644,19 +681,16 @@ fn check_config(config: &Result<Config, config::Error>) -> Check {
     }
 }
 
-/// Whether the providers the config file names still exist at the gateway.
+/// Whether the providers the config file ticks by default are credentials it
+/// defines.
 ///
-/// A name that does not is the quietest failure hura has: the create form simply
+/// A name that is not is the quietest failure hura has: the create form simply
 /// does not tick it, the sandbox comes up without the credential, and the clone
 /// fails for what looks like an authentication problem several steps later.
-/// Here is the only place that can be said before it happens, because it is the
-/// one command that both reads the file and asks the gateway.
-fn check_config_providers(client: &dyn OpenShell, named: &[String]) -> Check {
-    let existing = match client.providers() {
+fn check_config_providers(backend: &dyn Backend, named: &[String]) -> Check {
+    let existing = match backend.providers() {
         Ok(list) => list,
-        // The gateway check above already says so; repeating it here would be
-        // two failures for one cause.
-        Err(_) => return Check::ok("providers", "not checked: the gateway is unreachable"),
+        Err(_) => return Check::ok("providers", "not checked"),
     };
     let missing: Vec<&str> = named
         .iter()
@@ -668,8 +702,8 @@ fn check_config_providers(client: &dyn OpenShell, named: &[String]) -> Check {
     }
     Check::warn(
         "providers",
-        format!("no provider named {}", missing.join(", ")),
-        "openshell provider list; fix `providers` in the config file",
+        format!("no credential named {}", missing.join(", ")),
+        "add it under [credentials.NAME], or fix `providers` in the config file",
     )
 }
 
@@ -709,21 +743,21 @@ mod toolchain_tests {
     #[test]
     fn a_stale_variant_is_told_how_to_rebuild_itself() {
         assert_eq!(
-            rebuild_commands(&["hura-base:dotnet".to_string()]),
+            rebuild_commands(&["hura-sandbox:dotnet".to_string()]),
             ["hurad image build --toolchain dotnet"]
         );
         // The tag joins with `-`, the flag takes `,`.
         assert_eq!(
-            rebuild_commands(&["hura-base:dotnet-rust".to_string()]),
+            rebuild_commands(&["hura-sandbox:dotnet-rust".to_string()]),
             ["hurad image build --toolchain dotnet,rust"]
         );
         // One command each, since each is its own build.
         assert_eq!(
-            rebuild_commands(&["hura-base:dotnet".into(), "hura-base:rust".into()]).len(),
+            rebuild_commands(&["hura-sandbox:dotnet".into(), "hura-sandbox:rust".into()]).len(),
             2
         );
         // Nothing invented from something that is not a tag.
-        assert!(rebuild_commands(&["hura-base".to_string()]).is_empty());
+        assert!(rebuild_commands(&["hura-sandbox".to_string()]).is_empty());
     }
 }
 

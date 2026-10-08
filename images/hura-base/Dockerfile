@@ -2,13 +2,24 @@
 #
 # hura sandbox image.
 #
-# The community base image has git, node, python, uv, gh and claude, but no
-# tmux. hura runs each agent inside an in-sandbox tmux session so the agent
-# survives losing its connection, and so its output can be scraped with
-# capture-pane without depending on anything on the host.
+# Docker's `shell-docker` sandbox template has git, node, python, uv, gh, socat
+# and its own Docker Engine, which is the reason to be on it: an agent can build
+# and run containers inside its sandbox. It has no agent and no tmux. hura runs
+# each agent inside an in-sandbox tmux session so the agent survives losing its
+# connection, and so its output can be scraped with capture-pane without
+# depending on anything on the host.
 #
-# Build:  hura image build   (or: docker build -t hura-base:latest images/hura-base)
-FROM ghcr.io/nvidia/openshell-community/sandboxes/base:latest
+# The template's labels carry over to this image, and one of them
+# (`com.docker.sandboxes.start-docker`) is what makes the runtime start that
+# engine, so the base has to stay a `FROM` rather than a copy of its contents.
+#
+# The workload runs as the template's `agent` user, with HOME at /home/agent.
+# Everything hura itself puts in a session stays under /sandbox, which is made
+# here and given to `agent`.
+#
+# Build:  hurad image build   (or: docker build -t hura-base:latest images/hura-base,
+#         then load it into the sandbox runtime with `sbx template load`)
+FROM docker/sandbox-templates:shell-docker
 
 USER root
 
@@ -25,11 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Claude Code, at the newest release rather than whatever the base image froze.
 #
-# The base image bakes in a native `claude` binary and updates on its own
-# schedule -- it shipped 2.1.143 while 2.1.246 was current -- and the agent
-# cannot fix that from inside: a sandbox under `feature-work` cannot reach the
-# download host, and /usr/local/bin is not writable by the sandbox user anyway.
-# So the version is the image's business.
+# The template has no Claude Code, and the agent should not be the one picking
+# its version: a session under `feature-work` cannot reach the download host,
+# and a self-update would leave each session on whatever it found that day. So
+# the version is the image's business.
 #
 # `latest` is resolved to a concrete version, either here or by the caller, and
 # `--build-arg CLAUDE_VERSION=2.1.246` pins it when a specific one is wanted.
@@ -40,9 +50,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # against the newest release and says when it has fallen behind.
 #
 # The release binary, not install.sh: the installer lands a launcher under
-# `$HOME`, which here is the sandbox user's writable home, so the agent could
-# replace its own binary. Overwriting the base image's copy in /usr/local/bin
-# keeps it on PATH for every user and read-only to the agent.
+# `$HOME`, where the agent's own tools would shadow it. /usr/local/bin keeps it
+# on PATH for every user, at the path the rest of hura names.
 #
 # The checksum comes from the release manifest, so a truncated or substituted
 # download fails the build instead of shipping. The `--version` check at the end
@@ -73,6 +82,12 @@ RUN set -eu; \
     test "$installed" = "$version" \
         || { echo "wanted claude $version, got $installed" >&2; exit 1; }
 
+# The sandbox runtime sets ANTHROPIC_API_KEY to a sentinel in every exec, for an
+# Anthropic integration of its own that hura does not use. A tmux server keeps
+# the environment it started with, so whichever exec starts it, the agent in it
+# must not see that variable: Claude Code stops to ask about the key, and would
+# prefer it to the session's own credential.
+#
 # A long scrollback is what makes capture-pane useful for previews and, later,
 # for detecting what the agent is waiting on.
 #
@@ -94,20 +109,23 @@ RUN printf '%s\n' \
         'set-environment -g LANG C.UTF-8' \
         'set-environment -g LC_ALL C.UTF-8' \
         'set-environment -g COLORTERM truecolor' \
+        'set-environment -gu ANTHROPIC_API_KEY' \
     > /etc/tmux.conf \
     && chmod 0644 /etc/tmux.conf
 
 # UTF-8, and colour, and the reason both have to be said twice.
 #
-# The base image sets no locale at all, and the gateway does not pass this
-# environment through to an exec -- so a tmux client started by
-# `openshell sandbox exec` had neither. A tmux client that does not believe it is
-# on a UTF-8 terminal draws with the DEC line-drawing set and replaces every
-# character it cannot map with `_`, which is what Claude Code's banner, its box
-# rules and its `⏸` and `❯` glyphs turned into. `ENV` here fixes anything started
-# from the image; `set-environment` in the tmux conf above fixes the agent's own
-# process, whose environment comes from the tmux server; and `ops::attach_script`
-# exports it a third time for the client, which is the one the gateway strips.
+# The template sets no locale at all. Under OpenShell the gateway also stripped
+# the image's environment from every exec, so a tmux client it started had
+# neither; the sandbox runtime passes `ENV` through, but the tmux conf and
+# `ops::attach_script` still say it so nothing depends on which one ran. A tmux
+# client that does not believe it is on a UTF-8 terminal draws with the DEC
+# line-drawing set and replaces every character it cannot map with `_`, which is
+# what Claude Code's banner, its box rules and its `⏸` and `❯` glyphs turned
+# into. `ENV` here fixes anything started from the image; `set-environment` in
+# the tmux conf above fixes the agent's own process, whose environment comes
+# from the tmux server; and `ops::attach_script` exports it a third time for the
+# client, which is the one OpenShell stripped.
 #
 # `default-terminal` and `terminal-features RGB` are the colour half. Inside tmux
 # a pane's TERM decides how many colours the agent thinks it has, and RGB has to
@@ -127,8 +145,8 @@ ENV LANG=C.UTF-8 \
 #
 # Set twice on purpose. `ENV` covers anything started in the sandbox, including a
 # shell someone opens by hand; the same variable in `settings.json` is what
-# actually reaches the agent, because the gateway does not pass the image's
-# environment through to an exec.
+# Claude Code reads whatever its environment, which mattered under OpenShell,
+# whose exec passed none of the image's through.
 ENV DISABLE_AUTOUPDATER=1
 
 # Skip Claude Code's first-run onboarding, and turn copy-on-select off.
@@ -143,7 +161,9 @@ ENV DISABLE_AUTOUPDATER=1
 # sandbox it is worse than on a host: selecting text to read it takes the
 # clipboard, and the terminal it takes it from is one you are borrowing to watch
 # an agent work.
-RUN CLAUDE_VERSION="$(claude --version 2>/dev/null | awk '{print $1}')" \
+RUN mkdir -p /sandbox \
+    && chown agent:agent /sandbox \
+    && CLAUDE_VERSION="$(claude --version 2>/dev/null | awk '{print $1}')" \
     && jq -n --arg v "$CLAUDE_VERSION" '{ \
          hasCompletedOnboarding: true, \
          lastOnboardingVersion: $v, \
@@ -152,8 +172,8 @@ RUN CLAUDE_VERSION="$(claude --version 2>/dev/null | awk '{print $1}')" \
            "/sandbox": {hasTrustDialogAccepted: true, projectOnboardingSeenCount: 1}, \
            "/sandbox/repo": {hasTrustDialogAccepted: true, projectOnboardingSeenCount: 1} \
          } \
-       }' > /sandbox/.claude.json \
-    && chown sandbox:sandbox /sandbox/.claude.json
+       }' > /home/agent/.claude.json \
+    && chown agent:agent /home/agent/.claude.json
 
 # Status reporting, so the list view can say "this agent needs you" rather than
 # only "this sandbox is up".
@@ -174,11 +194,11 @@ RUN CLAUDE_VERSION="$(claude --version 2>/dev/null | awk '{print $1}')" \
 # read it and prints the line the agent shows.
 COPY hura-status /usr/local/bin/hura-status
 COPY hura-usage /usr/local/bin/hura-usage
-COPY claude-settings.json /sandbox/.claude/settings.json
+COPY claude-settings.json /home/agent/.claude/settings.json
 
 RUN chmod 0755 /usr/local/bin/hura-status /usr/local/bin/hura-usage \
-    && chmod 0644 /sandbox/.claude/settings.json \
-    && chown -R sandbox:sandbox /sandbox/.claude
+    && chmod 0644 /home/agent/.claude/settings.json \
+    && chown -R agent:agent /home/agent/.claude
 
 # The chat agent: Claude Code driven through the Agent SDK, by a host process
 # that lives in here rather than on the machine outside.
@@ -188,11 +208,12 @@ RUN chmod 0755 /usr/local/bin/hura-status /usr/local/bin/hura-usage \
 # protocol to each other, so the pair is chosen together rather than each being
 # whatever was newest. Optional dependencies are left out: they are the SDK's
 # own copy of Claude Code for every platform, and the host points it at
-# /usr/local/bin/claude instead, which is the binary the policy grants the API
-# to. Peer dependencies are left out too; the SDK bundles what it imports.
+# /usr/local/bin/claude instead, which is the one installed and pinned above.
+# Peer dependencies are left out too; the SDK bundles what it imports.
 #
-# Root-owned, like the claude binary, so the agent cannot rewrite the process
-# that answers its permission prompts.
+# Root-owned, like the claude binary. The agent has sudo in its VM, so this
+# keeps an accident from rewriting the process that answers its permission
+# prompts rather than a determined agent; the VM is the boundary.
 COPY hura-agent.mjs /usr/local/lib/hura-agent/hura-agent.mjs
 RUN set -eu; \
     claude_version="$(claude --version | awk '{print $1}')"; \
@@ -211,8 +232,4 @@ RUN set -eu; \
 # variant inherits it, so a variant built from an older base says so too.
 LABEL hura.chat="1"
 
-USER sandbox
-
-# Inherited from the base image, restated so a future base change is visible
-# here rather than silently altering behaviour.
-ENTRYPOINT ["/bin/bash"]
+USER agent

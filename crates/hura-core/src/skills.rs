@@ -40,20 +40,19 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-/// Where the agent looks for skills inside the sandbox. `HOME` is `/sandbox`.
-pub const SANDBOX_SKILLS_DIR: &str = "/sandbox/.claude/skills";
+/// Where the agent looks for skills inside the sandbox. `HOME` is `/home/agent`.
+pub const SANDBOX_SKILLS_DIR: &str = "/home/agent/.claude/skills";
 
 /// The file that makes a directory a skill.
 const MANIFEST: &str = "SKILL.md";
 
 /// The most base64 one skill may weigh, after compression.
 ///
-/// The payload rides inside the seeder script, which is itself written into the
-/// sandbox through an `exec` argument, so this is bounded by what a command line
-/// can hold rather than by anything in the gateway. 256 KiB of base64 is ~190KiB
-/// of gzip and far more prose than any skill has; a skill above it is one that
-/// has a virtualenv or a video in it by accident, and saying so is more useful
-/// than a create that fails on `argument list too long`.
+/// The payload rides inside the seeder script, which goes into the sandbox on
+/// an exec's stdin, so no command line bounds it any more; this does. 256 KiB
+/// of base64 is ~190KiB of gzip and far more prose than any skill has; a skill
+/// above it is one that has a virtualenv or a video in it by accident, and
+/// saying so is more useful than copying it into every sandbox.
 const MAX_PAYLOAD: usize = 256 * 1024;
 
 /// One skill, as the config file points at it and as the sandbox records it.
@@ -838,9 +837,9 @@ mod tests {
         };
         let (script, warnings) = pack(std::slice::from_ref(&skill));
         assert!(warnings.is_empty(), "{warnings:?}");
-        assert!(script.starts_with("mkdir -p '/sandbox/.claude/skills'"));
-        assert!(script.contains("rm -rf '/sandbox/.claude/skills/ship'"));
-        assert!(script.contains("| base64 -d | tar -xzf - -C '/sandbox/.claude/skills'"));
+        assert!(script.starts_with("mkdir -p '/home/agent/.claude/skills'"));
+        assert!(script.contains("rm -rf '/home/agent/.claude/skills/ship'"));
+        assert!(script.contains("| base64 -d | tar -xzf - -C '/home/agent/.claude/skills'"));
 
         // Unpack what the script carries and check every file survived. The
         // payload is the fourth field of `printf '%s' '<b64>' | ...`: base64

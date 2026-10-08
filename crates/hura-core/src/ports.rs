@@ -2,19 +2,19 @@
 //!
 //! Read from `/proc/net/tcp` and `/proc/net/tcp6` by the status poll, which is
 //! already an exec every couple of seconds: a second exec to ask the same
-//! sandbox one more question would queue behind the first, since execs are
-//! serialised gateway-side. The script keeps only the listening sockets' local
+//! sandbox one more question would be another third of a second on every
+//! poll. The script keeps only the listening sockets' local
 //! addresses, so what comes back is a few short lines however many connections
 //! the agent has open.
 //!
-//! Only what a forward can reach is kept. The gateway forwards to loopback and
+//! Only what a forward can reach is kept. A relay carries to loopback and
 //! nothing else, so a socket bound to one loopback or to every address is a
 //! preview, and a socket bound to one particular interface is not.
 
 use serde::{Deserialize, Serialize};
 
-/// The two addresses a forward may target. Not a free string: the gateway
-/// only forwards to loopback, and a client naming any other host would be
+/// The two addresses a forward may target. Not a free string: a relay only
+/// carries to loopback, and a client naming any other host would be
 /// asking the server to dial somewhere on its behalf.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -42,6 +42,13 @@ pub struct Listening {
     pub host: Loopback,
 }
 
+/// The ports `hurad relay` listens on inside a sandbox, one per preview.
+///
+/// The sandbox runtime publishes only ports bound beyond the sandbox's own
+/// loopback, so a relay on one of these carries a preview of a server that is
+/// bound to it. Reserved, so the relays never show up as previews themselves.
+pub const RELAY_PORTS: std::ops::RangeInclusive<u16> = 47700..=47799;
+
 /// The shell that prints each listening socket's local address, one per line,
 /// in the kernel's own hex. State `0A` is `LISTEN`.
 pub const SCRIPT: &str = r#"awk '$4=="0A"{print $2}' /proc/net/tcp /proc/net/tcp6 2>/dev/null"#;
@@ -60,6 +67,9 @@ pub fn parse(text: &str) -> Vec<Listening> {
         let Ok(port) = u16::from_str_radix(port, 16) else {
             continue;
         };
+        if RELAY_PORTS.contains(&port) {
+            continue;
+        }
         let Some(host) = reachable(addr) else {
             continue;
         };
@@ -112,11 +122,10 @@ pub struct Owner {
     /// Whether the socket was traced to this process, or the process was
     /// picked because its command line names the port.
     ///
-    /// Usually a guess, and that is the sandbox rather than a shortcut here:
-    /// it runs under `ptrace_scope=1`, which lets a process read another's
-    /// descriptors only if it is that process's ancestor -- and an exec is
-    /// never the ancestor of the agent's dev server. Measured: `readlink` on
-    /// another process's `fd/3` is refused, and so is `ss -p`'s netlink.
+    /// Certain for anything running as the sandbox's user: the VM has no
+    /// Yama, so an exec reads the descriptors of a dev server it did not
+    /// start (measured against v0.47.0). A server started with `sudo` keeps
+    /// its descriptors from the exec, and is the guess.
     pub certain: bool,
 }
 
@@ -210,8 +219,7 @@ pub fn parse_sandbox(out: &str) -> Found {
     let procs = section(PROCS_MARKER, None);
 
     // inode -> pid, from `ls -l`'s `/proc/123/fd:` headers and its
-    // `... 5 -> socket:[2576303]` lines -- which, under the sandbox's ptrace
-    // rules, are usually there without their targets.
+    // `... 5 -> socket:[2576303]` lines, which a root process's are without.
     let mut by_inode = std::collections::HashMap::<&str, u32>::new();
     let mut pid: Option<u32> = None;
     for line in fds.lines() {
@@ -331,20 +339,22 @@ fn program(command: &str) -> &str {
     first.rsplit('/').next().unwrap_or(first)
 }
 
-/// Not worth a row: a shell, or the sandbox keeping itself alive.
+/// Not worth a row: a shell, the sandbox keeping itself alive, or a relay
+/// carrying a preview out.
 fn plumbing(command: &str) -> bool {
     matches!(
         program(command),
-        "sh" | "bash" | "dash" | "zsh" | "fish" | "ash"
+        "sh" | "bash" | "dash" | "zsh" | "fish" | "ash" | "tini" | "socat"
     ) || command == "sleep infinity"
 }
 
-/// The agent and its tmux. A `node` running Claude Code is named for the
-/// script rather than the interpreter, so every word is looked at.
+/// The agent and its tmux, and the sandbox's own Docker Engine. A `node`
+/// running Claude Code is named for the script rather than the interpreter, so
+/// every word is looked at.
 fn protected(command: &str) -> bool {
     command.split_whitespace().any(|w| {
         let base = w.rsplit('/').next().unwrap_or(w);
-        base == "claude" || base == "tmux" || base.starts_with("tmux:")
+        matches!(base, "claude" | "tmux" | "dockerd" | "containerd") || base.starts_with("tmux:")
     })
 }
 
@@ -387,8 +397,8 @@ mod tests {
         format!("{PROCS_MARKER}\nself 200 998\n{lines}")
     }
 
-    /// The sandbox as it really answers: no descriptor targets, so the owner
-    /// is a guess from the command line -- and says so.
+    /// No descriptor targets, as for a server started with `sudo`: the owner
+    /// is a guess from the command line, and says so.
     #[test]
     fn without_descriptors_the_owner_is_guessed_from_the_command_line() {
         let out = format!(

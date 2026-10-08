@@ -6,7 +6,7 @@
 //! the host process: quitting the TUI mid-clone -- and the create thread is
 //! detached, so quitting is enough -- killed it and left a sandbox holding 69MB
 //! of a 238MB repository, no `HEAD`, and a record that still said `seeding`.
-//! Nothing in the gateway log, because nothing failed; the client simply went
+//! Nothing in the policy log, because nothing failed; the client simply went
 //! away.
 //!
 //! Now the host writes a script into the sandbox, starts it with `setsid`, and
@@ -16,8 +16,6 @@
 //! [`crate::ops::refresh_with`] the next time anything runs.
 
 use std::process::Command;
-
-use openshell_client::OpenShell;
 
 use crate::backend::{Backend, Paths};
 use crate::forge;
@@ -55,12 +53,12 @@ fn host_git_identity() -> (String, String) {
 
 /// How many times the clone is attempted before the seeding gives up.
 ///
-/// Three because the failure this exists for is a race that is over in
-/// milliseconds, and a second attempt has already missed it; the third is for
+/// Three because the failure this was made for was a race over in
+/// milliseconds, which a second attempt had already missed; the third is for
 /// the ordinary flaky network the first two were not.
 const CLONE_ATTEMPTS: u32 = 3;
-/// How long to wait between attempts. Long enough that a gateway settling after
-/// a fresh sandbox has settled, short enough not to be felt.
+/// How long to wait between attempts. Long enough for a fresh sandbox's network
+/// to have settled, short enough not to be felt.
 const CLONE_RETRY_SECS: u32 = 2;
 
 /// The clone-and-branch half of seeding, without a shebang or a `set`.
@@ -71,8 +69,8 @@ const CLONE_RETRY_SECS: u32 = 2;
 /// quoting -- have one home.
 ///
 /// The clone is retried, which nothing else in the seeder is, because it is the
-/// one step that runs while the sandbox is still brand new -- and OpenShell
-/// 0.0.110 can deny that first connection for a reason that has nothing to do
+/// one step that runs while the sandbox is still brand new, and OpenShell
+/// 0.0.110 could deny that first connection for a reason that had nothing to do
 /// with the policy:
 ///
 /// ```text
@@ -81,15 +79,16 @@ const CLONE_RETRY_SECS: u32 = 2;
 ///   Failed to stat /usr/bin/dash: No such file or directory (os error 2)
 /// ```
 ///
-/// A network rule is granted to a binary *and its ancestry*, and the gateway
-/// re-reads each ancestor's executable before it allows the connection. `dash`
-/// is in that ancestry -- it is `/bin/sh`, and [`launch`] starts the seeder with
-/// one -- and the launching shell exits about a tenth of a second after the
-/// clone begins, which is roughly when git opens its first connection. Lose that
-/// race and the ancestor's executable cannot be read, the connection is denied,
-/// and git reports the refused CONNECT as `response 403`. It is transient: the
-/// same clone, run again a second later, is allowed. Without a retry a race
-/// nobody can see costs the whole session, which is what it did.
+/// Its network rules were granted to a binary *and its ancestry*, and it
+/// re-read each ancestor's executable before it allowed the connection. `dash`
+/// was in that ancestry, as the `/bin/sh` that [`launch`] starts the seeder
+/// with, and the launching shell exits about a tenth of a second after the
+/// clone begins, which is roughly when git opens its first connection. Losing
+/// that race meant the ancestor's executable could not be read, the connection
+/// was denied, and git reported the refused CONNECT as `response 403`. It was
+/// transient: the same clone, run again a second later, was allowed. The
+/// sandbox runtime's rules are per sandbox, with no ancestry to check, but a
+/// race nobody can see should never cost the whole session, so the retry stays.
 pub(crate) fn clone_and_branch(session: &Session, paths: &Paths) -> String {
     let (name, email) = host_git_identity();
 
@@ -132,7 +131,7 @@ cd {repo}
 git config user.name {gname}
 git config user.email {gemail}
 # Persist the credential header in the clone, so a later push or fetch needs no
-# special casing. Safe: the value is the gateway's placeholder, not the secret,
+# special casing. Safe: the value is the runtime's placeholder, not the secret,
 # and it is meaningless outside this sandbox.
 if [ -n "$git_auth" ]; then
   git config "http.extraHeader" "$auth_header"
@@ -163,9 +162,7 @@ fn meta_write_command(meta_json: &str, paths: &Paths) -> String {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SeedError {
-    #[error(transparent)]
-    Client(#[from] openshell_client::Error),
-    /// Whatever the session's backend said, such as an unreachable gateway.
+    /// Whatever the session's backend said, such as an unreachable runtime.
     #[error(transparent)]
     Backend(#[from] crate::backend::Error),
     #[error("seeding failed (exit {code}): {stderr}")]
@@ -306,15 +303,20 @@ pub fn launch(
 ) -> Result<(), SeedError> {
     let paths = backend.paths(session);
     let script = detached_script(backend, session, start_agent);
+    // The script arrives on stdin, since it carries the task and every skill
+    // and an argument is capped at 128 KiB. It is written before anything is
+    // put in the background: a background job in a non-interactive shell has
+    // its stdin replaced with /dev/null, so a `cat` there writes nothing.
     let launcher = format!(
-        "mkdir -p {dir} && printf '%s' {script} > {path} &&          setsid sh {path} > {log} 2>&1 < /dev/null &          sleep 0.1",
+        "mkdir -p {dir} && cat > {path} || exit 1\n\
+         setsid sh {path} > {log} 2>&1 < /dev/null &\n\
+         sleep 0.1",
         dir = sh_quote(&paths.hura),
-        script = sh_quote(&script),
         path = sh_quote(&paths.seed_script()),
         log = sh_quote(&paths.seed_log()),
     );
 
-    let out = backend.exec(session, &["sh", "-c", &launcher])?;
+    let out = backend.exec_stdin(session, &["sh", "-c", &launcher], script.as_bytes())?;
     if !out.ok() {
         return Err(SeedError::Script {
             code: out.exit_code,
@@ -384,16 +386,17 @@ pub fn parse_seed_state(text: &str) -> SeedState {
 /// What a failed seeding says to whoever asked for the session.
 ///
 /// A denied connection is the one failure that reads as something else
-/// entirely. The gateway refuses the CONNECT, git reports `response 403`, and a
-/// 403 from a git host means an expired token to anyone who has ever seen one
-/// -- so the reader goes looking for a credential when the answer is a policy
-/// rule. The reason the gateway gives exists in exactly one place, the events
-/// feed, so say which feed rather than leaving the 403 to be interpreted.
+/// entirely. The sandbox's proxy refuses the CONNECT, git reports `response
+/// 403`, and a 403 from a git host means an expired token to anyone who has
+/// ever seen one, so the reader goes looking for a credential when the answer
+/// is a policy rule. The reason the runtime gives exists in exactly one place,
+/// the events feed, so say which feed rather than leaving the 403 to be
+/// interpreted.
 pub fn failure_message(session: &str, why: &str) -> String {
     let mut msg = format!("seeding failed: {why}");
     if why.contains("CONNECT tunnel failed") {
         msg.push_str(&format!(
-            ". That 403 is the gateway denying the connection, not the host refusing it; \
+            ". That 403 is the sandbox's policy denying the connection, not the host refusing it; \
              `hurad events {session}` names the rule and the reason"
         ));
     }
@@ -423,22 +426,29 @@ pub fn start_agent_script(backend: &dyn Backend, session: &Session) -> String {
         format!("{} \"$(cat {})\"", session.agent, paths.task())
     };
 
-    // The locale is exported here as well as in the image, because this runs as
-    // an exec and the gateway does not pass the image's environment through --
-    // and this exec is the one that starts the *tmux server*, whose environment
-    // every pane inherits. An agent with no UTF-8 locale draws its own box rules
-    // and glyphs as something tmux cannot map. See `ops::attach_script`.
+    // This exec is the one that starts the *tmux server*, whose environment
+    // every pane inherits, so what the agent should and should not see is
+    // settled here. The locale, because an agent with no UTF-8 locale draws its
+    // own box rules and glyphs as something tmux cannot map; see
+    // `ops::attach_script`. And not the runtime's `ANTHROPIC_API_KEY`: the
+    // sandbox runtime puts a sentinel in every exec for its own Anthropic
+    // integration, and Claude Code stops on "Detected a custom API key" before
+    // it reaches the task, and would then use it over the session's own
+    // credential. See `AGENT_ENV`.
     format!(
         r#"set -eu
-export LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor
+{agent_env}
 if {tmux_bin} has-session -t {tmux} 2>/dev/null; then
   exit 0
 fi
 mkdir -p {hura}
 printf '%s' {task} > {task_path}
+{markers}
 {tmux_bin} new-session -d -s {tmux} -c {repo}
 {tmux_bin} send-keys -t {tmux} {launch} Enter
 "#,
+        markers = agent_markers(&paths),
+        agent_env = AGENT_ENV,
         tmux_bin = backend.tmux(),
         tmux = sh_quote(&session.tmux),
         hura = sh_quote(&paths.hura),
@@ -449,10 +459,80 @@ printf '%s' {task} > {task_path}
     )
 }
 
-/// Read a session back out of a sandbox, for adopting work the local cache
-/// does not know about.
-pub fn read_meta(client: &dyn OpenShell, sandbox: &str) -> Result<Session, SeedError> {
-    let out = client.exec(sandbox, &["cat", META_PATH])?;
+/// The environment an agent is started in, as shell: the locale it draws
+/// with, and none of the sandbox runtime's Anthropic sentinel, which the
+/// runtime sets in every exec and Claude Code would otherwise ask about and
+/// then prefer to the session's own credential.
+pub const AGENT_ENV: &str =
+    "export LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor\nunset ANTHROPIC_API_KEY";
+
+/// Where a sandbox remembers, for one boot, that its agent has been started.
+///
+/// On a tmpfs, so it is gone after every start of the sandbox, which is the
+/// point: its absence beside an agent that once ran says the sandbox was
+/// stopped and started since, and the agent with it. The image's user is UID
+/// 1000, and this is its runtime directory.
+pub const BOOT_MARKER: &str = "/run/user/1000/hura-agent-up";
+
+/// Shell leaving both markers: the agent has been started, ever and this boot.
+pub fn agent_markers(paths: &Paths) -> String {
+    format!(
+        ": > {started} && : > {boot}",
+        started = sh_quote(&paths.agent_started()),
+        boot = sh_quote(BOOT_MARKER),
+    )
+}
+
+/// Shell for the start of the status poll that brings an agent back after its
+/// sandbox has been stopped and started: by the runtime's daemon restarting,
+/// or the machine.
+///
+/// Only when all three say so: the session had an agent, this boot has not
+/// started one, and tmux has no session for it. An agent closed in the same
+/// boot leaves the boot marker behind, so it is not restarted against your
+/// wishes; a session created without one never had the first marker. Its
+/// output goes nowhere, since the poll's output is the poll's.
+///
+/// A terminal agent continues its last conversation rather than starting the
+/// task again; a chat host reloads its conversations from the transcripts
+/// itself.
+pub fn resume_check(backend: &dyn Backend, session: &Session) -> String {
+    let paths = backend.paths(session);
+    let restart = match session.interface {
+        crate::chat::Interface::Chat => crate::chat::start_script(backend, session),
+        crate::chat::Interface::Terminal => format!(
+            r#"set -eu
+{agent_env}
+{markers}
+{tmux_bin} new-session -d -s {tmux} -c {repo}
+{tmux_bin} send-keys -t {tmux} {launch} Enter
+"#,
+            agent_env = AGENT_ENV,
+            markers = agent_markers(&paths),
+            tmux_bin = backend.tmux(),
+            tmux = sh_quote(&session.tmux),
+            repo = sh_quote(&paths.repo),
+            launch = sh_quote(&format!("{} --continue", session.agent)),
+        ),
+    };
+    format!(
+        "if [ -e {started} ] && [ ! -e {boot} ] && ! {tmux_bin} has-session -t {tmux} 2>/dev/null; then\n\
+         ( sh -c {restart} ) >/dev/null 2>&1 || true\n\
+         fi",
+        started = sh_quote(&paths.agent_started()),
+        boot = sh_quote(BOOT_MARKER),
+        tmux_bin = backend.tmux(),
+        tmux = sh_quote(&session.tmux),
+        restart = sh_quote(&restart),
+    )
+}
+
+/// The command that prints a session's own record from inside its sandbox.
+pub const READ_META: [&str; 2] = ["cat", META_PATH];
+
+/// A session read back out of its sandbox, for adopting work the local cache
+/// does not know about: what [`READ_META`] printed, judged.
+pub fn parse_meta(out: &crate::backend::ExecOutput) -> Result<Session, SeedError> {
     if !out.ok() {
         // Matched on the message rather than on the exit code, because `cat`
         // exits 1 for every reason it has.
@@ -693,10 +773,10 @@ mkdir -p "$dest/.git"
         )
     }
 
-    /// The gateway can deny the *first* connection of a brand-new sandbox over a
-    /// race in its ancestor check, and that denial is gone a second later. The
-    /// clone has to survive it: without the retry, a race nobody can see costs
-    /// the whole session.
+    /// OpenShell could deny the *first* connection of a brand-new sandbox over a
+    /// race in its ancestor check, and that denial was gone a second later. The
+    /// clone has to survive one like it: without the retry, a race nobody can
+    /// see costs the whole session.
     #[test]
     fn a_denied_first_clone_is_retried() {
         let (ok, _stderr, attempts) = run_clone("clone-retry", 1);
@@ -884,5 +964,42 @@ mkdir -p "$dest/.git"
             script.contains("do the thing"),
             "task must survive into the sandbox"
         );
+    }
+
+    /// After a stop and a start, the poll brings the agent back, and only then:
+    /// it checks for an agent ever started, none started this boot, and no
+    /// tmux session, and a terminal agent continues rather than starting the
+    /// task over.
+    #[test]
+    fn a_restarted_sandbox_gets_its_agent_back_and_only_then() {
+        let s = Session::new(
+            "a".into(),
+            "https://example.com/r.git".into(),
+            "the task".into(),
+        );
+        let check = resume_check(&sandboxed(), &s);
+        assert!(
+            check.contains("[ -e '/sandbox/.hura/agent-started' ]"),
+            "{check}"
+        );
+        assert!(
+            check.contains(&format!("[ ! -e '{BOOT_MARKER}' ]")),
+            "{check}"
+        );
+        assert!(check.contains("has-session -t 'agent'"), "{check}");
+        assert!(check.contains("claude --continue"), "{check}");
+        assert!(
+            !check.contains("the task"),
+            "a resume must not send the task again"
+        );
+
+        // Every start leaves both markers, so a resumed agent is not resumed
+        // again on the next poll.
+        let start = start_agent_script(&sandboxed(), &s);
+        assert!(
+            start.contains(&agent_markers(&sandboxed().paths(&s))),
+            "{start}"
+        );
+        assert!(start.contains("unset ANTHROPIC_API_KEY"), "{start}");
     }
 }

@@ -1,0 +1,274 @@
+{
+  "rules": [
+    {
+      "id": "default-fs-read-allow-all",
+      "name": "default-fs-read-allow-all",
+      "policy_id": "local-policy",
+      "scope": "global",
+      "applies_to": "all",
+      "resource_type": "filesystem:read",
+      "decision": "allow",
+      "resources": [
+        "**"
+      ],
+      "origin": "local",
+      "layer": "local",
+      "status": "active",
+      "editable": false,
+      "provenance": {
+        "created_via": "default"
+      },
+      "actions": [
+        "fs:mount:read"
+      ]
+    },
+    {
+      "id": "default-fs-write-allow-all",
+      "name": "default-fs-write-allow-all",
+      "policy_id": "local-policy",
+      "scope": "global",
+      "applies_to": "all",
+      "resource_type": "filesystem:write",
+      "decision": "allow",
+      "resources": [
+        "**"
+      ],
+      "origin": "local",
+      "layer": "local",
+      "status": "active",
+      "editable": false,
+      "provenance": {
+        "created_via": "default"
+      },
+      "actions": [
+        "fs:mount:read",
+        "fs:mount:write"
+      ]
+    },
+    {
+      "id": "fda93cfc-bbad-44bc-8e45-f29978e9a5a5",
+      "name": "fda93cfc-bbad-44bc-8e45-f29978e9a5a5",
+      "policy_id": "1a9987e1-74c1-4e9e-a455-4841d442055c",
+      "scope": "sandbox:hura-spike-a",
+      "applies_to": "sandbox:hura-spike-a",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "github.com"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-spike-a",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    },
+    {
+      "id": "d42a11f5-029d-4a12-96aa-78088c4f2c51",
+      "name": "d42a11f5-029d-4a12-96aa-78088c4f2c51",
+      "policy_id": "1a9987e1-74c1-4e9e-a455-4841d442055c",
+      "scope": "sandbox:hura-spike-a",
+      "applies_to": "sandbox:hura-spike-a",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "**.githubusercontent.com"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-spike-a",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    },
+    {
+      "id": "879c135d-caf1-4d7a-bff3-bd32ef6857c5",
+      "name": "879c135d-caf1-4d7a-bff3-bd32ef6857c5",
+      "policy_id": "1a9987e1-74c1-4e9e-a455-4841d442055c",
+      "scope": "sandbox:hura-spike-a",
+      "applies_to": "sandbox:hura-spike-a",
+      "resource_type": "http",
+      "decision": "allow",
+      "resources": [
+        "api.github.com"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-spike-a",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "http:request:get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "http_targets": [
+        {
+          "host": "api.github.com",
+          "path": "/repos/**"
+        }
+      ]
+    },
+    {
+      "id": "148582d1-e89d-4118-9083-63ab6db02a4a",
+      "name": "148582d1-e89d-4118-9083-63ab6db02a4a",
+      "policy_id": "1a9987e1-74c1-4e9e-a455-4841d442055c",
+      "scope": "sandbox:hura-spike-a",
+      "applies_to": "sandbox:hura-spike-a",
+      "resource_type": "http",
+      "decision": "deny",
+      "resources": [
+        "github.com"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-spike-a",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "http:request:post"
+      ],
+      "methods": [
+        "POST"
+      ],
+      "http_targets": [
+        {
+          "host": "github.com",
+          "path": "/**/git-receive-pack"
+        }
+      ]
+    },
+    {
+      "id": "87af6925-c9eb-4b06-9b56-8a0eb15e066c",
+      "name": "87af6925-c9eb-4b06-9b56-8a0eb15e066c",
+      "policy_id": "1a9987e1-74c1-4e9e-a455-4841d442055c",
+      "scope": "sandbox:hura-spike-a",
+      "applies_to": "sandbox:hura-spike-a",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "httpbin.org"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-spike-a",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    },
+    {
+      "id": "4b9dccda-894a-41c9-9c0e-21da32af4563",
+      "name": "4b9dccda-894a-41c9-9c0e-21da32af4563",
+      "policy_id": "1a9987e1-74c1-4e9e-a455-4841d442055c",
+      "scope": "sandbox:hura-spike-a",
+      "applies_to": "sandbox:hura-spike-a",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "registry-1.docker.io"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-spike-a",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    },
+    {
+      "id": "2fb0c53e-62f5-4c05-81f8-60de306f0bf6",
+      "name": "2fb0c53e-62f5-4c05-81f8-60de306f0bf6",
+      "policy_id": "1a9987e1-74c1-4e9e-a455-4841d442055c",
+      "scope": "sandbox:hura-spike-a",
+      "applies_to": "sandbox:hura-spike-a",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "auth.docker.io"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-spike-a",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    },
+    {
+      "id": "9d8d4c62-26f1-4b94-a405-1ba400f60549",
+      "name": "9d8d4c62-26f1-4b94-a405-1ba400f60549",
+      "policy_id": "1a9987e1-74c1-4e9e-a455-4841d442055c",
+      "scope": "sandbox:hura-spike-a",
+      "applies_to": "sandbox:hura-spike-a",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "production.cloudflare.docker.com"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-spike-a",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    },
+    {
+      "id": "73e6497b-df99-4294-a0f6-5e6e7d53c9d0",
+      "name": "73e6497b-df99-4294-a0f6-5e6e7d53c9d0",
+      "policy_id": "1a9987e1-74c1-4e9e-a455-4841d442055c",
+      "scope": "sandbox:hura-spike-a",
+      "applies_to": "sandbox:hura-spike-a",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "production.cloudfront.docker.com"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-spike-a",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    }
+  ]
+}

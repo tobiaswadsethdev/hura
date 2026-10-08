@@ -1,13 +1,11 @@
 //! Operations shared by the CLI, the TUI and the server.
 //!
-//! Everything here takes a [`Backend`] -- the place a session runs -- rather
-//! than a gateway client, so the scripts ask it where an exec goes and where
+//! Everything here takes a [`Backend`], the place a session runs, rather than a
+//! runtime client, so the scripts ask it where an exec goes and where
 //! the files are instead of naming `/sandbox/repo` and the image's tmux.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
-
-use openshell_client::{PolicyRevision, PolicyUpdate};
 
 use crate::backend::{Backend, Backends, Torn};
 use crate::comments;
@@ -45,7 +43,7 @@ pub struct Refreshed {
     pub warnings: Vec<String>,
 }
 
-/// Reconcile the cache against the gateway, adopt orphans, and persist.
+/// Reconcile the cache against the sandbox runtime, adopt orphans, and persist.
 /// [`refresh`], optionally repairing records left mid-lifecycle.
 ///
 /// `repair` re-reads the metadata of any session whose record still says
@@ -64,7 +62,7 @@ pub fn refresh_with(
     backends: &Backends,
     repair: bool,
 ) -> Result<Refreshed, Box<dyn std::error::Error>> {
-    // Asked before the lock is taken: the gateway call is the slow part, and
+    // Asked before the lock is taken: the runtime call is the slow part, and
     // holding a lock across it would stall a create in another process for no
     // reason.
     //
@@ -80,7 +78,7 @@ pub fn refresh_with(
 
     // Tombstones outlive the removal that wrote them only for as long as the
     // thing they name does: anything tombstoned and no longer reported by the
-    // gateway has finally gone, and the tombstone can go with it.
+    // runtime has finally gone, and the tombstone can go with it.
     removed::keep_only(&rec.lingering.iter().cloned().collect::<BTreeSet<_>>());
     let merged = rec.sessions.clone();
     out.sessions = store::update(|store| {
@@ -194,11 +192,10 @@ pub struct ToolchainChoice {
     pub summary: String,
 }
 
-/// One credential provider the gateway knows about.
+/// One credential a new session may be given, from the config file.
 ///
-/// Flattened for the same reason [`policy::View`] exists: `openshell_client`'s
-/// own types belong to a `0.0.x` project, and putting them on the wire would
-/// make their churn protocol churn.
+/// A name and a kind and nothing more: the value is the sandbox runtime's to
+/// resolve, and never travels.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderChoice {
@@ -222,7 +219,7 @@ pub struct NewOptions {
     /// yet would be a form you cannot use to start writing one.
     pub toolchains: Vec<ToolchainChoice>,
     pub providers: Vec<ProviderChoice>,
-    /// Why the provider list is empty, when it is. An unreachable gateway is a
+    /// Why the provider list is empty, when it is. A failure to list them is a
     /// fact about the server worth showing beside the field rather than a list
     /// that is simply blank.
     pub providers_error: Option<String>,
@@ -279,23 +276,15 @@ pub fn toolchain_choices() -> Vec<ToolchainChoice> {
         .collect()
 }
 
-/// Build [`NewOptions`] from the config file and the gateway.
+/// Build [`NewOptions`] from the config file and the backend.
 ///
 /// The provider list is the only part that can fail, and it fails softly: a
-/// gateway that cannot be reached leaves the field empty with a reason attached,
+/// list that cannot be read leaves the field empty with a reason attached,
 /// rather than refusing to open a form whose other five fields are fine.
 pub fn new_options(backends: &Backends, cfg: &crate::config::Config) -> NewOptions {
     let configured = cfg.policy();
     let (providers, providers_error) = match backends.sandboxed().providers() {
-        Ok(list) => (
-            list.into_iter()
-                .map(|p| ProviderChoice {
-                    name: p.name,
-                    kind: p.kind,
-                })
-                .collect(),
-            None,
-        ),
+        Ok(list) => (list, None),
         Err(e) => (Vec::new(), Some(e.to_string())),
     };
 
@@ -316,8 +305,8 @@ pub fn new_options(backends: &Backends, cfg: &crate::config::Config) -> NewOptio
 /// What is known about the repository a client has picked.
 ///
 /// The git facts, and the credentials to tick. Both are answers about *this*
-/// repository and both cost something to work out -- subprocesses for one, the
-/// gateway and the session cache for the other -- so they are asked for
+/// repository and both cost something to work out (subprocesses for one, the
+/// config and the session cache for the other), so they are asked for
 /// together, once, about the repository actually picked.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -457,7 +446,7 @@ impl NewSession {
     /// `taken` is the names already in use. A derived name steps around them,
     /// because the sandbox a name owns is one per machine, not one per project:
     /// the same task started in two projects derives the same name, and the
-    /// second used to be refused by the gateway for a clash nobody typed. A
+    /// second used to be refused by the runtime for a clash nobody typed. A
     /// name the client sent is left as it is -- it is theirs to be wrong about,
     /// and [`create`] says so.
     pub fn into_draft(
@@ -643,8 +632,8 @@ pub struct Created {
 /// checked first, so a bad name or an unknown policy fails while nothing exists
 /// yet, and every failure afterwards leaves a record saying what happened.
 ///
-/// [`Backend::place`] makes the sandbox, [`Backend::configure`] imposes what
-/// the gateway can be told to impose, and the seeder's first step is
+/// [`Backend::place`] makes the sandbox, [`Backend::configure`] imposes the
+/// rules every session starts with, and the seeder's first step is
 /// [`Backend::fetch_script`].
 ///
 /// The sandbox image is deliberately *not* built here. `image::build` streams
@@ -674,13 +663,13 @@ pub fn create(
     }
 
     // A first look for a name clash, so an obvious mistake fails before a
-    // sandbox exists. Not a lock: the gateway refuses a duplicate sandbox name
+    // sandbox exists. Not a lock: the runtime refuses a duplicate sandbox name
     // anyway, which is the check that actually holds.
     match Store::load().map_err(|e| e.to_string())?.get(&draft.name) {
         // The wreckage of a create that failed, which owns the name until
-        // someone takes it away. Deliberately left behind -- it is the only
-        // trace of a sandbox that may exist at the gateway but was never
-        // seeded, and without it `hurad rm` has nothing to name -- so it is not
+        // someone takes it away. Deliberately left behind, since it is the only
+        // trace of a sandbox that may exist in the runtime but was never
+        // seeded, and without it `hurad rm` has nothing to name. So it is not
         // dropped here either: taking the name silently would strand whatever
         // it still owns.
         //
@@ -709,9 +698,9 @@ pub fn create(
 
     let mut s = record(draft);
 
-    // Written before the gateway is asked for anything, because until there is
+    // Written before the runtime is asked for anything, because until there is
     // a record there is nothing for a client to show: creating a sandbox is
-    // seconds of gateway, and a window that stays empty for those seconds looks
+    // seconds of runtime, and a window that stays empty for those seconds looks
     // like the request was lost rather than like work in progress. The record
     // says `creating`, which is exactly what it is, and
     // [`crate::store::reconcile`] knows not to read the missing sandbox behind
@@ -720,8 +709,8 @@ pub fn create(
 
     progress(Step::Place);
     // Each failure is recorded, reason and all, before being returned. A
-    // `Failed` record is the only trace of a sandbox that may exist at the
-    // gateway but was never seeded, and without it that sandbox is invisible to
+    // `Failed` record is the only trace of a sandbox that may exist in the
+    // runtime but was never seeded, and without it that sandbox is invisible to
     // `hura rm`.
     if let Err(e) = backend.place(&mut s, draft) {
         return Err(fail(s, e.to_string(), &mut warnings));
@@ -736,7 +725,7 @@ pub fn create(
     // directory` about a session that is being created perfectly well.
     //
     // The window was always here and used to be microseconds; imposing MCP
-    // endpoints made it a `policy update --wait`, which is seconds. Saving here
+    // endpoints made it a runtime call per rule, which is far longer. Saving here
     // closes it: a record in `creating` is one the repair pass knows to leave
     // alone until the seeder has something to say. This is an update rather than
     // the first write -- the record went in above -- and what it adds is what
@@ -968,8 +957,8 @@ fi
 
 /// The diff between a session's work and the branch it started from.
 ///
-/// One exec, because exec on a sandbox is serialised: a second concurrent call
-/// waits behind the first, so each pane costs exactly one round trip.
+/// One exec, because each is a round trip of about a third of a second, so
+/// each pane costs exactly one.
 ///
 /// Three sections, because none of them alone is the answer. `diff base...HEAD`
 /// is committed work measured from the merge-base, so commits landing on the
@@ -1052,8 +1041,8 @@ pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(
         return crate::chat::tell(backend, session, message)
             .map_err(|e| format!("the agent could not be told: {e}"));
     }
-    let script = tell_script(backend.tmux(), &session.tmux, message);
-    match backend.exec(session, &["sh", "-c", &script]) {
+    let script = tell_script(backend.tmux(), &session.tmux);
+    match backend.exec_stdin(session, &["sh", "-c", &script], message.as_bytes()) {
         Ok(out) if out.ok() => Ok(()),
         Ok(out) => Err(format!(
             "the agent could not be told: {}",
@@ -1063,14 +1052,18 @@ pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(
     }
 }
 
-/// The shell that delivers one message. Separated so its shape can be asserted
-/// without a sandbox: what makes this correct is invisible at the call site.
-fn tell_script(bin: &str, tmux: &str, message: &str) -> String {
+/// The shell that delivers one message, read from its stdin. Separated so its
+/// shape can be asserted without a sandbox: what makes this correct is
+/// invisible at the call site.
+///
+/// The message never appears in the script. It is free text of any length, so
+/// it travels as data on stdin rather than as a quoted argument, where a
+/// review of a few hundred comments would pass the 128 KiB an argument may be.
+fn tell_script(bin: &str, tmux: &str) -> String {
     format!(
-        "printf '%s' {message} | {bin} load-buffer -b hura-tell - \
+        "{bin} load-buffer -b hura-tell - \
          && {bin} paste-buffer -b hura-tell -t {tmux} -d -p \
          && {bin} send-keys -t {tmux} Enter",
-        message = seed::sh_quote(message),
         tmux = seed::sh_quote(tmux),
     )
 }
@@ -1091,49 +1084,40 @@ pub fn send_comments(backend: &dyn Backend, session: &Session) -> Result<String,
     Ok(message)
 }
 
-/// The effective policy of a session's sandbox.
-///
-/// A gateway call, not an exec, so unlike the diff and the poll this does not
-/// queue behind whatever else is running against the sandbox.
-pub fn policy(backend: &dyn Backend, session: &Session) -> Result<PolicyRevision, String> {
-    backend
-        .policy(session)
-        .map_err(|e| format!("could not read the policy: {e}"))
+/// The rules on a session's sandbox, as the policy pane shows them, with the
+/// global lists said against them.
+pub fn policy(backend: &dyn Backend, session: &Session) -> Result<policy::View, String> {
+    let rules = backend
+        .rules(session)
+        .map_err(|e| format!("could not read the policy: {e}"))?;
+    // Unreadable lists only cost the pane its second section.
+    let lists = endpoints::Lists::load().unwrap_or_default();
+    Ok(policy::View::of(rules, session.policy.as_deref(), &lists))
 }
-
-/// How many log lines to ask for. The gateway returns the newest, so this is a
-/// window on the end of the log rather than a limit on what is kept.
-///
-/// Raised when the poll interval came down: every exec hura makes writes three
-/// events of its own, `events::parse` drops them, and the window has to be big
-/// enough that what is left still covers a useful stretch of time. The read
-/// itself is 14ms for 400 lines, so this is close to free.
-const LOG_LINES: usize = 1500;
 
 /// A session's recent policy decisions, newest first.
 ///
 /// Newest first because the pane is a feed: the event you want is the one that
 /// just happened, and it should be at the top without scrolling.
 pub fn events(backend: &dyn Backend, session: &Session) -> Result<Vec<events::Event>, String> {
-    let raw = backend
-        .logs(session, LOG_LINES)
+    let fresh = backend
+        .events(session)
         .map_err(|e| format!("could not read the log: {e}"))?;
     // Merged into what this session has already shown rather than replacing it:
-    // the gateway's window is a couple of minutes wide at these poll intervals,
-    // and the feed is meant to be a record. Newest first comes back from the
-    // merge, so the pane still reads as a feed.
-    Ok(events::merge_kept(&session.name, events::parse(&raw)))
+    // the runtime's log starts again whenever its daemon does, and the feed is
+    // meant to be a record. Newest first comes back from the merge, so the pane
+    // still reads as a feed.
+    Ok(events::merge_kept(&session.name, fresh))
 }
 
 /// Read every live session's log into its kept feed.
 ///
-/// The gateway's log is a window, and at the status channel's two-second
-/// polls its own execs fill it in about six minutes. The only thing that read
-/// it was the events pane, and only while it was the dock's open tab: a denial
-/// made while you were in the files, in another worktree, or away from the
-/// window scrolled out before anything saw it, and the feed looked as if it had
-/// stopped. `hurad serve` calls this on a timer, so the record is kept whoever
-/// is looking, and the pane draws from it as before.
+/// The runtime's log starts again whenever its daemon does. If the only thing
+/// that read it were the events pane, and only while it was the dock's open
+/// tab, a denial made while you were in the files, in another worktree, or away
+/// from the window could be gone before anything saw it. `hurad serve` calls
+/// this on a timer, so the record is kept whoever is looking, and the pane
+/// draws from it as before.
 ///
 /// Failures are not reported. A sandbox that cannot be read has usually just
 /// gone, the next refresh marks it dead, and the pane says why when opened.
@@ -1150,26 +1134,31 @@ pub fn keep_feeds(backends: &Backends) {
     }
 }
 
-/// Apply an incremental policy change and report what the sandbox ended up
-/// with, so the caller never has to assume the change landed.
-pub fn repolicy(
-    backend: &dyn Backend,
-    session: &Session,
-    update: &PolicyUpdate,
-) -> Result<PolicyRevision, String> {
+/// Open the package registries to a running session, for reading.
+pub fn widen(backend: &dyn Backend, session: &Session) -> Result<policy::View, String> {
     backend
-        .policy_update(session, update)
-        .map_err(|e| format!("policy update failed: {e}"))?;
+        .add_rules(session, &policy::REGISTRIES.rules())
+        .map_err(|e| format!("could not open the registries: {e}"))?;
     policy(backend, session)
 }
 
-/// Open an endpoint to a running session for the named binaries, and put it
-/// on the global allow list too when `everywhere`.
+/// Close them again: every allow on the session naming one of them goes,
+/// whichever rule opened it. Not a deny, so a later widen opens them again.
+pub fn tighten(backend: &dyn Backend, session: &Session) -> Result<policy::View, String> {
+    for endpoint in policy::REGISTRIES.endpoints {
+        backend
+            .withdraw(session, endpoint, true)
+            .map_err(|e| format!("could not close {endpoint}: {e}"))?;
+    }
+    policy(backend, session)
+}
+
+/// Open an endpoint to a running session, and put it on the global allow list
+/// too when `everywhere`.
 ///
 /// The whole host when `routes` is empty, and only those methods and paths
-/// when it is not, planned against the policy the sandbox has now, because
-/// whether that is a new rule or an addition to an existing one depends on
-/// it. See [`endpoints::routes_update`].
+/// when it is not. A deny this session has for the endpoint goes first, since
+/// a deny outranks every allow and the allow would otherwise change nothing.
 ///
 /// The live change first, and the list only once it has landed: an entry that
 /// promised every new session something this one was just refused would be a
@@ -1178,63 +1167,68 @@ pub fn allow(
     backend: &dyn Backend,
     session: &Session,
     endpoint: &str,
-    binaries: &[String],
     routes: &[endpoints::Route],
     everywhere: bool,
-) -> Result<PolicyRevision, String> {
+) -> Result<policy::View, String> {
     let endpoint = checked_endpoint(endpoint)?;
-    // An endpoint rule with no binaries grants nothing, so it is refused here
-    // rather than issued and reported as done.
-    if binaries.is_empty() {
-        return Err(format!("nothing named to allow {endpoint} for"));
-    }
-    if let Some(b) = binaries.iter().find(|b| !b.starts_with('/')) {
-        return Err(format!(
-            "`{b}` is not an absolute path, which is what the gateway matches"
-        ));
-    }
     // Checked again on this side, since they arrive from a client.
     let routes = routes
         .iter()
         .map(|r| endpoints::Route::checked(&r.method, &r.path))
         .collect::<Result<Vec<_>, _>>()?;
-    let update = if routes.is_empty() {
-        endpoints::allow_update(&endpoint, binaries)
-    } else {
-        let now = policy(backend, session)?;
-        let current = now
-            .policy
-            .as_ref()
-            .ok_or("the gateway returned no policy to add paths to")?;
-        endpoints::routes_update(current, &endpoint, binaries, &routes)?
-    };
-    let rev = repolicy(backend, session, &update)?;
+    backend
+        .withdraw(session, &endpoint, false)
+        .map_err(|e| format!("could not lift the block on {endpoint}: {e}"))?;
+    backend
+        .add_rules(session, &endpoints::allow_rules(&endpoint, &routes))
+        .map_err(|e| format!("could not allow {endpoint}: {e}"))?;
     if everywhere {
         edit_lists(|l| {
             if routes.is_empty() {
-                l.allow(&endpoint, binaries.to_vec())
+                l.allow(&endpoint)
             } else {
-                l.allow_routes(&endpoint, binaries.to_vec(), routes)
+                l.allow_routes(&endpoint, routes)
             }
         })?;
     }
-    Ok(rev)
+    policy(backend, session)
 }
 
-/// Remove an endpoint from a running session, for every binary, and put it on
-/// the global block list too when `everywhere`.
+/// Deny an endpoint to a running session, whatever opens it, and put it on
+/// the global block list too when `everywhere`. The session's own allows of it
+/// go with it.
 pub fn block(
     backend: &dyn Backend,
     session: &Session,
     endpoint: &str,
     everywhere: bool,
-) -> Result<PolicyRevision, String> {
+) -> Result<policy::View, String> {
     let endpoint = checked_endpoint(endpoint)?;
-    let rev = repolicy(backend, session, &endpoints::block_update(&endpoint))?;
+    // The runtime refuses a deny naming exactly what an allow names, so the
+    // allows go first; the deny then outranks any broader one that is left.
+    backend
+        .withdraw(session, &endpoint, true)
+        .map_err(|e| format!("could not take the allows off {endpoint}: {e}"))?;
+    backend
+        .add_rules(session, &[endpoints::deny_rule(&endpoint)])
+        .map_err(|e| format!("could not block {endpoint}: {e}"))?;
     if everywhere {
         edit_lists(|l| l.block(&endpoint))?;
     }
-    Ok(rev)
+    policy(backend, session)
+}
+
+/// Remove one of a session's own rules, which is how any change made here is
+/// taken back.
+pub fn remove_rule(
+    backend: &dyn Backend,
+    session: &Session,
+    id: &str,
+) -> Result<policy::View, String> {
+    backend
+        .remove_rule(session, id)
+        .map_err(|e| format!("could not remove the rule: {e}"))?;
+    policy(backend, session)
 }
 
 /// Take an endpoint off the global lists. No sandbox is touched.
@@ -1276,8 +1270,16 @@ fn edit_lists(f: impl FnOnce(&mut endpoints::Lists)) -> Result<(), String> {
 pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> String {
     let (cols, rows) = session::SCRAPE_SIZE;
     let bin = backend.tmux();
+    // Attaching to the agent after its sandbox was stopped and started is
+    // attaching to an agent that is not there yet, so it is brought back first,
+    // the way the status poll would. See `seed::resume_check`.
+    let resume = if tmux == session.tmux {
+        format!("{}\n", seed::resume_check(backend, session))
+    } else {
+        String::new()
+    };
     format!(
-        "{bin} attach -d -t {tmux} 2>/dev/null \
+        "{resume}{bin} attach -d -t {tmux} 2>/dev/null \
          || {bin} new-session -s {tmux} -c {repo}; \
          {bin} resize-window -t {tmux} -x {cols} -y {rows} 2>/dev/null; \
          {bin} set -w -t {tmux} window-size latest 2>/dev/null; \
@@ -1290,10 +1292,9 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
 /// The argv that attaches a terminal to a session, ready to be spawned under a
 /// pty.
 ///
-/// One definition for `hura attach`, the TUI's agent pane and the desktop's
-/// terminal channel. Where the session runs decides what that argv is -- an
-/// `openshell sandbox exec --tty` for one backend, the shell itself for the
-/// other -- and neither caller has to know which it got.
+/// One definition for `hura attach` and the desktop's terminal channel. Where
+/// the session runs decides what that argv is (an `sbx exec --interactive
+/// --tty` for the sandbox), and neither caller has to know which it got.
 pub fn attach_argv(
     backend: &dyn Backend,
     session: &Session,
@@ -1455,7 +1456,7 @@ pub fn kill_shell(backend: &dyn Backend, session: &Session, tmux: &str) -> Resul
 /// What destroying a session did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Destroyed {
-    /// The gateway deleted the sandbox.
+    /// The runtime deleted the sandbox.
     Sandbox,
     /// There was no sandbox left to delete; only the record went.
     RecordOnly,
@@ -1467,7 +1468,7 @@ pub enum Destroyed {
 /// asked for -- and so the TUI cannot leave behind a record the CLI would then
 /// report as a session whose sandbox has died.
 ///
-/// A sandbox the gateway has never heard of is the desired end state rather than
+/// A sandbox the runtime has never heard of is the desired end state rather than
 /// a failure: that is the case for a session left behind by a create that died
 /// before provisioning, and refusing to remove the record would make it
 /// permanent. The name is resolved through the cache with a fall back to the
@@ -1490,7 +1491,7 @@ pub fn destroy(backends: &Backends, name: &str) -> Result<Destroyed, String> {
         .cloned();
 
     // Written before any backend is asked, not after: the window this closes
-    // opens the moment the gateway starts deleting, and a tombstone written
+    // opens the moment the runtime starts deleting, and a tombstone written
     // after a delete that takes seconds to be accepted is a tombstone written
     // after the refresh it exists to stop. See [`crate::removed`].
     removed::remember(name);
@@ -1522,9 +1523,9 @@ pub fn destroy(backends: &Backends, name: &str) -> Result<Destroyed, String> {
 
 /// Everything one round trip per session is worth spending an exec on.
 ///
-/// Kept together deliberately. Exec on a sandbox is serialised gateway-side, so
-/// two separate polls would not just double the traffic -- they would queue
-/// behind each other. One script, one round trip, both answers.
+/// Kept together deliberately. Each exec on a sandbox is a round trip of about
+/// a third of a second, so two separate polls would double what every poll
+/// costs. One script, one round trip, both answers.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 // `PartialEq` so a stream can tell a poll that changed from one that did not,
 // which is the difference between a frame and silence. Not `Eq`: the usage
@@ -1596,7 +1597,8 @@ fn poll_script(backend: &dyn Backend, session: &Session) -> String {
         crate::chat::Interface::Chat => String::new(),
     };
     format!(
-        r#"( cd {repo} 2>/dev/null || exit 0
+        r#"{resume}
+( cd {repo} 2>/dev/null || exit 0
 {resolve_base}
 mb=''
 if [ -n "$base" ]; then mb=$(git merge-base "$base" HEAD 2>/dev/null); fi
@@ -1622,6 +1624,7 @@ printf '
 ' {pane_marker}
 {pane}
 "#,
+        resume = seed::resume_check(backend, session),
         repo = seed::sh_quote(&paths.repo),
         resolve_base = resolve_base_script(session),
         status_marker = seed::sh_quote(status::STATUS_MARKER),
@@ -1637,7 +1640,7 @@ printf '
 /// Split the poll script's output and interpret each part.
 ///
 /// Separate from [`poll`] so it can be tested against captured output without a
-/// gateway.
+/// sandbox.
 fn parse_poll(stdout: &str, now: u64) -> Poll {
     let (stat_part, rest) = match stdout.split_once(status::STATUS_MARKER) {
         Some(split) => split,
@@ -2012,7 +2015,7 @@ mod tests {
 
     /// The same task in a second project derives the same name, and a sandbox
     /// name is one per machine. The second gets a counter rather than a clash
-    /// at the gateway -- but a name the client typed is theirs and is kept.
+    /// in the runtime, but a name the client typed is theirs and is kept.
     #[test]
     fn a_derived_name_that_is_taken_gets_a_counter_and_a_typed_one_does_not() {
         let cfg = crate::config::Config::default();
@@ -2163,7 +2166,7 @@ mod tests {
     /// while the rest is still arriving; the single `Enter` is the submission.
     #[test]
     fn a_multi_line_message_is_one_bracketed_paste_and_one_enter() {
-        let script = tell_script("tmux -u", "agent", "first line\nsecond line");
+        let script = tell_script("tmux -u", "agent");
         assert!(script.contains("load-buffer -b hura-tell -"), "{script}");
         assert!(
             script.contains("paste-buffer -b hura-tell -t 'agent' -d -p"),
@@ -2173,18 +2176,16 @@ mod tests {
         assert!(script.contains("Enter"), "{script}");
     }
 
-    /// A comment is free text and will contain quotes. It has to reach the
-    /// agent as text rather than as shell.
+    /// A comment is free text and will contain quotes. It reaches the agent as
+    /// data on stdin, so nothing in it is ever shell.
     #[test]
-    fn a_message_with_quotes_in_it_cannot_break_out_of_the_script() {
-        let script = tell_script("tmux -u", "agent", "it's `wrong`; rm -rf / #");
-        // The dangerous run is inside a quoted literal, not sitting in the
-        // command position where the shell would act on it.
-        assert!(!script.contains("; rm -rf / #'\n"), "{script}");
+    fn a_message_is_never_part_of_the_script() {
+        let script = tell_script("tmux -u", "agent");
         assert!(
-            script.contains(r"'\''"),
-            "the apostrophe was not escaped: {script}"
+            script.starts_with("tmux -u load-buffer -b hura-tell -"),
+            "{script}"
         );
+        assert!(!script.contains("printf"), "{script}");
     }
 
     /// The branch a session works on is the config file's convention, and a

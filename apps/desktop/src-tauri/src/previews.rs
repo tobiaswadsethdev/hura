@@ -3,7 +3,7 @@
 //! For each preview this binds a port on `127.0.0.1` and turns every
 //! connection it accepts into a port channel on the window's one streaming
 //! connection -- see `Channel::Port` in `hura_proto::stream`. `hurad` does the
-//! other half: one `openshell forward service` per port, shared by every
+//! other half: one `hurad relay` per port, shared by every
 //! connection to it.
 //!
 //! **Through the paired connection, not around it.** The alternative was

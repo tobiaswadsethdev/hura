@@ -10,11 +10,11 @@
 //! restarts it, and can say what it is doing.
 //!
 //! The URL is derived rather than configured, and that is the point: a managed
-//! server is reachable at `http://hura-mcp-<name>:<port>/mcp` because this module
-//! is what named the container and what joined it to the gateway's network. The
-//! two mistakes that shape used to invite -- a container on the default bridge
-//! that no sandbox can resolve, and a `localhost` URL that means the sandbox
-//! itself -- are unreachable from here.
+//! server is reachable at `http://host.docker.internal:<port>/mcp` because this
+//! module is what published the container on `127.0.0.1` at that port. The two
+//! mistakes that shape used to invite, a container by a name no sandbox can
+//! resolve and a `localhost` URL that means the sandbox itself, are unreachable
+//! from here.
 //!
 //! **What runs in the container is not sandboxed by anything.** It is an
 //! ordinary container on the host's Docker daemon, holding the credential it was
@@ -30,7 +30,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-use super::{NETWORK, Server, Transport};
+use super::{HOST_ALIAS, Server, Transport};
 
 /// The prefix every managed container's name carries.
 ///
@@ -58,10 +58,11 @@ pub struct Managed {
     /// what it does not have, and a digest pinned in the config file is the
     /// user's decision to make.
     pub image: String,
-    /// The port the server listens on *inside* the container. Nothing is
-    /// published to the host: a sandbox reaches it by container name on the
-    /// gateway's network, and publishing it would put an authenticated MCP
-    /// server on the host's interfaces for no one's benefit.
+    /// The port the server listens on inside the container, and the one it is
+    /// published on here, on `127.0.0.1` only: a sandbox reaches it as
+    /// `host.docker.internal`, which the sandbox runtime takes to this
+    /// machine's loopback. Loopback rather than every interface, so an
+    /// authenticated MCP server is not on the network for anyone else.
     pub port: u16,
     /// Arguments after the image.
     #[serde(default)]
@@ -121,11 +122,7 @@ impl Entry {
         if managed.port == 0 {
             return Err(super::Error::BadPort("0".into()));
         }
-        let url = format!(
-            "http://{}:{}{PATH}",
-            container_name(name.trim()),
-            managed.port
-        );
+        let url = format!("http://{HOST_ALIAS}:{}{PATH}", managed.port);
         let server = Server::parse(name, &url, transport)?;
         Ok(Entry {
             server,
@@ -148,12 +145,13 @@ impl Entry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
-    /// Running, and on the gateway's network -- which is the only sense in
-    /// which a sandbox can reach it.
+    /// Running, and published on `127.0.0.1` at its port, which is the only
+    /// sense in which a sandbox can reach it.
     Running,
-    /// Running, but not attached to the gateway's network. Its own state
-    /// because it is the failure that looks fine in `docker ps` and reports
-    /// itself as an authentication problem in the agent.
+    /// Running, but not published there. Its own state because it is the
+    /// failure that looks fine in `docker ps` and reports itself as an
+    /// authentication problem in the agent, and because it is what a container
+    /// started before sessions moved to Docker Sandboxes looks like now.
     Detached,
     /// Started, exited, and started again -- an image that cannot stay up.
     ///
@@ -255,7 +253,7 @@ fn status(entry: &Entry, stored: &[String]) -> Status {
     };
 
     let container = container_name(entry.name());
-    let Inspected { state, restarts } = inspect(&container);
+    let Inspected { state, restarts } = inspect(&container, m.port);
     // A missing secret first, because it is the cause of most of the states
     // below: a container that exits immediately usually exited because the
     // credential it needed was not there.
@@ -272,7 +270,8 @@ fn status(entry: &Entry, stored: &[String]) -> Status {
                  The last of its own output is below."
             )),
             State::Detached => Some(format!(
-                "running, but not on the `{NETWORK}` network, so no sandbox can resolve it"
+                "running, but not published on 127.0.0.1:{}, so no sandbox can reach it",
+                m.port
             )),
             State::Stopped => Some("the container is not running".into()),
             State::Absent => Some("not started yet".into()),
@@ -342,14 +341,14 @@ pub fn start(entry: &Entry) -> Result<(), String> {
         "-d".into(),
         "--name".into(),
         container.clone(),
-        "--network".into(),
-        NETWORK.to_string(),
+        // On this machine's loopback only, which is where the sandbox runtime
+        // takes `host.docker.internal`, and nowhere anyone else can reach.
+        "--publish".into(),
+        format!("127.0.0.1:{port}:{port}", port = m.port),
         // Survives a reboot of the host without `hurad` having to notice, which
         // is what "managed" has to mean for something an agent depends on.
         "--restart".into(),
         "unless-stopped".into(),
-        // Nothing is published: a sandbox reaches it by name on the network
-        // above, and the host has no business reaching it at all.
         "--label".into(),
         "hura.mcp=true".into(),
     ];
@@ -412,10 +411,12 @@ pub fn ensure(entries: &[Entry]) -> Vec<String> {
     let mut warnings = Vec::new();
     for entry in entries.iter().filter(|e| e.is_managed()) {
         let container = container_name(entry.name());
+        let port = entry.managed.as_ref().map_or(0, |m| m.port);
         // Only a healthy one is left alone. A crash-looping container is one
         // Docker is already restarting, so pressing start on it should recreate
-        // it from the catalog -- which is usually what has changed.
-        if inspect(&container).state == State::Running {
+        // it from the catalog, which is usually what has changed; a detached one
+        // is recreated published where a sandbox can reach it.
+        if inspect(&container, port).state == State::Running {
             continue;
         }
         if let Err(e) = start(entry) {
@@ -427,10 +428,12 @@ pub fn ensure(entries: &[Entry]) -> Vec<String> {
 
 /// Ask Docker what a container is doing, in one call.
 ///
-/// The network is part of the answer rather than a second question: "running"
-/// and "running where a sandbox can resolve it" are different states, and the
-/// difference is the whole failure mode this feature has.
-fn inspect(container: &str) -> Inspected {
+/// Where it is published is part of the answer rather than a second question:
+/// "running" and "running where a sandbox can reach it" are different states,
+/// and the difference is the whole failure mode this feature has. A container
+/// left over from before sessions moved to Docker Sandboxes is running on a
+/// network with nothing published, and reads as the second.
+fn inspect(container: &str, port: u16) -> Inspected {
     let plain = |state| Inspected { state, restarts: 0 };
     let Ok(out) = Command::new("docker")
         .args([
@@ -438,7 +441,7 @@ fn inspect(container: &str) -> Inspected {
             container,
             "--format",
             "{{.State.Running}} {{.RestartCount}} \
-             {{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}",
+             {{range $p, $b := .NetworkSettings.Ports}}{{range $b}}{{.HostIp}}:{{.HostPort}} {{end}}{{end}}",
         ])
         .output()
     else {
@@ -466,16 +469,17 @@ fn inspect(container: &str) -> Inspected {
     let mut parts = said.split_whitespace();
     let running = parts.next() == Some("true");
     let restarts: u32 = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
-    let networks: Vec<&str> = parts.collect();
+    let published: Vec<&str> = parts.collect();
+    let wanted = format!("127.0.0.1:{port}");
 
     let state = if !running {
         State::Stopped
     } else if restarts > 0 {
-        // Deliberately ahead of the network check: an image that will not stay
-        // up is the thing to fix first, and a restarting container has no
-        // networks listed at all on some of the calls.
+        // Deliberately ahead of the port check: an image that will not stay up
+        // is the thing to fix first, and a restarting container has no ports
+        // listed at all on some of the calls.
         State::Crashing
-    } else if networks.contains(&NETWORK) {
+    } else if published.contains(&wanted.as_str()) {
         State::Running
     } else {
         State::Detached
@@ -522,13 +526,14 @@ mod tests {
     }
 
     /// The URL is derived, which is what removes the two mistakes a
-    /// hand-written one invites: a container name nothing resolves, and a
+    /// hand-written one invites: a container name no sandbox resolves, and a
     /// `localhost` that means the sandbox itself.
     #[test]
-    fn a_managed_entry_derives_its_url_from_the_container_it_will_start() {
+    fn a_managed_entry_derives_its_url_from_the_port_it_will_publish() {
         let e = Entry::managed("jira", Transport::Http, managed()).unwrap();
-        assert_eq!(e.server.url, "http://hura-mcp-jira:9000/mcp");
-        assert_eq!(e.server.endpoint, "hura-mcp-jira:9000");
+        assert_eq!(e.server.url, "http://host.docker.internal:9000/mcp");
+        assert_eq!(e.server.endpoint, "host.docker.internal:9000");
+        assert!(e.server.via_host());
         assert_eq!(container_name("jira"), "hura-mcp-jira");
         assert!(e.is_managed());
     }
