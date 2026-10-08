@@ -14,7 +14,10 @@
 //! * a sandbox stops itself shortly after its last session disconnects
 //!   unless it is switched to detached mode with `run -d`
 //! * `policy allow` and `policy deny` have no JSON output, and say which rule
-//!   they made as `Rule added to policy local (scope: sandbox:NAME): ID (...)`
+//!   they made as `Rule added to policy local (scope: sandbox:NAME): ID (...)`,
+//!   or which one already covers it as `Already covered ... (by rule "ID")`
+//! * a deny naming exactly what an allow names is refused as a conflict, so
+//!   the allow has to go first
 
 use std::ffi::OsStr;
 use std::io::Write as _;
@@ -678,12 +681,19 @@ fn refusal(args: &[String], subject: Option<&str>, out: &ExecOutput) -> Error {
     }
 }
 
-/// The id out of `Rule added to policy local (scope: sandbox:NAME): ID (...)`.
+/// The id out of `Rule added to policy local (scope: sandbox:NAME): ID (...)`,
+/// or, for a rule an existing one already covers, out of
+/// `Already covered in policy local (...): HOST [tcp] (by rule "ID")`, which is
+/// the CLI's answer to adding it again, with exit status 0.
 fn rule_id(said: &str) -> Option<String> {
-    let line = said.lines().find(|l| l.starts_with("Rule added"))?;
-    let (_, rest) = line.split_once("): ")?;
-    let id = rest.split_whitespace().next()?;
-    Some(id.to_string())
+    if let Some(line) = said.lines().find(|l| l.starts_with("Rule added")) {
+        let (_, rest) = line.split_once("): ")?;
+        let id = rest.split_whitespace().next()?;
+        return Some(id.to_string());
+    }
+    let line = said.lines().find(|l| l.starts_with("Already covered"))?;
+    let quoted = line.split("by rule \"").nth(1)?;
+    Some(quoted.split('"').next()?.to_string())
 }
 
 /// The placeholder out of `Saved custom secret placeholder "PH" for ...`.
@@ -995,6 +1005,14 @@ mod tests {
             Some("fda93cfc-bbad-44bc-8e45-f29978e9a5a5")
         );
         assert_eq!(rule_id("nothing useful"), None);
+        assert_eq!(
+            rule_id(
+                "Already covered in policy local (scope: sandbox:hura-e2e-claude): \
+                 api.github.com:443 [tcp] (by rule \"1a7788f6-913b-4458-8943-166d7a81575f\")\n"
+            )
+            .as_deref(),
+            Some("1a7788f6-913b-4458-8943-166d7a81575f")
+        );
 
         assert_eq!(
             placeholder(

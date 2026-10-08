@@ -41,7 +41,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use openshell_client::PolicyUpdate;
+use sbx_client::{Decision, RuleSpec};
 
 mod managed;
 
@@ -49,33 +49,19 @@ pub use managed::{
     CONTAINER_PREFIX, Entry, Managed, State, Status, container_name, ensure, start, statuses, stop,
 };
 
-/// The binaries an MCP endpoint is granted to.
-///
-/// Both paths, because the two are the same program in different images and an
-/// endpoint rule naming a path that does not exist simply never matches. The
-/// second is where the current image puts it -- measured, from the denial the
-/// gateway logged when this rule listed only `node`:
-/// `binary '/usr/local/bin/claude' not allowed in policy`.
-pub const AGENT_BINARIES: [&str; 2] = ["/usr/bin/claude", "/usr/local/bin/claude"];
-
-/// The access class an MCP endpoint is granted.
-///
-/// `full`, and a path allow-list would be theatre: MCP is JSON-RPC tunnelled
-/// through one URL, so every call is `POST /mcp` and the only rules that could
-/// be written are the ones already implied by naming the endpoint. The
-/// discrimination that is real here is the binary, not the path.
-const ACCESS: &str = "full";
-
 /// The Docker network the gateway puts sandboxes on, and so the one a sibling
 /// MCP container has to join to be reachable by name. Verified against 0.0.110.
 pub const NETWORK: &str = "openshell-docker";
 
-/// The host that resolves to the Docker bridge gateway inside every sandbox.
+/// The name a sandbox reaches this machine by.
 ///
-/// The gateway sets it in `ExtraHosts` alongside `host.docker.internal`; this is
-/// the OpenShell-specific one, so it survives a driver that maps the Docker name
-/// differently.
-pub const HOST_ALIAS: &str = "host.openshell.internal";
+/// The sandbox runtime's proxy takes it to the host's own loopback, which is
+/// why a rule for it names `localhost` and the port rather than this name.
+pub const HOST_ALIAS: &str = "host.docker.internal";
+
+/// What a URL named before the move to Docker Sandboxes said for the same
+/// thing. Still recognised, so such an entry is known for what it means.
+const OLD_HOST_ALIAS: &str = "host.openshell.internal";
 
 /// How the agent talks to the server.
 ///
@@ -164,43 +150,38 @@ impl Server {
     /// Whether this one is reached through the host's published ports rather
     /// than by container name. The two need different checks in `doctor`.
     pub fn via_host(&self) -> bool {
-        self.host() == HOST_ALIAS || self.host() == "host.docker.internal"
+        self.host() == HOST_ALIAS || self.host() == OLD_HOST_ALIAS
     }
 }
 
-/// The single policy update that opens every configured server.
+/// The rule that opens every configured server, or none for no servers.
 ///
-/// One call rather than one per server: `--binary` applies to every
-/// `--add-endpoint` in an invocation, and here every endpoint wants exactly the
-/// same binary list, so grouping them is free -- and it costs one
-/// `--wait` (a few seconds) instead of one per server. The rule names are the
-/// gateway's to pick, as they are for [`crate::policy::Preset`]: `--rule-name`
-/// is rejected for a multi-endpoint update, and its derived names already say
-/// the host.
-pub fn widen(servers: &[Server]) -> Option<PolicyUpdate> {
-    if servers.is_empty() {
-        return None;
-    }
-    // De-duplicated: two servers on one container -- a common shape, one
-    // process serving several tool sets -- are one endpoint, and asking the
-    // gateway to add it twice is asking for two rules that say the same thing.
-    let mut endpoints: Vec<String> = Vec::new();
+/// One rule, de-duplicated: two servers on one container, a common shape, are
+/// one endpoint. A server reached through the host is named as the runtime
+/// sees it, `localhost` and its port, since that is where its proxy takes
+/// `host.docker.internal`.
+pub fn rules(servers: &[Server]) -> Vec<RuleSpec> {
+    let mut hosts: Vec<String> = Vec::new();
     for s in servers {
-        let spec = format!("{}:{ACCESS}:rest:enforce", s.endpoint);
-        if !endpoints.contains(&spec) {
-            endpoints.push(spec);
+        let endpoint = if s.via_host() {
+            let port = s.endpoint.rsplit_once(':').map_or("80", |(_, p)| p);
+            format!("localhost:{port}")
+        } else {
+            s.endpoint.clone()
+        };
+        if !hosts.contains(&endpoint) {
+            hosts.push(endpoint);
         }
     }
-    Some(PolicyUpdate {
-        add_endpoints: endpoints,
-        binaries: AGENT_BINARIES.iter().map(|b| (*b).to_string()).collect(),
-        rule_name: None,
-        // The agent is started by the seeder moments later and reads its MCP
-        // servers at startup, so returning before the rules load would leave it
-        // holding a server it cannot reach.
-        wait: true,
-        ..Default::default()
-    })
+    if hosts.is_empty() {
+        return Vec::new();
+    }
+    vec![RuleSpec {
+        decision: Decision::Allow,
+        resources: hosts,
+        methods: Vec::new(),
+        path: None,
+    }]
 }
 
 /// The seeder's MCP step: register every server with the agent.
@@ -419,32 +400,30 @@ mod tests {
     }
 
     #[test]
-    fn nothing_configured_is_no_policy_call() {
-        assert!(widen(&[]).is_none());
+    fn nothing_configured_is_no_rule() {
+        assert!(rules(&[]).is_empty());
     }
 
+    /// One rule for every server, and a server on this machine as the
+    /// runtime's proxy sees it.
     #[test]
-    fn one_call_grants_every_endpoint_to_the_agent() {
+    fn one_rule_opens_every_server() {
         let servers = vec![
             server("http://mcp-jira:9000/mcp").unwrap(),
-            Server::parse("azure", "http://mcp-azure:9001/mcp", Transport::Http).unwrap(),
+            Server::parse(
+                "local",
+                "http://host.docker.internal:9001/mcp",
+                Transport::Http,
+            )
+            .unwrap(),
         ];
-        let u = widen(&servers).unwrap();
-        assert_eq!(
-            u.add_endpoints,
-            [
-                "mcp-jira:9000:full:rest:enforce",
-                "mcp-azure:9001:full:rest:enforce"
-            ]
-        );
-        assert!(u.binaries.iter().any(|b| b == "/usr/local/bin/claude"));
+        let r = rules(&servers);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].resources, ["mcp-jira:9000", "localhost:9001"]);
         assert!(
-            !u.binaries.iter().any(|b| b.ends_with("node")),
-            "the agent is a native binary; granting node would widen the rule to \
-             everything javascript in the sandbox"
+            r[0].methods.is_empty(),
+            "MCP is one URL; a path rule buys nothing"
         );
-        assert!(u.wait, "the agent starts moments later");
-        assert_eq!(u.rule_name, None, "rejected for a multi-endpoint update");
     }
 
     /// Two tool sets served by one container are one endpoint.
@@ -454,7 +433,7 @@ mod tests {
             Server::parse("a", "http://mcp:9000/a", Transport::Http).unwrap(),
             Server::parse("b", "http://mcp:9000/b", Transport::Sse).unwrap(),
         ];
-        assert_eq!(widen(&servers).unwrap().add_endpoints.len(), 1);
+        assert_eq!(rules(&servers)[0].resources.len(), 1);
     }
 
     #[test]

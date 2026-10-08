@@ -12,7 +12,6 @@ export type Lists = { allow: Array<Allow>,
  */
 routes: Array<RouteAllow>, 
 /**
- * `host:port` for each. No binaries: removing an endpoint removes it for
- * everything, which is the only granularity `--remove-endpoint` has.
+ * `host:port` for each.
  */
 block: Array<string>, };

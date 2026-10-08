@@ -149,7 +149,7 @@ enum Command {
         name: String,
     },
 
-    /// Print the policy the gateway is enforcing for a session.
+    /// Print the rules on a session's sandbox.
     Policy {
         /// Session name.
         name: String,
@@ -244,8 +244,8 @@ enum Command {
     /// them, and a list you can only read is a list that rots.
     ///
     /// This records the rule for sandboxes started from now on. It does not
-    /// touch a session that is already running -- that is `policy update`
-    /// through the gateway, and it needs a live sandbox to update.
+    /// touch a session that is already running; the window's events pane does
+    /// that, for one session at a time.
     Endpoints {
         /// Put an endpoint on the allow list, e.g. `crates.io:443`.
         #[arg(long, value_name = "ENDPOINT")]
@@ -254,11 +254,6 @@ enum Command {
         /// Put an endpoint on the block list.
         #[arg(long, value_name = "ENDPOINT", conflicts_with = "allow")]
         block: Option<String>,
-
-        /// Restrict an `--allow` to one binary. Repeatable; every binary when
-        /// omitted, which is the widest the gateway can express.
-        #[arg(long = "binary", value_name = "PATH", requires = "allow")]
-        binaries: Vec<String>,
 
         /// Narrow an `--allow` to one method and path glob, e.g.
         /// `GET /org/_packaging/feed/nuget/v3/**`, or a bare path for GET.
@@ -502,9 +497,8 @@ fn main() -> ExitCode {
         Some(Command::Endpoints {
             allow,
             block,
-            binaries,
             paths,
-        }) => cmd_endpoints(allow.as_deref(), block.as_deref(), binaries, &paths),
+        }) => cmd_endpoints(allow.as_deref(), block.as_deref(), &paths),
         Some(Command::Rm { names }) => cmd_rm(&backends, names),
     };
 
@@ -1098,37 +1092,20 @@ fn cmd_policy(backends: &Backends, name: &str, widen: bool, tighten: bool) -> Fa
     let backend = backends.for_session(&session);
 
     // The change first, so what is printed below is the policy that came back
-    // from applying it rather than the one from before. `repolicy` waits for
-    // the gateway to load the rules, so this is not a race.
-    let rev = if widen || tighten {
-        let preset = &policy::REGISTRIES;
-        let update = match widen {
-            true => preset.widen(),
-            false => preset.tighten(),
-        };
-        let rev = ops::repolicy(backend, &session, &update)?;
-        println!(
-            "{} {}",
-            if widen {
-                "widened to"
-            } else {
-                "tightened from"
-            },
-            preset.label
-        );
-        rev
+    // from applying it rather than the one from before. A rule applies to the
+    // next request, so this is not a race.
+    let view = if widen {
+        let view = ops::widen(backend, &session)?;
+        println!("widened to {}", policy::REGISTRIES.label);
+        view
+    } else if tighten {
+        let view = ops::tighten(backend, &session)?;
+        println!("tightened from {}", policy::REGISTRIES.label);
+        view
     } else {
         ops::policy(backend, &session)?
     };
-
-    // Empty on a read failure rather than fatal: the reason to run this command
-    // is the sandbox's own rules, and losing them to an unreadable convenience
-    // file would be the wrong trade. The section is omitted when the lists are
-    // empty, so a failure reads the same as never having used the feature --
-    // which is why `hurad endpoints`, where the lists are edited, reports it
-    // instead.
-    let lists = endpoints::Lists::load().unwrap_or_default();
-    print_policy(&policy::View::of(&rev, session.policy.as_deref(), &lists));
+    print_policy(&view);
     Ok(())
 }
 
@@ -1196,12 +1173,7 @@ fn cmd_attach(backends: &Backends, name: &str) -> Fallible {
 /// Through [`endpoints::update_at`] rather than a load/modify/save here,
 /// because that takes the lock file the window's own writes take: two processes
 /// editing this at once is not exotic when one of them is a server.
-fn cmd_endpoints(
-    allow: Option<&str>,
-    block: Option<&str>,
-    binaries: Vec<String>,
-    paths: &[String],
-) -> Fallible {
+fn cmd_endpoints(allow: Option<&str>, block: Option<&str>, paths: &[String]) -> Fallible {
     let path = endpoints::Lists::default_path();
     if let Some(endpoint) = allow {
         let routes = paths
@@ -1213,9 +1185,9 @@ fn cmd_endpoints(
             .collect::<Result<Vec<_>, _>>()?;
         endpoints::update_at(&path, path.with_extension("lock"), |l| {
             if routes.is_empty() {
-                l.allow(endpoint, binaries)
+                l.allow(endpoint)
             } else {
-                l.allow_routes(endpoint, binaries, routes)
+                l.allow_routes(endpoint, routes)
             }
         })?;
         println!("{endpoint} is on the allow list");
@@ -1230,18 +1202,10 @@ fn cmd_endpoints(
         return Ok(());
     }
     for a in &lists.allow {
-        let who = match a.binaries.is_empty() {
-            true => "any binary".to_string(),
-            false => a.binaries.join(" "),
-        };
-        println!("{:<7} {:<32} {who}", "allow", a.endpoint);
+        println!("{:<7} {}", "allow", a.endpoint);
     }
     for r in &lists.routes {
-        let who = match r.binaries.is_empty() {
-            true => "the rule already naming it".to_string(),
-            false => r.binaries.join(" "),
-        };
-        println!("{:<7} {:<32} {who}", "allow", r.endpoint);
+        println!("{:<7} {}", "allow", r.endpoint);
         for route in &r.routes {
             println!("{:<7} {:<32} only {route}", "", "");
         }

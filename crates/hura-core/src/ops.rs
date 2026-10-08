@@ -7,8 +7,6 @@
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
-use openshell_client::{PolicyRevision, PolicyUpdate};
-
 use crate::backend::{Backend, Backends, Torn};
 use crate::comments;
 use crate::endpoints;
@@ -1087,14 +1085,15 @@ pub fn send_comments(backend: &dyn Backend, session: &Session) -> Result<String,
     Ok(message)
 }
 
-/// The effective policy of a session's sandbox.
-///
-/// A gateway call, not an exec, so unlike the diff and the poll this does not
-/// queue behind whatever else is running against the sandbox.
-pub fn policy(backend: &dyn Backend, session: &Session) -> Result<PolicyRevision, String> {
-    backend
-        .policy(session)
-        .map_err(|e| format!("could not read the policy: {e}"))
+/// The rules on a session's sandbox, as the policy pane shows them, with the
+/// global lists said against them.
+pub fn policy(backend: &dyn Backend, session: &Session) -> Result<policy::View, String> {
+    let rules = backend
+        .rules(session)
+        .map_err(|e| format!("could not read the policy: {e}"))?;
+    // Unreadable lists only cost the pane its second section.
+    let lists = endpoints::Lists::load().unwrap_or_default();
+    Ok(policy::View::of(rules, session.policy.as_deref(), &lists))
 }
 
 /// A session's recent policy decisions, newest first.
@@ -1137,26 +1136,31 @@ pub fn keep_feeds(backends: &Backends) {
     }
 }
 
-/// Apply an incremental policy change and report what the sandbox ended up
-/// with, so the caller never has to assume the change landed.
-pub fn repolicy(
-    backend: &dyn Backend,
-    session: &Session,
-    update: &PolicyUpdate,
-) -> Result<PolicyRevision, String> {
+/// Open the package registries to a running session, for reading.
+pub fn widen(backend: &dyn Backend, session: &Session) -> Result<policy::View, String> {
     backend
-        .policy_update(session, update)
-        .map_err(|e| format!("policy update failed: {e}"))?;
+        .add_rules(session, &policy::REGISTRIES.rules())
+        .map_err(|e| format!("could not open the registries: {e}"))?;
     policy(backend, session)
 }
 
-/// Open an endpoint to a running session for the named binaries, and put it
-/// on the global allow list too when `everywhere`.
+/// Close them again: every allow on the session naming one of them goes,
+/// whichever rule opened it. Not a deny, so a later widen opens them again.
+pub fn tighten(backend: &dyn Backend, session: &Session) -> Result<policy::View, String> {
+    for endpoint in policy::REGISTRIES.endpoints {
+        backend
+            .withdraw(session, endpoint, true)
+            .map_err(|e| format!("could not close {endpoint}: {e}"))?;
+    }
+    policy(backend, session)
+}
+
+/// Open an endpoint to a running session, and put it on the global allow list
+/// too when `everywhere`.
 ///
 /// The whole host when `routes` is empty, and only those methods and paths
-/// when it is not, planned against the policy the sandbox has now, because
-/// whether that is a new rule or an addition to an existing one depends on
-/// it. See [`endpoints::routes_update`].
+/// when it is not. A deny this session has for the endpoint goes first, since
+/// a deny outranks every allow and the allow would otherwise change nothing.
 ///
 /// The live change first, and the list only once it has landed: an entry that
 /// promised every new session something this one was just refused would be a
@@ -1165,63 +1169,68 @@ pub fn allow(
     backend: &dyn Backend,
     session: &Session,
     endpoint: &str,
-    binaries: &[String],
     routes: &[endpoints::Route],
     everywhere: bool,
-) -> Result<PolicyRevision, String> {
+) -> Result<policy::View, String> {
     let endpoint = checked_endpoint(endpoint)?;
-    // An endpoint rule with no binaries grants nothing, so it is refused here
-    // rather than issued and reported as done.
-    if binaries.is_empty() {
-        return Err(format!("nothing named to allow {endpoint} for"));
-    }
-    if let Some(b) = binaries.iter().find(|b| !b.starts_with('/')) {
-        return Err(format!(
-            "`{b}` is not an absolute path, which is what the gateway matches"
-        ));
-    }
     // Checked again on this side, since they arrive from a client.
     let routes = routes
         .iter()
         .map(|r| endpoints::Route::checked(&r.method, &r.path))
         .collect::<Result<Vec<_>, _>>()?;
-    let update = if routes.is_empty() {
-        endpoints::allow_update(&endpoint, binaries)
-    } else {
-        let now = policy(backend, session)?;
-        let current = now
-            .policy
-            .as_ref()
-            .ok_or("the gateway returned no policy to add paths to")?;
-        endpoints::routes_update(current, &endpoint, binaries, &routes)?
-    };
-    let rev = repolicy(backend, session, &update)?;
+    backend
+        .withdraw(session, &endpoint, false)
+        .map_err(|e| format!("could not lift the block on {endpoint}: {e}"))?;
+    backend
+        .add_rules(session, &endpoints::allow_rules(&endpoint, &routes))
+        .map_err(|e| format!("could not allow {endpoint}: {e}"))?;
     if everywhere {
         edit_lists(|l| {
             if routes.is_empty() {
-                l.allow(&endpoint, binaries.to_vec())
+                l.allow(&endpoint)
             } else {
-                l.allow_routes(&endpoint, binaries.to_vec(), routes)
+                l.allow_routes(&endpoint, routes)
             }
         })?;
     }
-    Ok(rev)
+    policy(backend, session)
 }
 
-/// Remove an endpoint from a running session, for every binary, and put it on
-/// the global block list too when `everywhere`.
+/// Deny an endpoint to a running session, whatever opens it, and put it on
+/// the global block list too when `everywhere`. The session's own allows of it
+/// go with it.
 pub fn block(
     backend: &dyn Backend,
     session: &Session,
     endpoint: &str,
     everywhere: bool,
-) -> Result<PolicyRevision, String> {
+) -> Result<policy::View, String> {
     let endpoint = checked_endpoint(endpoint)?;
-    let rev = repolicy(backend, session, &endpoints::block_update(&endpoint))?;
+    // The runtime refuses a deny naming exactly what an allow names, so the
+    // allows go first; the deny then outranks any broader one that is left.
+    backend
+        .withdraw(session, &endpoint, true)
+        .map_err(|e| format!("could not take the allows off {endpoint}: {e}"))?;
+    backend
+        .add_rules(session, &[endpoints::deny_rule(&endpoint)])
+        .map_err(|e| format!("could not block {endpoint}: {e}"))?;
     if everywhere {
         edit_lists(|l| l.block(&endpoint))?;
     }
-    Ok(rev)
+    policy(backend, session)
+}
+
+/// Remove one of a session's own rules, which is how any change made here is
+/// taken back.
+pub fn remove_rule(
+    backend: &dyn Backend,
+    session: &Session,
+    id: &str,
+) -> Result<policy::View, String> {
+    backend
+        .remove_rule(session, id)
+        .map_err(|e| format!("could not remove the rule: {e}"))?;
+    policy(backend, session)
 }
 
 /// Take an endpoint off the global lists. No sandbox is touched.

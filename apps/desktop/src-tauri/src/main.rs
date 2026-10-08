@@ -273,14 +273,12 @@ fn allow(
     server: String,
     name: String,
     endpoint: String,
-    binaries: Vec<String>,
     everywhere: bool,
 ) -> Result<PolicyView, Failed> {
     let reply = remote(&server)?
         .call(Request::Allow {
             name,
             endpoint,
-            binaries,
             everywhere,
         })
         .map_err(to_message)?;
@@ -294,7 +292,6 @@ fn allow_paths(
     server: String,
     name: String,
     endpoint: String,
-    binaries: Vec<String>,
     routes: Vec<Route>,
     everywhere: bool,
 ) -> Result<PolicyView, Failed> {
@@ -302,7 +299,6 @@ fn allow_paths(
         .call(Request::AllowPaths {
             name,
             endpoint,
-            binaries,
             routes,
             everywhere,
         })
@@ -333,6 +329,15 @@ fn block(
 fn unlist(server: String, name: String, endpoint: String) -> Result<PolicyView, Failed> {
     let reply = remote(&server)?
         .call(Request::Unlist { name, endpoint })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Policy(view) => view, "a policy")
+}
+
+/// Remove one of a session's own rules. Answers with its policy re-read.
+#[tauri::command(async)]
+fn remove_rule(server: String, name: String, id: String) -> Result<PolicyView, Failed> {
+    let reply = remote(&server)?
+        .call(Request::RemoveRule { name, id })
         .map_err(to_message)?;
     expect_reply!(reply, Reply::Policy(view) => view, "a policy")
 }
@@ -1082,6 +1087,7 @@ fn main() {
             allow_paths,
             block,
             unlist,
+            remove_rule,
             diff,
             git_status,
             git,

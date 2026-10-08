@@ -9,16 +9,16 @@
 // question a denial asks is "should this be reachable?" and that is a question
 // about `docs.rs:443`, not about the fourteenth time the agent tried it. **Log**
 // is the feed as the gateway said it, newest first, for when the order is the
-// point. Both offer the same two changes beside the evidence: open an endpoint
-// for the binaries that were refused, or close one that is open -- for this
-// session, or for every new session too.
+// point. Both offer the same two changes beside the evidence: open an endpoint,
+// or close one that is open, for this session or for every new session too. A
+// change is to the whole sandbox, since its rules are not about one program.
 //
 // The endpoints come in two sections, denied above allowed, because the
 // denied ones are the reason anybody opens this pane: each says what was
 // refused and carries an allow button, where it used to say "right-click" in a
 // hint over the list. Verdicts are the shields the policy pane and the menus
-// use, and inside an endpoint the rows say only what the endpoint does not --
-// `node(812)`, not `/usr/bin/node(812) -> registry.npmjs.org:443` again.
+// use, and inside an endpoint the rows say only what the endpoint does not:
+// the request, not the host again.
 //
 // An allow is the whole host or some of its paths. A denial of the host names
 // no path, because the connection was refused before any request was made, so
@@ -55,8 +55,6 @@ type Group = {
   events: FeedEvent[];
   denied: number;
   allowed: number;
-  /// Every binary a denial named, newest first. What an allow is offered for.
-  refused: string[];
   /// Every request a denial named, newest first: what a rule's paths refused.
   requests: Route[];
 };
@@ -65,10 +63,13 @@ type Group = {
 /// feed says: a denial a minute ago and an allow since is an endpoint that is
 /// open now.
 type Standing = {
-  /// Whether any rule names it.
+  /// Whether some allow lets requests through to it, and no deny stops them.
   open: boolean;
-  /// The binaries those rules grant it to.
-  binaries: string[];
+  /// Whether every request gets through, rather than only some paths.
+  whole: boolean;
+  /// Whether a deny of the whole host is on it.
+  denied: boolean;
+  /// The ids of the rules that name it.
   rules: string[];
   /// Which global list it is on, if either.
   listed: "allow" | "block" | null;
@@ -324,25 +325,18 @@ function EndpointRow({
   const row = `ep:${g.endpoint}`;
   const [host, port] = split(g.endpoint);
   const busy = actions.busy === g.endpoint;
-  const grant = grantable(s, g.refused);
   // The one change that is on the row rather than in its menu: it is what a
   // denial is asking for, and it opens the panel, so it is still asked.
-  const canAllow = tone === "denied" && grant.length > 0 && actions.busy === null;
-  // An L7 denial names no binary; what it names is the request, which is the
-  // thing to read.
-  const request = g.refused.length === 0 ? g.events.find((e) => e.verdict === "Denied") : undefined;
+  const canAllow = tone === "denied" && actions.busy === null;
+  // A denial by a rule's paths names the request, which is the thing to read.
+  const request = g.requests.length > 0 ? g.events.find((e) => e.verdict === "Denied") : undefined;
 
   const meta: React.ReactNode[] = [
-    ...binariesOf(g).map((b) => (
-      <span key={b} className="bin" title={b}>
-        {base(b)}
-      </span>
-    )),
     ...(request ? [<span key="req" className="bin">{brief(request)}</span>] : []),
     ...(g.denied > 0 ? [<span key="d" className="count bad">{g.denied} denied</span>] : []),
     ...(g.allowed > 0 ? [<span key="a" className="count">{g.allowed} allowed</span>] : []),
-    <span key="s" title={s.rules.length ? `by ${s.rules.join(", ")}` : undefined}>
-      {s.open ? "in policy" : "not in policy"}
+    <span key="s" title={s.rules.length ? `${s.rules.length} ${s.rules.length === 1 ? "rule" : "rules"} name it` : undefined}>
+      {s.denied ? "denied" : s.whole ? "open" : s.open ? "some paths open" : "not in policy"}
     </span>,
     ...(s.listed === "allow" ? [<span key="l">allowed everywhere</span>] : []),
     ...(s.listed === "block" ? [<span key="l">blocked everywhere</span>] : []),
@@ -351,7 +345,7 @@ function EndpointRow({
   return (
     <li
       className={`ep ${tone}${busy ? " busy" : ""}`}
-      {...actions.menu(() => itemsFor(g.endpoint, row, g.refused, g.requests, g.denied > 0, actions))}
+      {...actions.menu(() => itemsFor(g.endpoint, row, g.requests, g.denied > 0, actions))}
     >
       <div className="ep-head">
         <button className="ep-open" onClick={onToggle} aria-expanded={open}>
@@ -371,7 +365,7 @@ function EndpointRow({
             {canAllow && (
               <button
                 className="ep-allow"
-                title={`allow ${grant.map(base).join(", ")} to reach ${g.endpoint}`}
+                title={`allow this sandbox to reach ${g.endpoint}`}
                 onClick={() => actions.setAsking({ row, kind: "allow" })}
               >
                 <Grant />
@@ -387,7 +381,7 @@ function EndpointRow({
 
       <div className="ep-meta">{dotted(meta)}</div>
 
-      <Panel endpoint={g.endpoint} row={row} refused={g.refused} requests={g.requests} {...actions} />
+      <Panel endpoint={g.endpoint} row={row} requests={g.requests} {...actions} />
 
       {open && (
         <ul className="ep-log">
@@ -413,7 +407,6 @@ function EndpointRow({
 
 function LogRow({ event: e, ...actions }: { event: FeedEvent } & Actions) {
   const row = `log:${e.at}|${e.class}|${e.subject}`;
-  const refused = e.verdict === "Denied" && e.target?.binary ? [e.target.binary] : [];
   const request = e.verdict === "Denied" ? requestOf(e) : null;
   const requests = request ? [request] : [];
   return (
@@ -424,7 +417,7 @@ function LogRow({ event: e, ...actions }: { event: FeedEvent } & Actions) {
       {...actions.menu(() => {
         const line: MenuItem = { label: "Copy line", icon: Copy, run: () => copy(lineOf(e)) };
         return e.target
-          ? itemsFor(e.target.endpoint, row, refused, requests, e.verdict === "Denied", actions, [line])
+          ? itemsFor(e.target.endpoint, row, requests, e.verdict === "Denied", actions, [line])
           : [line];
       })}
     >
@@ -453,7 +446,7 @@ function LogRow({ event: e, ...actions }: { event: FeedEvent } & Actions) {
         )}
       </div>
       {e.target && (
-        <Panel endpoint={e.target.endpoint} row={row} refused={refused} requests={requests} {...actions} />
+        <Panel endpoint={e.target.endpoint} row={row} requests={requests} {...actions} />
       )}
     </li>
   );
@@ -470,34 +463,29 @@ function Verdict({ verdict }: { verdict: FeedEvent["verdict"] }) {
 
 /// What a row's menu offers, each item only when it would change something: an
 /// allow beside a denial the policy has not since answered, a block beside an
-/// endpoint some rule still opens. Copying is always there.
+/// endpoint something still opens. Copying is always there.
 ///
-/// An allow from the menu goes straight through, for the binaries that were
-/// refused, because that is the answer nearly every time and the menu is
-/// already the deliberate gesture. Choosing which binaries when there is more
-/// than one, choosing paths, and a block (which takes an endpoint from
-/// everything, git included) open the panel under the row instead, so the
+/// An allow of the whole host from the menu goes straight through, because
+/// that is the answer nearly every time and the menu is already the deliberate
+/// gesture. Choosing paths, and a block (which takes an endpoint from the whole
+/// sandbox, git included), open the panel under the row instead, so the
 /// question is asked beside the evidence.
 ///
-/// A denial by a rule's paths has no one-click allow. The click used to give
-/// the whole host, which is the opposite of what a rule written path by path
-/// was for, so the panel opens on the path that was refused instead.
+/// A denial by a rule's paths has no one-click allow. The click would give the
+/// whole host, which is the opposite of what a rule written path by path was
+/// for, so the panel opens on the path that was refused instead.
 function itemsFor(
   endpoint: string,
   row: string,
-  refused: string[],
   requests: Route[],
   denied: boolean,
   a: Actions,
   more: MenuItem[] = [],
 ): MenuItem[] {
   const s = a.standing(endpoint);
-  const offered = candidates(s, refused);
-  const grant = grantable(s, refused);
-  const who = grant.map(base).join(", ");
   const items: MenuItem[] = [];
 
-  if (denied && grant.length > 0 && a.busy === null) {
+  if (denied && !s.whole && a.busy === null) {
     if (requests.length > 0) {
       items.push(
         {
@@ -508,7 +496,6 @@ function itemsFor(
         },
         {
           label: "Allow the whole host…",
-          hint: who,
           run: () => a.setAsking({ row, kind: "allow", scope: "host" }),
         },
       );
@@ -517,31 +504,22 @@ function itemsFor(
         {
           label: "Allow in this session",
           icon: Grant,
-          hint: who,
-          run: () => a.apply(endpoint, api.allow(a.server, a.name, endpoint, grant, false)),
+          run: () => a.apply(endpoint, api.allow(a.server, a.name, endpoint, false)),
         },
         {
           label: "Allow in every new session too",
           icon: Grant,
-          hint: who,
-          run: () => a.apply(endpoint, api.allow(a.server, a.name, endpoint, grant, true)),
+          run: () => a.apply(endpoint, api.allow(a.server, a.name, endpoint, true)),
+        },
+        {
+          label: "Allow only some paths…",
+          hint: "method and path",
+          run: () => a.setAsking({ row, kind: "allow", scope: "paths" }),
         },
       );
-      if (offered.length > 1) {
-        items.push({
-          label: "Allow…",
-          hint: "choose binaries",
-          run: () => a.setAsking({ row, kind: "allow", scope: "host" }),
-        });
-      }
-      items.push({
-        label: "Allow only some paths…",
-        hint: "method and path",
-        run: () => a.setAsking({ row, kind: "allow", scope: "paths" }),
-      });
     }
   }
-  if (s.open && a.busy === null) {
+  if (s.open && !s.denied && a.busy === null) {
     if (items.length) items.push("separator");
     items.push({
       label: "Block…",
@@ -562,7 +540,6 @@ function itemsFor(
 function Panel({
   endpoint,
   row,
-  refused,
   requests,
   server,
   name,
@@ -570,7 +547,7 @@ function Panel({
   setAsking,
   standing,
   onChanged,
-}: { endpoint: string; row: string; refused: string[]; requests: Route[] } & Actions) {
+}: { endpoint: string; row: string; requests: Route[] } & Actions) {
   if (asking?.row !== row) return null;
   return (
     <ChangePanel
@@ -579,14 +556,13 @@ function Panel({
       scope={asking.scope}
       endpoint={endpoint}
       standing={standing(endpoint)}
-      refused={refused}
       requests={requests}
-      run={(binaries, everywhere, routes) =>
+      run={(everywhere, routes) =>
         asking.kind === "block"
           ? api.block(server, name, endpoint, everywhere)
           : routes
-            ? api.allowPaths(server, name, endpoint, binaries, routes, everywhere)
-            : api.allow(server, name, endpoint, binaries, everywhere)
+            ? api.allowPaths(server, name, endpoint, routes, everywhere)
+            : api.allow(server, name, endpoint, everywhere)
       }
       onDone={(view) => {
         setAsking(null);
@@ -602,7 +578,6 @@ function ChangePanel({
   scope: asked,
   endpoint,
   standing: s,
-  refused,
   requests,
   run,
   onDone,
@@ -612,18 +587,11 @@ function ChangePanel({
   scope?: Scope;
   endpoint: string;
   standing: Standing;
-  refused: string[];
   requests: Route[];
-  run: (binaries: string[], everywhere: boolean, routes?: Route[]) => Promise<PolicyView>;
+  run: (everywhere: boolean, routes?: Route[]) => Promise<PolicyView>;
   onDone: (view: PolicyView) => void;
   onCancel: () => void;
 }) {
-  const offered = candidates(s, refused);
-  // The ones that were refused, ticked; the ones a rule already grants are
-  // offered only for an L7 denial, where there is nothing else to name.
-  const [picked, setPicked] = useState<Set<string>>(
-    () => new Set(offered.filter((b) => !s.binaries.includes(b) || refused.length === 0)),
-  );
   // A refused path is the evidence that paths are what is wanted.
   const [scope, setScope] = useState<Scope>(asked ?? (requests.length > 0 ? "paths" : "host"));
   const [routes, setRoutes] = useState<Route[]>(() =>
@@ -634,20 +602,9 @@ function ChangePanel({
   const [error, setError] = useState<string | null>(null);
   const [host] = split(endpoint);
 
-  // Where paths would land: a rule of their own when nothing names the
-  // endpoint, the one rule that does when it already grants every binary on
-  // offer, and nowhere otherwise. The gateway picks the rule it adds paths to
-  // by host and port alone, so it cannot add them for anyone else.
-  const joins =
-    s.rules.length === 1 && offered.every((b) => s.binaries.includes(b)) ? s.rules[0] : null;
-  const pathsFit = !s.open || joins !== null;
   const narrowing = kind === "allow" && scope === "paths";
   const problems = routes.map((r) => pathProblem(r.path));
-  const ready =
-    kind === "block" ||
-    (narrowing
-      ? pathsFit && problems.every((p) => p === null) && (joins !== null || picked.size > 0)
-      : picked.size > 0);
+  const ready = !narrowing || problems.every((p) => p === null);
 
   const edit = (i: number, change: Partial<Route>) =>
     setRoutes((prev) => prev.map((r, j) => (j === i ? { ...r, ...change } : r)));
@@ -659,11 +616,9 @@ function ChangePanel({
       if (narrowing) {
         const wanted = routes.map((r) => ({ method: r.method, path: r.path.trim() }));
         const unique = wanted.filter((r, i) => wanted.findIndex((q) => sameRoute(q, r)) === i);
-        // Joining a rule gives the paths to everything it grants, so that is
-        // what is sent, rather than ticks the gateway could not honour.
-        onDone(await run(joins !== null ? offered : [...picked], everywhere, unique));
+        onDone(await run(everywhere, unique));
       } else {
-        onDone(await run([...picked], everywhere));
+        onDone(await run(everywhere));
       }
     } catch (e) {
       setError(messageOf(e));
@@ -676,29 +631,8 @@ function ChangePanel({
       {kind === "allow" ? (
         <>
           <p className="change-what">
-            <Grant className="allowed" /> Allow <code>{endpoint}</code> for
+            <Grant className="allowed" /> Allow <code>{endpoint}</code>
           </p>
-          <div className="change-bins">
-            {offered.map((b) => (
-              <label key={b} className="tick">
-                <input
-                  type="checkbox"
-                  checked={narrowing && joins !== null ? true : picked.has(b)}
-                  disabled={busy || (narrowing && joins !== null)}
-                  onChange={(e) =>
-                    setPicked((prev) => {
-                      const next = new Set(prev);
-                      if (e.target.checked) next.add(b);
-                      else next.delete(b);
-                      return next;
-                    })
-                  }
-                />
-                <span className="bin-name">{base(b)}</span>
-                <span className="bin-path">{b}</span>
-              </label>
-            ))}
-          </div>
 
           <div className="segmented" role="tablist" aria-label="how much of the endpoint">
             {(
@@ -721,21 +655,9 @@ function ChangePanel({
           </div>
 
           {!narrowing ? (
-            <p className="change-note">Full access, for these binaries only.</p>
-          ) : !pathsFit ? (
             <p className="change-note">
-              {s.rules.length > 1 ? (
-                <>
-                  {s.rules.length} rules already name it, and the gateway cannot tell which one to add
-                  paths to.
-                </>
-              ) : (
-                <>
-                  <b>{s.rules[0]}</b> already grants it to <b>{s.binaries.map(base).join(", ")}</b>,
-                  and the gateway can only add paths to that rule, for those binaries.
-                </>
-              )}{" "}
-              This can only be the whole host.
+              Every request, from anything in this sandbox.
+              {s.denied && <> The deny on it here is lifted first.</>}
             </p>
           ) : (
             <>
@@ -784,13 +706,6 @@ function ChangePanel({
                 </button>
               </div>
               <p className="change-note">
-                {joins !== null ? (
-                  <>
-                    Added to <b>{joins}</b>, so for every binary it grants.{" "}
-                  </>
-                ) : (
-                  <>For these binaries only. </>
-                )}
                 Anything else on the host stays denied and turns up here with its path.{" "}
                 <code>*</code> is one segment, <code>**</code> any number.
               </p>
@@ -803,13 +718,8 @@ function ChangePanel({
             <Revoke className="denied" /> Block <code>{endpoint}</code>
           </p>
           <p className="change-note">
-            Removed from this sandbox for every binary
-            {s.binaries.length > 0 && (
-              <>
-                , including <b>{s.binaries.map(base).join(", ")}</b>
-              </>
-            )}
-            . Anything that depends on it stops working.
+            Denied to everything in this sandbox, whatever opens it. Anything that depends on it
+            stops working.
           </p>
         </>
       )}
@@ -835,8 +745,6 @@ function ChangePanel({
           disabled={busy || !ready}
           onClick={() => void go()}
         >
-          {/* The one wait in this pane that keeps its words: the gateway
-              takes seconds to load a revision, and the policy is changing. */}
           {busy ? (
             <>
               <span className="spin" /> applying
@@ -852,7 +760,8 @@ function ChangePanel({
   );
 }
 
-/// The methods a path can be opened for. `*` is the gateway's own wildcard.
+/// The methods a path can be opened for. `ANY` is the runtime's own word for
+/// all of them.
 const METHODS = [
   { value: "GET", label: "GET" },
   { value: "HEAD", label: "HEAD" },
@@ -860,19 +769,18 @@ const METHODS = [
   { value: "PUT", label: "PUT" },
   { value: "PATCH", label: "PATCH" },
   { value: "DELETE", label: "DELETE" },
-  { value: "*", label: "*", hint: "any method" },
+  { value: "ANY", label: "ANY", hint: "any method" },
 ];
 
-/// What is wrong with a path as the gateway will read it, `""` for nothing
+/// What is wrong with a path as the runtime will read it, `""` for nothing
 /// typed yet, and `null` for nothing. The server checks again; this is so the
-/// button says so before a six-second round trip does.
+/// button says so before a round trip does.
 function pathProblem(path: string): string | null {
   const p = path.trim();
   if (!p) return "";
   if (!p.startsWith("/")) return "a path starts with /";
-  // `host:port:METHOD:path_glob` is the gateway's syntax, and it refuses a
-  // colon in the glob rather than guess where the path begins.
-  if (p.includes(":")) return "the gateway refuses a colon in a path";
+  if (/[?#%]/.test(p)) return "the path alone: no query, fragment or %-escapes";
+  if (p.split("/").includes("..")) return "no .. in a path";
   if (/\s/.test(p)) return "no spaces";
   return null;
 }
@@ -922,14 +830,12 @@ function group(feed: FeedEvent[]): Group[] {
     const key = e.target.endpoint;
     let g = byEndpoint.get(key);
     if (!g) {
-      g = { endpoint: key, events: [], denied: 0, allowed: 0, refused: [], requests: [] };
+      g = { endpoint: key, events: [], denied: 0, allowed: 0, requests: [] };
       byEndpoint.set(key, g);
     }
     g.events.push(e);
     if (e.verdict === "Denied") {
       g.denied++;
-      const b = e.target.binary;
-      if (b && !g.refused.includes(b)) g.refused.push(b);
       const r = requestOf(e);
       if (r && !g.requests.some((q) => sameRoute(q, r))) g.requests.push(r);
     } else if (e.verdict === "Allowed") {
@@ -941,11 +847,9 @@ function group(feed: FeedEvent[]): Group[] {
 }
 
 function standingOf(policy: PolicyView | null, endpoint: string): Standing {
-  const rules = (policy?.network ?? []).filter((r) =>
-    r.endpoints.some((e) => e.host_port === endpoint),
-  );
+  const rules = (policy?.rules ?? []).filter((r) => r.hosts.some((h) => hostMatches(h, endpoint)));
+  const denied = rules.some((r) => !r.allow && r.methods.length === 0);
   const lists = policy?.lists;
-  // `routes` is absent from an `hurad` that predates paths.
   const allowed = [...(lists?.allow ?? []), ...(lists?.routes ?? [])];
   const listed = allowed.some((a) => a.endpoint === endpoint)
     ? "allow"
@@ -953,11 +857,30 @@ function standingOf(policy: PolicyView | null, endpoint: string): Standing {
       ? "block"
       : null;
   return {
-    open: rules.length > 0,
-    binaries: [...new Set(rules.flatMap((r) => r.binaries))],
-    rules: rules.map((r) => r.key),
+    open: !denied && rules.some((r) => r.allow),
+    whole: !denied && rules.some((r) => r.allow && r.methods.length === 0),
+    denied,
+    rules: rules.map((r) => r.id),
     listed,
   };
+}
+
+/// Whether a rule's host covers an endpoint, the way the runtime matches it: a
+/// bare host is any port and not its subdomains, `*.` is one label, `**.` any
+/// number, and `**` is everything. The same rule as `policy::host_matches`.
+function hostMatches(resource: string, endpoint: string): boolean {
+  const [host, port] = split(endpoint);
+  const m = /^(.*):(\d+)$/.exec(resource);
+  const pattern = (m ? m[1] : resource).toLowerCase();
+  if (m && m[2] !== port) return false;
+  const h = host.toLowerCase();
+  if (pattern === "**") return true;
+  if (pattern.startsWith("**.")) return h.endsWith(pattern.slice(2));
+  if (pattern.startsWith("*.")) {
+    const label = h.endsWith(pattern.slice(1)) ? h.slice(0, h.length - pattern.length + 1) : "";
+    return label.length > 0 && !label.includes(".");
+  }
+  return h === pattern;
 }
 
 /// The gateway's reason when no rule names the endpoint at all. It repeats the
@@ -967,39 +890,10 @@ function standingOf(policy: PolicyView | null, endpoint: string): Standing {
 const GENERIC = /^endpoint \S+ is not allowed by any policy$/;
 
 /// The verdict an endpoint's row wears: its last decision, unless the policy
-/// has since moved -- a denial followed by an allow from this pane is an
-/// endpoint that is open, and should stop looking like a problem.
+/// has since moved. A denial followed by an allow of the whole host from this
+/// pane is an endpoint that is open, and should stop looking like a problem.
 function toneFor(g: Group, s: Standing): "denied" | "allowed" {
-  return g.events[0].verdict === "Denied" && !opensFor(s, g.refused) ? "denied" : "allowed";
-}
-
-/// Who an allow would add: the refused binaries no rule grants yet, or, for an
-/// L7 denial that names none, the binaries a rule already sends there.
-function grantable(s: Standing, refused: string[]): string[] {
-  const offered = candidates(s, refused);
-  return refused.length > 0 ? offered.filter((b) => !s.binaries.includes(b)) : offered;
-}
-
-/// What an allow can be offered for: the binaries that were refused, or, for
-/// an L7 denial that names none, the binaries a rule already sends there --
-/// adding full access for them is what lifts a path restriction.
-function candidates(s: Standing, refused: string[]): string[] {
-  return refused.length > 0 ? refused : s.binaries;
-}
-
-/// Whether the policy already grants every refused binary. For an L7 denial
-/// there is nothing to compare, so it never counts as already open.
-function opensFor(s: Standing, refused: string[]): boolean {
-  return refused.length > 0 && refused.every((b) => s.binaries.includes(b));
-}
-
-function binariesOf(g: Group): string[] {
-  const all: string[] = [];
-  for (const e of g.events) {
-    const b = e.target?.binary;
-    if (b && !all.includes(b)) all.push(b);
-  }
-  return all;
+  return g.events[0].verdict === "Denied" && !s.whole ? "denied" : "allowed";
 }
 
 /// One event as the terminal's feed prints it, for pasting into an issue.

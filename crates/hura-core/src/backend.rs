@@ -12,7 +12,7 @@
 //! isolation at all. It was removed: two backends meant two of everything to
 //! keep working, and the isolation is the product.
 
-use openshell_client::{PolicyRevision, PolicyUpdate};
+use sbx_client::RuleSpec;
 
 use crate::doctor::Check;
 use crate::events::Event;
@@ -221,10 +221,19 @@ pub trait Backend {
     /// Read a session's own record, from wherever this backend keeps it.
     fn read_meta(&self, name: &str) -> Result<Session>;
 
-    /// The effective policy.
-    fn policy(&self, session: &Session) -> Result<PolicyRevision>;
+    /// Every network rule that applies to the session, its own and the ones
+    /// every sandbox has.
+    fn rules(&self, session: &Session) -> Result<Vec<crate::policy::Rule>>;
 
-    fn policy_update(&self, session: &Session, update: &PolicyUpdate) -> Result<()>;
+    /// Add rules to the session. They apply to the next request.
+    fn add_rules(&self, session: &Session, rules: &[RuleSpec]) -> Result<()>;
+
+    /// Remove one of the session's own rules.
+    fn remove_rule(&self, session: &Session, id: &str) -> Result<()>;
+
+    /// Take an endpoint out of the session's own allows (or denies, when
+    /// `allow` is false) that name it, keeping what else they named.
+    fn withdraw(&self, session: &Session, endpoint: &str, allow: bool) -> Result<()>;
 
     /// The session's recent allow and deny decisions, as read from wherever
     /// this backend keeps them. Not merged with what was kept: that is

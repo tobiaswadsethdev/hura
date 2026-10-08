@@ -979,7 +979,7 @@ mod tests {
         let msg = e.to_string();
         assert!(msg.contains("jira"), "names the entry: {msg}");
         assert!(
-            msg.contains("host.openshell.internal"),
+            msg.contains("host.docker.internal"),
             "says what to use: {msg}"
         );
     }

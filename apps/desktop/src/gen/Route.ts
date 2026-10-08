@@ -4,14 +4,13 @@
  * One method and path an allow is narrowed to:
  * `GET /contoso/tools/_packaging/feed/nuget/v3/**`.
  *
- * Enforced rather than advisory, because every endpoint this module opens is
- * `rest`, which the gateway inspects request by request. A rules block with no
- * access class beside it is default-deny, so a rule carrying only routes
- * grants those and nothing else on the host.
+ * Enforced rather than advisory: the sandbox's proxy inspects every request to
+ * a host with rules like this, and anything on it the rules do not name is
+ * refused.
  */
 export type Route = { 
 /**
- * Upper case, or `*` for any method.
+ * Upper case, or `ANY` for any method.
  */
 method: string, 
 /**

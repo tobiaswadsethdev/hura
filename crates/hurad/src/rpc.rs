@@ -14,10 +14,7 @@ use std::path::Path;
 use hura_core::backend::{Backend, Backends};
 use hura_core::session::Session;
 use hura_core::store::Store;
-use hura_core::{
-    chat, comments, config, endpoints, files, git, image, ops, policy, projects, repos, secrets,
-    skills,
-};
+use hura_core::{chat, comments, config, files, git, image, ops, projects, repos, secrets, skills};
 use hura_proto::{Failure, GitOp, McpOp, Outcome, Reply, Request};
 
 /// Answer one request.
@@ -40,22 +37,18 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
         Request::Allow {
             name,
             endpoint,
-            binaries,
             everywhere,
         } => with_session(&name, |s| {
-            let backend = backends.for_session(s);
-            let revision = ops::allow(backend, s, &endpoint, &binaries, &[], everywhere)
-                .map_err(Failure::failed)?;
-            Ok(policy_view(&revision, s))
+            ops::allow(backends.for_session(s), s, &endpoint, &[], everywhere)
+                .map(Reply::Policy)
+                .map_err(Failure::failed)
         }),
         Request::AllowPaths {
             name,
             endpoint,
-            binaries,
             routes,
             everywhere,
         } => with_session(&name, |s| {
-            let backend = backends.for_session(s);
             // Never an allow of the whole host: that is `Allow`, and an empty
             // list here is a client that lost the paths on the way.
             if routes.is_empty() {
@@ -63,19 +56,23 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                     "no paths named to allow on {endpoint}"
                 )));
             }
-            let revision = ops::allow(backend, s, &endpoint, &binaries, &routes, everywhere)
-                .map_err(Failure::failed)?;
-            Ok(policy_view(&revision, s))
+            ops::allow(backends.for_session(s), s, &endpoint, &routes, everywhere)
+                .map(Reply::Policy)
+                .map_err(Failure::failed)
         }),
         Request::Block {
             name,
             endpoint,
             everywhere,
         } => with_session(&name, |s| {
-            let backend = backends.for_session(s);
-            let revision =
-                ops::block(backend, s, &endpoint, everywhere).map_err(Failure::failed)?;
-            Ok(policy_view(&revision, s))
+            ops::block(backends.for_session(s), s, &endpoint, everywhere)
+                .map(Reply::Policy)
+                .map_err(Failure::failed)
+        }),
+        Request::RemoveRule { name, id } => with_session(&name, |s| {
+            ops::remove_rule(backends.for_session(s), s, &id)
+                .map(Reply::Policy)
+                .map_err(Failure::failed)
         }),
         Request::Unlist { name, endpoint } => with_session(&name, |s| {
             ops::unlist(&endpoint).map_err(Failure::failed)?;
@@ -511,16 +508,9 @@ fn ls(backends: &Backends) -> Outcome {
 
 /// The policy pane's contents.
 fn policy(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
-    let revision = ops::policy(backend, session).map_err(Failure::gateway)?;
-    Ok(policy_view(&revision, session))
-}
-
-fn policy_view(revision: &openshell_client::PolicyRevision, session: &Session) -> Reply {
-    Reply::Policy(policy::View::of(
-        revision,
-        session.policy.as_deref(),
-        &lists(),
-    ))
+    ops::policy(backend, session)
+        .map(Reply::Policy)
+        .map_err(Failure::gateway)
 }
 
 fn events(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
@@ -555,15 +545,6 @@ fn with_session(name: &str, f: impl FnOnce(&Session) -> Result<Reply, Failure>) 
         Ok(reply) => reply.into(),
         Err(failure) => failure.into(),
     }
-}
-
-/// The global allow and block lists, for the policy reply.
-///
-/// Empty on a read failure rather than fatal, for the reason `hura policy` does
-/// the same: the point of asking is the sandbox's own rules, and losing them to
-/// an unreadable convenience file is the wrong trade.
-fn lists() -> endpoints::Lists {
-    endpoints::Lists::load().unwrap_or_default()
 }
 
 /// A sandbox's ports: what is listening and who holds it, from the sandbox;

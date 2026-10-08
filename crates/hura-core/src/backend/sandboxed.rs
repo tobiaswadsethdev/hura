@@ -5,11 +5,6 @@
 //! What [`crate::ops`] needs of a sandbox, behind the [`Backend`] trait so the
 //! scripts above it never name the runtime.
 
-use std::collections::BTreeMap;
-
-use openshell_client::{
-    Endpoint, MethodPath, NetworkPolicy, Policy, PolicyRevision, PolicyUpdate, Rule as OsRule,
-};
 use sbx_client::{CreateOpts, Decision, Error as SbxError, Rule, RuleSpec, Sbx, Status};
 
 use super::{Backend, Error, ExecOutput, Paths, Result, Torn};
@@ -109,47 +104,25 @@ impl Sandboxed {
         Ok(self.client.add_rule(sandbox, rule)?)
     }
 
-    /// Apply an incremental change, written in the terms the callers still
-    /// use, as rules on the sandbox.
-    ///
-    /// An added endpoint is an allow, narrowed to the read methods when its
-    /// access is `read-only`. A path is an allow for that method and path. A
-    /// removed endpoint takes the allows naming it away, and is not a deny: the
-    /// same removal is what `--tighten` does, and a deny would outrank the
-    /// allow a later `--widen` adds. Binaries have nothing to apply to.
-    fn apply(&self, sandbox: &str, update: &PolicyUpdate) -> Result<()> {
-        for spec in &update.add_endpoints {
-            self.add(sandbox, &endpoint_rule(spec))?;
-        }
-        for spec in &update.add_allow {
-            let rule = route_rule(spec)
-                .ok_or_else(|| Error::Local(format!("`{spec}` is not host:port:METHOD:path")))?;
-            self.add(sandbox, &rule)?;
-        }
-        if !update.remove_endpoints.is_empty() {
-            let rules = self.client.rules(sandbox)?;
-            for endpoint in &update.remove_endpoints {
-                self.withdraw(sandbox, &rules, endpoint)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Take an endpoint out of every allow on this sandbox that names it, and
-    /// put back what else those rules named.
-    fn withdraw(&self, sandbox: &str, rules: &[Rule], endpoint: &str) -> Result<()> {
-        let host = endpoint.split(':').next().unwrap_or(endpoint);
-        let names = |r: &str| r == endpoint || r == host;
-        for rule in rules
+    /// Take an endpoint out of every rule of one decision on this sandbox that
+    /// names it, and put back what else those rules named.
+    fn withdraw_from(&self, sandbox: &str, endpoint: &str, decision: Decision) -> Result<()> {
+        for rule in self
+            .client
+            .rules(sandbox)?
             .iter()
-            .filter(|r| r.is_scoped() && r.is_network() && r.decision == Decision::Allow)
-            .filter(|r| r.resources.iter().any(|x| names(x)))
+            .filter(|r| r.is_scoped() && r.is_network() && r.decision == decision)
+            .filter(|r| {
+                r.resources
+                    .iter()
+                    .any(|x| policy::host_matches(x, endpoint))
+            })
         {
             self.client.remove_rule(sandbox, &rule.id)?;
             let rest: Vec<String> = rule
                 .resources
                 .iter()
-                .filter(|x| !names(x))
+                .filter(|x| !policy::host_matches(x, endpoint))
                 .cloned()
                 .collect();
             if !rest.is_empty() {
@@ -190,165 +163,45 @@ impl Sandboxed {
                 return Ok(());
             }
         };
-        for update in &lists.updates() {
-            let Err(e) = self.apply(sandbox, update) else {
+        for rule in &lists.rules() {
+            // A deny is refused beside an allow naming exactly the same thing,
+            // which is what blocking an endpoint the template opens is, so the
+            // template's allows of it go first.
+            let landed = match rule.decision {
+                Decision::Deny => rule
+                    .resources
+                    .iter()
+                    .try_for_each(|e| self.withdraw_from(sandbox, e, Decision::Allow))
+                    .and_then(|()| self.add(sandbox, rule)),
+                Decision::Allow => self.add(sandbox, rule),
+            };
+            let Err(e) = landed else {
                 continue;
             };
-            if !update.remove_endpoints.is_empty() {
+            let what = rule.resources.join(", ");
+            if rule.decision == Decision::Deny {
                 return Err(Error::Local(format!(
-                    "the global block list could not be applied, so {} would have been reachable: {e}",
-                    update.remove_endpoints.join(", ")
+                    "the global block list could not be applied, so {what} would have been \
+                     reachable: {e}"
                 )));
             }
             warnings.push(format!(
-                "the global allow list could not be applied, so {} is not reachable: {e}",
-                update.add_endpoints.join(", ")
+                "the global allow list could not be applied, so {what} is not reachable: {e}"
             ));
-        }
-        for entry in &lists.routes {
-            for route in &entry.routes {
-                let rule = RuleSpec {
-                    decision: Decision::Allow,
-                    resources: vec![entry.endpoint.clone()],
-                    methods: vec![route.method.clone()],
-                    path: Some(route.path.clone()),
-                };
-                if let Err(e) = self.add(sandbox, &rule) {
-                    warnings.push(format!(
-                        "the allowed path {} {} on {} could not be applied, so it is not \
-                         reachable: {e}",
-                        route.method, route.path, entry.endpoint
-                    ));
-                }
-            }
         }
         Ok(())
     }
 }
 
-/// `host:port[:access[:protocol...]]` as one allow.
-fn endpoint_rule(spec: &str) -> RuleSpec {
-    let mut parts = spec.split(':');
-    let host = parts.next().unwrap_or_default();
-    let port = parts.next().filter(|p| !p.is_empty());
-    let access = parts.next().unwrap_or_default();
-    let resource = match port {
-        Some(p) => format!("{host}:{p}"),
-        None => host.to_string(),
-    };
-    let read_only = access == "read-only";
-    RuleSpec {
-        decision: Decision::Allow,
-        resources: vec![resource],
-        methods: if read_only {
-            ["GET", "HEAD", "OPTIONS"].map(String::from).to_vec()
-        } else {
-            Vec::new()
-        },
-        path: read_only.then(|| "/**".to_string()),
-    }
-}
-
-/// `host:port:METHOD:path` as one allow. Paths never hold a colon, since
-/// [`endpoints::Route`] refuses one.
-fn route_rule(spec: &str) -> Option<RuleSpec> {
-    let mut parts = spec.splitn(4, ':');
-    let (host, port, method, path) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
-    Some(RuleSpec {
-        decision: Decision::Allow,
-        resources: vec![format!("{host}:{port}")],
-        methods: vec![method.to_string()],
-        path: Some(path.to_string()),
-    })
-}
-
-/// The rules on a sandbox, in the shape the policy pane is still drawn from:
-/// one network rule per runtime rule, keyed by its id, with its hosts as
-/// endpoints and its methods and paths as the endpoint's rules. A rule every
-/// sandbox has is keyed `global-ID` so the pane can tell it from the session's
-/// own. No binaries, because the runtime has none to name.
-fn revision_of(rules: &[Rule]) -> PolicyRevision {
-    let mut network = BTreeMap::new();
-    for r in rules
-        .iter()
-        .filter(|r| r.is_network() && (r.status.is_empty() || r.status == "active"))
-    {
-        let http = r.resource_type == "http";
-        let decided = |method: &str, path: &str| {
-            let mp = MethodPath {
-                method: method.to_string(),
-                path: path.to_string(),
-            };
-            match r.decision {
-                Decision::Allow => OsRule {
-                    allow: Some(mp),
-                    deny: None,
-                },
-                Decision::Deny => OsRule {
-                    allow: None,
-                    deny: Some(mp),
-                },
-            }
-        };
-        let mut lines = Vec::new();
-        if http {
-            for target in &r.http_targets {
-                for m in &r.methods {
-                    lines.push(decided(m, &target.path));
-                }
-            }
-        } else if r.decision == Decision::Deny {
-            lines.push(decided("*", "/**"));
-        }
-        let endpoints = r
-            .resources
-            .iter()
-            .map(|res| {
-                let (host, port) = match res.rsplit_once(':') {
-                    Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => {
-                        (h.to_string(), p.parse().unwrap_or(0))
-                    }
-                    _ => (res.clone(), 0),
-                };
-                Endpoint {
-                    host,
-                    port,
-                    protocol: http.then(|| "rest".to_string()),
-                    enforcement: Some("enforce".to_string()),
-                    access: (!http && r.decision == Decision::Allow).then(|| "full".to_string()),
-                    tls: None,
-                    rules: lines.clone(),
-                }
-            })
-            .collect();
-        let key = if r.is_scoped() {
-            r.id.clone()
-        } else {
-            format!("global-{}", r.id)
-        };
-        let verb = match r.decision {
-            Decision::Allow => "allow",
-            Decision::Deny => "deny",
-        };
-        network.insert(
-            key,
-            NetworkPolicy {
-                name: Some(format!("{verb} {}", r.resources.join(", "))),
-                endpoints,
-                binaries: Vec::new(),
-            },
-        );
-    }
-    PolicyRevision {
-        version: 1,
-        active_version: 1,
-        hash: String::new(),
-        policy_source: "sandbox".to_string(),
-        status: "loaded".to_string(),
-        policy: Some(Policy {
-            network_policies: network,
-            ..Policy::default()
-        }),
+/// A runtime rule as the policy pane reads it.
+fn rule_of(r: &Rule) -> policy::Rule {
+    policy::Rule {
+        id: r.id.clone(),
+        allow: r.decision == Decision::Allow,
+        hosts: r.resources.clone(),
+        methods: r.methods.iter().map(|m| m.to_ascii_uppercase()).collect(),
+        path: r.http_targets.first().map(|t| t.path.clone()),
+        global: !r.is_scoped(),
     }
 }
 
@@ -476,25 +329,26 @@ impl Backend for Sandboxed {
             })?;
         }
         self.impose_lists(&session.sandbox, warnings)?;
-        if let Some(update) = mcp::widen(&session.mcp)
-            && let Err(e) = self.apply(&session.sandbox, &update)
-        {
-            warnings.push(format!(
-                "the mcp endpoints could not be opened, so the agent will report {} unreachable: {e}",
-                session
-                    .mcp
-                    .iter()
-                    .map(|s| s.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
+        for rule in mcp::rules(&session.mcp) {
+            if let Err(e) = self.add(&session.sandbox, &rule) {
+                warnings.push(format!(
+                    "the mcp endpoints could not be opened, so the agent will report {} \
+                     unreachable: {e}",
+                    session
+                        .mcp
+                        .iter()
+                        .map(|s| s.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
         }
-        for update in toolchain::updates(&draft.toolchains) {
-            if let Err(e) = self.apply(&session.sandbox, &update) {
+        for rule in toolchain::rules(&draft.toolchains) {
+            if let Err(e) = self.add(&session.sandbox, &rule) {
                 warnings.push(format!(
                     "the toolchain registries could not be opened, so {} is not \
                      reachable and a restore will be denied: {e}",
-                    update.add_endpoints.join(", ")
+                    rule.resources.join(", ")
                 ));
             }
         }
@@ -547,12 +401,34 @@ impl Backend for Sandboxed {
         seed::parse_meta(&exec_output(out)).map_err(|e| Error::Local(e.to_string()))
     }
 
-    fn policy(&self, session: &Session) -> Result<PolicyRevision> {
-        Ok(revision_of(&self.client.rules(&session.sandbox)?))
+    fn rules(&self, session: &Session) -> Result<Vec<policy::Rule>> {
+        Ok(self
+            .client
+            .rules(&session.sandbox)?
+            .iter()
+            .filter(|r| r.is_network() && (r.status.is_empty() || r.status == "active"))
+            .map(rule_of)
+            .collect())
     }
 
-    fn policy_update(&self, session: &Session, update: &PolicyUpdate) -> Result<()> {
-        self.apply(&session.sandbox, update)
+    fn add_rules(&self, session: &Session, rules: &[RuleSpec]) -> Result<()> {
+        for rule in rules {
+            self.add(&session.sandbox, rule)?;
+        }
+        Ok(())
+    }
+
+    fn remove_rule(&self, session: &Session, id: &str) -> Result<()> {
+        Ok(self.client.remove_rule(&session.sandbox, id)?)
+    }
+
+    fn withdraw(&self, session: &Session, endpoint: &str, allow: bool) -> Result<()> {
+        let decision = if allow {
+            Decision::Allow
+        } else {
+            Decision::Deny
+        };
+        self.withdraw_from(&session.sandbox, endpoint, decision)
     }
 
     fn events(&self, session: &Session) -> Result<Vec<Event>> {
@@ -762,57 +638,17 @@ mod tests {
         }
     }
 
+    /// A withdrawal takes the endpoint out of the rules naming it and keeps
+    /// the rest of what they named, and adds no deny: a later widen has to be
+    /// able to open the endpoint again.
     #[test]
-    fn an_update_in_the_old_terms_becomes_rules() {
-        let (b, fake) = backend(Settings::default());
-        b.apply(
-            "hura-a",
-            &PolicyUpdate {
-                add_endpoints: vec![
-                    "registry.npmjs.org:443:read-only:rest:enforce".into(),
-                    "crates.io:443".into(),
-                ],
-                add_allow: vec!["pkgs.example.com:443:GET:/contoso/_packaging/**".into()],
-                binaries: vec!["/usr/bin/node".into()],
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            fake.added(),
-            [
-                (
-                    vec!["registry.npmjs.org:443".to_string()],
-                    vec!["GET".to_string(), "HEAD".into(), "OPTIONS".into()],
-                    Some("/**".to_string())
-                ),
-                (vec!["crates.io:443".to_string()], vec![], None),
-                (
-                    vec!["pkgs.example.com:443".to_string()],
-                    vec!["GET".to_string()],
-                    Some("/contoso/_packaging/**".to_string())
-                ),
-            ]
-        );
-    }
-
-    /// A removal takes the endpoint out of the rules naming it and keeps the
-    /// rest of what they named, and adds no deny: a later widen has to be able
-    /// to open the endpoint again.
-    #[test]
-    fn a_removed_endpoint_leaves_the_rest_of_its_rule() {
+    fn a_withdrawn_endpoint_leaves_the_rest_of_its_rule() {
         let (b, fake) = backend(Settings::default());
         for rule in policy::resolve("feature-work").unwrap().rules {
             b.add("hura-a", &rule).unwrap();
         }
-        b.apply(
-            "hura-a",
-            &PolicyUpdate {
-                remove_endpoints: vec!["platform.claude.com:443".into()],
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        b.withdraw_from("hura-a", "platform.claude.com:443", Decision::Allow)
+            .unwrap();
         let now = fake.added();
         assert!(now.iter().any(|(r, _, _)| r == &["api.anthropic.com:443"]));
         assert!(
@@ -828,37 +664,25 @@ mod tests {
     }
 
     #[test]
-    fn the_pane_is_drawn_from_the_rules_on_the_sandbox() {
+    fn the_pane_reads_the_rules_on_the_sandbox() {
         let (b, fake) = backend(Settings::default());
         for rule in policy::resolve("feature-work").unwrap().rules {
             b.add("hura-a", &rule).unwrap();
         }
-        let rev = revision_of(&fake.rules.borrow());
-        assert!(rev.is_settled());
-        let policy = rev.policy.unwrap();
-        let endpoints: Vec<&Endpoint> = policy
-            .network_policies
-            .values()
-            .flat_map(|n| &n.endpoints)
-            .collect();
-        let push = endpoints
+        let rules: Vec<policy::Rule> = fake.rules.borrow().iter().map(rule_of).collect();
+        let push = rules
             .iter()
-            .find(|e| {
-                e.host == "github.com"
-                    && e.rules.iter().any(|r| {
-                        r.allow
-                            .as_ref()
-                            .is_some_and(|mp| mp.path.ends_with("git-receive-pack"))
-                    })
+            .find(|r| {
+                r.path.as_deref() == Some("/**/git-receive-pack") && r.names("github.com:443")
             })
             .expect("the push rule");
-        assert_eq!(push.port, 443);
-        assert_eq!(push.protocol.as_deref(), Some("rest"));
-        let api = endpoints
+        assert_eq!(push.methods, ["POST"]);
+        assert!(push.allow && !push.global);
+        let api = rules
             .iter()
-            .find(|e| e.host == "api.anthropic.com")
+            .find(|r| r.names("api.anthropic.com:443"))
             .unwrap();
-        assert_eq!(api.access.as_deref(), Some("full"));
+        assert!(api.whole());
     }
 
     #[test]
