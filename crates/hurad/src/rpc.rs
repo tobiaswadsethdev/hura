@@ -408,16 +408,8 @@ fn inspect(backends: &Backends, path: &str, branch: Option<&str>) -> Outcome {
         Vec::new()
     } else {
         let origin = checkout.origin.clone();
-        let choices: Vec<ops::ProviderChoice> = backends
-            .gateway()
-            .providers()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|p| ops::ProviderChoice {
-                name: p.name,
-                kind: p.kind,
-            })
-            .collect();
+        let choices: Vec<ops::ProviderChoice> =
+            backends.sandboxed().providers().unwrap_or_default();
         let sessions: Result<Vec<Session>, _> =
             Store::load().map(|s| s.list().into_iter().cloned().collect());
         let used = match (&origin, &sessions) {

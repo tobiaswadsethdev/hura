@@ -403,7 +403,7 @@ fn main() -> ExitCode {
     }
     // Every command that works on a session goes through this rather than the
     // client.
-    let backends = Backends::from_client(Box::new(client.clone()));
+    let backends = Backends::from_client(Box::new(client));
 
     // Read out before the match, which moves `cli.command`.
     let chosen = cli.server.clone();
@@ -426,7 +426,7 @@ fn main() -> ExitCode {
         Some(Command::Secret { name, forget }) => secret(&name, forget),
         Some(Command::Skills) => list_skills(),
         Some(Command::Doctor) => {
-            let mut checks = doctor::run(&client, &loaded);
+            let mut checks = doctor::run(backends.sandboxed(), &loaded);
             // Appended here rather than inside `doctor::run`, because both need
             // things the core does not have: the protocol's port, and a client
             // for it.

@@ -7,7 +7,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::time::Duration;
 
-use openshell_client::OpenShell;
+use crate::backend::Backend;
 
 use crate::config::{self, Config};
 use crate::mcp;
@@ -84,29 +84,6 @@ fn check_openshell() -> Check {
             "not on PATH",
             "install from the release tarballs into ~/.local/bin; OpenShell's own \
              install.sh supports dpkg/rpm only",
-        ),
-    }
-}
-
-fn check_gateway(client: &dyn OpenShell) -> Check {
-    match client.status() {
-        Ok(st) if st.is_connected() => Check::ok(
-            "gateway",
-            format!(
-                "{} {} ({})",
-                st.server, st.version, st.authentication.status
-            ),
-        ),
-        Ok(st) => Check::fail(
-            "gateway",
-            format!("reachable but status is `{}`", st.status),
-            "systemctl --user status openshell-gateway",
-        ),
-        Err(e) => Check::fail(
-            "gateway",
-            e.to_string(),
-            "systemctl --user enable --now openshell-gateway && \
-             openshell gateway add https://127.0.0.1:17670 --local --name openshell",
         ),
     }
 }
@@ -598,12 +575,12 @@ fn own_addresses() -> Vec<String> {
     out
 }
 
-pub fn run(client: &dyn OpenShell, config: &Result<Config, config::Error>) -> Vec<Check> {
+pub fn run(backend: &dyn Backend, config: &Result<Config, config::Error>) -> Vec<Check> {
     let mut checks = vec![
         check_version(),
         check_config(config),
         check_openshell(),
-        check_gateway(client),
+        backend.health(),
         check_docker(),
         check_tmux(),
         check_linger(),
@@ -615,7 +592,7 @@ pub fn run(client: &dyn OpenShell, config: &Result<Config, config::Error>) -> Ve
     if let Ok(cfg) = config
         && !cfg.providers().is_empty()
     {
-        checks.push(check_config_providers(client, cfg.providers()));
+        checks.push(check_config_providers(backend, cfg.providers()));
     }
     // Same reasoning: the check is about the file being right, so it only runs
     // when the file says something.
@@ -651,8 +628,8 @@ fn check_config(config: &Result<Config, config::Error>) -> Check {
 /// fails for what looks like an authentication problem several steps later.
 /// Here is the only place that can be said before it happens, because it is the
 /// one command that both reads the file and asks the gateway.
-fn check_config_providers(client: &dyn OpenShell, named: &[String]) -> Check {
-    let existing = match client.providers() {
+fn check_config_providers(backend: &dyn Backend, named: &[String]) -> Check {
+    let existing = match backend.providers() {
         Ok(list) => list,
         // The gateway check above already says so; repeating it here would be
         // two failures for one cause.

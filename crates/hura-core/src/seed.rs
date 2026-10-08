@@ -17,8 +17,6 @@
 
 use std::process::Command;
 
-use openshell_client::OpenShell;
-
 use crate::backend::{Backend, Paths};
 use crate::forge;
 use crate::session::{META_PATH, Session};
@@ -163,8 +161,6 @@ fn meta_write_command(meta_json: &str, paths: &Paths) -> String {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SeedError {
-    #[error(transparent)]
-    Client(#[from] openshell_client::Error),
     /// Whatever the session's backend said, such as an unreachable gateway.
     #[error(transparent)]
     Backend(#[from] crate::backend::Error),
@@ -449,10 +445,12 @@ printf '%s' {task} > {task_path}
     )
 }
 
-/// Read a session back out of a sandbox, for adopting work the local cache
-/// does not know about.
-pub fn read_meta(client: &dyn OpenShell, sandbox: &str) -> Result<Session, SeedError> {
-    let out = client.exec(sandbox, &["cat", META_PATH])?;
+/// The command that prints a session's own record from inside its sandbox.
+pub const READ_META: [&str; 2] = ["cat", META_PATH];
+
+/// A session read back out of its sandbox, for adopting work the local cache
+/// does not know about: what [`READ_META`] printed, judged.
+pub fn parse_meta(out: &crate::backend::ExecOutput) -> Result<Session, SeedError> {
     if !out.ok() {
         // Matched on the message rather than on the exit code, because `cat`
         // exits 1 for every reason it has.

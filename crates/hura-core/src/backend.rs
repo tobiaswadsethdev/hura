@@ -12,10 +12,11 @@
 //! isolation at all. It was removed: two backends meant two of everything to
 //! keep working, and the isolation is the product.
 
-use openshell_client::{
-    Error as OsError, ExecOutput, OpenShell, PolicyRevision, PolicyUpdate, Provider,
-};
+use openshell_client::{OpenShell, PolicyRevision, PolicyUpdate};
 
+use crate::doctor::Check;
+use crate::events::Event;
+use crate::ops::ProviderChoice;
 use crate::session::{self, Session};
 
 mod sandboxed;
@@ -26,9 +27,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// The gateway said no, or could not be reached.
-    #[error(transparent)]
-    Gateway(#[from] OsError),
+    /// No sandbox by that name where sessions run.
+    #[error("{0}")]
+    Missing(String),
+    /// Where sessions run said no, or could not be reached.
+    #[error("{0}")]
+    Refused(String),
     /// Something on the server itself: a command that would not spawn, a
     /// directory that is not there.
     #[error("{0}")]
@@ -39,11 +43,35 @@ impl Error {
     /// Whether this is "there is nothing there", which several callers treat as
     /// the state they were trying to reach rather than as a failure.
     pub fn is_missing(&self) -> bool {
-        matches!(self, Error::Gateway(OsError::NotFound(_)))
+        matches!(self, Error::Missing(_))
     }
 
     fn local(e: impl std::fmt::Display) -> Self {
         Error::Local(e.to_string())
+    }
+}
+
+/// What a command run inside a session left behind.
+///
+/// The backend's own type rather than whichever client produced it, so the
+/// scripts above the trait (the diff, the poll, the seeder) never name what
+/// runs them.
+#[derive(Debug, Clone, Default)]
+pub struct ExecOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+}
+
+impl ExecOutput {
+    pub fn ok(&self) -> bool {
+        self.exit_code == 0
+    }
+
+    /// Stdout without its trailing newlines, which is what callers almost
+    /// always want.
+    pub fn trimmed(&self) -> &str {
+        self.stdout.trim_end_matches('\n')
     }
 }
 
@@ -185,11 +213,17 @@ pub trait Backend {
 
     fn policy_update(&self, session: &Session, update: &PolicyUpdate) -> Result<()>;
 
-    /// The decision log.
-    fn logs(&self, session: &Session, lines: usize) -> Result<String>;
+    /// The session's recent allow and deny decisions, as read from wherever
+    /// this backend keeps them. Not merged with what was kept: that is
+    /// [`crate::ops::events`].
+    fn events(&self, session: &Session) -> Result<Vec<Event>>;
 
-    /// Credential providers a new session may be given.
-    fn providers(&self) -> Result<Vec<Provider>>;
+    /// Credentials a new session may be given.
+    fn providers(&self) -> Result<Vec<ProviderChoice>>;
+
+    /// Whether the place sessions run is there and answering, as `hurad doctor`
+    /// reports it.
+    fn health(&self) -> Check;
 }
 
 /// The backend every session runs on, as configured.
@@ -214,15 +248,9 @@ impl Backends {
     }
 
     /// The backend itself, for the operations that are not about one session:
-    /// listing what exists and creating something new.
+    /// listing what exists, creating something new, and `hurad doctor`.
     pub fn sandboxed(&self) -> &dyn Backend {
         &self.sandboxed
-    }
-
-    /// The gateway client, for the few callers that are about the gateway
-    /// itself rather than about a session: `hura doctor`, the image build.
-    pub fn gateway(&self) -> &dyn OpenShell {
-        self.sandboxed.client()
     }
 }
 

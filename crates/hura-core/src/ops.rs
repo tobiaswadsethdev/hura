@@ -287,15 +287,7 @@ pub fn toolchain_choices() -> Vec<ToolchainChoice> {
 pub fn new_options(backends: &Backends, cfg: &crate::config::Config) -> NewOptions {
     let configured = cfg.policy();
     let (providers, providers_error) = match backends.sandboxed().providers() {
-        Ok(list) => (
-            list.into_iter()
-                .map(|p| ProviderChoice {
-                    name: p.name,
-                    kind: p.kind,
-                })
-                .collect(),
-            None,
-        ),
+        Ok(list) => (list, None),
         Err(e) => (Vec::new(), Some(e.to_string())),
     };
 
@@ -1101,28 +1093,19 @@ pub fn policy(backend: &dyn Backend, session: &Session) -> Result<PolicyRevision
         .map_err(|e| format!("could not read the policy: {e}"))
 }
 
-/// How many log lines to ask for. The gateway returns the newest, so this is a
-/// window on the end of the log rather than a limit on what is kept.
-///
-/// Raised when the poll interval came down: every exec hura makes writes three
-/// events of its own, `events::parse` drops them, and the window has to be big
-/// enough that what is left still covers a useful stretch of time. The read
-/// itself is 14ms for 400 lines, so this is close to free.
-const LOG_LINES: usize = 1500;
-
 /// A session's recent policy decisions, newest first.
 ///
 /// Newest first because the pane is a feed: the event you want is the one that
 /// just happened, and it should be at the top without scrolling.
 pub fn events(backend: &dyn Backend, session: &Session) -> Result<Vec<events::Event>, String> {
-    let raw = backend
-        .logs(session, LOG_LINES)
+    let fresh = backend
+        .events(session)
         .map_err(|e| format!("could not read the log: {e}"))?;
     // Merged into what this session has already shown rather than replacing it:
     // the gateway's window is a couple of minutes wide at these poll intervals,
     // and the feed is meant to be a record. Newest first comes back from the
     // merge, so the pane still reads as a feed.
-    Ok(events::merge_kept(&session.name, events::parse(&raw)))
+    Ok(events::merge_kept(&session.name, fresh))
 }
 
 /// Read every live session's log into its kept feed.

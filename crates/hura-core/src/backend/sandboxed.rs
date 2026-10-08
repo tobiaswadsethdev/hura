@@ -8,14 +8,15 @@
 use std::time::{Duration, Instant};
 
 use openshell_client::{
-    CreateOpts, Error as OsError, ExecOutput, OpenShell, Phase, PolicyRevision, PolicyUpdate,
-    Provider, Sandbox,
+    CreateOpts, Error as OsError, OpenShell, Phase, PolicyRevision, PolicyUpdate, Sandbox,
 };
 
-use super::{Backend, Error, Paths, Result, Torn};
+use super::{Backend, Error, ExecOutput, Paths, Result, Torn};
+use crate::doctor::Check;
 use crate::endpoints;
+use crate::events::{self, Event};
 use crate::mcp;
-use crate::ops::Draft;
+use crate::ops::{Draft, ProviderChoice};
 use crate::policy;
 use crate::removed;
 use crate::seed;
@@ -27,15 +28,26 @@ pub struct Sandboxed {
     client: Box<dyn OpenShell>,
 }
 
+impl From<OsError> for Error {
+    fn from(e: OsError) -> Self {
+        match e {
+            OsError::NotFound(_) => Error::Missing(e.to_string()),
+            other => Error::Refused(other.to_string()),
+        }
+    }
+}
+
+fn exec_output(out: openshell_client::ExecOutput) -> ExecOutput {
+    ExecOutput {
+        stdout: out.stdout,
+        stderr: out.stderr,
+        exit_code: out.exit_code,
+    }
+}
+
 impl Sandboxed {
     pub fn new(client: Box<dyn OpenShell>) -> Self {
         Sandboxed { client }
-    }
-
-    /// The gateway itself, for the callers that are about the gateway rather
-    /// than about a session: `hura doctor`, the image build, the provider list.
-    pub fn client(&self) -> &dyn OpenShell {
-        self.client.as_ref()
     }
 
     /// Apply the global allow and block lists to a sandbox that has just been
@@ -269,7 +281,7 @@ impl Backend for Sandboxed {
     }
 
     fn exec(&self, session: &Session, argv: &[&str]) -> Result<ExecOutput> {
-        Ok(self.client.exec(&session.sandbox, argv)?)
+        Ok(exec_output(self.client.exec(&session.sandbox, argv)?))
     }
 
     fn interactive_argv(&self, session: &Session, argv: &[&str]) -> Result<Vec<String>> {
@@ -379,8 +391,10 @@ impl Backend for Sandboxed {
     }
 
     fn read_meta(&self, name: &str) -> Result<Session> {
-        seed::read_meta(self.client.as_ref(), &session::sandbox_name(name))
-            .map_err(|e| Error::Local(e.to_string()))
+        let out = self
+            .client
+            .exec(&session::sandbox_name(name), &seed::READ_META)?;
+        seed::parse_meta(&exec_output(out)).map_err(|e| Error::Local(e.to_string()))
     }
 
     fn policy(&self, session: &Session) -> Result<PolicyRevision> {
@@ -391,21 +405,62 @@ impl Backend for Sandboxed {
         Ok(self.client.policy_update(&session.sandbox, update)?)
     }
 
-    fn logs(&self, session: &Session, lines: usize) -> Result<String> {
-        Ok(self.client.logs(&session.sandbox, lines)?)
+    fn events(&self, session: &Session) -> Result<Vec<Event>> {
+        let raw = self.client.logs(&session.sandbox, LOG_LINES)?;
+        Ok(events::parse(&raw))
     }
 
-    fn providers(&self) -> Result<Vec<Provider>> {
-        Ok(self.client.providers()?)
+    fn providers(&self) -> Result<Vec<ProviderChoice>> {
+        Ok(self
+            .client
+            .providers()?
+            .into_iter()
+            .map(|p| ProviderChoice {
+                name: p.name,
+                kind: p.kind,
+            })
+            .collect())
+    }
+
+    fn health(&self) -> Check {
+        match self.client.status() {
+            Ok(st) if st.is_connected() => Check::ok(
+                "gateway",
+                format!(
+                    "{} {} ({})",
+                    st.server, st.version, st.authentication.status
+                ),
+            ),
+            Ok(st) => Check::fail(
+                "gateway",
+                format!("reachable but status is `{}`", st.status),
+                "systemctl --user status openshell-gateway",
+            ),
+            Err(e) => Check::fail(
+                "gateway",
+                e.to_string(),
+                "systemctl --user enable --now openshell-gateway && \
+                 openshell gateway add https://127.0.0.1:17670 --local --name openshell",
+            ),
+        }
     }
 }
+
+/// How many log lines to ask for. The gateway returns the newest, so this is a
+/// window on the end of the log rather than a limit on what is kept.
+///
+/// Raised when the poll interval came down: every exec hura makes writes three
+/// events of its own, `events::parse` drops them, and the window has to be big
+/// enough that what is left still covers a useful stretch of time. The read
+/// itself is 14ms for 400 lines, so this is close to free.
+const LOG_LINES: usize = 1500;
 
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
 
-    use openshell_client::{GatewayStatus, Result as OsResult};
+    use openshell_client::{ExecOutput, GatewayStatus, Provider, Result as OsResult};
 
     use super::*;
 
