@@ -41,7 +41,7 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 
 /// Where the agent looks for skills inside the sandbox. `HOME` is `/sandbox`.
-pub const SANDBOX_SKILLS_DIR: &str = "/sandbox/.claude/skills";
+pub const SANDBOX_SKILLS_DIR: &str = "/home/agent/.claude/skills";
 
 /// The file that makes a directory a skill.
 const MANIFEST: &str = "SKILL.md";
@@ -838,9 +838,9 @@ mod tests {
         };
         let (script, warnings) = pack(std::slice::from_ref(&skill));
         assert!(warnings.is_empty(), "{warnings:?}");
-        assert!(script.starts_with("mkdir -p '/sandbox/.claude/skills'"));
-        assert!(script.contains("rm -rf '/sandbox/.claude/skills/ship'"));
-        assert!(script.contains("| base64 -d | tar -xzf - -C '/sandbox/.claude/skills'"));
+        assert!(script.starts_with("mkdir -p '/home/agent/.claude/skills'"));
+        assert!(script.contains("rm -rf '/home/agent/.claude/skills/ship'"));
+        assert!(script.contains("| base64 -d | tar -xzf - -C '/home/agent/.claude/skills'"));
 
         // Unpack what the script carries and check every file survived. The
         // payload is the fourth field of `printf '%s' '<b64>' | ...`: base64

@@ -9,18 +9,27 @@
 //! in the Dockerfile -- silently requires BuildKit: the legacy builder ignores
 //! the `# syntax=` directive and fails with "no source files were specified".
 //!
-//! **Two kinds of image.** The base, `hura-base:latest`, is what a session with no
-//! toolchain runs. A *variant* -- `hura-base:dotnet`, `hura-base:dotnet-rust` -- is
+//! **Two kinds of image.** The base, `hura-sandbox:latest`, is what a session with no
+//! toolchain runs. A *variant* -- `hura-sandbox:dotnet`, `hura-sandbox:dotnet-rust` -- is
 //! the base plus one layer per toolchain, so docker shares the base's several
 //! gigabytes and only the toolchains asked for are ever built. The base is a
 //! prerequisite of every variant, which is why the variant build ensures it
 //! first: a variant whose `FROM` is missing fails with docker's words about a
 //! manifest, several lines away from the thing to do about it. See
 //! [`crate::toolchain`] for what a toolchain is beyond its install.
+//!
+//! **Two stores.** Docker builds the images and keeps them, because the sandbox
+//! runtime cannot build. A session's sandbox is made from the runtime's own
+//! store, so every image is loaded into it after it is built, and an image
+//! counts as ready only when the runtime holds the same one Docker does. A
+//! rebuild that was never loaded would otherwise leave every new session on
+//! the previous build, with nothing to say so.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+use sbx_client::Sbx as _;
 
 use crate::session::{IMAGE, IMAGE_REPO};
 use crate::toolchain::{self, Toolchain};
@@ -56,13 +65,85 @@ pub fn exists() -> bool {
 /// Whether a particular tag is built. The base image or one of the toolchain
 /// variants; see [`crate::toolchain::tag`].
 pub fn exists_tag(tag: &str) -> bool {
-    Command::new("docker")
-        .args(["image", "inspect", tag])
-        .stdout(Stdio::null())
+    docker_id(tag).is_some()
+}
+
+/// The id Docker gives a built image, as `sha256:` and the hex.
+fn docker_id(tag: &str) -> Option<String> {
+    let out = Command::new("docker")
+        .args(["image", "inspect", tag, "--format", "{{.Id}}"])
         .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!id.is_empty()).then_some(id)
+}
+
+/// Whether the sandbox runtime holds this tag as the image Docker built.
+///
+/// By id, not by tag: a tag the runtime has from an earlier build is exactly
+/// the stale image this exists to catch.
+pub fn loaded(tag: &str) -> bool {
+    let Some(id) = docker_id(tag) else {
+        return false;
+    };
+    let Ok(templates) = sbx_client::CliClient::new().templates() else {
+        return false;
+    };
+    templates.iter().any(|t| same_image(t, tag, &id))
+}
+
+/// Whether a runtime template is this tag at this Docker id.
+///
+/// The runtime names a local image `docker.io/library/NAME` and shortens its id
+/// to twelve characters, the start of Docker's hex.
+fn same_image(t: &sbx_client::Template, tag: &str, docker_id: &str) -> bool {
+    let (repo, label) = tag.split_once(':').unwrap_or((tag, "latest"));
+    let hex = docker_id.strip_prefix("sha256:").unwrap_or(docker_id);
+    let named = t.repository == repo || t.repository.ends_with(&format!("/{repo}"));
+    named && t.tag == label && !t.id.is_empty() && hex.starts_with(&t.id)
+}
+
+/// Copy a built image into the sandbox runtime's store.
+///
+/// Through a file because that is the only way in: `docker save` writes an
+/// archive and `sbx template load` reads one. About half a minute for the base
+/// image, most of it the save.
+pub fn load(tag: &str) -> Result<(), String> {
+    let archive = std::env::temp_dir().join(format!(
+        "hura-image-{}-{}.tar",
+        std::process::id(),
+        tag.replace([':', '/'], "-")
+    ));
+    println!("loading {tag} into the sandbox runtime ...");
+    let saved = Command::new("docker")
+        .args(["save", "-o"])
+        .arg(&archive)
+        .arg(tag)
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .map_err(|e| format!("could not run docker: {e}"));
+    let result = match saved {
+        Ok(status) if status.success() => sbx_client::CliClient::new()
+            .load_template(&archive)
+            .map_err(|e| format!("could not load {tag} into the sandbox runtime: {e}")),
+        Ok(status) => Err(format!("docker save exited with {status}")),
+        Err(e) => Err(e),
+    };
+    let _ = fs::remove_file(&archive);
+    result
+}
+
+/// Load the tag when the runtime does not hold this build of it. Returns
+/// whether it had to.
+pub fn ensure_loaded(tag: &str) -> Result<bool, String> {
+    if loaded(tag) {
+        return Ok(false);
+    }
+    load(tag)?;
+    Ok(true)
 }
 
 /// Write the embedded context to a fresh directory and return its path.
@@ -109,7 +190,8 @@ pub fn build() -> Result<(), String> {
     // Clean up whether or not the build worked; a failed build's context is not
     // worth keeping, since it is regenerated from constants every time.
     let _ = fs::remove_dir_all(&dir);
-    result
+    result?;
+    load(IMAGE)
 }
 
 /// The `docker build` argv. Split out so the build-arg wiring is testable
@@ -159,7 +241,8 @@ pub fn build_variant(chains: &[&'static Toolchain]) -> Result<(), String> {
     println!("building {tag} ({})", toolchain::labels(chains).join(", "));
     let result = run_variant_build(&dir, &tag);
     let _ = fs::remove_dir_all(&dir);
-    result
+    result?;
+    load(&tag)
 }
 
 /// The variant's context: one generated Dockerfile and nothing else.
@@ -259,7 +342,7 @@ pub fn variants() -> Vec<String> {
 
 /// Variants built before the base image they sit on.
 ///
-/// A variant is `FROM hura-base:latest`, so rebuilding the base -- which is what
+/// A variant is `FROM hura-sandbox:latest`, so rebuilding the base -- which is what
 /// picks up a newer Claude Code -- leaves every variant on the old one. Nothing
 /// about that looks wrong: sessions start, the toolchain works, and the agent is
 /// the version it was months ago. This is the check that says so.
@@ -426,10 +509,11 @@ pub fn ensure_chat(chains: &[&'static Toolchain]) -> Result<bool, String> {
     Ok(built)
 }
 
-/// Build the image if it is missing. Returns whether a build happened.
+/// Build the image if it is missing, and load it if the runtime does not have
+/// this build of it. Returns whether either happened.
 pub fn ensure() -> Result<bool, String> {
     if exists() {
-        return Ok(false);
+        return ensure_loaded(IMAGE);
     }
     println!("building {IMAGE} (first run, this takes a minute) ...");
     build()?;
@@ -447,7 +531,7 @@ pub fn ensure_for(chains: &[&'static Toolchain]) -> Result<bool, String> {
     }
     let tag = toolchain::tag(chains);
     if exists_tag(&tag) {
-        return Ok(false);
+        return ensure_loaded(&tag);
     }
     println!("building {tag} (first use of these toolchains, this takes a while) ...");
     build_variant(chains)?;
@@ -464,10 +548,10 @@ mod tests {
     #[test]
     fn embedded_dockerfile_installs_tmux() {
         assert!(DOCKERFILE.contains("tmux"));
-        assert!(DOCKERFILE.contains("openshell-community/sandboxes/base"));
+        assert!(DOCKERFILE.contains("FROM docker/sandbox-templates:shell-docker"));
         assert!(
-            DOCKERFILE.contains("USER sandbox"),
-            "must drop back to the sandbox user"
+            DOCKERFILE.trim_end().ends_with("USER agent"),
+            "must drop back to the agent user"
         );
     }
 
@@ -645,7 +729,7 @@ mod tests {
 
     /// A variant is built from a generated Dockerfile and no other context, and
     /// it must be tagged with the toolchains rather than over the base image --
-    /// a variant built as `hura-base:latest` would replace the thing it is
+    /// a variant built as `hura-sandbox:latest` would replace the thing it is
     /// layered on.
     #[test]
     fn a_variant_builds_from_its_own_context_under_its_own_tag() {
@@ -660,8 +744,8 @@ mod tests {
         );
         fs::remove_dir_all(&dir).expect("cleanup");
 
-        let argv = variant_build_argv(Path::new("/tmp/ctx"), "hura-base:rust");
-        assert_eq!(argv, ["build", "-t", "hura-base:rust", "/tmp/ctx"]);
+        let argv = variant_build_argv(Path::new("/tmp/ctx"), "hura-sandbox:rust");
+        assert_eq!(argv, ["build", "-t", "hura-sandbox:rust", "/tmp/ctx"]);
         assert_ne!(
             argv[2], IMAGE,
             "a variant must not overwrite the base image"
@@ -674,7 +758,7 @@ mod tests {
     fn the_variant_filter_is_the_image_repository() {
         // The filter docker is given, spelled out here so a rename of either
         // constant is caught by a test rather than by an empty list.
-        assert_eq!(IMAGE_REPO, "hura-base");
+        assert_eq!(IMAGE_REPO, "hura-sandbox");
         assert!(IMAGE.starts_with(IMAGE_REPO));
     }
 
@@ -730,7 +814,7 @@ mod tests {
     fn the_image_turns_copy_on_select_off() {
         assert!(
             DOCKERFILE.contains("copyOnSelect: false"),
-            "the generated /sandbox/.claude.json must turn it off"
+            "the generated /home/agent/.claude.json must turn it off"
         );
         assert!(
             !CLAUDE_SETTINGS.contains("copyOnSelect"),
@@ -801,5 +885,25 @@ mod tests {
         ] {
             assert!(text.contains(state), "no hook writes `{state}`");
         }
+    }
+
+    /// The runtime names a local image by Docker Hub's long form and shortens
+    /// its id, and a tag it holds from an earlier build is not the image.
+    #[test]
+    fn a_template_is_the_built_image_only_by_id() {
+        let t = sbx_client::Template {
+            id: "411d4058670c".into(),
+            repository: "docker.io/library/hura-sandbox".into(),
+            tag: "latest".into(),
+            flavor: None,
+        };
+        let built = "sha256:411d4058670c9f6a3b5d0e2c1a7b8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a";
+        assert!(same_image(&t, "hura-sandbox:latest", built));
+        assert!(!same_image(&t, "hura-sandbox:rust", built));
+        assert!(!same_image(
+            &t,
+            "hura-sandbox:latest",
+            "sha256:0000000000009f6a3b5d0e2c1a7b8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a"
+        ));
     }
 }

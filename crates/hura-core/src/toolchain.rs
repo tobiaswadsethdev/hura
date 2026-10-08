@@ -15,8 +15,8 @@
 //! **A toolchain is three things, not one.** The install is the obvious part. The
 //! other two are why this is a module rather than a longer Dockerfile:
 //!
-//! * an **image variant**, tagged by the toolchains in it -- `hura-base:dotnet`,
-//!   `hura-base:dotnet-rust` -- layered onto the base image, so docker shares the
+//! * an **image variant**, tagged by the toolchains in it -- `hura-sandbox:dotnet`,
+//!   `hura-sandbox:dotnet-rust` -- layered onto the base image, so docker shares the
 //!   base's several gigabytes and a Rust session does not carry the .NET SDK;
 //! * the **registry endpoints** it cannot work without, each bound to the binary
 //!   that reaches it, imposed on the session that asked for the toolchain and on
@@ -226,15 +226,15 @@ pub fn tag(chains: &[&'static Toolchain]) -> String {
 
 /// The Dockerfile for a variant image: the base, plus one layer per toolchain.
 ///
-/// `FROM hura-base:latest` rather than a longer base Dockerfile with conditional
+/// `FROM hura-sandbox:latest` rather than a longer base Dockerfile with conditional
 /// steps, so the several gigabytes of base image are built once and shared by
 /// every variant -- and so a variant's build is only ever the toolchains asked
 /// for. It also keeps one thing true that a conditional build would quietly
 /// break: the base image is what a session with no toolchain runs, byte for byte.
 ///
-/// `USER root` and back again, because the base image ends as the sandbox user
+/// `USER root` and back again, because the base image ends as the `agent` user
 /// and every layer here installs into `/usr/local`. Ending anywhere else would
-/// hand the agent a root shell.
+/// start every session as root.
 pub fn dockerfile(chains: &[&'static Toolchain]) -> String {
     let mut out = String::from("# syntax=docker/dockerfile:1\n");
     out.push_str(
@@ -254,7 +254,7 @@ pub fn dockerfile(chains: &[&'static Toolchain]) -> String {
         out.push_str(chain.layer.trim_end());
         out.push_str("\n\n");
     }
-    out.push_str("USER sandbox\n");
+    out.push_str("USER agent\n");
     out
 }
 
@@ -419,8 +419,8 @@ mod tests {
             tag(&resolve(&owned).unwrap())
         };
         assert_eq!(of(&[]), crate::session::IMAGE, "no toolchain, no variant");
-        assert_eq!(of(&["dotnet"]), "hura-base:dotnet");
-        assert_eq!(of(&["dotnet", "rust"]), "hura-base:dotnet-rust");
+        assert_eq!(of(&["dotnet"]), "hura-sandbox:dotnet");
+        assert_eq!(of(&["dotnet", "rust"]), "hura-sandbox:dotnet-rust");
         assert_eq!(
             of(&["rust", "dotnet"]),
             of(&["dotnet", "rust"]),
@@ -454,7 +454,7 @@ mod tests {
             "the layers install into /usr/local"
         );
         assert!(
-            df.trim_end().ends_with("USER sandbox"),
+            df.trim_end().ends_with("USER agent"),
             "a variant must end as the sandbox user:\n{df}"
         );
         // The manifest's directory is not in the base image, and no layer owns

@@ -205,7 +205,7 @@ pub fn widen(servers: &[Server]) -> Option<PolicyUpdate> {
 
 /// The seeder's MCP step: register every server with the agent.
 ///
-/// `claude mcp add` rather than writing `mcpServers` into `/sandbox/.claude.json`
+/// `claude mcp add` rather than writing `mcpServers` into `/home/agent/.claude.json`
 /// by hand, because the CLI owns that file's shape and the image already
 /// pre-populates it with the onboarding keys -- a hand-written merge would be a
 /// second thing that has to know the format. `--scope user` puts them in that

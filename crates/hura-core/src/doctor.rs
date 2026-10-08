@@ -226,7 +226,7 @@ fn check_image() -> Check {
 /// not a problem to report -- unlike the base image, which every session needs.
 ///
 /// The staleness half is the part worth a check. A variant is `FROM
-/// hura-base:latest`, so rebuilding the base for a newer agent leaves every
+/// hura-sandbox:latest`, so rebuilding the base for a newer agent leaves every
 /// variant behind it, and nothing about that looks wrong from outside: sessions
 /// start, the toolchain works, and the agent is whatever version it was when the
 /// variant was built.
@@ -259,7 +259,7 @@ fn check_toolchains() -> Option<Check> {
             ),
             // One command per variant, because each is its own build. The tag's
             // toolchains are joined with `-` and `--toolchain` takes them
-            // comma-separated, so `hura-base:dotnet-rust` turns back into
+            // comma-separated, so `hura-sandbox:dotnet-rust` turns back into
             // `--toolchain dotnet,rust`.
             rebuild_commands(&stale).join("; "),
         ));
@@ -686,21 +686,21 @@ mod toolchain_tests {
     #[test]
     fn a_stale_variant_is_told_how_to_rebuild_itself() {
         assert_eq!(
-            rebuild_commands(&["hura-base:dotnet".to_string()]),
+            rebuild_commands(&["hura-sandbox:dotnet".to_string()]),
             ["hurad image build --toolchain dotnet"]
         );
         // The tag joins with `-`, the flag takes `,`.
         assert_eq!(
-            rebuild_commands(&["hura-base:dotnet-rust".to_string()]),
+            rebuild_commands(&["hura-sandbox:dotnet-rust".to_string()]),
             ["hurad image build --toolchain dotnet,rust"]
         );
         // One command each, since each is its own build.
         assert_eq!(
-            rebuild_commands(&["hura-base:dotnet".into(), "hura-base:rust".into()]).len(),
+            rebuild_commands(&["hura-sandbox:dotnet".into(), "hura-sandbox:rust".into()]).len(),
             2
         );
         // Nothing invented from something that is not a tag.
-        assert!(rebuild_commands(&["hura-base".to_string()]).is_empty());
+        assert!(rebuild_commands(&["hura-sandbox".to_string()]).is_empty());
     }
 }
 

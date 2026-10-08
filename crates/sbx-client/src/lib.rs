@@ -966,11 +966,11 @@ mod tests {
         ));
 
         let no_image = ExecOutput {
-            stderr: "error: template 'hura-base:x' not found\n".into(),
+            stderr: "error: template 'hura-sandbox:x' not found\n".into(),
             ..gone.clone()
         };
         match refusal(&args, Some("hura-nope"), &no_image) {
-            Error::Cli { stderr, .. } => assert_eq!(stderr, "template 'hura-base:x' not found"),
+            Error::Cli { stderr, .. } => assert_eq!(stderr, "template 'hura-sandbox:x' not found"),
             other => panic!("{other:?}"),
         }
     }
@@ -1016,13 +1016,13 @@ mod tests {
     fn the_commands_it_builds() {
         let create = CreateOpts {
             name: "hura-a".into(),
-            template: "hura-base:latest".into(),
+            template: "hura-sandbox:latest".into(),
             cpus: Some(4),
             memory: Some("8g".into()),
         };
         assert_eq!(
             create.args().join(" "),
-            "create shell --name hura-a --template hura-base:latest --pull never \
+            "create shell --name hura-a --template hura-sandbox:latest --pull never \
              --skills off --quiet --cpus 4 --memory 8g"
         );
 

@@ -748,6 +748,7 @@ name = "hura-core"
 version = "0.22.0"
 dependencies = [
  "openshell-client",
+ "sbx-client",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

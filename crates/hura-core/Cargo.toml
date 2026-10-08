@@ -9,6 +9,7 @@ description = "The headless half of hura: sessions, policy, and everything that 
 
 [dependencies]
 openshell-client = { path = "../openshell-client" }
+sbx-client = { path = "../sbx-client" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

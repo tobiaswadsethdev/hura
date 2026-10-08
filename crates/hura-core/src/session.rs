@@ -50,14 +50,15 @@ pub const TMUX_SESSION: &str = "agent";
 /// and its reviewers already look for, which is `<you>/PROJ-123-description`.
 pub const DEFAULT_BRANCH_PREFIX: &str = "hura";
 
-/// Container image hura runs sandboxes from: the community base plus tmux.
-pub const IMAGE: &str = "hura-base:latest";
+/// Container image hura runs sandboxes from: Docker's `shell-docker` sandbox
+/// template plus tmux, Claude Code and hura's own scripts.
+pub const IMAGE: &str = "hura-sandbox:latest";
 /// The repository half of [`IMAGE`], which the toolchain variants share.
 ///
-/// Its own constant because a variant tag is built from it -- `hura-base:dotnet`
-/// beside `hura-base:latest` -- and two `format!`s spelling the name out would be
+/// Its own constant because a variant tag is built from it -- `hura-sandbox:dotnet`
+/// beside `hura-sandbox:latest` -- and two `format!`s spelling the name out would be
 /// two places to rename it. See [`crate::toolchain::tag`].
-pub const IMAGE_REPO: &str = "hura-base";
+pub const IMAGE_REPO: &str = "hura-sandbox";
 
 /// Gateway limit on a label value.
 const MAX_LABEL_VALUE: usize = 63;

@@ -75,8 +75,8 @@ RUN set -eu; \
 #
 # Set twice for the reason the base image sets its locale twice: `ENV` covers a
 # shell opened by hand, `set-environment` in tmux.conf is what reaches the agent.
-ENV CARGO_HOME=/sandbox/.cargo
+ENV CARGO_HOME=/home/agent/.cargo
 
 RUN printf '%s\n' \
-        'set-environment -g CARGO_HOME /sandbox/.cargo' \
+        'set-environment -g CARGO_HOME /home/agent/.cargo' \
     >> /etc/tmux.conf

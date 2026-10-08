@@ -351,7 +351,7 @@ enum ImageAction {
     Build {
         /// Toolchain to layer in. Repeatable, or comma-separated.
         ///
-        /// Builds `hura-base:<toolchains>` on top of the base image, building the
+        /// Builds `hura-sandbox:<toolchains>` on top of the base image, building the
         /// base first if it is missing. Without this, the base image itself is
         /// built, which is what a session with no toolchain runs.
         #[arg(long = "toolchain", value_delimiter = ',')]
