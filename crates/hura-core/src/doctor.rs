@@ -277,40 +277,27 @@ fn check_toolchains() -> Option<Check> {
 
 /// How long to wait for a published MCP port to answer.
 ///
-/// It is on the loopback bridge, so a server that is up answers in microseconds
-/// and anything slower is a firewall or a wrong address. Short enough that a
-/// misconfigured entry does not make `doctor` feel broken.
+/// It is on this machine's loopback, so a server that is up answers in
+/// microseconds and anything slower is a firewall or a wrong address. Short
+/// enough that a misconfigured entry does not make `doctor` feel broken.
 const MCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Whether the MCP servers the config names are actually there.
 ///
-/// The quietest failure this feature has: a container that is not running, or
-/// one running but not attached to the gateway's network, produces a session
-/// whose agent comes up with a tool it cannot reach -- and the agent reports
-/// that as "needs authentication", which sends anyone looking in the wrong
-/// direction entirely.
+/// The quietest failure this feature has: a server that is not running, or one
+/// running where no sandbox can reach it, produces a session whose agent comes
+/// up with a tool it cannot reach, and the agent reports that as "needs
+/// authentication", which sends anyone looking in the wrong direction entirely.
 ///
 /// Three shapes, checked differently because they fail differently. A
 /// **managed** entry is asked of [`mcp::statuses`], which is the same answer the
-/// window's integrations screen shows -- one implementation, so a check that
-/// passes here cannot disagree with a screen that says something is wrong. An
-/// external **container name** is asked about through Docker, since the host
-/// cannot reach it by name at all -- only sandboxes on that network can. An
-/// external **published port** is connected to, on the bridge gateway address
-/// the sandbox will use rather than on `localhost`, because a container
-/// published to `127.0.0.1` only is exactly the mistake that looks fine from the
-/// host and is unreachable from a sandbox.
+/// window's integrations screen shows: one implementation, so a check that
+/// passes here cannot disagree with a screen that says something is wrong. One
+/// of your own reached **through this machine** is connected to on
+/// `127.0.0.1`, where the sandbox runtime takes `host.docker.internal`. And
+/// one named by **a container's name** is said to be unreachable outright: a
+/// sandbox cannot resolve the names of this machine's containers.
 fn check_mcp(entries: &[mcp::Entry]) -> Check {
-    // Also the answer to "is Docker there at all": without the network there is
-    // no address to connect to and no point asking about containers, and the
-    // docker check above has already said why. Saying it a second time here
-    // would be two failures for one cause.
-    let Some(bridge) = bridge_gateway() else {
-        return Check::ok(
-            "mcp",
-            "not checked: the openshell docker network is not there",
-        );
-    };
     let mut problems: Vec<String> = Vec::new();
     let live = mcp::statuses(entries);
 
@@ -319,15 +306,15 @@ fn check_mcp(entries: &[mcp::Entry]) -> Check {
         let problem = if entry.is_managed() {
             status.problem.clone()
         } else if s.via_host() {
-            (!port_open(&bridge, port_of(s))).then(|| {
+            (!port_open("127.0.0.1", port_of(s))).then(|| {
                 format!(
-                    "nothing is listening on {bridge}:{}, which is where `{}` points from inside a sandbox",
+                    "nothing is listening on 127.0.0.1:{}, which is where `{}` points from inside a sandbox",
                     port_of(s),
                     s.host()
                 )
             })
         } else {
-            container_problem(s.host())
+            container_problem(s.host(), port_of(s))
         };
         if let Some(p) = problem {
             problems.push(format!("{}: {p}", s.name));
@@ -346,59 +333,23 @@ fn check_mcp(entries: &[mcp::Entry]) -> Check {
         "mcp",
         problems.join("; "),
         format!(
-            "a managed one starts from the window's integrations screen; \
-             one of your own can be attached with \
-             `docker network connect {} <container>`, or its url fixed in the \
-             config file",
-            mcp::NETWORK
+            "a managed one starts from the window's integrations screen; one of your \
+             own is published on 127.0.0.1 and named as `{}` in its url",
+            mcp::HOST_ALIAS
         ),
     )
 }
 
-/// What is wrong with the container an MCP url names, if anything.
-///
-/// Only ever called once Docker is known to be answering, so `inspect` failing
-/// means the container does not exist -- which is the most likely thing to be
-/// wrong, and the one a sandbox reports as an MCP server that needs
-/// authentication.
-fn container_problem(name: &str) -> Option<String> {
-    let Some(out) = probe(&[
-        "docker",
-        "inspect",
-        name,
-        "--format",
-        "{{.State.Running}} {{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}",
-    ]) else {
-        return Some(format!(
-            "there is no container named `{name}`, so no sandbox can resolve that url"
-        ));
-    };
-    let mut parts = out.split_whitespace();
-    let running = parts.next() == Some("true");
-    let networks: Vec<&str> = parts.collect();
-    if !running {
-        return Some(format!("container `{name}` is not running"));
-    }
-    if !networks.contains(&mcp::NETWORK) {
-        return Some(format!(
-            "container `{name}` is not on the `{}` network, so no sandbox can resolve it",
-            mcp::NETWORK
-        ));
-    }
-    None
-}
-
-/// The address `host.openshell.internal` resolves to inside a sandbox.
-fn bridge_gateway() -> Option<String> {
-    probe(&[
-        "docker",
-        "network",
-        "inspect",
-        mcp::NETWORK,
-        "--format",
-        "{{(index .IPAM.Config 0).Gateway}}",
-    ])
-    .filter(|ip| !ip.is_empty())
+/// Whether an MCP url names one of this machine's containers, which no
+/// sandbox can resolve. `None` for any other host, which is somewhere a
+/// sandbox can be given a rule for.
+fn container_problem(name: &str, port: &str) -> Option<String> {
+    probe(&["docker", "inspect", name, "--format", "{{.Name}}"])?;
+    Some(format!(
+        "`{name}` is a container here, and a sandbox cannot reach containers by name; \
+         publish it on 127.0.0.1:{port} and use `http://{}:{port}`",
+        mcp::HOST_ALIAS
+    ))
 }
 
 fn port_of(s: &mcp::Server) -> &str {

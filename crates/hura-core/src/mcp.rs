@@ -7,32 +7,24 @@
 //! containers, holding their own secrets, and the sandbox is granted one
 //! endpoint each.
 //!
-//! Two topologies work, measured against OpenShell 0.0.110 with the Docker
-//! driver:
-//!
-//! * **A sibling container on the gateway's own network.** Started with
-//!   `--network openshell-docker`, it is reachable from a sandbox by container
-//!   name -- Docker's embedded DNS resolves it even though the sandbox has no
-//!   DNS of its own, because the proxy does the resolving. Nothing is published
-//!   on the host at all, which is why this is the shape the README documents.
-//! * **A port published on the host**, reached as `host.openshell.internal`,
-//!   which every sandbox already has in `/etc/hosts` pointing at the bridge
-//!   gateway. Use it when the server is not in a container, or is in one that
-//!   cannot join another network.
+//! A sandbox reaches this machine as `host.docker.internal`, which the sandbox
+//! runtime's proxy takes to the host's own loopback, and nothing else on it: a
+//! container on the host cannot be reached by its name. So a server for
+//! sandboxes is a port published on `127.0.0.1`, which is how a managed one is
+//! run, and its url names `host.docker.internal` and that port. A server
+//! somewhere else entirely is reached by its own host name.
 //!
 //! What does *not* work, and is rejected here rather than three steps later:
 //! `localhost` and `127.0.0.1`. Inside a sandbox those mean the sandbox itself,
 //! so a URL that is correct on the host is silently wrong once it gets there.
 //!
-//! **The grant is per-binary, and the binary is the agent.** Unlike npm -- where
-//! the kernel-resolved exe is `/usr/bin/node` and the rule cannot tell an agent
-//! from anything else JavaScript -- Claude Code 2.x is a native binary, so
-//! `/usr/local/bin/claude` is a rule only the agent satisfies. Nothing else in
-//! the sandbox can reach the MCP server, not `curl` and not `git`.
+//! **The grant is to the whole sandbox.** Its rules are not about one program,
+//! so anything in the session can reach a server it is given, not only the
+//! agent.
 //!
 //! **What this costs, said plainly.** The agent gains everything the MCP server
-//! can do, using the host's credentials, and the gateway can only see it as
-//! `POST /mcp` -- every MCP call is the same request shape, so the method/path
+//! can do, using the host's credentials, and the proxy can only see it as
+//! `POST /mcp`: every MCP call is the same request shape, so the method/path
 //! rules that make the git endpoints sharp buy nothing here. A server that can
 //! transition Jira issues means a sandboxed agent can transition Jira issues.
 //! That is a fine trade for Jira and Azure DevOps, and a terrible one for a
@@ -48,10 +40,6 @@ mod managed;
 pub use managed::{
     CONTAINER_PREFIX, Entry, Managed, State, Status, container_name, ensure, start, statuses, stop,
 };
-
-/// The Docker network the gateway puts sandboxes on, and so the one a sibling
-/// MCP container has to join to be reachable by name. Verified against 0.0.110.
-pub const NETWORK: &str = "openshell-docker";
 
 /// The name a sandbox reaches this machine by.
 ///
@@ -293,8 +281,8 @@ pub enum Error {
     #[error("url carries credentials; an mcp server should hold its own, not take them from here")]
     UserInfo,
     #[error(
-        "`{0}` is the sandbox itself, not the host: reach a published port as \
-         `{HOST_ALIAS}`, or a container on the `{NETWORK}` network by its name"
+        "`{0}` is the sandbox itself, not the host: publish the server on \
+         127.0.0.1 here and reach it as `{HOST_ALIAS}`"
     )]
     Loopback(String),
     #[error(

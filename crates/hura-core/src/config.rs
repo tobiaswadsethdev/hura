@@ -317,6 +317,23 @@ impl Config {
                     mcp::Error::DuplicateName(resolved.name().to_string()).to_string(),
                 ));
             }
+            // A managed server is published on its own port here, so two on one
+            // port would leave the second unable to start.
+            if let Some(port) = resolved.managed.as_ref().map(|m| m.port)
+                && let Some(other) = mcp
+                    .iter()
+                    .find(|e| e.managed.as_ref().is_some_and(|m| m.port == port))
+            {
+                return Err(invalid(
+                    "mcp",
+                    format!(
+                        "`{}` and `{}` both run on port {port}, and each is published on \
+                         its own port on this machine; give one another port",
+                        other.name(),
+                        resolved.name()
+                    ),
+                ));
+            }
             mcp.push(resolved);
         }
 
@@ -911,8 +928,8 @@ mod tests {
         .unwrap();
         let e = &c.mcp()[0];
         assert!(e.is_managed());
-        assert_eq!(e.server.url, "http://hura-mcp-sentry:9000/mcp");
-        assert_eq!(e.server.endpoint, "hura-mcp-sentry:9000");
+        assert_eq!(e.server.url, "http://host.docker.internal:9000/mcp");
+        assert_eq!(e.server.endpoint, "host.docker.internal:9000");
         let m = e.managed.as_ref().unwrap();
         assert_eq!(m.image, "ghcr.io/example/mcp-sentry:1.4");
         assert_eq!(m.secrets, ["SENTRY_TOKEN"]);
@@ -1014,5 +1031,28 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.to_string().contains("already the name"), "{e}");
+    }
+
+    #[test]
+    fn two_managed_servers_cannot_share_a_port() {
+        let e = parse(
+            r#"
+            [[mcp]]
+            name = "jira"
+            image = "ghcr.io/example/mcp-jira:1"
+            port = 9000
+
+            [[mcp]]
+            name = "sentry"
+            image = "ghcr.io/example/mcp-sentry:1"
+            port = 9000
+            "#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("jira") && e.contains("sentry") && e.contains("9000"),
+            "{e}"
+        );
     }
 }
