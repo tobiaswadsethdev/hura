@@ -76,25 +76,13 @@ fn probe(argv: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn check_openshell() -> Check {
-    match probe(&["openshell", "--version"]) {
-        Some(v) => Check::ok("openshell", v),
-        None => Check::fail(
-            "openshell",
-            "not on PATH",
-            "install from the release tarballs into ~/.local/bin; OpenShell's own \
-             install.sh supports dpkg/rpm only",
-        ),
-    }
-}
-
 fn check_docker() -> Check {
     match probe(&["docker", "version", "--format", "{{.Server.Version}}"]) {
         Some(v) if !v.is_empty() => Check::ok("docker", format!("server {v}")),
         _ => Check::fail(
             "docker",
             "daemon not reachable",
-            "start Docker; the gateway auto-selects kubernetes > podman > docker",
+            "start Docker; it builds the sandbox image, which the sandbox runtime cannot",
         ),
     }
 }
@@ -579,7 +567,6 @@ pub fn run(backend: &dyn Backend, config: &Result<Config, config::Error>) -> Vec
     let mut checks = vec![
         check_version(),
         check_config(config),
-        check_openshell(),
         backend.health(),
         check_docker(),
         check_tmux(),
@@ -621,19 +608,16 @@ fn check_config(config: &Result<Config, config::Error>) -> Check {
     }
 }
 
-/// Whether the providers the config file names still exist at the gateway.
+/// Whether the providers the config file ticks by default are credentials it
+/// defines.
 ///
-/// A name that does not is the quietest failure hura has: the create form simply
+/// A name that is not is the quietest failure hura has: the create form simply
 /// does not tick it, the sandbox comes up without the credential, and the clone
 /// fails for what looks like an authentication problem several steps later.
-/// Here is the only place that can be said before it happens, because it is the
-/// one command that both reads the file and asks the gateway.
 fn check_config_providers(backend: &dyn Backend, named: &[String]) -> Check {
     let existing = match backend.providers() {
         Ok(list) => list,
-        // The gateway check above already says so; repeating it here would be
-        // two failures for one cause.
-        Err(_) => return Check::ok("providers", "not checked: the gateway is unreachable"),
+        Err(_) => return Check::ok("providers", "not checked"),
     };
     let missing: Vec<&str> = named
         .iter()
@@ -645,8 +629,8 @@ fn check_config_providers(backend: &dyn Backend, named: &[String]) -> Check {
     }
     Check::warn(
         "providers",
-        format!("no provider named {}", missing.join(", ")),
-        "openshell provider list; fix `providers` in the config file",
+        format!("no credential named {}", missing.join(", ")),
+        "add it under [credentials.NAME], or fix `providers` in the config file",
     )
 }
 

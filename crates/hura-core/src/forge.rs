@@ -29,43 +29,41 @@ impl Forge {
         }
     }
 
-    /// The provider profile that carries a credential for it.
-    pub fn provider_profile(self) -> &'static str {
+    /// The kind of credential that authenticates git to it.
+    pub fn credential(self) -> crate::credentials::Kind {
         match self {
-            Forge::GitHub => "github",
-            Forge::AzureDevOps => "azure-devops-pat",
+            Forge::GitHub => crate::credentials::Kind::GitHub,
+            Forge::AzureDevOps => crate::credentials::Kind::AzureDevOpsPat,
         }
     }
 
-    /// Environment variable the provider leaves a credential *reference* in.
+    /// The credential kind's name, which is what the create form preselects by.
+    pub fn provider_profile(self) -> &'static str {
+        self.credential().name()
+    }
+
+    /// Environment variable the session's credential placeholder is in.
     ///
-    /// Not the credential. The gateway sets this to a placeholder of the form
-    /// `openshell:resolve:env:v<id>_<NAME>` and substitutes the real secret
-    /// into any outgoing header containing it -- including inside the base64 of
-    /// a Basic credential, which is what makes [`Self::auth_header_expr`] work.
-    /// So the value is safe to write into a git config, and the secret never
-    /// exists inside the sandbox at all.
+    /// Not the credential. The sandbox runtime's proxy writes the real value
+    /// over the placeholder in the headers of requests to the forge's hosts,
+    /// so the value is safe to write into a git config, and the secret never
+    /// exists inside the sandbox at all. See [`crate::credentials`].
     pub fn credential_env(self) -> &'static str {
-        match self {
-            // First of the profile's env_vars; see providers/azure-devops-pat.yaml.
-            Forge::AzureDevOps => "AZURE_DEVOPS_PAT",
-            Forge::GitHub => "GITHUB_TOKEN",
-        }
+        self.credential().env()
     }
 
     /// Shell expression evaluating to an `Authorization` header value.
     ///
-    /// Azure DevOps PATs are HTTP Basic with the token as the *password* and an
-    /// empty username -- `base64(":" + pat)`. Sending one as a bearer token
-    /// gets a 302 to an Entra sign-in page rather than a 401, which is a
-    /// singularly unhelpful way to fail. GitHub tokens are bearer, matching the
-    /// builtin `github` provider profile's `auth_style`.
+    /// The placeholder goes in as it is, because the proxy swaps only an exact
+    /// match. For Azure DevOps that means the stored value is already the
+    /// Basic credential, `base64(":" + pat)`, which is how
+    /// [`crate::credentials::Credential::secret`] stores a PAT. Sending a PAT as
+    /// a bearer token gets a 302 to an Entra sign-in page rather than a 401,
+    /// which is a singularly unhelpful way to fail. GitHub tokens are bearer.
     pub fn auth_header_expr(self) -> String {
         let var = self.credential_env();
         match self {
-            Forge::AzureDevOps => {
-                format!(r#"Authorization: Basic $(printf ':%s' "${var}" | base64 -w0)"#)
-            }
+            Forge::AzureDevOps => format!(r#"Authorization: Basic ${var}"#),
             Forge::GitHub => format!(r#"Authorization: Bearer ${var}"#),
         }
     }
@@ -460,15 +458,13 @@ mod tests {
 
     /// Azure DevOps wants the token as a Basic *password*. Measured: sent as a
     /// bearer token the API answers 302 to an Entra sign-in page, so getting
-    /// this wrong does not even look like an auth failure.
+    /// this wrong does not even look like an auth failure. The placeholder
+    /// goes in bare, since the proxy only replaces an exact match, and the
+    /// encoding is done on the host when the secret is stored.
     #[test]
     fn azure_authenticates_as_basic_and_github_as_bearer() {
         let az = Forge::AzureDevOps.auth_header_expr();
-        assert!(az.contains("Basic"), "{az}");
-        assert!(az.contains("printf ':%s'"), "empty username: {az}");
-        assert!(az.contains("base64 -w0"), "no line wrapping: {az}");
-        assert!(az.contains("$AZURE_DEVOPS_PAT"), "{az}");
-        assert!(!az.contains("Bearer"), "{az}");
+        assert_eq!(az, "Authorization: Basic $AZURE_DEVOPS_PAT");
 
         let gh = Forge::GitHub.auth_header_expr();
         assert!(gh.contains("Bearer $GITHUB_TOKEN"), "{gh}");

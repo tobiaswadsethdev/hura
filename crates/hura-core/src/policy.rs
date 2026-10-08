@@ -4,15 +4,14 @@
 //! is deliberately visible: a named template at creation, the effective rules
 //! in a pane, and a keybinding to widen or tighten egress while the agent runs.
 //!
-//! Templates are embedded in the binary and written to a temp file when the CLI
-//! needs a path, the same trick [`crate::image`] uses for the build context, so
-//! `hura` works installed rather than only from a checkout.
+//! Templates are hura's own: a list of network rules in TOML, embedded in the
+//! binary and parsed here, which each become one rule on the session's sandbox.
 
 use std::fmt::Write as _;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use openshell_client::{Policy, PolicyRevision, PolicyUpdate};
+use sbx_client::{Decision, RuleSpec};
 
 use crate::endpoints::{Lists, Route};
 use crate::pane;
@@ -22,7 +21,7 @@ pub struct Template {
     pub name: &'static str,
     /// One line, for `--help` and the pane.
     pub summary: &'static str,
-    pub yaml: &'static str,
+    pub toml: &'static str,
 }
 
 /// The templates, widest-denying first. Order is the order `hura new --help`
@@ -31,17 +30,17 @@ pub const TEMPLATES: [Template; 3] = [
     Template {
         name: "readonly-explore",
         summary: "clone and read; no push, no model API",
-        yaml: include_str!("../../../policies/readonly-explore.yaml"),
+        toml: include_str!("../../../policies/readonly-explore.toml"),
     },
     Template {
         name: "feature-work",
         summary: "clone, agent, push (github + azure devops)",
-        yaml: include_str!("../../../policies/feature-work.yaml"),
+        toml: include_str!("../../../policies/feature-work.toml"),
     },
     Template {
         name: "net-open",
         summary: "feature-work plus npm and PyPI",
-        yaml: include_str!("../../../policies/net-open.yaml"),
+        toml: include_str!("../../../policies/net-open.toml"),
     },
 ];
 
@@ -61,92 +60,149 @@ pub fn help() -> String {
         .join("\n")
 }
 
-/// A policy resolved to a file the `openshell` CLI can be pointed at.
-///
-/// Owns the temp file when the policy came from a template, and removes it on
-/// drop -- so it has to stay alive until `sandbox create` has run, not just
-/// until the path has been read.
+/// A policy resolved to the rules a sandbox is given.
 #[derive(Debug)]
 pub struct Resolved {
     /// What to record in the session: the template name, or the path as given.
     pub label: String,
-    path: PathBuf,
-    temp: bool,
-}
-
-impl Resolved {
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for Resolved {
-    fn drop(&mut self) {
-        if self.temp {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
+    pub rules: Vec<RuleSpec>,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("no policy template or file `{spec}`\n\navailable templates:\n{available}")]
     Unknown { spec: String, available: String },
-    #[error("could not write the {template} template to {path}: {source}")]
-    Write {
-        template: String,
-        path: PathBuf,
+    #[error("could not read {path}: {source}")]
+    Read {
+        path: String,
         #[source]
         source: std::io::Error,
     },
+    #[error("{name} is not a valid policy: {message}")]
+    Invalid { name: String, message: String },
+    #[error(
+        "{path} is an OpenShell policy, which nothing enforces any more; write its \
+         network rules as a hura template instead (see policies/feature-work.toml)"
+    )]
+    OpenShell { path: String },
 }
 
-/// Resolve `--policy`: a template name, or a path to a YAML file.
+/// Whether `--policy` names a file rather than a template. The one rule both
+/// [`resolve`] and the config file's validation use, so the two cannot
+/// disagree about what is a path.
+pub fn looks_like_path(spec: &str) -> bool {
+    spec.contains('/')
+        || [".toml", ".yaml", ".yml"]
+            .iter()
+            .any(|ext| spec.ends_with(ext))
+}
+
+/// Resolve `--policy`: a template name, or a path to a template file.
 ///
-/// A name is tried first, so a file called `net-open.yaml` in the working
-/// directory cannot silently shadow the template of that name -- but a spec
-/// that looks like a path (`./net-open`, `policies/net-open.yaml`) is never
+/// A name is tried first, so a file called `net-open.toml` in the working
+/// directory cannot silently shadow the template of that name, but a spec
+/// that looks like a path (`./net-open`, `policies/net-open.toml`) is never
 /// matched against a template, so the checked-in files stay usable directly.
 pub fn resolve(spec: &str) -> Result<Resolved, Error> {
-    let looks_like_path = spec.contains('/') || spec.ends_with(".yaml") || spec.ends_with(".yml");
-
-    if !looks_like_path && let Some(t) = find(spec) {
-        return materialize(t);
-    }
-
-    let path = PathBuf::from(spec);
-    if path.is_file() {
+    if !looks_like_path(spec)
+        && let Some(t) = find(spec)
+    {
         return Ok(Resolved {
-            label: spec.to_string(),
-            path,
-            temp: false,
+            label: t.name.to_string(),
+            rules: parse(t.name, t.toml)?,
         });
     }
-    Err(Error::Unknown {
-        spec: spec.to_string(),
-        available: help(),
-    })
-}
-
-/// Write an embedded template out so the CLI can be given a path.
-fn materialize(t: &Template) -> Result<Resolved, Error> {
-    // The pid keeps concurrent invocations from sharing a file. Not a security
-    // boundary: the content is a compile-time constant.
-    let path = std::env::temp_dir().join(format!(
-        "hura-policy-{}-{}.yaml",
-        t.name,
-        std::process::id()
-    ));
-    fs::write(&path, t.yaml).map_err(|source| Error::Write {
-        template: t.name.to_string(),
-        path: path.clone(),
+    let path = Path::new(spec);
+    if !path.is_file() {
+        return Err(Error::Unknown {
+            spec: spec.to_string(),
+            available: help(),
+        });
+    }
+    if spec.ends_with(".yaml") || spec.ends_with(".yml") {
+        return Err(Error::OpenShell {
+            path: spec.to_string(),
+        });
+    }
+    let text = std::fs::read_to_string(path).map_err(|source| Error::Read {
+        path: spec.to_string(),
         source,
     })?;
     Ok(Resolved {
-        label: t.name.to_string(),
-        path,
-        temp: true,
+        label: spec.to_string(),
+        rules: parse(spec, &text)?,
     })
+}
+
+/// A template file, exactly: an unknown key is a typo, and a typo in a policy
+/// is a rule that silently is not there.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTemplate {
+    #[serde(default)]
+    rule: Vec<RawRule>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRule {
+    hosts: Vec<String>,
+    #[serde(default)]
+    methods: Vec<String>,
+    path: Option<String>,
+    decision: Option<String>,
+}
+
+/// The HTTP methods a rule may name, as the sandbox runtime takes them.
+const METHODS: [&str; 10] = [
+    "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT", "TRACE", "ANY",
+];
+
+/// Parse a template's text into rules. `name` is only for the messages.
+pub fn parse(name: &str, text: &str) -> Result<Vec<RuleSpec>, Error> {
+    let invalid = |message: String| Error::Invalid {
+        name: name.to_string(),
+        message,
+    };
+    let raw: RawTemplate = toml::from_str(text).map_err(|e| invalid(e.to_string()))?;
+    raw.rule
+        .into_iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let n = i + 1;
+            if r.hosts.is_empty() || r.hosts.iter().any(|h| h.trim().is_empty()) {
+                return Err(invalid(format!("rule {n} names no host")));
+            }
+            if let Some(m) = r.methods.iter().find(|m| !METHODS.contains(&m.as_str())) {
+                return Err(invalid(format!("rule {n}: `{m}` is not an HTTP method")));
+            }
+            if let Some(p) = &r.path {
+                if r.methods.is_empty() {
+                    return Err(invalid(format!(
+                        "rule {n} has a path but no methods; a path narrows an HTTP rule"
+                    )));
+                }
+                if !p.starts_with('/') {
+                    return Err(invalid(format!("rule {n}: the path must start with `/`")));
+                }
+            }
+            let decision = match r.decision.as_deref() {
+                None | Some("allow") => Decision::Allow,
+                Some("deny") => Decision::Deny,
+                Some(other) => {
+                    return Err(invalid(format!(
+                        "rule {n}: decision is `allow` or `deny`, not `{other}`"
+                    )));
+                }
+            };
+            Ok(RuleSpec {
+                decision,
+                resources: r.hosts,
+                methods: r.methods,
+                path: r.path,
+            })
+        })
+        .collect()
 }
 
 /// The mid-run widen: the package registries.
@@ -1000,43 +1056,48 @@ mod tests {
     }
 
     #[test]
-    fn every_template_is_findable_and_parses_as_yaml() {
+    fn every_template_is_findable_and_parses() {
         for t in &TEMPLATES {
             assert!(find(t.name).is_some(), "{} not findable", t.name);
             assert!(!t.summary.is_empty());
-            // Not a YAML parser -- the crate has none -- but the shape a policy
-            // must have is cheap to assert, and a template that lost its
-            // network section would deny everything without saying so.
-            assert!(t.yaml.contains("version: 1"), "{}", t.name);
-            assert!(t.yaml.contains("filesystem_policy:"), "{}", t.name);
-            assert!(t.yaml.contains("run_as_user: sandbox"), "{}", t.name);
-            assert!(t.yaml.contains("/dev/pts"), "{} must allow a pty", t.name);
+            let rules = parse(t.name, t.toml).unwrap();
+            assert!(!rules.is_empty(), "{} opens nothing", t.name);
         }
         assert!(find(DEFAULT_TEMPLATE).is_some());
         assert!(find("no-such-template").is_none());
     }
 
-    /// Strip `#` comments, so a test about what a template *does* is not
-    /// confounded by a template explaining what it no longer does.
-    fn directives(yaml: &str) -> String {
-        yaml.lines()
-            .filter(|l| !l.trim_start().starts_with('#'))
-            .collect::<Vec<_>>()
-            .join("\n")
+    /// Whether a template opens `path` on `host` for `method`, by its rules
+    /// rather than by its text, so a comment mentioning a host does not count.
+    fn opens(name: &str, host: &str, method: &str, path: &str) -> bool {
+        let rules = parse(name, find(name).unwrap().toml).unwrap();
+        rules.iter().any(|r| {
+            r.decision == Decision::Allow
+                && r.resources
+                    .iter()
+                    .any(|h| h == host || h == &format!("{host}:443"))
+                && (r.methods.is_empty() || r.methods.iter().any(|m| m == method))
+                && r.path.as_deref().is_none_or(|p| glob(p, path))
+        })
     }
 
-    /// The deprecation the gateway warns about on every create. It is worth a
-    /// test rather than a comment because the warning is only visible in the
-    /// sandbox log, which nothing reads by default.
-    #[test]
-    fn no_template_carries_the_deprecated_tls_key() {
-        for t in &TEMPLATES {
-            assert!(
-                !directives(t.yaml).contains("tls: terminate"),
-                "{} still sets tls: terminate",
-                t.name
-            );
+    /// The runtime's path globs, enough for these tests: `**` any number of
+    /// segments, `*` within one.
+    fn glob(pattern: &str, path: &str) -> bool {
+        fn go(p: &[u8], s: &[u8]) -> bool {
+            match (p.first(), s.first()) {
+                (None, None) => true,
+                (Some(b'*'), _) if p.get(1) == Some(&b'*') => {
+                    (0..=s.len()).any(|i| go(&p[2..], &s[i..]))
+                }
+                (Some(b'*'), _) => (0..=s.len())
+                    .take_while(|&i| i == 0 || s[i - 1] != b'/')
+                    .any(|i| go(&p[1..], &s[i..])),
+                (Some(a), Some(b)) if a == b => go(&p[1..], &s[1..]),
+                _ => false,
+            }
         }
+        go(pattern.as_bytes(), path.as_bytes())
     }
 
     /// readonly-explore has to actually deny what it claims to: no model API,
@@ -1044,54 +1105,83 @@ mod tests {
     /// strict end of the range a lie.
     #[test]
     fn readonly_explore_denies_the_model_api_and_push() {
-        let y = find("readonly-explore").unwrap().yaml;
-        assert!(!y.contains("api.anthropic.com"));
-        assert!(!y.contains("git-receive-pack"), "push must not be allowed");
-        assert!(y.contains("git-upload-pack"), "fetch must still work");
+        let ro = "readonly-explore";
+        assert!(!opens(ro, "api.anthropic.com", "POST", "/v1/messages"));
+        let push = "/contoso/tools/_git/Repo/git-receive-pack";
+        assert!(
+            !opens(ro, "github.com", "POST", push),
+            "push must not be allowed"
+        );
+        assert!(
+            !opens(ro, "dev.azure.com", "POST", push),
+            "push must not be allowed"
+        );
+        let fetch = "/octocat/Hello-World.git/git-upload-pack";
+        assert!(
+            opens(ro, "github.com", "POST", fetch),
+            "fetch must still work"
+        );
     }
 
     #[test]
     fn net_open_is_feature_work_plus_registries() {
-        let feature = find("feature-work").unwrap().yaml;
-        let open = find("net-open").unwrap().yaml;
-        for host in [
-            "api.anthropic.com",
-            "github.com",
-            "api.github.com",
-            "git-receive-pack",
-        ] {
-            assert!(feature.contains(host), "feature-work lost {host}");
-            assert!(open.contains(host), "net-open lost {host}");
+        for name in ["feature-work", "net-open"] {
+            assert!(opens(name, "api.anthropic.com", "POST", "/v1/messages"));
+            assert!(opens(name, "api.github.com", "GET", "/repos/o/r"));
+            assert!(opens(
+                name,
+                "github.com",
+                "POST",
+                "/o/r.git/git-receive-pack"
+            ));
         }
         for host in ["registry.npmjs.org", "pypi.org", "files.pythonhosted.org"] {
             assert!(
-                !feature.contains(host),
+                !opens("feature-work", host, "GET", "/x"),
                 "feature-work must not reach {host}"
             );
-            assert!(open.contains(host), "net-open must reach {host}");
+            assert!(
+                opens("net-open", host, "GET", "/x"),
+                "net-open must reach {host}"
+            );
+            assert!(
+                !opens("net-open", host, "PUT", "/x"),
+                "net-open must not publish to {host}"
+            );
         }
-        // npm is a `#!` script, so the exe the gateway matches is the
-        // interpreter. Listing only /usr/bin/npm denies every install.
-        assert!(open.contains("/usr/bin/node"));
     }
 
-    /// Both forges in every template. They coexist rather than being separate
-    /// per-host templates because an endpoint is useless without the matching
-    /// provider attached: the credential is a per-session placeholder, so
-    /// listing dev.azure.com in a GitHub session grants reachability to a host
-    /// it holds no token for. Six near-identical files would cost more than
-    /// that is worth. To narrow it, copy the file and delete a block --
-    /// `--policy <path>` takes it directly.
+    /// Both forges in every template. Reachability to a forge the session holds
+    /// no credential for grants nothing that matters: the credential is a
+    /// per-session secret, and a host is useless without it. To narrow it,
+    /// copy the file and delete a block; `--policy <path>` takes it directly.
     #[test]
     fn every_template_covers_both_forges() {
         for t in &TEMPLATES {
-            let y = directives(t.yaml);
-            assert!(y.contains("github.com"), "{} lost github", t.name);
-            assert!(y.contains("dev.azure.com"), "{} lost azure devops", t.name);
             // Azure DevOps has the extra project level, but the git paths are
-            // tail-anchored and identical -- verified against a real clone of
+            // tail-anchored and identical, verified against a real clone of
             // /contoso/tools/_git/Contoso.DotFiles.
-            assert!(y.contains("/**/info/refs*"), "{}", t.name);
+            let refs = "/contoso/tools/_git/Contoso.DotFiles/info/refs?service=git-upload-pack";
+            assert!(
+                opens(
+                    t.name,
+                    "dev.azure.com",
+                    "GET",
+                    refs.split('?').next().unwrap()
+                ),
+                "{}",
+                t.name
+            );
+            assert!(
+                opens(
+                    t.name,
+                    "github.com",
+                    "GET",
+                    "/octocat/Hello-World.git/info/refs"
+                ),
+                "{}",
+                t.name
+            );
         }
     }
 
@@ -1100,51 +1190,72 @@ mod tests {
     /// read-only template must not have it.
     #[test]
     fn only_the_publishing_templates_reach_the_azure_rest_api() {
-        let ro = directives(find("readonly-explore").unwrap().yaml);
-        assert!(!ro.contains("_apis"), "readonly-explore must not open PRs");
-        assert!(!ro.contains("git-receive-pack"), "and must not push");
-        assert!(!ro.contains("/usr/bin/curl"), "and needs no REST binary");
-
+        let pr = "/contoso/tools/_apis/git/repositories/r/pullrequests";
+        assert!(
+            !opens("readonly-explore", "dev.azure.com", "POST", pr),
+            "readonly-explore must not open PRs"
+        );
         for name in ["feature-work", "net-open"] {
-            let y = directives(find(name).unwrap().yaml);
-            assert!(y.contains("_apis"), "{name} cannot open a PR");
-            assert!(y.contains("git-receive-pack"), "{name} cannot push");
-            assert!(y.contains("/usr/bin/curl"), "{name} has no REST binary");
+            assert!(
+                opens(name, "dev.azure.com", "POST", pr),
+                "{name} cannot open a PR"
+            );
         }
     }
 
     #[test]
-    fn resolves_a_template_by_name_to_a_real_file() {
+    fn resolves_a_template_by_name() {
         let r = resolve("feature-work").unwrap();
         assert_eq!(r.label, "feature-work");
-        assert!(r.path().is_file());
-        let written = fs::read_to_string(r.path()).unwrap();
-        assert_eq!(written, find("feature-work").unwrap().yaml);
-
-        // The temp file is the resolver's, and must not outlive it.
-        let path = r.path().to_path_buf();
-        drop(r);
-        assert!(!path.exists(), "the temp policy must be cleaned up");
+        assert_eq!(
+            r.rules,
+            parse("feature-work", find("feature-work").unwrap().toml).unwrap()
+        );
     }
 
     /// A path is relative to the working directory, which under `cargo test` is
-    /// the package root rather than the workspace root -- hence the manifest
-    /// dir rather than a bare `policies/...`.
+    /// the package root rather than the workspace root, hence the manifest dir
+    /// rather than a bare `policies/...`.
     #[test]
-    fn resolves_a_path_and_leaves_it_alone() {
-        let spec = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../policies/feature-work.yaml"
-        );
+    fn resolves_a_path_to_a_template_file() {
+        let spec = concat!(env!("CARGO_MANIFEST_DIR"), "/../../policies/net-open.toml");
         let r = resolve(spec).unwrap();
         assert_eq!(r.label, spec);
-        let path = r.path().to_path_buf();
-        drop(r);
-        assert!(path.exists(), "a file the user owns must never be removed");
+        assert!(!r.rules.is_empty());
+    }
+
+    /// An OpenShell policy is refused by name rather than read as something it
+    /// is not: its binaries and filesystem sections have nothing to apply to.
+    #[test]
+    fn an_openshell_policy_file_is_refused_with_its_reason() {
+        let dir = std::env::temp_dir().join(format!("hura-policy-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let yaml = dir.join("mine.yaml");
+        std::fs::write(&yaml, "version: 1\n").unwrap();
+        let e = resolve(yaml.to_str().unwrap()).unwrap_err();
+        assert!(matches!(e, Error::OpenShell { .. }), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A typo is a rule that is silently not there, so it is refused.
+    #[test]
+    fn a_template_with_a_mistake_is_refused_with_where_it_is() {
+        let typo = "[[rule]]\nhost = [\"github.com\"]\n";
+        assert!(matches!(parse("t", typo), Err(Error::Invalid { .. })));
+        let verb = "[[rule]]\nhosts = [\"github.com\"]\nmethods = [\"FETCH\"]\n";
+        let e = parse("t", verb).unwrap_err().to_string();
+        assert!(e.contains("rule 1") && e.contains("FETCH"), "{e}");
+        let pathless = "[[rule]]\nhosts = [\"github.com\"]\npath = \"/x\"\n";
+        assert!(
+            parse("t", pathless).is_err(),
+            "a path without methods narrows nothing"
+        );
+        let deny = "[[rule]]\nhosts = [\"x.com\"]\ndecision = \"deny\"\n";
+        assert_eq!(parse("t", deny).unwrap()[0].decision, Decision::Deny);
     }
 
     /// A spec that looks like a path is never matched against a template, so
-    /// the checked-in `policies/*.yaml` stay directly usable -- and a template
+    /// the checked-in `policies/*.toml` stay directly usable, and a template
     /// name still wins over a same-named file in the working directory, so
     /// `--policy net-open` cannot be hijacked by a local file.
     #[test]

@@ -1,0 +1,51 @@
+# net-open: feature-work, plus the npm and PyPI registries for reading.
+#
+# A registry fetch is thousands of requests, so these are read-only rather than
+# open: GET, HEAD and OPTIONS on any path, and nothing that could publish. See
+# feature-work.toml for what the keys mean.
+
+[[rule]]
+hosts = ["api.anthropic.com:443", "platform.claude.com:443"]
+
+[[rule]]
+hosts = ["github.com:443"]
+methods = ["GET"]
+path = "/**/info/refs*"
+
+[[rule]]
+hosts = ["github.com:443"]
+methods = ["POST"]
+path = "/**/git-upload-pack"
+
+[[rule]]
+hosts = ["github.com:443"]
+methods = ["POST"]
+path = "/**/git-receive-pack"
+
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["GET"]
+path = "/**/info/refs*"
+
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["POST"]
+path = "/**/git-upload-pack"
+
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["POST"]
+path = "/**/git-receive-pack"
+
+[[rule]]
+hosts = ["dev.azure.com:443"]
+methods = ["GET", "POST"]
+path = "/**/_apis/**"
+
+[[rule]]
+hosts = ["api.github.com:443"]
+
+[[rule]]
+hosts = ["registry.npmjs.org:443", "pypi.org:443", "files.pythonhosted.org:443"]
+methods = ["GET", "HEAD", "OPTIONS"]
+path = "/**"

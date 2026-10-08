@@ -16,6 +16,7 @@ hura-core = { path = "../hura-core" }
 hura-client = { path = "../hura-client" }
 hura-proto = { path = "../hura-proto" }
 openshell-client = { path = "../openshell-client" }
+sbx-client = { path = "../sbx-client" }
 clap = { version = "4", features = ["derive"] }
 # Raw mode for `attach`, and nothing else. It arrived through `ratatui` until
 # the terminal interface went; this is the same crate, named directly.

@@ -1044,8 +1044,8 @@ pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(
         return crate::chat::tell(backend, session, message)
             .map_err(|e| format!("the agent could not be told: {e}"));
     }
-    let script = tell_script(backend.tmux(), &session.tmux, message);
-    match backend.exec(session, &["sh", "-c", &script]) {
+    let script = tell_script(backend.tmux(), &session.tmux);
+    match backend.exec_stdin(session, &["sh", "-c", &script], message.as_bytes()) {
         Ok(out) if out.ok() => Ok(()),
         Ok(out) => Err(format!(
             "the agent could not be told: {}",
@@ -1055,14 +1055,18 @@ pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(
     }
 }
 
-/// The shell that delivers one message. Separated so its shape can be asserted
-/// without a sandbox: what makes this correct is invisible at the call site.
-fn tell_script(bin: &str, tmux: &str, message: &str) -> String {
+/// The shell that delivers one message, read from its stdin. Separated so its
+/// shape can be asserted without a sandbox: what makes this correct is
+/// invisible at the call site.
+///
+/// The message never appears in the script. It is free text of any length, so
+/// it travels as data on stdin rather than as a quoted argument, where a
+/// review of a few hundred comments would pass the 128 KiB an argument may be.
+fn tell_script(bin: &str, tmux: &str) -> String {
     format!(
-        "printf '%s' {message} | {bin} load-buffer -b hura-tell - \
+        "{bin} load-buffer -b hura-tell - \
          && {bin} paste-buffer -b hura-tell -t {tmux} -d -p \
          && {bin} send-keys -t {tmux} Enter",
-        message = seed::sh_quote(message),
         tmux = seed::sh_quote(tmux),
     )
 }
@@ -1259,8 +1263,16 @@ fn edit_lists(f: impl FnOnce(&mut endpoints::Lists)) -> Result<(), String> {
 pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> String {
     let (cols, rows) = session::SCRAPE_SIZE;
     let bin = backend.tmux();
+    // Attaching to the agent after its sandbox was stopped and started is
+    // attaching to an agent that is not there yet, so it is brought back first,
+    // the way the status poll would. See `seed::resume_check`.
+    let resume = if tmux == session.tmux {
+        format!("{}\n", seed::resume_check(backend, session))
+    } else {
+        String::new()
+    };
     format!(
-        "{bin} attach -d -t {tmux} 2>/dev/null \
+        "{resume}{bin} attach -d -t {tmux} 2>/dev/null \
          || {bin} new-session -s {tmux} -c {repo}; \
          {bin} resize-window -t {tmux} -x {cols} -y {rows} 2>/dev/null; \
          {bin} set -w -t {tmux} window-size latest 2>/dev/null; \
@@ -1579,7 +1591,8 @@ fn poll_script(backend: &dyn Backend, session: &Session) -> String {
         crate::chat::Interface::Chat => String::new(),
     };
     format!(
-        r#"( cd {repo} 2>/dev/null || exit 0
+        r#"{resume}
+( cd {repo} 2>/dev/null || exit 0
 {resolve_base}
 mb=''
 if [ -n "$base" ]; then mb=$(git merge-base "$base" HEAD 2>/dev/null); fi
@@ -1605,6 +1618,7 @@ printf '
 ' {pane_marker}
 {pane}
 "#,
+        resume = seed::resume_check(backend, session),
         repo = seed::sh_quote(&paths.repo),
         resolve_base = resolve_base_script(session),
         status_marker = seed::sh_quote(status::STATUS_MARKER),
@@ -2146,7 +2160,7 @@ mod tests {
     /// while the rest is still arriving; the single `Enter` is the submission.
     #[test]
     fn a_multi_line_message_is_one_bracketed_paste_and_one_enter() {
-        let script = tell_script("tmux -u", "agent", "first line\nsecond line");
+        let script = tell_script("tmux -u", "agent");
         assert!(script.contains("load-buffer -b hura-tell -"), "{script}");
         assert!(
             script.contains("paste-buffer -b hura-tell -t 'agent' -d -p"),
@@ -2156,18 +2170,16 @@ mod tests {
         assert!(script.contains("Enter"), "{script}");
     }
 
-    /// A comment is free text and will contain quotes. It has to reach the
-    /// agent as text rather than as shell.
+    /// A comment is free text and will contain quotes. It reaches the agent as
+    /// data on stdin, so nothing in it is ever shell.
     #[test]
-    fn a_message_with_quotes_in_it_cannot_break_out_of_the_script() {
-        let script = tell_script("tmux -u", "agent", "it's `wrong`; rm -rf / #");
-        // The dangerous run is inside a quoted literal, not sitting in the
-        // command position where the shell would act on it.
-        assert!(!script.contains("; rm -rf / #'\n"), "{script}");
+    fn a_message_is_never_part_of_the_script() {
+        let script = tell_script("tmux -u", "agent");
         assert!(
-            script.contains(r"'\''"),
-            "the apostrophe was not escaped: {script}"
+            script.starts_with("tmux -u load-buffer -b hura-tell -"),
+            "{script}"
         );
+        assert!(!script.contains("printf"), "{script}");
     }
 
     /// The branch a session works on is the config file's convention, and a

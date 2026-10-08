@@ -42,6 +42,13 @@ pub struct Listening {
     pub host: Loopback,
 }
 
+/// The ports `hurad relay` listens on inside a sandbox, one per preview.
+///
+/// The sandbox runtime publishes only ports bound beyond the sandbox's own
+/// loopback, so a relay on one of these carries a preview of a server that is
+/// bound to it. Reserved, so the relays never show up as previews themselves.
+pub const RELAY_PORTS: std::ops::RangeInclusive<u16> = 47700..=47799;
+
 /// The shell that prints each listening socket's local address, one per line,
 /// in the kernel's own hex. State `0A` is `LISTEN`.
 pub const SCRIPT: &str = r#"awk '$4=="0A"{print $2}' /proc/net/tcp /proc/net/tcp6 2>/dev/null"#;
@@ -60,6 +67,9 @@ pub fn parse(text: &str) -> Vec<Listening> {
         let Ok(port) = u16::from_str_radix(port, 16) else {
             continue;
         };
+        if RELAY_PORTS.contains(&port) {
+            continue;
+        }
         let Some(host) = reachable(addr) else {
             continue;
         };
@@ -331,20 +341,22 @@ fn program(command: &str) -> &str {
     first.rsplit('/').next().unwrap_or(first)
 }
 
-/// Not worth a row: a shell, or the sandbox keeping itself alive.
+/// Not worth a row: a shell, the sandbox keeping itself alive, or a relay
+/// carrying a preview out.
 fn plumbing(command: &str) -> bool {
     matches!(
         program(command),
-        "sh" | "bash" | "dash" | "zsh" | "fish" | "ash"
+        "sh" | "bash" | "dash" | "zsh" | "fish" | "ash" | "tini" | "socat"
     ) || command == "sleep infinity"
 }
 
-/// The agent and its tmux. A `node` running Claude Code is named for the
-/// script rather than the interpreter, so every word is looked at.
+/// The agent and its tmux, and the sandbox's own Docker Engine. A `node`
+/// running Claude Code is named for the script rather than the interpreter, so
+/// every word is looked at.
 fn protected(command: &str) -> bool {
     command.split_whitespace().any(|w| {
         let base = w.rsplit('/').next().unwrap_or(w);
-        base == "claude" || base == "tmux" || base.starts_with("tmux:")
+        matches!(base, "claude" | "tmux" | "dockerd" | "containerd") || base.starts_with("tmux:")
     })
 }
 

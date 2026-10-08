@@ -53,7 +53,8 @@ pub struct Config {
     /// and "this is what you asked for".
     pub present: bool,
 
-    /// Gateway to talk to, when `--gateway` does not say.
+    /// The OpenShell gateway sessions used to run on. Nothing reads it since
+    /// they moved to Docker Sandboxes; still parsed so existing files load.
     pub gateway: Option<String>,
     /// Repository a `hura new` without `--repo` clones, and the row the TUI's
     /// picker opens on.
@@ -62,8 +63,20 @@ pub struct Config {
     pub base: Option<String>,
     /// Policy template name, or a path to a YAML file.
     pub policy: Option<String>,
-    /// Credential providers attached to a new session.
+    /// Credentials a new session is given unless the create form says
+    /// otherwise, by name from [`Self::credentials`].
     pub providers: Option<Vec<String>>,
+    /// Every credential a session may be given, from `[credentials.NAME]`.
+    pub credentials: Vec<crate::credentials::Credential>,
+    /// Whole CPUs per session sandbox. Unset is the runtime's default, which
+    /// is every host CPU for every sandbox.
+    pub sandbox_cpus: Option<u32>,
+    /// Memory per session sandbox, as `8g` or `512m`. Unset is the runtime's
+    /// default, half the host's memory for every sandbox.
+    pub sandbox_memory: Option<String>,
+    /// The `sbx` binary, when it is neither on `PATH` nor where its installer
+    /// puts it.
+    pub sbx: Option<PathBuf>,
     /// Where the TUI's picker looks for repositories. Replaces the built-in
     /// roots rather than adding to them, like `HURA_REPO_ROOTS`, which still wins.
     pub repo_roots: Option<Vec<PathBuf>>,
@@ -157,13 +170,13 @@ impl Config {
         // A policy that is neither a template nor a path is a typo, and finding
         // out at create time -- after a sandbox exists -- is finding out late.
         if let Some(spec) = &raw.policy
-            && !looks_like_path(spec)
+            && !policy::looks_like_path(spec)
             && policy::find(spec).is_none()
         {
             return Err(invalid(
                 "policy",
                 format!(
-                    "`{spec}` is not a template; expected one of {}, or a path to a YAML file",
+                    "`{spec}` is not a template; expected one of {}, or a path to a template file",
                     names()
                 ),
             ));
@@ -307,6 +320,48 @@ impl Config {
             mcp.push(resolved);
         }
 
+        let mut credentials = Vec::new();
+        for (name, c) in raw.credentials.unwrap_or_default() {
+            let named = |message: String| invalid("credentials", format!("`{name}`: {message}"));
+            let kind = crate::credentials::Kind::parse(&c.kind).ok_or_else(|| {
+                named(format!(
+                    "`{}` is not a kind of credential; expected one of {}",
+                    c.kind,
+                    crate::credentials::Kind::ALL.map(|k| k.name()).join(", ")
+                ))
+            })?;
+            let source = match (blank_to_none(c.command), blank_to_none(c.reference)) {
+                (Some(cmd), None) => crate::credentials::Source::Command(cmd),
+                (None, Some(r)) => crate::credentials::Source::Ref(r),
+                (Some(_), Some(_)) => {
+                    return Err(named("has both `command` and `ref`; say which".into()));
+                }
+                (None, None) => {
+                    return Err(named(
+                        "says nowhere to get the value from; give it a `command` or a `ref`".into(),
+                    ));
+                }
+            };
+            credentials.push(crate::credentials::Credential { name, kind, source });
+        }
+
+        if raw.sandbox_cpus == Some(0) {
+            return Err(invalid(
+                "sandbox_cpus",
+                "a sandbox needs at least one CPU".into(),
+            ));
+        }
+        let sandbox_memory = blank_to_none(raw.sandbox_memory);
+        if let Some(m) = &sandbox_memory {
+            let (digits, unit) = m.split_at(m.trim_end_matches(['m', 'g', 'M', 'G']).len());
+            if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) || unit.len() > 1 {
+                return Err(invalid(
+                    "sandbox_memory",
+                    format!("`{m}` is not an amount of memory; write it as `8g` or `512m`"),
+                ));
+            }
+        }
+
         Ok(Config {
             path: path.to_path_buf(),
             present: true,
@@ -315,6 +370,10 @@ impl Config {
             base: raw.base,
             policy: raw.policy,
             providers: raw.providers,
+            credentials,
+            sandbox_cpus: raw.sandbox_cpus,
+            sandbox_memory,
+            sbx: raw.sbx.map(|p| expand_tilde(&p)),
             repo_roots: raw
                 .repo_roots
                 .map(|list| list.iter().map(|p| expand_tilde(p)).collect()),
@@ -342,6 +401,15 @@ impl Config {
     /// The providers a new session gets when nothing else says.
     pub fn providers(&self) -> &[String] {
         self.providers.as_deref().unwrap_or(&[])
+    }
+
+    /// Every credential a session may be given.
+    pub fn credentials(&self) -> &[crate::credentials::Credential] {
+        &self.credentials
+    }
+
+    pub fn credential(&self, name: &str) -> Option<&crate::credentials::Credential> {
+        self.credentials.iter().find(|c| c.name == name)
     }
 
     /// What a work branch is named under.
@@ -402,6 +470,22 @@ struct Raw {
     tracker: Option<serde::de::IgnoredAny>,
     branch_prefix: Option<String>,
     interface: Option<String>,
+    /// `[credentials.NAME]` tables. Ordered by name so the create form lists
+    /// them the same way every time.
+    credentials: Option<std::collections::BTreeMap<String, RawCredential>>,
+    sandbox_cpus: Option<u32>,
+    sandbox_memory: Option<String>,
+    sbx: Option<PathBuf>,
+}
+
+/// One `[credentials.NAME]` table.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCredential {
+    kind: String,
+    command: Option<String>,
+    #[serde(rename = "ref")]
+    reference: Option<String>,
 }
 
 /// One `[[mcp]]` table, before it is checked. Its own struct so a misspelled key
@@ -472,12 +556,6 @@ impl std::error::Error for Error {
             _ => None,
         }
     }
-}
-
-/// The same rule `policy::resolve` uses, so validation and resolution cannot
-/// disagree about what is a path.
-fn looks_like_path(spec: &str) -> bool {
-    spec.contains('/') || spec.ends_with(".yaml") || spec.ends_with(".yml")
 }
 
 fn names() -> String {

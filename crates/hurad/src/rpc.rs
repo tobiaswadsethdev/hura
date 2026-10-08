@@ -19,7 +19,6 @@ use hura_core::{
     skills,
 };
 use hura_proto::{Failure, GitOp, McpOp, Outcome, Reply, Request};
-use openshell_client::CliClient;
 
 /// Answer one request.
 ///
@@ -531,16 +530,12 @@ fn events(backend: &dyn Backend, session: &Session) -> Result<Reply, Failure> {
 
 /// The backend, as this server holds it.
 ///
-/// Built per use rather than kept in a `static`: a `CliClient` is a path and two
-/// options, and building it costs a config read. What that buys is an `hurad` that picks up an edited `config.toml`
-/// without a restart, which is the same promise every other read here makes.
+/// Built per use rather than kept in a `static`: a client is a path, and
+/// building one costs a config read. What that buys is an `hurad` that picks up
+/// an edited `config.toml` without a restart, which is the same promise every
+/// other read here makes.
 pub fn backends() -> Backends {
-    let cfg = config::Config::load().unwrap_or_default();
-    let mut client = CliClient::default();
-    if let Some(g) = &cfg.gateway {
-        client = client.with_gateway(g.clone());
-    }
-    Backends::from_client(Box::new(client))
+    Backends::from_config(&config::Config::load().unwrap_or_default())
 }
 
 /// Look a session up by name, and answer for it.

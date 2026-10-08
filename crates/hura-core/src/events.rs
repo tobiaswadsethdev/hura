@@ -401,6 +401,110 @@ impl Event {
     }
 }
 
+/// The decisions in a Docker Sandboxes policy log, as events.
+///
+/// The runtime counts rather than lists: one row per host and rule since its
+/// daemon started, with when it was first and last seen. Each row becomes one
+/// event at its first sighting, so a row seen again is the same event. The
+/// subject takes a shape [`Event::target`] already reads: `METHOD host:port/path`
+/// for a request the proxy judged by its method and path, `host:port` for a
+/// connection. Name lookups are left out; every connection already has a row
+/// of its own, and the lookups are the half nobody acts on.
+pub fn from_sbx(log: &sbx_client::PolicyLog) -> Vec<Event> {
+    let rows = log
+        .blocked_hosts
+        .iter()
+        .map(|e| (e, Verdict::Denied))
+        .chain(log.allowed_hosts.iter().map(|e| (e, Verdict::Allowed)));
+    let mut out: Vec<Event> = rows
+        .filter(|(e, _)| e.proxy_type != "network" && !e.host.ends_with(".docker.internal"))
+        .filter_map(|(e, verdict)| {
+            let at = epoch_of(&e.since)?;
+            let request = requested(&e.rule);
+            let (class, subject) = match &request {
+                Some((method, path)) => (
+                    format!("HTTP:{method}"),
+                    format!("{method} {}{path}", e.host),
+                ),
+                None => ("NET:OPEN".to_string(), e.host.clone()),
+            };
+            Some(Event {
+                at,
+                class,
+                severity: Severity::Info,
+                verdict,
+                subject,
+                policy: deciding_rule(&e.rule),
+                reason: e.reason.clone().filter(|r| !r.is_empty()),
+            })
+        })
+        .collect();
+    out.sort_by_key(|e| std::cmp::Reverse(e.at));
+    out
+}
+
+/// The method and path out of a judged request, from the operation the log
+/// names: `op(action=http:request:post, ..., http:path:/o/r.git/git-receive-pack])`.
+fn requested(rule: &str) -> Option<(String, String)> {
+    let action = rule.split("action=http:request:").nth(1)?;
+    let method: String = action
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect();
+    if method.is_empty() {
+        return None;
+    }
+    let path = rule.split("http:path:").nth(1)?;
+    let path: String = path
+        .chars()
+        .take_while(|c| !matches!(c, ']' | ','))
+        .collect();
+    path.starts_with('/')
+        .then(|| (method.to_ascii_uppercase(), path))
+}
+
+/// The rule that decided, when one did: `local:ID` out of
+/// `denied: rule "local:ID" matched op(...)`. A refusal because nothing matched
+/// names no rule, which is `None` here as `-` was in the gateway's log.
+fn deciding_rule(rule: &str) -> Option<String> {
+    let quoted = rule.split("rule \"").nth(1)?;
+    let id = quoted.split('"').next()?;
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+/// Epoch seconds from an RFC 3339 time, as the runtime writes them:
+/// `2026-10-08T11:34:44.903534058+02:00` or with a `Z`. The fraction is
+/// dropped, for the reason [`Event::at`] gives.
+fn epoch_of(stamp: &str) -> Option<u64> {
+    let (date, rest) = stamp.split_once('T')?;
+    let mut ymd = date.splitn(3, '-').map(|p| p.parse::<i64>().ok());
+    let (y, m, d) = (ymd.next()??, ymd.next()??, ymd.next()??);
+    let (clock, offset) = if let Some(c) = rest.strip_suffix('Z') {
+        (c, 0)
+    } else {
+        let at = rest.rfind(['+', '-'])?;
+        let (c, off) = rest.split_at(at);
+        let sign = if off.starts_with('-') { -1 } else { 1 };
+        let (oh, om) = off[1..].split_once(':')?;
+        (
+            c,
+            sign * (oh.parse::<i64>().ok()? * 3600 + om.parse::<i64>().ok()? * 60),
+        )
+    };
+    let clock = clock.split('.').next()?;
+    let mut hms = clock.splitn(3, ':').map(|p| p.parse::<i64>().ok());
+    let (hh, mm, ss) = (hms.next()??, hms.next()??, hms.next()??);
+    // Days since the epoch from a civil date: Howard Hinnant's algorithm.
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let secs = days * 86_400 + hh * 3600 + mm * 60 + ss - offset;
+    u64::try_from(secs).ok()
+}
+
 /// Bracketed groups the log line puts before the payload.
 const LEADING_GROUPS: usize = 4;
 
@@ -1096,5 +1200,67 @@ mod tests {
         assert!(!Severity::parse("INFO").is_notable());
         // An unknown grade must not be silently downgraded to routine.
         assert!(Severity::parse("WHATEVER").is_notable());
+    }
+
+    /// The log the runtime keeps, read into the feed's own events: a refused
+    /// request by its method and path, a refused connection by its endpoint,
+    /// and the lookups left out.
+    #[test]
+    fn the_runtime_log_reads_as_events() {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sbx-client/tests/fixtures/policy-log.json"
+        ))
+        .unwrap();
+        let log: sbx_client::PolicyLog = serde_json::from_str(&text).unwrap();
+        let events = from_sbx(&log);
+        assert!(
+            events
+                .iter()
+                .all(|e| !e.subject.contains(".docker.internal"))
+        );
+
+        let push = events
+            .iter()
+            .find(|e| e.class == "HTTP:POST" && e.subject.contains("git-receive-pack"))
+            .expect("the refused push");
+        assert_eq!(push.verdict, Verdict::Denied);
+        assert_eq!(
+            push.subject,
+            "POST github.com:443/octocat/Hello-World.git/git-receive-pack"
+        );
+        assert_eq!(
+            push.policy.as_deref(),
+            Some("local:148582d1-e89d-4118-9083-63ab6db02a4a")
+        );
+        let target = push.target().unwrap();
+        assert_eq!(target.endpoint, "github.com:443");
+        assert_eq!(target.binary, None);
+
+        let refused = events
+            .iter()
+            .find(|e| e.subject == "example.com:443")
+            .expect("the refused connection");
+        assert_eq!(refused.class, "NET:OPEN");
+        assert_eq!(refused.policy, None);
+        assert_eq!(refused.target().unwrap().endpoint, "example.com:443");
+
+        assert!(events.iter().any(|e| e.verdict == Verdict::Allowed));
+        assert!(
+            events.windows(2).all(|w| w[0].at >= w[1].at),
+            "newest first"
+        );
+    }
+
+    #[test]
+    fn runtime_timestamps_are_read_in_their_own_offset() {
+        assert_eq!(epoch_of("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(epoch_of("2026-10-08T09:34:44Z"), Some(1_791_452_084));
+        assert_eq!(
+            epoch_of("2026-10-08T11:34:44.903534058+02:00"),
+            Some(1_791_452_084)
+        );
+        assert_eq!(epoch_of("2026-10-08T04:34:44-05:00"), Some(1_791_452_084));
+        assert_eq!(epoch_of("yesterday"), None);
     }
 }

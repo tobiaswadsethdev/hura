@@ -296,15 +296,18 @@ pub fn start_script(backend: &dyn Backend, session: &Session) -> String {
     );
     format!(
         r#"set -eu
-export LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor
+{agent_env}
 if {tmux_bin} has-session -t {tmux} 2>/dev/null; then
   exit 0
 fi
 mkdir -p {hura}
 printf '%s' {task} > {task_path}
+{markers}
 {tmux_bin} new-session -d -s {tmux} -c {repo}
 {tmux_bin} send-keys -t {tmux} {serve} Enter
 "#,
+        markers = crate::seed::agent_markers(&paths),
+        agent_env = crate::seed::AGENT_ENV,
         tmux_bin = backend.tmux(),
         tmux = sh_quote(&session.tmux),
         hura = sh_quote(&paths.hura),
@@ -387,16 +390,23 @@ fn is_closable(name: &str) -> bool {
 /// What [`crate::ops::tell`] is for a chat session: a review goes in as one
 /// message, the way a bracketed paste puts it into a terminal.
 pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(), String> {
-    run(
-        backend,
-        session,
-        &format!(
-            "printf '%s' {} | hura-agent send {}",
-            sh_quote(message),
-            sh_quote(AGENT)
-        ),
-    )
-    .map(drop)
+    // On stdin rather than in the script, for the reason `ops::tell` gives.
+    let out = backend
+        .exec_stdin(
+            session,
+            &["sh", "-c", &format!("hura-agent send {}", sh_quote(AGENT))],
+            message.as_bytes(),
+        )
+        .map_err(|e| e.to_string())?;
+    if !out.ok() {
+        let why = out.stderr.trim();
+        return Err(if why.is_empty() {
+            format!("hura-agent exited with {}", out.exit_code)
+        } else {
+            why.to_string()
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

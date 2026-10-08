@@ -14,6 +14,7 @@
 mod attach;
 mod auth;
 mod forward;
+mod relay;
 mod rpc;
 mod serve;
 mod stream;
@@ -31,7 +32,6 @@ use hura_core::{
     toolchain, update,
 };
 use hura_proto::{DEFAULT_PORT, Pairing};
-use openshell_client::CliClient;
 
 use auth::Tokens;
 use config::Config;
@@ -121,6 +121,14 @@ enum Command {
     Skills,
     /// Check that everything hura depends on is present and working.
     Doctor,
+    /// Carry a port inside a session's sandbox to a loopback port here. Run by
+    /// the server for each preview; not for typing.
+    #[command(hide = true)]
+    Relay {
+        sandbox: String,
+        port: u16,
+        host: String,
+    },
 
     /// Start a session: create a sandbox, clone the repo, cut a work branch.
     New(NewArgs),
@@ -395,15 +403,9 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut client = CliClient::new();
-    // The flag first, the file second: a gateway named on the command line is
-    // about this command, and the file is about every other one.
-    if let Some(g) = cli.gateway.clone().or_else(|| cfg.gateway.clone()) {
-        client = client.with_gateway(g);
-    }
-    // Every command that works on a session goes through this rather than the
-    // client.
-    let backends = Backends::from_client(Box::new(client));
+    // Every command that works on a session goes through this rather than a
+    // client of its own.
+    let backends = Backends::from_config(&cfg);
 
     // Read out before the match, which moves `cli.command`.
     let chosen = cli.server.clone();
@@ -425,6 +427,11 @@ fn main() -> ExitCode {
         Some(Command::Secrets) => list_secrets(),
         Some(Command::Secret { name, forget }) => secret(&name, forget),
         Some(Command::Skills) => list_skills(),
+        Some(Command::Relay {
+            sandbox,
+            port,
+            host,
+        }) => relay::run(&sandbox, port, &host).map_err(Into::into),
         Some(Command::Doctor) => {
             let mut checks = doctor::run(backends.sandboxed(), &loaded);
             // Appended here rather than inside `doctor::run`, because both need
@@ -1398,7 +1405,7 @@ fn serve(opts: Serve) -> Fallible {
         }
         // Not fatal. The gateway can come back, and a server that refuses to
         // start without it is one you cannot reach to find out why.
-        Err(e) => eprintln!("hurad: the gateway did not answer at startup: {e}"),
+        Err(e) => eprintln!("hurad: the sandbox runtime did not answer at startup: {e}"),
     }
 
     // The managed MCP containers, brought up with the server that owns them.

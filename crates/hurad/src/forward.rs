@@ -404,4 +404,11 @@ mod tests {
         let reply = String::from_utf8_lossy(&buf[..n]);
         assert!(reply.starts_with("HTTP/1."), "{reply}");
     }
+
+    /// What `hurad relay` says is what this reads the port from.
+    #[test]
+    fn the_relay_announces_its_port_in_words_this_reads() {
+        let line = crate::relay::announce(44620, "127.0.0.1", 5173, "hura-a");
+        assert_eq!(bound_port(&line), Some(44620));
+    }
 }

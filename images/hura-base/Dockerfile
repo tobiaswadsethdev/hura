@@ -82,6 +82,12 @@ RUN set -eu; \
     test "$installed" = "$version" \
         || { echo "wanted claude $version, got $installed" >&2; exit 1; }
 
+# The sandbox runtime sets ANTHROPIC_API_KEY to a sentinel in every exec, for an
+# Anthropic integration of its own that hura does not use. A tmux server keeps
+# the environment it started with, so whichever exec starts it, the agent in it
+# must not see that variable: Claude Code stops to ask about the key, and would
+# prefer it to the session's own credential.
+#
 # A long scrollback is what makes capture-pane useful for previews and, later,
 # for detecting what the agent is waiting on.
 #
@@ -103,6 +109,7 @@ RUN printf '%s\n' \
         'set-environment -g LANG C.UTF-8' \
         'set-environment -g LC_ALL C.UTF-8' \
         'set-environment -g COLORTERM truecolor' \
+        'set-environment -gu ANTHROPIC_API_KEY' \
     > /etc/tmux.conf \
     && chmod 0644 /etc/tmux.conf
 

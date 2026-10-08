@@ -148,6 +148,8 @@ pub struct CreateOpts {
     /// In the CLI's own units, such as `8g`. `None` leaves its default, which
     /// is half the host's memory.
     pub memory: Option<String>,
+    /// Variables every process in the sandbox gets, `exec` included.
+    pub env: Vec<(String, String)>,
 }
 
 impl CreateOpts {
@@ -179,6 +181,10 @@ impl CreateOpts {
         if let Some(m) = &self.memory {
             out.push("--memory".into());
             out.push(m.clone());
+        }
+        for (k, v) in &self.env {
+            out.push("--env".into());
+            out.push(format!("{k}={v}"));
         }
         out
     }
@@ -498,7 +504,9 @@ pub trait Sbx {
     /// Make a sandbox-scoped secret, returning its placeholder.
     fn add_secret(&self, spec: &SecretSpec) -> Result<String>;
 
-    fn remove_secret(&self, placeholder: &str) -> Result<()>;
+    /// Remove a custom secret. `sandbox` is required for a sandbox-scoped one:
+    /// without it the CLI reports success and leaves the secret in place.
+    fn remove_secret(&self, sandbox: Option<&str>, placeholder: &str) -> Result<()>;
 
     fn templates(&self) -> Result<Vec<Template>>;
 
@@ -844,11 +852,12 @@ impl Sbx for CliClient {
         })
     }
 
-    fn remove_secret(&self, placeholder: &str) -> Result<()> {
-        self.run_checked(
-            &strings(&["secret", "rm", "--placeholder", placeholder, "--force"]),
-            None,
-        )?;
+    fn remove_secret(&self, sandbox: Option<&str>, placeholder: &str) -> Result<()> {
+        let mut args = strings(&["secret", "rm", "--placeholder", placeholder, "--force"]);
+        if let Some(sb) = sandbox {
+            args.extend(strings(&["--sandbox", sb]));
+        }
+        self.run_checked(&args, sandbox)?;
         Ok(())
     }
 
@@ -1019,11 +1028,12 @@ mod tests {
             template: "hura-sandbox:latest".into(),
             cpus: Some(4),
             memory: Some("8g".into()),
+            env: vec![("GITHUB_TOKEN".into(), "hura-cs-x".into())],
         };
         assert_eq!(
             create.args().join(" "),
             "create shell --name hura-a --template hura-sandbox:latest --pull never \
-             --skills off --quiet --cpus 4 --memory 8g"
+             --skills off --quiet --cpus 4 --memory 8g --env GITHUB_TOKEN=hura-cs-x"
         );
 
         let rule = RuleSpec {

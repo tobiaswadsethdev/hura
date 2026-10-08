@@ -2,21 +2,12 @@
 //!
 //! A session is a task plus the sandbox running it. The **sandbox is the
 //! source of truth**: seeding writes `/sandbox/.hura/meta.json` inside it, so a
-//! session survives losing the local cache entirely. Labels carry only
-//! identity, because the gateway restricts label values to Kubernetes rules -
-//! at most 63 characters of `[A-Za-z0-9._-]`, which cannot hold a repo URL or
-//! a branch name containing `/`.
+//! session survives losing the local cache entirely. Its name says which
+//! session it is (`hura-<session>`), since the sandbox runtime has no labels.
 
-use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-
-/// Marks a sandbox as ours, so discovery never touches sandboxes created by
-/// hand or by another tool.
-pub const LABEL_MANAGED: &str = "hura.managed";
-pub const LABEL_SESSION: &str = "hura.session";
-pub const SELECTOR_MANAGED: &str = "hura.managed=true";
 
 /// Where the metadata record lives inside the sandbox.
 pub const META_PATH: &str = "/sandbox/.hura/meta.json";
@@ -60,39 +51,17 @@ pub const IMAGE: &str = "hura-sandbox:latest";
 /// two places to rename it. See [`crate::toolchain::tag`].
 pub const IMAGE_REPO: &str = "hura-sandbox";
 
-/// Gateway limit on a label value.
-const MAX_LABEL_VALUE: usize = 63;
-/// Gateway limit on a sandbox name, measured against 0.0.110.
-const MAX_SANDBOX_NAME: usize = 19;
 /// Prefix applied to sandbox and tmux names, so ours are recognisable in
-/// `openshell sandbox list` alongside sandboxes created by hand.
+/// `sbx ls` beside sandboxes created by hand, and so a sandbox says which
+/// session it is: everything after the prefix.
 const PREFIX: &str = "hura-";
-/// How much of a *sandbox* name is left for the session's own name.
-const MAX_NAME_IN_SANDBOX: usize = MAX_SANDBOX_NAME - PREFIX.len();
 
 /// How long a session name may be.
 ///
-/// Deliberately longer than a sandbox name can hold. `hura-` plus fifteen
-/// characters is what the gateway allows, and fifteen characters of a task
-/// produce names like `i-want-to-add`: the *filler* survives and the subject is
-/// cut off. So the session name is ours and the sandbox name is derived from it
-/// -- see [`sandbox_name`] -- and the full name travels in the `hura.session`
-/// label, which has 63 characters to spend.
-///
-/// Forty rather than sixty-three: the name is also a branch (`hura/<name>`), a
-/// column in the list, and something you type after `hura attach`.
+/// The name is also a branch (`hura/<name>`), a column in the list, and
+/// something you type after `hura attach`. The sandbox, `hura-` and the name,
+/// stays well inside the 63 characters the runtime accepts.
 const MAX_NAME: usize = 40;
-
-/// Characters of the name kept when a sandbox name has to be shortened: what
-/// is left once the dash and the four hex digits of the discriminator below
-/// have had theirs.
-///
-/// Worked out from the budget rather than written down, because written down
-/// it was ten, one more than there is room for. The names it was tested with
-/// all had a dash as their tenth character, which is trimmed, so they came to
-/// nineteen; `data-239-all-campaign-costs-from-google` came to twenty, and the
-/// gateway refused to create its sandbox.
-const SANDBOX_STEM: usize = MAX_NAME_IN_SANDBOX - "-0000".len();
 
 /// The size to leave the agent's tmux window at when nothing is attached.
 ///
@@ -105,43 +74,26 @@ pub const SCRAPE_SIZE: (u16, u16) = (200, 50);
 /// The sandbox a session of this name owns.
 ///
 /// The convention, in one place. Deleting and adopting both have to name a
-/// sandbox without a record to read it from -- that is the whole point of
-/// having a convention -- and two copies of this `format!` would be two things
+/// sandbox without a record to read it from, which is the whole point of
+/// having a convention, and two copies of this `format!` would be two things
 /// to keep in step with [`Session::new`].
 pub fn sandbox_name(name: &str) -> String {
-    if name.len() <= MAX_NAME_IN_SANDBOX {
-        return format!("{PREFIX}{name}");
-    }
-    // Truncation alone would collide: `maxgaming-scala-customer-id` and
-    // `maxgaming-scala-tax` share their first fifteen characters, and the two
-    // sessions would name one sandbox. So a long name keeps its first nine
-    // characters -- enough to recognise in `openshell sandbox list` -- and ends
-    // in four hex digits of the *whole* name, which keeps this a pure function
-    // of the session name. That is what makes it a convention rather than a
-    // lookup: deleting or adopting a sandbox has to name it without a record to
-    // read it from.
-    let stem: String = name.chars().take(SANDBOX_STEM).collect();
-    format!("{PREFIX}{}-{:04x}", stem.trim_end_matches('-'), tag(name))
+    format!("{PREFIX}{name}")
 }
 
-/// FNV-1a, folded to sixteen bits. A hash, not a checksum: it only has to
-/// scatter names that share a prefix, and writing four lines beats a dependency.
-fn tag(name: &str) -> u16 {
-    let mut h: u32 = 0x811c_9dc5;
-    for b in name.as_bytes() {
-        h ^= u32::from(*b);
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    ((h >> 16) ^ h) as u16
+/// The session a sandbox belongs to, read off its name. `None` for a sandbox
+/// that is not one of hura's, which includes one that only starts with the
+/// prefix but could not have been made from a session name.
+pub fn session_of(sandbox: &str) -> Option<&str> {
+    let name = sandbox.strip_prefix(PREFIX)?;
+    validate_name(name).is_ok().then_some(name)
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum NameError {
     #[error("name is empty")]
     Empty,
-    #[error(
-        "name is longer than {MAX_NAME} characters (the gateway caps sandbox names at {MAX_SANDBOX_NAME})"
-    )]
+    #[error("name is longer than {MAX_NAME} characters")]
     TooLong,
     #[error("name must be lowercase letters, digits and dashes; `{0}` is not allowed")]
     BadChar(char),
@@ -288,7 +240,6 @@ pub fn validate_name(name: &str) -> Result<(), NameError> {
     if !name.starts_with(edges_ok) || !name.ends_with(edges_ok) {
         return Err(NameError::BadEdge);
     }
-    debug_assert!(name.len() <= MAX_LABEL_VALUE);
     Ok(())
 }
 
@@ -525,13 +476,6 @@ impl Session {
             failure: None,
         }
     }
-
-    pub fn labels(&self) -> BTreeMap<String, String> {
-        let mut l = BTreeMap::new();
-        l.insert(LABEL_MANAGED.to_string(), "true".to_string());
-        l.insert(LABEL_SESSION.to_string(), self.name.clone());
-        l
-    }
 }
 
 #[cfg(test)]
@@ -650,101 +594,33 @@ mod tests {
         );
     }
 
-    /// Long enough to say what the session is, and still a legal branch, label
-    /// and list column.
+    /// Long enough to say what the session is, and still a legal branch and
+    /// list column.
     #[test]
-    fn a_name_may_be_longer_than_a_sandbox_name() {
+    fn a_long_name_is_still_a_session() {
         let long = "add-maxgaming-scala-customer-id-to-prod";
-        assert!(long.len() > MAX_NAME_IN_SANDBOX && long.len() <= MAX_NAME);
+        assert!(long.len() <= MAX_NAME);
         assert_eq!(validate_name(long), Ok(()));
 
         let s = Session::new(long.into(), "https://example.com/r.git".into(), "t".into());
         assert_eq!(s.work_branch, format!("hura/{long}"));
-        assert_eq!(
-            s.labels().get(LABEL_SESSION).map(String::as_str),
-            Some(long),
-            "the full name lives in the label, whatever the sandbox is called"
-        );
+        assert_eq!(s.sandbox, format!("hura-{long}"));
     }
 
-    /// The derived sandbox name is a pure function of the session name -- that
-    /// is what lets `hura rm` and adoption name a sandbox with no record to read.
+    /// The sandbox is a pure function of the session name and the session is
+    /// read back off it, which is what lets `hura rm` and adoption name a
+    /// sandbox with no record to read.
     #[test]
-    fn a_long_name_gets_a_short_sandbox_of_its_own() {
-        let a = "maxgaming-scala-customer-id";
-        let b = "maxgaming-scala-tax-rate";
-
-        for name in [a, b] {
-            let sandbox = sandbox_name(name);
-            assert!(
-                sandbox.len() <= MAX_SANDBOX_NAME,
-                "`{sandbox}` is {} long",
-                sandbox.len()
-            );
-            assert!(sandbox.starts_with("hura-maxgaming"), "{sandbox}");
-            assert_eq!(sandbox, sandbox_name(name), "must be deterministic");
+    fn a_sandbox_says_which_session_it_is() {
+        for name in ["add-auth", "data-239-all-campaign-costs-from-google"] {
+            assert_eq!(session_of(&sandbox_name(name)), Some(name));
         }
-        assert_ne!(
-            sandbox_name(a),
-            sandbox_name(b),
-            "two names sharing fifteen characters must not share a sandbox"
-        );
-
-        // Short names are untouched, so sandboxes created before this keep the
-        // names they already have.
-        assert_eq!(sandbox_name("add-auth"), "hura-add-auth");
-        assert_eq!(
-            sandbox_name(&"a".repeat(MAX_NAME_IN_SANDBOX)).len(),
-            MAX_SANDBOX_NAME
-        );
-    }
-
-    /// Whatever the cut lands on, the sandbox name fits. The names above all
-    /// cut on a dash, which is trimmed, and that hid a stem one character too
-    /// long: a name cut on a letter came to twenty, and the gateway refused it
-    /// with `name exceeds maximum length (20 > 19)`.
-    #[test]
-    fn a_shortened_sandbox_name_fits_whatever_it_is_cut_on() {
-        for len in 1..=MAX_NAME {
-            let sandbox = sandbox_name(&"a".repeat(len));
-            assert!(
-                sandbox.len() <= MAX_SANDBOX_NAME,
-                "`{sandbox}` is {} long",
-                sandbox.len()
-            );
-        }
-        assert_eq!(
-            sandbox_name("data-239-all-campaign-costs-from-google"),
-            "hura-data-239-19fb"
-        );
-    }
-
-    /// Sandboxes already made keep their names. Only a stem cut on a dash ever
-    /// fitted, and nine characters trimmed is the same as ten trimmed when the
-    /// tenth is a dash, so shortening the stem renamed nothing that exists.
-    #[test]
-    fn sandboxes_made_before_the_stem_shrank_keep_their_names() {
-        assert_eq!(
-            sandbox_name("maxgaming-scala-customer-id"),
-            "hura-maxgaming-92cf"
-        );
-        assert_eq!(
-            sandbox_name("maxgaming-scala-tax-rate"),
-            "hura-maxgaming-7a38"
-        );
-        assert_eq!(
-            sandbox_name("fix-thing-with-a-long-tail"),
-            "hura-fix-thing-2e65"
-        );
-    }
-
-    /// A stem cut mid-name must not leave the dash next to the discriminator.
-    #[test]
-    fn a_shortened_sandbox_name_never_doubles_its_dash() {
-        // Ten characters of this land exactly on a dash.
-        let sandbox = sandbox_name("fix-thing-with-a-long-tail");
-        assert!(!sandbox.contains("--"), "{sandbox}");
-        assert!(sandbox.len() <= MAX_SANDBOX_NAME);
+        // The longest name fits what the runtime accepts, measured at 63.
+        assert!(sandbox_name(&"a".repeat(MAX_NAME)).len() <= 63);
+        // Not ours: no prefix, or something after it no session could be.
+        assert_eq!(session_of("claude-workspace"), None);
+        assert_eq!(session_of("hura-"), None);
+        assert_eq!(session_of("hura-Spike_A"), None);
     }
 
     #[test]
@@ -795,17 +671,6 @@ mod tests {
         assert_eq!(s.sandbox, "hura-add-auth");
         assert_eq!(s.tmux, TMUX_SESSION);
         assert_eq!(s.work_branch, "hura/add-auth");
-        let l = s.labels();
-        assert_eq!(l.get(LABEL_SESSION).map(String::as_str), Some("add-auth"));
-        assert_eq!(l.get(LABEL_MANAGED).map(String::as_str), Some("true"));
-        // Every label value must satisfy the gateway's rules.
-        for v in l.values() {
-            assert!(v.len() <= MAX_LABEL_VALUE);
-            assert!(
-                v.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
-            );
-        }
     }
 
     /// `published` went with `hurad publish`. A record still carrying it is a

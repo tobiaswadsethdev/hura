@@ -12,7 +12,7 @@
 //! isolation at all. It was removed: two backends meant two of everything to
 //! keep working, and the isolation is the product.
 
-use openshell_client::{OpenShell, PolicyRevision, PolicyUpdate};
+use openshell_client::{PolicyRevision, PolicyUpdate};
 
 use crate::doctor::Check;
 use crate::events::Event;
@@ -21,7 +21,7 @@ use crate::session::{self, Session};
 
 mod sandboxed;
 
-pub use sandboxed::Sandboxed;
+pub use sandboxed::{Sandboxed, Settings};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -121,6 +121,12 @@ impl Paths {
     pub fn seed_script(&self) -> String {
         format!("{}/seed.sh", self.hura)
     }
+    /// Left by the first start of the session's agent, and kept: a session
+    /// that once had an agent gets it back after its sandbox restarts. See
+    /// [`crate::seed::resume_check`].
+    pub fn agent_started(&self) -> String {
+        format!("{}/agent-started", self.hura)
+    }
 }
 
 /// The `.hura` directory inside a sandbox. Not public: [`Paths::in_sandbox`] is
@@ -147,6 +153,13 @@ pub trait Backend {
     fn paths(&self, session: &Session) -> Paths;
 
     fn exec(&self, session: &Session, argv: &[&str]) -> Result<ExecOutput>;
+
+    /// Run a command with `input` on its stdin.
+    ///
+    /// For anything that does not belong in an argument: a script carrying a
+    /// task and the skills, a review, a message. Linux caps a single argument
+    /// at 128 KiB, and none of those has a size of its own choosing.
+    fn exec_stdin(&self, session: &Session, argv: &[&str], input: &[u8]) -> Result<ExecOutput>;
 
     /// The argv a terminal emulator spawns to attach to this session.
     fn interactive_argv(&self, session: &Session, argv: &[&str]) -> Result<Vec<String>>;
@@ -239,8 +252,19 @@ impl Backends {
         Backends { sandboxed }
     }
 
-    pub fn from_client(client: Box<dyn OpenShell>) -> Self {
-        Backends::new(Sandboxed::new(client))
+    pub fn from_client(client: Box<dyn sbx_client::Sbx>, settings: Settings) -> Self {
+        Backends::new(Sandboxed::new(client, settings))
+    }
+
+    /// The backend as the config file describes it: the `sbx` it names, or the
+    /// one found on `PATH` or where its installer puts it, and the sizes and
+    /// credentials sessions are made with.
+    pub fn from_config(cfg: &crate::config::Config) -> Self {
+        let mut client = sbx_client::CliClient::new();
+        if let Some(bin) = &cfg.sbx {
+            client = client.with_bin(bin);
+        }
+        Backends::from_client(Box::new(client), Settings::from_config(cfg))
     }
 
     pub fn for_session(&self, _session: &Session) -> &dyn Backend {
@@ -258,67 +282,92 @@ impl Backends {
 ///
 /// Almost every test in this crate about a backend is about the script it
 /// produces -- the diff, the poll, the seeder, the publish -- and a script is
-/// pure. What was missing was a way to get a [`Backend`] without a gateway to
-/// talk to, which is why this exists and why its `OpenShell` panics: a test
+/// pure. What was missing was a way to get a [`Backend`] without a sandbox
+/// runtime to talk to, which is why this exists and why its `Sbx` panics: a test
 /// that reaches the network through one of these is a test that meant to be a
 /// live test.
 #[cfg(test)]
 pub(crate) mod testing {
-    use openshell_client::{
-        CreateOpts, ExecOutput, GatewayStatus, OpenShell, PolicyRevision, PolicyUpdate, Provider,
-        Result as OsResult, Sandbox,
+    use std::path::Path;
+
+    use sbx_client::{
+        CreateOpts, CustomSecret, ExecOutput, PolicyLog, Port, Result as SbxResult, Rule, RuleSpec,
+        Sandbox, Sbx, SecretSpec, Template, Version,
     };
 
-    use super::Sandboxed;
+    use super::{Sandboxed, Settings};
 
     pub(crate) fn sandboxed() -> Sandboxed {
-        Sandboxed::new(Box::new(NoGateway))
+        Sandboxed::new(Box::new(NoSandboxes), Settings::default())
     }
 
-    struct NoGateway;
+    struct NoSandboxes;
 
     /// Every method unreachable, on purpose. See the module comment.
-    impl OpenShell for NoGateway {
-        fn status(&self) -> OsResult<GatewayStatus> {
-            unreachable!("no gateway in a script test")
+    impl Sbx for NoSandboxes {
+        fn version(&self) -> SbxResult<Version> {
+            unreachable!("no sandboxes in a script test")
         }
-        fn create(&self, _: &CreateOpts) -> OsResult<Sandbox> {
-            unreachable!("no gateway in a script test")
+        fn create(&self, _: &CreateOpts) -> SbxResult<()> {
+            unreachable!("no sandboxes in a script test")
         }
-        fn list(&self, _: Option<&str>) -> OsResult<Vec<Sandbox>> {
-            unreachable!("no gateway in a script test")
+        fn detach(&self, _: &str) -> SbxResult<()> {
+            unreachable!("no sandboxes in a script test")
         }
-        fn get(&self, _: &str) -> OsResult<Sandbox> {
-            unreachable!("no gateway in a script test")
+        fn list(&self) -> SbxResult<Vec<Sandbox>> {
+            unreachable!("no sandboxes in a script test")
         }
-        fn exec(&self, _: &str, _: &[&str]) -> OsResult<ExecOutput> {
-            unreachable!("no gateway in a script test")
+        fn exec(&self, _: &str, _: &[&str]) -> SbxResult<ExecOutput> {
+            unreachable!("no sandboxes in a script test")
         }
-        fn delete(&self, _: &str) -> OsResult<()> {
-            unreachable!("no gateway in a script test")
-        }
-        fn policy(&self, _: &str) -> OsResult<PolicyRevision> {
-            unreachable!("no gateway in a script test")
-        }
-        fn policy_update(&self, _: &str, _: &PolicyUpdate) -> OsResult<()> {
-            unreachable!("no gateway in a script test")
-        }
-        fn logs(&self, _: &str, _: usize) -> OsResult<String> {
-            unreachable!("no gateway in a script test")
-        }
-        fn providers(&self) -> OsResult<Vec<Provider>> {
-            unreachable!("no gateway in a script test")
+        fn exec_stdin(&self, _: &str, _: &[&str], _: &[u8]) -> SbxResult<ExecOutput> {
+            unreachable!("no sandboxes in a script test")
         }
         fn interactive_argv(&self, name: &str, argv: &[&str]) -> Vec<String> {
             // The one method that is pure: it builds a command line and talks
             // to nothing, and a test about attaching wants to read it.
-            let mut out = vec!["openshell".to_string()];
-            out.extend(["sandbox", "exec", "-n", name, "--tty", "--"].map(String::from));
-            out.extend(argv.iter().map(|a| (*a).to_string()));
-            out
+            sbx_client::CliClient::new()
+                .with_bin("sbx")
+                .interactive_argv(name, argv)
         }
-        fn forward_argv(&self, _: &str, _: u16, _: &str) -> Vec<String> {
-            unreachable!("no gateway in a script test")
+        fn remove(&self, _: &str) -> SbxResult<()> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn rules(&self, _: &str) -> SbxResult<Vec<Rule>> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn add_rule(&self, _: &str, _: &RuleSpec) -> SbxResult<String> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn remove_rule(&self, _: &str, _: &str) -> SbxResult<()> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn log(&self, _: &str) -> SbxResult<PolicyLog> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn ports(&self, _: &str) -> SbxResult<Vec<Port>> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn publish(&self, _: &str, _: u16) -> SbxResult<Port> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn unpublish(&self, _: &str, _: &Port) -> SbxResult<()> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn secrets(&self) -> SbxResult<Vec<CustomSecret>> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn add_secret(&self, _: &SecretSpec) -> SbxResult<String> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn remove_secret(&self, _: Option<&str>, _: &str) -> SbxResult<()> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn templates(&self) -> SbxResult<Vec<Template>> {
+            unreachable!("no sandboxes in a script test")
+        }
+        fn load_template(&self, _: &Path) -> SbxResult<()> {
+            unreachable!("no sandboxes in a script test")
         }
     }
 }

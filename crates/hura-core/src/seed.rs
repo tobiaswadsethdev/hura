@@ -302,15 +302,20 @@ pub fn launch(
 ) -> Result<(), SeedError> {
     let paths = backend.paths(session);
     let script = detached_script(backend, session, start_agent);
+    // The script arrives on stdin, since it carries the task and every skill
+    // and an argument is capped at 128 KiB. It is written before anything is
+    // put in the background: a background job in a non-interactive shell has
+    // its stdin replaced with /dev/null, so a `cat` there writes nothing.
     let launcher = format!(
-        "mkdir -p {dir} && printf '%s' {script} > {path} &&          setsid sh {path} > {log} 2>&1 < /dev/null &          sleep 0.1",
+        "mkdir -p {dir} && cat > {path} || exit 1\n\
+         setsid sh {path} > {log} 2>&1 < /dev/null &\n\
+         sleep 0.1",
         dir = sh_quote(&paths.hura),
-        script = sh_quote(&script),
         path = sh_quote(&paths.seed_script()),
         log = sh_quote(&paths.seed_log()),
     );
 
-    let out = backend.exec(session, &["sh", "-c", &launcher])?;
+    let out = backend.exec_stdin(session, &["sh", "-c", &launcher], script.as_bytes())?;
     if !out.ok() {
         return Err(SeedError::Script {
             code: out.exit_code,
@@ -419,22 +424,29 @@ pub fn start_agent_script(backend: &dyn Backend, session: &Session) -> String {
         format!("{} \"$(cat {})\"", session.agent, paths.task())
     };
 
-    // The locale is exported here as well as in the image, because this runs as
-    // an exec and the gateway does not pass the image's environment through --
-    // and this exec is the one that starts the *tmux server*, whose environment
-    // every pane inherits. An agent with no UTF-8 locale draws its own box rules
-    // and glyphs as something tmux cannot map. See `ops::attach_script`.
+    // This exec is the one that starts the *tmux server*, whose environment
+    // every pane inherits, so what the agent should and should not see is
+    // settled here. The locale, because an agent with no UTF-8 locale draws its
+    // own box rules and glyphs as something tmux cannot map; see
+    // `ops::attach_script`. And not the runtime's `ANTHROPIC_API_KEY`: the
+    // sandbox runtime puts a sentinel in every exec for its own Anthropic
+    // integration, and Claude Code stops on "Detected a custom API key" before
+    // it reaches the task, and would then use it over the session's own
+    // credential. See `AGENT_ENV`.
     format!(
         r#"set -eu
-export LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor
+{agent_env}
 if {tmux_bin} has-session -t {tmux} 2>/dev/null; then
   exit 0
 fi
 mkdir -p {hura}
 printf '%s' {task} > {task_path}
+{markers}
 {tmux_bin} new-session -d -s {tmux} -c {repo}
 {tmux_bin} send-keys -t {tmux} {launch} Enter
 "#,
+        markers = agent_markers(&paths),
+        agent_env = AGENT_ENV,
         tmux_bin = backend.tmux(),
         tmux = sh_quote(&session.tmux),
         hura = sh_quote(&paths.hura),
@@ -442,6 +454,74 @@ printf '%s' {task} > {task_path}
         task_path = sh_quote(&paths.task()),
         repo = sh_quote(&paths.repo),
         launch = sh_quote(&launch),
+    )
+}
+
+/// The environment an agent is started in, as shell: the locale it draws
+/// with, and none of the sandbox runtime's Anthropic sentinel, which the
+/// runtime sets in every exec and Claude Code would otherwise ask about and
+/// then prefer to the session's own credential.
+pub const AGENT_ENV: &str =
+    "export LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor\nunset ANTHROPIC_API_KEY";
+
+/// Where a sandbox remembers, for one boot, that its agent has been started.
+///
+/// On a tmpfs, so it is gone after every start of the sandbox, which is the
+/// point: its absence beside an agent that once ran says the sandbox was
+/// stopped and started since, and the agent with it. The image's user is UID
+/// 1000, and this is its runtime directory.
+pub const BOOT_MARKER: &str = "/run/user/1000/hura-agent-up";
+
+/// Shell leaving both markers: the agent has been started, ever and this boot.
+pub fn agent_markers(paths: &Paths) -> String {
+    format!(
+        ": > {started} && : > {boot}",
+        started = sh_quote(&paths.agent_started()),
+        boot = sh_quote(BOOT_MARKER),
+    )
+}
+
+/// Shell for the start of the status poll that brings an agent back after its
+/// sandbox has been stopped and started: by the runtime's daemon restarting,
+/// or the machine.
+///
+/// Only when all three say so: the session had an agent, this boot has not
+/// started one, and tmux has no session for it. An agent closed in the same
+/// boot leaves the boot marker behind, so it is not restarted against your
+/// wishes; a session created without one never had the first marker. Its
+/// output goes nowhere, since the poll's output is the poll's.
+///
+/// A terminal agent continues its last conversation rather than starting the
+/// task again; a chat host reloads its conversations from the transcripts
+/// itself.
+pub fn resume_check(backend: &dyn Backend, session: &Session) -> String {
+    let paths = backend.paths(session);
+    let restart = match session.interface {
+        crate::chat::Interface::Chat => crate::chat::start_script(backend, session),
+        crate::chat::Interface::Terminal => format!(
+            r#"set -eu
+{agent_env}
+{markers}
+{tmux_bin} new-session -d -s {tmux} -c {repo}
+{tmux_bin} send-keys -t {tmux} {launch} Enter
+"#,
+            agent_env = AGENT_ENV,
+            markers = agent_markers(&paths),
+            tmux_bin = backend.tmux(),
+            tmux = sh_quote(&session.tmux),
+            repo = sh_quote(&paths.repo),
+            launch = sh_quote(&format!("{} --continue", session.agent)),
+        ),
+    };
+    format!(
+        "if [ -e {started} ] && [ ! -e {boot} ] && ! {tmux_bin} has-session -t {tmux} 2>/dev/null; then\n\
+         ( sh -c {restart} ) >/dev/null 2>&1 || true\n\
+         fi",
+        started = sh_quote(&paths.agent_started()),
+        boot = sh_quote(BOOT_MARKER),
+        tmux_bin = backend.tmux(),
+        tmux = sh_quote(&session.tmux),
+        restart = sh_quote(&restart),
     )
 }
 
@@ -882,5 +962,42 @@ mkdir -p "$dest/.git"
             script.contains("do the thing"),
             "task must survive into the sandbox"
         );
+    }
+
+    /// After a stop and a start, the poll brings the agent back, and only then:
+    /// it checks for an agent ever started, none started this boot, and no
+    /// tmux session, and a terminal agent continues rather than starting the
+    /// task over.
+    #[test]
+    fn a_restarted_sandbox_gets_its_agent_back_and_only_then() {
+        let s = Session::new(
+            "a".into(),
+            "https://example.com/r.git".into(),
+            "the task".into(),
+        );
+        let check = resume_check(&sandboxed(), &s);
+        assert!(
+            check.contains("[ -e '/sandbox/.hura/agent-started' ]"),
+            "{check}"
+        );
+        assert!(
+            check.contains(&format!("[ ! -e '{BOOT_MARKER}' ]")),
+            "{check}"
+        );
+        assert!(check.contains("has-session -t 'agent'"), "{check}");
+        assert!(check.contains("claude --continue"), "{check}");
+        assert!(
+            !check.contains("the task"),
+            "a resume must not send the task again"
+        );
+
+        // Every start leaves both markers, so a resumed agent is not resumed
+        // again on the next poll.
+        let start = start_agent_script(&sandboxed(), &s);
+        assert!(
+            start.contains(&agent_markers(&sandboxed().paths(&s))),
+            "{start}"
+        );
+        assert!(start.contains("unset ANTHROPIC_API_KEY"), "{start}");
     }
 }

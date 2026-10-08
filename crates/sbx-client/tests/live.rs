@@ -35,6 +35,7 @@ impl<'a> Made<'a> {
                 template: TEMPLATE.into(),
                 cpus: Some(2),
                 memory: Some("2g".into()),
+                env: vec![],
             })
             .unwrap();
         Made {
@@ -162,7 +163,7 @@ fn removing_a_sandbox_takes_its_rules_and_secrets() {
         .unwrap()
         .iter()
         .any(|s| s.placeholder == placeholder);
-    let _ = c.remove_secret(&placeholder);
+    let _ = c.remove_secret(Some(name), &placeholder);
     println!("rule left behind: {leftover_rule}, secret left behind: {leftover_secret}");
     assert!(
         !leftover_rule,

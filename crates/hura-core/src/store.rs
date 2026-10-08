@@ -20,9 +20,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-use openshell_client::{Phase, Sandbox};
-
-use crate::session::{self, LABEL_SESSION, Session, State};
+use crate::session::{self, Session, State};
 
 #[derive(Debug, Default)]
 pub struct Store {
@@ -170,6 +168,31 @@ pub fn update_at<T>(
     result
 }
 
+/// A sandbox as reconciling sees it, whatever runs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Live {
+    pub sandbox: String,
+    /// The session it belongs to, when it is one of hura's. `None` for a
+    /// sandbox that only shares the naming convention.
+    pub session: Option<String>,
+    pub status: Status,
+}
+
+/// Where a live sandbox is in its life.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    Running,
+    /// On its way up, and not ready to run anything yet.
+    Starting,
+    /// Stopped with its files kept. Any exec starts it again, which is why
+    /// nothing that only looks at a session may exec into one.
+    Stopped,
+    Deleting,
+    Error,
+    /// Something this build does not name, left alone.
+    Other(String),
+}
+
 /// What reconciling the cache against live sandboxes produced.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Reconciliation {
@@ -212,10 +235,10 @@ const CREATING_GRACE: u64 = 15 * 60;
 /// list a second later with its old task and its old branch.
 pub fn reconcile(
     cached: Vec<Session>,
-    live: &[Sandbox],
+    live: &[Live],
     removed: &BTreeSet<String>,
 ) -> Reconciliation {
-    let by_name: BTreeMap<&str, &Sandbox> = live.iter().map(|s| (s.name.as_str(), s)).collect();
+    let by_name: BTreeMap<&str, &Live> = live.iter().map(|s| (s.sandbox.as_str(), s)).collect();
     let now = session::now_epoch();
 
     let mut out = Reconciliation::default();
@@ -235,11 +258,11 @@ pub fn reconcile(
                 }
                 session.state = State::Dead;
             }
-            Some(sb) => match sb.phase {
+            Some(sb) => match sb.status {
                 // Deletion is asynchronous: the sandbox stays listed as
                 // `Deleting` for a while, and treating that as alive leaves a
                 // removed session showing as healthy.
-                Phase::Deleting => {
+                Status::Deleting => {
                     if session.state != State::Dead {
                         out.dead.push(session.name.clone());
                     }
@@ -247,14 +270,23 @@ pub fn reconcile(
                 }
                 // Said only where nothing more particular has been: a create
                 // that recorded why it failed knows more than the phase does.
-                Phase::Error => {
+                Status::Error => {
                     session.state = State::Failed;
                     session.failure.get_or_insert_with(|| {
-                        format!("the gateway reports its sandbox `{}` in `Error`", sb.name)
+                        format!("its sandbox `{}` reports an error", sb.sandbox)
                     });
                 }
-                Phase::Stopped => session.state = State::Idle,
-                Phase::Ready if session.state == State::Dead => session.state = State::Ready,
+                // A stopped sandbox keeps its files and starts again on the
+                // next exec, so the session is resting rather than gone.
+                Status::Stopped
+                    if matches!(session.state, State::Ready | State::Idle | State::Dead) =>
+                {
+                    session.state = State::Idle;
+                }
+                // Started again, by whatever exec'd into it first.
+                Status::Running if matches!(session.state, State::Dead | State::Idle) => {
+                    session.state = State::Ready;
+                }
                 // A sandbox that is not running yet, under a record that claims
                 // it is. Only reachable for a session whose create finished
                 // long ago -- a create of its own waits for `Ready` before it
@@ -265,7 +297,7 @@ pub fn reconcile(
                 // it actually is, and the states in flight are left alone for
                 // the reason `in_flight_states_are_left_alone` gives: a create
                 // in another process owns them.
-                Phase::Provisioning | Phase::Starting
+                Status::Starting
                     if matches!(session.state, State::Ready | State::Idle | State::Dead) =>
                 {
                     session.state = State::Creating;
@@ -283,7 +315,7 @@ pub fn reconcile(
 
     let known: Vec<&str> = out.sessions.iter().map(|s| s.name.as_str()).collect();
     for sb in live {
-        let Some(name) = sb.labels.get(LABEL_SESSION) else {
+        let Some(name) = &sb.session else {
             continue;
         };
         // A session someone destroyed, whose sandbox the gateway is still
@@ -302,7 +334,13 @@ pub fn reconcile(
         // Kept as well as the tombstone above rather than replaced by it: this
         // one also covers a sandbox removed by something that is not this tool,
         // which leaves no tombstone at all.
-        if sb.phase == Phase::Deleting {
+        if sb.status == Status::Deleting {
+            continue;
+        }
+        // Adopting one means reading its record out of it, and an exec starts
+        // a stopped sandbox. One that was stopped is adopted once something
+        // has started it again, rather than started here by a refresh.
+        if sb.status != Status::Running {
             continue;
         }
         if !known.contains(&name.as_str()) {
@@ -315,26 +353,14 @@ pub fn reconcile(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use openshell_client::{Phase, Sandbox};
-
     use super::*;
-    use crate::session::{LABEL_MANAGED, Session};
+    use crate::session::Session;
 
-    fn sandbox(name: &str, phase: Phase, session_label: Option<&str>) -> Sandbox {
-        let mut labels = BTreeMap::new();
-        labels.insert(LABEL_MANAGED.to_string(), "true".to_string());
-        if let Some(s) = session_label {
-            labels.insert(LABEL_SESSION.to_string(), s.to_string());
-        }
-        Sandbox {
-            id: format!("id-{name}"),
-            name: name.to_string(),
-            phase,
-            created_at: "2026-08-21 14:15:56".to_string(),
-            labels,
-            workspace: "default".to_string(),
+    fn sandbox(name: &str, status: Status, session: Option<&str>) -> Live {
+        Live {
+            sandbox: name.to_string(),
+            session: session.map(str::to_string),
+            status,
         }
     }
 
@@ -347,7 +373,7 @@ mod tests {
     /// [`super::reconcile`] with nothing tombstoned, which is what every case
     /// below except the two about tombstones is about. Shadows the real one so
     /// those cases stay one argument wide.
-    fn reconcile(cached: Vec<Session>, live: &[Sandbox]) -> Reconciliation {
+    fn reconcile(cached: Vec<Session>, live: &[Live]) -> Reconciliation {
         super::reconcile(cached, live, &BTreeSet::new())
     }
 
@@ -453,7 +479,7 @@ mod tests {
     /// must not report an error.
     #[test]
     fn a_sandbox_being_deleted_is_not_an_orphan() {
-        let live = vec![sandbox("hura-gone", Phase::Deleting, Some("gone"))];
+        let live = vec![sandbox("hura-gone", Status::Deleting, Some("gone"))];
         let out = reconcile(vec![], &live);
         assert!(out.orphans.is_empty(), "{:?}", out.orphans);
     }
@@ -496,7 +522,7 @@ mod tests {
     fn deleting_phase_counts_as_dead() {
         // Regression: a deleted sandbox lingers in `Deleting` and used to keep
         // reporting the last cached state, so `ls` showed it as ready.
-        let live = [sandbox("hura-a", Phase::Deleting, Some("a"))];
+        let live = [sandbox("hura-a", Status::Deleting, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(r.sessions[0].state, State::Dead);
         assert_eq!(r.dead, vec!["a"]);
@@ -504,14 +530,14 @@ mod tests {
 
     #[test]
     fn stopped_sandbox_reads_as_idle() {
-        let live = [sandbox("hura-a", Phase::Stopped, Some("a"))];
+        let live = [sandbox("hura-a", Status::Stopped, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(r.sessions[0].state, State::Idle);
     }
 
     #[test]
     fn error_phase_overrides_cached_state() {
-        let live = [sandbox("hura-a", Phase::Error, Some("a"))];
+        let live = [sandbox("hura-a", Status::Error, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(r.sessions[0].state, State::Failed);
         assert!(r.dead.is_empty());
@@ -519,7 +545,7 @@ mod tests {
 
     #[test]
     fn returning_sandbox_revives_a_dead_session() {
-        let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
+        let live = [sandbox("hura-a", Status::Running, Some("a"))];
         let r = reconcile(vec![session("a", State::Dead)], &live);
         assert_eq!(r.sessions[0].state, State::Ready);
     }
@@ -542,10 +568,10 @@ mod tests {
     /// The phase is a reason when there is no better one, and only then.
     #[test]
     fn an_error_phase_says_so_unless_the_record_knows_more() {
-        let live = [sandbox("hura-a", Phase::Error, Some("a"))];
+        let live = [sandbox("hura-a", Status::Error, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         let said = r.sessions[0].failure.as_deref().unwrap_or_default();
-        assert!(said.contains("`Error`"), "{said}");
+        assert!(said.contains("reports an error"), "{said}");
 
         let mut known = session("a", State::Failed);
         known.failure = Some("seeding failed: fatal: repository not found".into());
@@ -559,7 +585,7 @@ mod tests {
     /// A session that comes back is not the one the reason was about.
     #[test]
     fn a_revived_session_drops_its_reason() {
-        let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
+        let live = [sandbox("hura-a", Status::Running, Some("a"))];
         let mut gone = session("a", State::Dead);
         gone.failure = Some("the gateway reports its sandbox `hura-a` in `Error`".into());
         let r = reconcile(vec![gone], &live);
@@ -570,7 +596,7 @@ mod tests {
     #[test]
     fn in_flight_states_are_left_alone() {
         // A create still running must not be clobbered into Ready.
-        let live = [sandbox("hura-a", Phase::Provisioning, Some("a"))];
+        let live = [sandbox("hura-a", Status::Starting, Some("a"))];
         let r = reconcile(vec![session("a", State::Seeding)], &live);
         assert_eq!(r.sessions[0].state, State::Seeding);
     }
@@ -581,7 +607,7 @@ mod tests {
     /// `is not ready (phase: Provisioning)`.
     #[test]
     fn a_provisioning_sandbox_is_not_reported_ready() {
-        let live = [sandbox("hura-a", Phase::Provisioning, Some("a"))];
+        let live = [sandbox("hura-a", Status::Starting, Some("a"))];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(r.sessions[0].state, State::Creating);
     }
@@ -589,8 +615,8 @@ mod tests {
     #[test]
     fn unknown_managed_sandbox_is_an_orphan() {
         let live = [
-            sandbox("hura-a", Phase::Ready, Some("a")),
-            sandbox("hura-b", Phase::Ready, Some("b")),
+            sandbox("hura-a", Status::Running, Some("a")),
+            sandbox("hura-b", Status::Running, Some("b")),
         ];
         let r = reconcile(vec![session("a", State::Ready)], &live);
         assert_eq!(
@@ -602,9 +628,31 @@ mod tests {
 
     #[test]
     fn managed_sandbox_without_a_session_label_is_ignored() {
-        let live = [sandbox("hura-weird", Phase::Ready, None)];
+        let live = [sandbox("hura-weird", Status::Running, None)];
         let r = reconcile(vec![], &live);
         assert!(r.orphans.is_empty());
+    }
+
+    /// Reading a stopped orphan's record would start it, so it waits until
+    /// something else has.
+    #[test]
+    fn a_stopped_sandbox_is_not_adopted_until_it_runs() {
+        let stopped = [sandbox("hura-a", Status::Stopped, Some("a"))];
+        assert!(reconcile(vec![], &stopped).orphans.is_empty());
+        let running = [sandbox("hura-a", Status::Running, Some("a"))];
+        assert_eq!(reconcile(vec![], &running).orphans, ["a"]);
+    }
+
+    /// A sandbox stopped by its runtime and started again by an exec is the
+    /// session it was.
+    #[test]
+    fn a_stopped_session_is_ready_again_once_its_sandbox_runs() {
+        let stopped = [sandbox("hura-a", Status::Stopped, Some("a"))];
+        let r = reconcile(vec![session("a", State::Ready)], &stopped);
+        assert_eq!(r.sessions[0].state, State::Idle);
+        let running = [sandbox("hura-a", Status::Running, Some("a"))];
+        let r = reconcile(r.sessions, &running);
+        assert_eq!(r.sessions[0].state, State::Ready);
     }
 
     #[test]
@@ -620,7 +668,7 @@ mod tests {
         // `Ready` rather than `Deleting` on purpose: `Deleting` was already
         // skipped, and the phase the gateway reports in the seconds after a
         // delete is not something this side gets to decide.
-        let live = [sandbox("hura-a", Phase::Ready, Some("a"))];
+        let live = [sandbox("hura-a", Status::Running, Some("a"))];
         let removed = BTreeSet::from(["a".to_string()]);
 
         let r = super::reconcile(vec![], &live, &removed);
