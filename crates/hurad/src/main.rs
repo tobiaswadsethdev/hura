@@ -43,13 +43,9 @@ use store::Store;
 #[command(
     name = "hurad",
     version,
-    about = "Parallel coding agents in OpenShell sandboxes, and the server for them"
+    about = "Parallel coding agents in Docker Sandboxes, and the server for them"
 )]
 struct Cli {
-    /// Gateway name to operate on (defaults to the active one).
-    #[arg(long, global = true)]
-    gateway: Option<String>,
-
     /// Ask a paired `hurad` instead of this machine's own sandboxes.
     ///
     /// `--server` alone when one server is paired, `--server=<name>` otherwise;
@@ -916,11 +912,39 @@ fn cmd_config(cfg: &Config, init: bool, path_only: bool) -> Fallible {
         println!("{} {:<12} {}", if set { "*" } else { "-" }, key, value);
     };
     row(
-        "gateway",
-        cfg.gateway.is_some(),
-        cfg.gateway
+        "sbx",
+        cfg.sbx.is_some(),
+        cfg.sbx
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| sbx_client::locate().display().to_string()),
+    );
+    row(
+        "sandbox_cpus",
+        cfg.sandbox_cpus.is_some(),
+        cfg.sandbox_cpus
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "(every host CPU)".into()),
+    );
+    row(
+        "sandbox_memory",
+        cfg.sandbox_memory.is_some(),
+        cfg.sandbox_memory
             .clone()
-            .unwrap_or_else(|| "(the active one)".into()),
+            .unwrap_or_else(|| "(half the host's memory)".into()),
+    );
+    row(
+        "credentials",
+        !cfg.credentials().is_empty(),
+        if cfg.credentials().is_empty() {
+            "(none; add [credentials.NAME] tables)".into()
+        } else {
+            cfg.credentials()
+                .iter()
+                .map(|c| format!("{} ({})", c.name, c.kind.name()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
     );
     row(
         "repo",
@@ -977,8 +1001,8 @@ fn cmd_config(cfg: &Config, init: bool, path_only: bool) -> Fallible {
             cfg.mcp()
                 .iter()
                 .map(|e| {
-                    // A managed entry's url is derived from the container this
-                    // server starts, so what is worth printing is the image it
+                    // A managed entry's url is derived from the port this server
+                    // publishes, so what is worth printing is the image it
                     // runs; an external one is a url somebody else operates.
                     match &e.managed {
                         Some(m) => format!("{} -> {} (managed)", e.name(), m.image),

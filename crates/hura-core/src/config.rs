@@ -819,7 +819,9 @@ mod tests {
     #[test]
     fn the_example_documents_every_key() {
         for key in [
-            "gateway",
+            "sbx",
+            "sandbox_cpus",
+            "sandbox_memory",
             "repo",
             "base",
             "policy",
@@ -838,6 +840,34 @@ mod tests {
             EXAMPLE.contains("# [[mcp]]"),
             "the example does not show `[[mcp]]`"
         );
+        assert!(
+            EXAMPLE.contains("# [credentials."),
+            "the example does not show `[credentials.NAME]`"
+        );
+    }
+
+    /// The example's own tables, uncommented, are a config file that loads.
+    #[test]
+    fn the_example_s_credentials_load() {
+        let text: String = EXAMPLE
+            .lines()
+            .skip_while(|l| !l.starts_with("# [credentials.claude]"))
+            .take_while(|l| l.starts_with('#'))
+            .map(|l| l.trim_start_matches('#').trim_start())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let c = parse(&text).unwrap();
+        assert_eq!(c.credentials().len(), 2);
+        assert_eq!(
+            c.credential("azure-devops").unwrap().kind,
+            crate::credentials::Kind::AzureDevOpsPat
+        );
+    }
+
+    /// A file written before sessions moved to Docker Sandboxes still loads.
+    #[test]
+    fn a_retired_gateway_still_parses() {
+        parse("gateway = \"default\"\n").expect("a retired key is accepted and ignored");
     }
 
     #[test]

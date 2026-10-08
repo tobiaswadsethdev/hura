@@ -747,7 +747,6 @@ dependencies = [
 name = "hura-core"
 version = "0.22.0"
 dependencies = [
- "openshell-client",
  "sbx-client",
  "serde",
  "serde_json",
@@ -779,7 +778,6 @@ dependencies = [
  "hura-client",
  "hura-core",
  "hura-proto",
- "openshell-client",
  "portable-pty",
  "rand 0.10.2",
  "rcgen",
@@ -1010,15 +1008,6 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
-
-[[package]]
-name = "openshell-client"
-version = "0.22.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
 
 [[package]]
 name = "parking_lot"

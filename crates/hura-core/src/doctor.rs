@@ -99,14 +99,14 @@ fn check_tmux() -> Check {
 }
 
 /// WSL in particular: without lingering the user manager exits with the last
-/// shell, taking the gateway and every running sandbox with it.
+/// shell, taking the sandbox runtime's daemon and every running sandbox with it.
 fn check_linger() -> Check {
     let user = std::env::var("USER").unwrap_or_default();
     match probe(&["loginctl", "show-user", &user]) {
         Some(out) if out.contains("Linger=yes") => Check::ok("linger", "enabled"),
         Some(_) => Check::warn(
             "linger",
-            "disabled: the gateway dies when your last shell exits",
+            "disabled: the sandbox runtime stops when your last shell exits",
             format!("sudo loginctl enable-linger {user}"),
         ),
         None => Check::warn(
@@ -145,6 +145,130 @@ fn check_version() -> Check {
 }
 
 /// A built image is the difference between a ~1s and a ~minute session.
+/// The sandbox runtime's client, at the binary the config names if it names
+/// one.
+fn sbx_client(config: &Result<Config, config::Error>) -> sbx_client::CliClient {
+    let client = sbx_client::CliClient::new();
+    match config.as_ref().ok().and_then(|c| c.sbx.as_ref()) {
+        Some(bin) => client.with_bin(bin),
+        None => client,
+    }
+}
+
+/// The runtime's own checks, said only where one is not passing: sign-in,
+/// virtualization, storage and its daemon are each something hura cannot
+/// work around, and the runtime already knows how to ask about them.
+fn check_sbx_diagnose(sbx: &sbx_client::CliClient) -> Vec<Check> {
+    let Ok(found) = sbx.diagnose() else {
+        // Not installed, or not answering: the `sbx` check above says which.
+        return Vec::new();
+    };
+    let failing: Vec<String> = found
+        .iter()
+        .filter(|d| d.status == "fail")
+        .map(|d| format!("{}: {}", d.name.to_ascii_lowercase(), d.message))
+        .collect();
+    if failing.is_empty() {
+        return vec![Check::ok("sbx checks", format!("{} passed", found.len()))];
+    }
+    vec![Check::fail(
+        "sbx checks",
+        failing.join("; "),
+        "sbx diagnose",
+    )]
+}
+
+/// Whether the runtime lets anything out of every sandbox on its own.
+///
+/// Every session's policy is a list of allows, which only means something on a
+/// runtime that refuses what no rule allows: its deny-all preset. The other
+/// presets add global allows, every host for `allow-all` and a baseline of
+/// model providers, registries and code hosts for `balanced`, which every
+/// session then has beyond its own rules. Measured: the deny-all preset is not
+/// always listed as a rule of its own, so what is checked is the absence of
+/// global allows, not the presence of a deny.
+fn check_sbx_policy(sbx: &sbx_client::CliClient) -> Check {
+    let Ok(rules) = sbx.all_rules() else {
+        return Check::ok("sbx policy", "not checked: the runtime is not answering");
+    };
+    let global_allows: Vec<&sbx_client::Rule> = rules
+        .iter()
+        .filter(|r| !r.is_scoped() && r.is_network() && r.decision == sbx_client::Decision::Allow)
+        .collect();
+    if global_allows.is_empty() {
+        return Check::ok(
+            "sbx policy",
+            "deny-all: only what a session's rules allow gets out",
+        );
+    }
+    let fix = "sbx policy reset, and choose deny-all (it stops running sandboxes)";
+    if global_allows
+        .iter()
+        .any(|r| r.resources.iter().any(|x| x == "**"))
+    {
+        return Check::fail(
+            "sbx policy",
+            "the runtime allows every host to every sandbox, so no session's rules decide anything",
+            fix,
+        );
+    }
+    let hosts: usize = global_allows.iter().map(|r| r.resources.len()).sum();
+    Check::warn(
+        "sbx policy",
+        format!(
+            "the runtime allows {hosts} hosts to every sandbox, beyond each session's own rules"
+        ),
+        fix,
+    )
+}
+
+/// Whether the runtime's daemon runs under a unit of its own.
+///
+/// Started by the first `sbx` call instead, it lives in the cgroup of whatever
+/// made that call, and when that was `hurad` under systemd, restarting `hurad`
+/// (which `hurad update` asks for) takes the daemon and every sandbox with it.
+fn check_sbx_daemon_unit() -> Check {
+    match probe(&["systemctl", "--user", "is-active", "sbx-daemon"]) {
+        Some(state) if state == "active" => Check::ok("sbx daemon", "sbx-daemon.service"),
+        _ => Check::warn(
+            "sbx daemon",
+            "not running as its own unit, so restarting hurad can stop every sandbox",
+            "install docs/sbx-daemon.service to ~/.config/systemd/user, then \
+             systemctl --user enable --now sbx-daemon",
+        ),
+    }
+}
+
+/// Whether the runtime holds the image Docker built, for the base and each
+/// variant there is. A session is made from the runtime's copy, so one that
+/// is missing or older is what a new session runs. Loaded by the next create,
+/// so this is a warning about the minute that create will spend.
+fn check_template() -> Vec<Check> {
+    let tags: Vec<String> = std::iter::once(crate::session::IMAGE.to_string())
+        .chain(crate::image::variants())
+        .filter(|t| crate::image::exists_tag(t))
+        .collect();
+    let stale: Vec<&String> = tags.iter().filter(|t| !crate::image::loaded(t)).collect();
+    if tags.is_empty() {
+        return Vec::new();
+    }
+    if stale.is_empty() {
+        return vec![Check::ok("templates", format!("{} loaded", tags.len()))];
+    }
+    vec![Check::warn(
+        "templates",
+        format!(
+            "not loaded into the sandbox runtime as built: {}",
+            stale
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        "the next session that needs one loads it; or hurad image build",
+    )]
+}
+
 fn check_image() -> Check {
     if crate::image::exists() {
         // An image from an older hura works, but reports no agent status, and
@@ -515,15 +639,13 @@ fn own_addresses() -> Vec<String> {
 }
 
 pub fn run(backend: &dyn Backend, config: &Result<Config, config::Error>) -> Vec<Check> {
-    let mut checks = vec![
-        check_version(),
-        check_config(config),
-        backend.health(),
-        check_docker(),
-        check_tmux(),
-        check_linger(),
-        check_image(),
-    ];
+    let mut checks = vec![check_version(), check_config(config), backend.health()];
+    let sbx = sbx_client(config);
+    checks.extend(check_sbx_diagnose(&sbx));
+    checks.push(check_sbx_policy(&sbx));
+    checks.push(check_sbx_daemon_unit());
+    checks.extend([check_docker(), check_tmux(), check_linger(), check_image()]);
+    checks.extend(check_template());
     checks.extend(check_toolchains());
     // Only when the file names some, since the check is about the file being
     // right rather than about providers existing.

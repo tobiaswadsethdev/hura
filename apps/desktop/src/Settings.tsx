@@ -234,10 +234,12 @@ export function SettingsScreen({
 
             <fieldset>
               <legend>credentials</legend>
-              {!options && <p className="hint">asking the gateway…</p>}
+              {!options && <p className="hint">reading the credentials…</p>}
               {options?.providers_error && <p className="error">{options.providers_error}</p>}
               {options && options.providers.length === 0 && !options.providers_error && (
-                <p className="hint">the gateway has no credential providers</p>
+                <p className="hint">
+                  none configured: add a <code>[credentials.NAME]</code> table to the server's config file
+                </p>
               )}
               <div className="pills">
                 {(options?.providers ?? []).map((p) => (

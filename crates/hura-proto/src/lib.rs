@@ -530,9 +530,11 @@ pub struct Failure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FailureKind {
-    /// No session by that name, on the server or at the gateway.
+    /// No session by that name, on the server or where sessions run.
     NoSuchSession,
-    /// The gateway refused, or could not be reached at all.
+    /// Where sessions run refused, or could not be reached at all. Named for
+    /// the OpenShell gateway sessions used to run on; the name is on the wire,
+    /// so it stays.
     Gateway,
     /// A request this server does not have, which is what an older server says
     /// to a newer client rather than failing to parse it.

@@ -681,6 +681,46 @@ fn refusal(args: &[String], subject: Option<&str>, out: &ExecOutput) -> Error {
     }
 }
 
+/// One line of `sbx diagnose --json`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Diagnosis {
+    pub name: String,
+    /// `pass`, `warn`, `fail` or `skip`.
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+struct Diagnoses {
+    #[serde(default)]
+    checks: Vec<Diagnosis>,
+}
+
+impl CliClient {
+    /// The runtime's own health checks: its daemon, sign-in, virtualization
+    /// and storage. A few seconds, so only for `hurad doctor`.
+    pub fn diagnose(&self) -> Result<Vec<Diagnosis>> {
+        let args = strings(&["diagnose", "--json"]);
+        // Exits non-zero when a check fails, which is an answer, not an error.
+        let out = self.run(&args, None)?;
+        let parsed: Diagnoses =
+            serde_json::from_str(&out.stdout).map_err(|source| Error::Parse {
+                args: args.join(" "),
+                source,
+            })?;
+        Ok(parsed.checks)
+    }
+
+    /// Every rule the runtime has, the global ones and every sandbox's.
+    pub fn all_rules(&self) -> Result<Vec<Rule>> {
+        let listing: RuleListing =
+            self.json(&strings(&["policy", "ls", "--wide", "--json"]), None)?;
+        Ok(listing.rules)
+    }
+}
+
 /// The id out of `Rule added to policy local (scope: sandbox:NAME): ID (...)`,
 /// or, for a rule an existing one already covers, out of
 /// `Already covered in policy local (...): HOST [tcp] (by rule "ID")`, which is

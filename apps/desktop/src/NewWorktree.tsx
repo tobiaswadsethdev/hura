@@ -340,11 +340,11 @@ function Form({
           ))}
           {options.providers_error && (
             <span className="error" title={options.providers_error}>
-              gateway unreachable
+              could not list credentials
             </span>
           )}
           {options.providers.length === 0 && !options.providers_error && (
-            <span className="hint">none on the gateway</span>
+            <span className="hint">none configured</span>
           )}
         </PickRow>
 
