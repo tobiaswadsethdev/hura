@@ -18,6 +18,15 @@ export type FeedEvent = { target: Target | null,
  */
 at: number, 
 /**
+ * How many times it has happened, which the runtime counts. One for an
+ * event kept before it counted.
+ */
+count: number, 
+/**
+ * When it last happened, as epoch seconds; `at` for one seen once.
+ */
+last: number, 
+/**
  * `NET:OPEN`, `HTTP:GET`, `CONFIG:VALIDATED`.
  */
 class: string, severity: Severity, verdict: Verdict, 

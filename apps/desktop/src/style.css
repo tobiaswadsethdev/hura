@@ -1661,6 +1661,10 @@ main { display: flex; flex: 1; min-height: 0; }
 .entry-head .verdict-glyph { margin-top: 2px; }
 :is(.traffic-log, .ep-log) .clock { color: var(--dimmer); flex: none; font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
 .entry-head .clock { margin-left: auto; line-height: 18px; }
+/* How many decisions one row stands for: the runtime counts rather than lists. */
+:is(.traffic-log, .ep-log) .times { flex: none; color: var(--dim); font-family: var(--font-mono); font-size: 11px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.entry-head .times { margin-left: auto; }
+.entry-head .times + .clock { margin-left: 6px; }
 :is(.traffic-log, .ep-log) .class { color: var(--dimmer); flex: none; font-family: var(--font-mono); font-size: 11px; }
 .traffic-log .subject {
   min-width: 0;

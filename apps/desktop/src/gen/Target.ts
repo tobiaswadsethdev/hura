@@ -4,21 +4,11 @@
  * The endpoint an event was about, when it was about one.
  *
  * This is what makes the feed actionable rather than only readable: a denial
- * names a host, a port and usually the binary that reached for it, which is
- * exactly the shape `policy update` takes. Everything else in the pane is
- * prose.
+ * names a host and a port, which is exactly what an allow or a block takes.
+ * Everything else in the pane is prose.
  */
 export type Target = { 
 /**
- * `pastebin.com:443`. The unit `--add-endpoint` and `--remove-endpoint`
- * both address, so the whole feature is expressed in these.
+ * `pastebin.com:443`, the unit an allow and a block both address.
  */
-endpoint: string, 
-/**
- * The kernel-resolved path the connection came from, when the line names
- * one. Absent for a bare L7 decision, which judges a method and a path --
- * and absent is load-bearing: an endpoint rule with
- * no binaries grants nothing, so an allow with nothing to bind to is
- * refused rather than issued.
- */
-binary: string | null, };
+endpoint: string, };

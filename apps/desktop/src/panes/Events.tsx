@@ -320,7 +320,6 @@ function EndpointRow({
   onToggle,
   ...actions
 }: { group: Group; tone: "denied" | "allowed"; open: boolean; onToggle: () => void } & Actions) {
-  const last = g.events[0];
   const s = actions.standing(g.endpoint);
   const row = `ep:${g.endpoint}`;
   const [host, port] = split(g.endpoint);
@@ -372,8 +371,8 @@ function EndpointRow({
                 allow
               </button>
             )}
-            <span className="ep-age" title={`last decision ${clock(last.at)} UTC`}>
-              {ago(last.at)}
+            <span className="ep-age" title={`last decision ${clock(lastSeen(g))} UTC`}>
+              {ago(lastSeen(g))}
             </span>
           </>
         )}
@@ -392,6 +391,7 @@ function EndpointRow({
               <span className="what" title={e.subject}>
                 {breakable(brief(e))}
               </span>
+              <Times event={e} />
               {e.policy && <span className="rule">{e.policy}</span>}
               {e.reason && !GENERIC.test(e.reason) && <span className="reason">{e.reason}</span>}
             </li>
@@ -433,7 +433,10 @@ function LogRow({ event: e, ...actions }: { event: FeedEvent } & Actions) {
             <span className="spin" /> applying
           </span>
         ) : (
-          <span className="clock">{clock(e.at)}</span>
+          <>
+            <Times event={e} />
+            <span className="clock">{clock(e.at)}</span>
+          </>
         )}
       </div>
       <div className="entry-why">
@@ -835,15 +838,16 @@ function group(feed: FeedEvent[]): Group[] {
     }
     g.events.push(e);
     if (e.verdict === "Denied") {
-      g.denied++;
+      g.denied += e.count;
       const r = requestOf(e);
       if (r && !g.requests.some((q) => sameRoute(q, r))) g.requests.push(r);
     } else if (e.verdict === "Allowed") {
-      g.allowed++;
+      g.allowed += e.count;
     }
   }
-  // The feed is newest first, so insertion order already is.
-  return [...byEndpoint.values()];
+  // Most recently active first: the runtime counts a decision in one row, so
+  // a row first seen long ago may be the one that happened a second ago.
+  return [...byEndpoint.values()].sort((a, b) => lastSeen(b) - lastSeen(a));
 }
 
 function standingOf(policy: PolicyView | null, endpoint: string): Standing {
@@ -896,9 +900,26 @@ function toneFor(g: Group, s: Standing): "denied" | "allowed" {
   return g.events[0].verdict === "Denied" && !s.whole ? "denied" : "allowed";
 }
 
+/// When an endpoint was last decided about. The runtime counts on in one row,
+/// so that is the latest `last` rather than the latest first sighting.
+function lastSeen(g: Group): number {
+  return Math.max(...g.events.map((e) => e.last || e.at));
+}
+
+/// How many times a row stands for, when it is more than once, with when it
+/// last happened on hover.
+function Times({ event: e }: { event: FeedEvent }) {
+  if (e.count <= 1) return null;
+  return (
+    <span className="times" title={`${e.count} times, last at ${clock(e.last || e.at)} UTC`}>
+      ×{e.count}
+    </span>
+  );
+}
+
 /// One event as the terminal's feed prints it, for pasting into an issue.
 function lineOf(e: FeedEvent): string {
-  return [clock(e.at), VERDICT[e.verdict], e.class, e.subject, e.policy && `[${e.policy}]`, e.reason]
+  return [clock(e.at), VERDICT[e.verdict], e.class, e.subject, e.count > 1 && `x${e.count}`, e.policy && `[${e.policy}]`, e.reason]
     .filter(Boolean)
     .join("  ");
 }

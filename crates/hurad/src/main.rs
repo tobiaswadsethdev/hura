@@ -1130,8 +1130,15 @@ fn print_events(events: &[events::Event]) {
             events::Verdict::Denied => "DENY",
             events::Verdict::Neutral => "-",
         };
+        // The runtime counts a decision rather than logging it each time, so
+        // one line can stand for many.
+        let times = if e.count > 1 {
+            format!("  x{}", e.count)
+        } else {
+            String::new()
+        };
         println!(
-            "{}  {:<5}  {:<16} {}{}",
+            "{}  {:<5}  {:<16} {}{times}{}",
             e.clock_utc(),
             verdict,
             e.class,

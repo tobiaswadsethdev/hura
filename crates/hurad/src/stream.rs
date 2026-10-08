@@ -11,7 +11,7 @@
 //! asking and sends only what is new -- which is also the only way a second
 //! client watching the same session does not double the load on it.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -534,10 +534,11 @@ async fn pipe(
 /// The allow/deny feed, as decisions are made.
 ///
 /// The first frame carries the recent log and every frame after it carries the
-/// difference, keyed on what the core already considers the same event -- so a
-/// decision the gateway's window reports twice is sent once.
+/// difference, keyed on what the core already considers the same event. The
+/// runtime counts on in one row, so an event is sent again when its count or
+/// its last sighting moves, and a client keeps the newest it was sent for a key.
 async fn events(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>) {
-    let mut seen: HashSet<(u64, String, String)> = HashSet::new();
+    let mut seen: HashMap<(u64, String, String), (u64, u64)> = HashMap::new();
 
     loop {
         let s = session.clone();
@@ -550,7 +551,10 @@ async fn events(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>)
 
         match fetched {
             Ok(all) => {
-                let fresh: Vec<Event> = all.into_iter().filter(|e| seen.insert(e.key())).collect();
+                let fresh: Vec<Event> = all
+                    .into_iter()
+                    .filter(|e| seen.insert(e.key(), (e.count, e.last)) != Some((e.count, e.last)))
+                    .collect();
                 if !fresh.is_empty()
                     && out
                         .send(ServerFrame::Events { id, events: fresh })
