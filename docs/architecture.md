@@ -1,7 +1,6 @@
 # Architecture
 
-A tour of the code, for anyone about to change some of it. [PLAN.md](../PLAN.md)
-has the decisions and the increments that got here; this is the map.
+A tour of the code, for anyone about to change some of it: this is the map.
 
 ## The shape of it
 

@@ -8,11 +8,6 @@ A desktop workspace and a CLI for running several coding agents in parallel,
 each in its own [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)
 microVM.
 
-Claude Squad's workflow, with real isolation underneath: a VM per session with
-its own Docker Engine, network policy enforced outside it, credentials injected
-into requests instead of sitting on disk, and an audit trail of every
-allow/deny.
-
 Network policy names hosts, and for the ones that matter the requests allowed on
 them, so a session can be configured such that:
 
@@ -236,14 +231,6 @@ modules, and worth ten minutes before a first change.
 
 By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). Security
 reports have their own route: [SECURITY.md](SECURITY.md).
-
-## Status
-
-Early, and honest about it. [PLAN.md](PLAN.md) is the record of what has been
-built increment by increment and what is still on the list. Interfaces are still
-moving, and `0.5.0` is not a promise that anything has settled: 0.4.0 folded the
-`hura` binary into `hurad` and took the terminal interface out with it, which is
-the size of change this still makes.
 
 ## License
 
