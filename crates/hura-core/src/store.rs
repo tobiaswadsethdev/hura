@@ -106,18 +106,36 @@ impl Store {
         self.sessions.remove(name)
     }
 
-    /// Take the state of every session listed, leaving any record not mentioned
-    /// alone.
+    /// Take what a refresh worked out for each session it read, where the
+    /// record is still the one it read. What comes back is each of those
+    /// sessions as the cache now holds it.
     ///
-    /// Not `replace_all`, which is what this was: a refresh knows only what it
-    /// loaded, and a create running in another process may have added a session
-    /// since. Wholesale replacement dropped that record; merging keeps it.
-    /// Removal is [`Store::remove`]'s job, which is what destroying a session
-    /// calls.
-    pub fn merge(&mut self, sessions: Vec<Session>) {
-        for s in sessions {
-            self.sessions.insert(s.name.clone(), s);
+    /// A refresh reads the cache, asks the runtime, and writes back what it
+    /// concluded, and asking takes a fifth of a second under Docker Sandboxes.
+    /// Anything written in that time is newer than the refresh's conclusion: a
+    /// create saving `seeding` and then `ready`, or a destroy dropping the
+    /// record. Writing over the first left a finished session saying
+    /// `creating` for good, since nothing in a running server asks again, and
+    /// writing over the second brought a destroyed session back. So a record
+    /// that changed keeps its change, one that went stays gone, and the next
+    /// refresh reconciles whatever this one stepped around.
+    ///
+    /// Records the refresh never read are left alone, which is why this is not
+    /// `replace_all`, as it once was: a create may have added one.
+    pub fn merge(&mut self, read: &[Session], reconciled: Vec<Session>) -> Vec<Session> {
+        let read: BTreeMap<&str, &Session> = read.iter().map(|s| (s.name.as_str(), s)).collect();
+        let mut out = Vec::with_capacity(reconciled.len());
+        for s in reconciled {
+            match (self.sessions.get(&s.name), read.get(s.name.as_str())) {
+                (Some(now), Some(then)) if now != *then => out.push(now.clone()),
+                (None, Some(_)) => {}
+                _ => {
+                    self.sessions.insert(s.name.clone(), s.clone());
+                    out.push(s);
+                }
+            }
         }
+        out
     }
 }
 
@@ -418,11 +436,64 @@ mod tests {
         // A create in another process adds one.
         update_at(&path, &lock, |s| s.upsert(session("new", State::Seeding))).unwrap();
         // The refresh writes back only what it knew about.
-        update_at(&path, &lock, |s| s.merge(vec![session("old", State::Idle)])).unwrap();
+        let read = [session("old", State::Ready)];
+        update_at(&path, &lock, |s| {
+            s.merge(&read, vec![session("old", State::Idle)])
+        })
+        .unwrap();
 
         let after = Store::load_from(&path).unwrap();
         assert_eq!(after.get("old").map(|s| s.state), Some(State::Idle));
         assert!(after.contains("new"), "the record the refresh never saw");
+    }
+
+    /// The race a refresh lost to every create that finished while it was
+    /// asking the runtime, measured against a server with two windows polling:
+    /// a session whose seeder had said `done` still read `creating` once they
+    /// stopped. A record written after the refresh read it is newer than
+    /// anything the refresh concluded.
+    #[test]
+    fn a_refresh_does_not_write_over_a_create_that_finished_meanwhile() {
+        let mut store = Store::default();
+        store.upsert(session("a", State::Creating));
+        let read: Vec<Session> = store.list().into_iter().cloned().collect();
+
+        // The create moves on while the refresh is asking the runtime.
+        store.upsert(session("a", State::Ready));
+
+        let kept = store.merge(&read, vec![session("a", State::Creating)]);
+        assert_eq!(store.get("a").map(|s| s.state), Some(State::Ready));
+        assert_eq!(
+            kept.iter().map(|s| s.state).collect::<Vec<_>>(),
+            [State::Ready]
+        );
+    }
+
+    /// The same window, from the other side: a session destroyed while a
+    /// refresh was asking about it stays destroyed.
+    #[test]
+    fn a_refresh_does_not_bring_back_a_session_removed_meanwhile() {
+        let mut store = Store::default();
+        store.upsert(session("a", State::Ready));
+        let read: Vec<Session> = store.list().into_iter().cloned().collect();
+
+        store.remove("a");
+
+        let kept = store.merge(&read, vec![session("a", State::Idle)]);
+        assert!(!store.contains("a"));
+        assert!(kept.is_empty());
+    }
+
+    /// What a refresh is for, when nothing raced it: the record takes what it
+    /// concluded.
+    #[test]
+    fn an_unchanged_record_takes_what_the_refresh_concluded() {
+        let mut store = Store::default();
+        store.upsert(session("a", State::Ready));
+        let read: Vec<Session> = store.list().into_iter().cloned().collect();
+
+        store.merge(&read, vec![session("a", State::Dead)]);
+        assert_eq!(store.get("a").map(|s| s.state), Some(State::Dead));
     }
 
     /// What a failure is recorded with when there may already be a record: the

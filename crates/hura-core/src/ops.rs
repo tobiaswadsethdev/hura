@@ -63,38 +63,49 @@ pub fn refresh_with(
     repair: bool,
 ) -> Result<Refreshed, Box<dyn std::error::Error>> {
     // Asked before the lock is taken: the runtime call is the slow part, and
-    // holding a lock across it would stall a create in another process for no
-    // reason.
+    // holding a lock across it would stall a create for no reason.
     //
-    // Reconciled against what is on disk *now*, not against a snapshot taken
-    // before that call. A create walking a session through `seeding` to
-    // `ready` in another process finishes inside that window often enough that
-    // the difference is a session whose record disagrees with its own sandbox.
-    let cached: Vec<Session> = Store::load()?.list().into_iter().cloned().collect();
+    // So what is read here can be overtaken before it is written back: a
+    // create walking a session through `seeding` to `ready` finishes inside
+    // that window often enough to matter. [`Store::merge`] writes back only
+    // the records nobody has changed since this read.
+    let read: Vec<Session> = Store::load()?.list().into_iter().cloned().collect();
     let mut out = Refreshed::default();
     let backend = backends.sandboxed();
-    let rec = backend.live(cached)?;
-    out.dead.extend(rec.dead.clone());
+    let rec = backend.live(read.clone())?;
 
     // Tombstones outlive the removal that wrote them only for as long as the
     // thing they name does: anything tombstoned and no longer reported by the
     // runtime has finally gone, and the tombstone can go with it.
     removed::keep_only(&rec.lingering.iter().cloned().collect::<BTreeSet<_>>());
-    let merged = rec.sessions.clone();
-    out.sessions = store::update(|store| {
-        store.merge(merged.clone());
-        merged
-    })?;
+    let reconciled = rec.sessions.clone();
+    out.sessions = store::update(|store| store.merge(&read, reconciled))?;
+    // Only what was written as dead is reported as dead. A record that changed
+    // meanwhile kept its change, and the next refresh judges it afresh.
+    out.dead.extend(
+        rec.dead
+            .iter()
+            .filter(|name| {
+                out.sessions
+                    .iter()
+                    .any(|s| &s.name == *name && s.state == State::Dead)
+            })
+            .cloned(),
+    );
 
     for orphan in &rec.orphans {
         // Outside the lock, because reading a record is an exec; the adopted
         // record is written on its own once it is known.
         match backend.read_meta(orphan) {
+            // Only into a name nobody holds: a create that wrote its record
+            // after this refresh read the cache knows more than the sandbox's
+            // metadata does.
             Ok(s) => {
-                out.adopted.push(s.name.clone());
                 let record = s.clone();
-                store::update(|store| store.upsert(record))?;
-                out.sessions.push(s);
+                if store::update(|store| store.insert_new(record))? {
+                    out.adopted.push(s.name.clone());
+                    out.sessions.push(s);
+                }
             }
             // Phrased as the session's state rather than as a failure of
             // this code, since the usual cause is a create in flight in
