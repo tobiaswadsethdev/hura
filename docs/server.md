@@ -33,7 +33,10 @@ hura://box.lan:17671/8f3c...e21a#d8faa48b...e140
 ```
 
 That is the address, a token, and the fingerprint of the certificate the server
-will present. On the client:
+will present. On a terminal it also prints the same line as a QR code above it,
+for the [iOS app](../apps/ios/README.md) to scan. `--no-qr` leaves the code
+out, and so does output that is not a terminal, so a script piping `pair`
+gets the line alone. On the client:
 
 ```sh
 hurad connect 'hura://box.lan:17671/8f3c...e21a#d8faa48b...e140' --name work

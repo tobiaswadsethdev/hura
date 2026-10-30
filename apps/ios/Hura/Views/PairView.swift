@@ -45,22 +45,20 @@ struct PairView: View {
 
     private var scan: some View {
         Group {
-            Section("Paste the pairing string") {
+            Section {
+                QRScannerView { code in accept(code) }
+                    .frame(height: 300)
+                    .listRowInsets(EdgeInsets())
+            } footer: {
+                Text("On the machine running hurad, run `hurad pair phone --host <address this phone can reach>` and point the camera at the code it shows.")
+            }
+            Section("Or paste the pairing string") {
                 TextField("hura://…", text: $pasted, axis: .vertical)
                     .font(.footnote.monospaced())
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Button("Continue") { accept(pasted) }
                     .disabled(pasted.isEmpty)
-            }
-            Section {
-                QRScannerView { code in accept(code) }
-                    .frame(height: 260)
-                    .listRowInsets(EdgeInsets())
-            } header: {
-                Text("Or scan it")
-            } footer: {
-                Text("On the machine running hurad: `hurad pair phone --host <address this phone can reach>`. The string is shown once.")
             }
         }
     }
