@@ -1,0 +1,19 @@
+{
+  "name": "hura-relay",
+  "private": true,
+  "description": "The hura push relay (Cloudflare Worker)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler d1 migrations apply hura-relay --remote && wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "wrangler types --strict-vars=false --check && tsc --noEmit",
+    "types": "wrangler types --strict-vars=false"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.9",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.154.0"
+  }
+}

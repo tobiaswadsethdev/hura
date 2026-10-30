@@ -1,0 +1,31 @@
+// The hura relay's configuration. Before the first deploy (see README.md):
+//   npx wrangler d1 create hura-relay      -> paste the database_id below
+//   npx wrangler secret put APNS_KEY_P8    -> contents of AuthKey_XXXXXXXXXX.p8
+//   npm run deploy
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hura-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hura-relay",
+      // From `npx wrangler d1 create hura-relay`.
+      "database_id": "",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "APNS_KEY_ID": "9M8S43LG8U",
+    "APNS_TEAM_ID": "5CLNYT78JN",
+    // The hura iOS app's bundle ID.
+    "APNS_TOPIC": "dev.tobiaswadseth.hura.ios",
+    // Only honoured for http://127.0.0.1 or http://localhost, for local
+    // end-to-end tests against a fake APNs. Leave empty in production.
+    "APNS_ORIGIN_OVERRIDE": ""
+  },
+  // Hourly cleanup of idempotency and rate-limit rows.
+  "triggers": { "crons": ["17 * * * *"] }
+}
