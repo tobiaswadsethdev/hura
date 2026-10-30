@@ -15,12 +15,14 @@ mod attach;
 mod auth;
 mod forward;
 mod push;
+mod qr;
 mod relay;
 mod rpc;
 mod serve;
 mod stream;
 mod tls;
 
+use std::io::IsTerminal as _;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -86,6 +88,10 @@ enum Command {
         host: Option<String>,
         #[arg(long, default_value_t = DEFAULT_PORT)]
         port: u16,
+        /// Print only the pairing string, not the QR code a phone scans. The
+        /// code is also left out when the output is not a terminal.
+        #[arg(long)]
+        no_qr: bool,
     },
     /// The tokens this server accepts.
     Tokens,
@@ -412,7 +418,12 @@ fn main() -> ExitCode {
             sans: Vec::new(),
         }),
         Some(Command::Serve(s)) => serve(s),
-        Some(Command::Pair { name, host, port }) => pair(&name, host, port),
+        Some(Command::Pair {
+            name,
+            host,
+            port,
+            no_qr,
+        }) => pair(&name, host, port, no_qr),
         Some(Command::Tokens) => list_tokens(),
         Some(Command::Revoke { name }) => revoke(&name),
         Some(Command::Mcp { action, name }) => mcp(action, name),
@@ -1534,7 +1545,7 @@ async fn watch_for_releases() {
     }
 }
 
-fn pair(name: &str, host: Option<String>, port: u16) -> Fallible {
+fn pair(name: &str, host: Option<String>, port: u16, no_qr: bool) -> Fallible {
     let dir = state::dir();
     state::private_dir(&dir)?;
 
@@ -1554,9 +1565,23 @@ fn pair(name: &str, host: Option<String>, port: u16) -> Fallible {
         fingerprint: identity.fingerprint,
     };
 
+    // For the iOS app to scan. Only on a terminal: a script reading this wants
+    // the string, and a code drawn into a file is escape codes.
+    let qr = (!no_qr && std::io::stdout().is_terminal())
+        .then(|| qr::render(&pairing.to_string()))
+        .flatten();
+    if let Some(qr) = &qr {
+        print!("{qr}");
+        println!();
+    }
     println!("{pairing}");
     println!();
-    println!("Paste that into the client once. It is shown here and nowhere else --");
+    if qr.is_some() {
+        println!("Scan the code with the hura app on a phone, or paste the line into a client.");
+        println!("It is shown here and nowhere else --");
+    } else {
+        println!("Paste that into the client once. It is shown here and nowhere else --");
+    }
     println!("the server keeps only a hash, so a lost token is replaced, not recovered.");
     if let Some(hint) = wsl_hint() {
         println!();

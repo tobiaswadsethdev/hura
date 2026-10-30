@@ -27,7 +27,7 @@ struct ServerListView: View {
                     ContentUnavailableView {
                         Label("No servers", systemImage: "shippingbox")
                     } description: {
-                        Text("Run `hurad pair phone --host <address>` on the machine running hurad, then scan or paste what it prints.")
+                        Text("Run `hurad pair phone --host <address>` on the machine running hurad, then scan the code it shows.")
                     } actions: {
                         Button("Pair a Server") { pairing = true }
                             .buttonStyle(.borderedProminent)

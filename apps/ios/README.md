@@ -50,8 +50,9 @@ reach. Over Tailscale, that is the machine's tailnet address or MagicDNS name:
 hurad pair phone --host box.tailnet-name.ts.net
 ```
 
-Paste the `hura://…` line into the app's pairing screen, or open it as a link
-on the phone. The app shows the address and the certificate's fingerprint,
+It prints a QR code above the `hura://…` line. Scan it on the app's pairing
+screen, or with the Camera app, which opens the link in hura. Pasting the line
+works too. The app shows the address and the certificate's fingerprint,
 connects only to a server presenting exactly that certificate, and sends the
 token only after it has. It then checks that the server accepts the token
 before it keeps anything. `hurad revoke phone` on the server cuts the phone
