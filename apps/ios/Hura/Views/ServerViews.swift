@@ -67,6 +67,7 @@ struct ServerView: View {
     @State private var creatingIn: Project?
     @State private var destroying: Session?
     @State private var forgetting: Project?
+    @State private var screen: ServerScreen?
     @State private var error: String?
 
     var body: some View {
@@ -139,6 +140,22 @@ struct ServerView: View {
                     Label("Add", systemImage: "plus")
                 }
                 .disabled(server.state != .online)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("Integrations", systemImage: "puzzlepiece.extension") { screen = .integrations }
+                    Button("Settings", systemImage: "gearshape") { screen = .settings }
+                    Button("About", systemImage: "info.circle") { screen = .about }
+                } label: {
+                    Label("Server", systemImage: "ellipsis.circle")
+                }
+            }
+        }
+        .navigationDestination(item: $screen) { screen in
+            switch screen {
+            case .integrations: IntegrationsView(server: server)
+            case .settings: ServerSettingsView(server: server)
+            case .about: AboutView(server: server)
             }
         }
         .sheet(isPresented: $addingProject) {
