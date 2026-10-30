@@ -153,6 +153,92 @@ public struct ServerClient: Sendable {
         _ = try await call("answer", Body(name: name, id: id, decision: decision), as: Told.self)
     }
 
+    // MARK: The dock
+
+    /// One directory of the working copy; "" is its root.
+    public func files(_ name: String, path: String) async throws -> Dir {
+        struct Body: Encodable { var name: String; var path: String }
+        return try await call("files", Body(name: name, path: path), as: Dir.self)
+    }
+
+    public func file(_ name: String, path: String) async throws -> FileText {
+        struct Body: Encodable { var name: String; var path: String }
+        return try await call("file", Body(name: name, path: path), as: FileText.self)
+    }
+
+    public func gitStatus(_ name: String) async throws -> GitAnswer {
+        try await call("git-status", Named(name: name), as: GitAnswer.self)
+    }
+
+    public func git(_ name: String, _ action: GitOp) async throws -> GitAnswer {
+        struct Body: Encodable { var name: String; var action: GitOp }
+        return try await call("git", Body(name: name, action: action), as: GitAnswer.self)
+    }
+
+    public func gitDiff(_ name: String, path: String, against: Against) async throws -> FileDiff {
+        struct Body: Encodable { var name: String; var path: String; var against: Against }
+        return try await call("git-diff", Body(name: name, path: path, against: against), as: FileDiff.self)
+    }
+
+    public func comments(_ name: String) async throws -> [Comment] {
+        try await call("comments", Named(name: name), as: CommentsReply.self).comments
+    }
+
+    public func comment(_ name: String, _ comment: NewComment) async throws -> [Comment] {
+        struct Body: Encodable { var name: String; var comment: NewComment }
+        return try await call("comment", Body(name: name, comment: comment), as: CommentsReply.self).comments
+    }
+
+    public func uncomment(_ name: String, id: Int64) async throws -> [Comment] {
+        struct Body: Encodable { var name: String; var id: Int64 }
+        return try await call("uncomment", Body(name: name, id: id), as: CommentsReply.self).comments
+    }
+
+    /// Sends the review to the agent as one message, and forgets it.
+    public func sendComments(_ name: String) async throws -> String {
+        try await call("send-comments", Named(name: name), as: Told.self).message
+    }
+
+    public func policy(_ name: String) async throws -> PolicyView {
+        try await call("policy", Named(name: name), as: PolicyView.self)
+    }
+
+    /// The runtime's decisions, newest first.
+    public func events(_ name: String) async throws -> [PolicyEvent] {
+        try await call("events", Named(name: name), as: EventsReply.self).events
+    }
+
+    /// Opens an endpoint to the session; `everywhere` lists it for every new
+    /// session too. Answers with the policy re-read.
+    public func allow(_ name: String, endpoint: String, everywhere: Bool) async throws -> PolicyView {
+        struct Body: Encodable { var name: String; var endpoint: String; var everywhere: Bool }
+        return try await call("allow", Body(name: name, endpoint: endpoint, everywhere: everywhere), as: PolicyView.self)
+    }
+
+    /// Opens only these methods and paths of the endpoint.
+    public func allowPaths(_ name: String, endpoint: String, routes: [PathRoute], everywhere: Bool) async throws -> PolicyView {
+        struct Body: Encodable { var name: String; var endpoint: String; var routes: [PathRoute]; var everywhere: Bool }
+        return try await call("allow-paths", Body(name: name, endpoint: endpoint, routes: routes, everywhere: everywhere),
+                              as: PolicyView.self)
+    }
+
+    /// Denies an endpoint to the session, whatever opens it.
+    public func block(_ name: String, endpoint: String, everywhere: Bool) async throws -> PolicyView {
+        struct Body: Encodable { var name: String; var endpoint: String; var everywhere: Bool }
+        return try await call("block", Body(name: name, endpoint: endpoint, everywhere: everywhere), as: PolicyView.self)
+    }
+
+    /// Takes an endpoint off the lists new sessions start from.
+    public func unlist(_ name: String, endpoint: String) async throws -> PolicyView {
+        struct Body: Encodable { var name: String; var endpoint: String }
+        return try await call("unlist", Body(name: name, endpoint: endpoint), as: PolicyView.self)
+    }
+
+    public func removeRule(_ name: String, id: String) async throws -> PolicyView {
+        struct Body: Encodable { var name: String; var id: String }
+        return try await call("remove-rule", Body(name: name, id: id), as: PolicyView.self)
+    }
+
     public func configurePush(relayURL: String, pushToken: String, pushKey: String?,
                               prefs: [String: Bool]?) async throws -> PushStatus {
         var body: [String: RequestJSON] = [
@@ -259,13 +345,20 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public var toolchains: [String]
     public var providers: [String]
     public var policy: String?
+    public var sandbox: String
+    /// `claude`, say.
+    public var agent: String
+    /// Skills copied in when it was made, by name.
+    public var skills: [String]
+    /// MCP servers it was given, by name.
+    public var mcp: [String]
 
     public var id: String { name }
     public var isChat: Bool { interface == "chat" }
     public var isLive: Bool { !["creating", "seeding", "failed", "dead"].contains(state) }
 
     enum CodingKeys: String, CodingKey {
-        case name, state, task, interface, project, repo, failure, toolchains, providers, policy
+        case name, state, task, interface, project, repo, failure, toolchains, providers, policy, sandbox, agent, skills, mcp
         case workBranch = "work_branch"
         case baseBranch = "base_branch"
         case createdAt = "created_at"
@@ -273,7 +366,8 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
 
     public init(name: String, state: String, workBranch: String = "", task: String = "", interface: String = "terminal",
                 project: String? = nil, repo: String = "", baseBranch: String? = nil, createdAt: Int64 = 0,
-                failure: String? = nil, toolchains: [String] = [], providers: [String] = [], policy: String? = nil) {
+                failure: String? = nil, toolchains: [String] = [], providers: [String] = [], policy: String? = nil,
+                sandbox: String = "") {
         self.name = name
         self.state = state
         self.workBranch = workBranch
@@ -287,6 +381,10 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
         self.toolchains = toolchains
         self.providers = providers
         self.policy = policy
+        self.sandbox = sandbox
+        agent = "claude"
+        skills = []
+        mcp = []
     }
 
     public init(from decoder: Decoder) throws {
@@ -304,6 +402,11 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
         toolchains = try c.decodeIfPresent([String].self, forKey: .toolchains) ?? []
         providers = try c.decodeIfPresent([String].self, forKey: .providers) ?? []
         policy = try c.decodeIfPresent(String.self, forKey: .policy)
+        sandbox = try c.decodeIfPresent(String.self, forKey: .sandbox) ?? ""
+        agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? "claude"
+        struct Named: Decodable { var name: String }
+        skills = (try c.decodeIfPresent([Named].self, forKey: .skills) ?? []).map(\.name)
+        mcp = (try c.decodeIfPresent([Named].self, forKey: .mcp) ?? []).map(\.name)
     }
 }
 
@@ -332,6 +435,9 @@ public struct AgentReport: Decodable, Equatable, Sendable {
 
 public struct Poll: Decodable, Equatable, Sendable {
     public var status: AgentReport?
+    /// What the session has spent, once its agent has reported.
+    public var usage: Usage?
+    public var stat: DiffStat?
 }
 
 struct Told: Decodable {

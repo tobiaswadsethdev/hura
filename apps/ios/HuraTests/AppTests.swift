@@ -105,3 +105,27 @@ func namesModelsAsAPersonWould(id: String, name: String) {
     #expect(WorkTab.chat("2").label == "2" && !WorkTab.chat("2").isAgent)
     #expect(WorkTab.terminal("shell-1").label == "shell-1")
 }
+
+/// Host patterns match as `hostMatches` in the desktop's Events.tsx.
+@Test func matchesRuleHostsLikeTheDesktop() {
+    #expect(hostMatches("github.com:443", "github.com:443"))
+    #expect(!hostMatches("github.com:80", "github.com:443"))
+    #expect(hostMatches("github.com", "github.com:443"))
+    #expect(hostMatches("**", "anything.example:443"))
+    #expect(hostMatches("**.github.com", "api.eu.github.com:443"))
+    #expect(hostMatches("*.github.com", "api.github.com:443"))
+    #expect(!hostMatches("*.github.com", "api.eu.github.com:443"))
+    #expect(!hostMatches("*.github.com", "github.com:443"))
+}
+
+@Test func checksAPathBeforeAllowingIt() {
+    #expect(pathProblem("/feed/v3/**") == nil)
+    #expect(pathProblem("") == "")
+    #expect(pathProblem("feed") != nil)
+    #expect(pathProblem("/a?b") != nil)
+    #expect(pathProblem("/a/../b") != nil)
+    #expect(pathProblem("/a b") != nil)
+    #expect(asPath("https://registry.npmjs.org/-/v1/search", host: "registry.npmjs.org") == "/-/v1/search")
+    #expect(asPath("registry.npmjs.org", host: "registry.npmjs.org") == "/")
+    #expect(asPath("https://other.org/x", host: "registry.npmjs.org") == "https://other.org/x")
+}

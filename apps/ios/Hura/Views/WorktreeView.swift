@@ -34,6 +34,7 @@ struct WorktreeView: View {
     @State private var chats: [String: Chat] = [:]
     @State private var terminals: [String: TerminalChannel] = [:]
     @State private var showingDetails = false
+    @State private var showingDock = false
     @State private var confirmingDelete = false
     @State private var error: String?
 
@@ -72,6 +73,9 @@ struct WorktreeView: View {
         .navigationTitle(tab.map { $0.isAgent ? name : "\(name) · \($0.label)" } ?? name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
+        .navigationDestination(isPresented: $showingDock) {
+            DockView(server: server, name: name)
+        }
         .sheet(isPresented: $showingDetails) {
             NavigationStack {
                 details
@@ -135,6 +139,13 @@ struct WorktreeView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        if session?.isLive == true {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showingDock = true } label: {
+                    Label("Files, Git and Policy", systemImage: "sidebar.right")
+                }
+            }
+        }
         if hasWorkspace, let session {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
