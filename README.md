@@ -100,6 +100,13 @@ marked as one:
   whether it was started here or from `hurad new`. The comments that file was
   created with survive the edit, because they are most of what it is for. See
   [docs/configuration.md](docs/configuration.md).
+- **Your sessions on your phone.** An iOS app shows each server's sessions
+  and a chat session's conversation, live. When an agent asks permission to
+  run something, the notification says what, and Allow or Deny on it answers
+  that request and no other. The text is encrypted end to end, through a small
+  relay that holds the APNs key, and the phone connects over the same pinned
+  TLS as the window. See [apps/ios](apps/ios/README.md) and
+  [docs/notifications.md](docs/notifications.md).
 - **The window can be somewhere else.** `hurad` serves its sessions over one
   authenticated TLS port, so the machine you sit at needs no sandbox runtime, no
   Docker and no tmux of its own. A Linux server inside WSL with the window out
