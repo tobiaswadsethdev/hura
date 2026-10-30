@@ -15,6 +15,10 @@ configFiles:
 packages:
   HuraKit:
     path: HuraKit
+  # The terminal emulator for terminal sessions and shells.
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm
+    exactVersion: 1.20.0
 
 settings:
   base:
@@ -30,6 +34,7 @@ targets:
       - Hura
     dependencies:
       - package: HuraKit
+      - package: SwiftTerm
       - target: HuraNotificationService
     info:
       path: Hura/Info.plist

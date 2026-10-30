@@ -74,8 +74,32 @@ struct ChatView: View {
                     }
                 }
             }
-            ForEach(chat.pending) { ask in
-                askBanner(ask)
+            // The oldest first; the rest wait their turn, as in the terminal.
+            if let ask = chat.pending.first {
+                ScrollView {
+                    AskCard(ask: ask, enabled: answering == nil && chat.phase == .live) { answer(ask, $0) }
+                        .id(ask.id)
+                    if chat.pending.count > 1 {
+                        Text("\(chat.pending.count - 1) more after this").font(.caption).foregroundStyle(.secondary)
+                            .padding(.bottom, 6)
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(maxHeight: 420)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            if !suggestions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(suggestions, id: \.self) { c in
+                            Button("/\(c)") { draft = "/\(c) " }
+                                .font(.caption.monospaced())
+                                .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                }
+                .padding(.vertical, 4)
             }
             composer
         }
@@ -109,50 +133,63 @@ struct ChatView: View {
         .padding(.top, 60)
     }
 
-    private func askBanner(_ ask: Ask) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(ask.summary)
-                        .font(.subheadline.monospaced())
-                        .textSelection(.enabled)
-                    if let d = ask.description, !d.isEmpty {
-                        Text(d).font(.caption).foregroundStyle(.secondary)
+    /// Slash commands matching what is being typed.
+    private var suggestions: [String] {
+        guard draft.hasPrefix("/"), !draft.contains(" ") else { return [] }
+        let typed = draft.dropFirst()
+        return Array(chat.commands.filter { $0.hasPrefix(typed) }.prefix(8))
+    }
+
+    /// Claude Code's permission modes, in the desktop window's words.
+    static let modes: [(value: String, label: String, hint: String)] = [
+        ("auto", "Auto", "Decides what to ask"),
+        ("default", "Ask", "Before edits and commands"),
+        ("acceptEdits", "Accept Edits", "Asks for the rest"),
+        ("plan", "Plan", "Changes nothing"),
+    ]
+
+    private var settingsBar: some View {
+        HStack(spacing: 12) {
+            Menu {
+                Picker("Permission mode", selection: Binding(get: { chat.mode ?? "auto" }, set: { m in
+                    Task { do { try await chat.setMode(m) } catch { chat.error = error.localizedDescription } }
+                })) {
+                    ForEach(Self.modes, id: \.value) { m in
+                        Text("\(m.label) — \(m.hint)").tag(m.value)
                     }
                 }
-                Spacer(minLength: 0)
+            } label: {
+                Label(Self.modes.first { $0.value == (chat.mode ?? "auto") }?.label ?? (chat.mode ?? "Auto"),
+                      systemImage: "shield.lefthalf.filled")
             }
-            if ask.isQuestion {
-                Text("This needs a choice; answer it in hura's desktop window.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                HStack {
-                    Button {
-                        answer(ask, allow: true)
-                    } label: {
-                        Label("Allow", systemImage: "checkmark").frame(maxWidth: .infinity)
+            if !chat.models.isEmpty {
+                Menu {
+                    Picker("Model", selection: Binding(get: { chat.model ?? chat.models[0].value }, set: { m in
+                        Task { do { try await chat.setModel(m) } catch { chat.error = error.localizedDescription } }
+                    })) {
+                        ForEach(chat.models) { m in
+                            Text(m.displayName).tag(m.value)
+                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    Button(role: .destructive) {
-                        answer(ask, allow: false)
-                    } label: {
-                        Label("Deny", systemImage: "xmark")
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
+                } label: {
+                    Label(chat.model.map(modelName) ?? chat.models[0].displayName, systemImage: "cpu")
                 }
-                .disabled(answering != nil || chat.phase != .live)
             }
+            Spacer()
+            if chat.status == "compacting" { Text("compacting") }
+            if let ctx = chat.contextPercentage { Text("ctx \(Int(ctx.rounded()))%") }
+            if let cost = chat.costUSD, cost > 0 { Text(String(format: "$%.2f", cost)) }
         }
-        .padding(12)
-        .background(Color.orange.opacity(0.15))
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .padding(.horizontal, 14)
+        .padding(.top, 6)
     }
 
     private var composer: some View {
+        VStack(spacing: 0) {
+        settingsBar
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Message Claude", text: $draft, axis: .vertical)
                 .lineLimit(1...6)
@@ -176,9 +213,10 @@ struct ChatView: View {
                 .accessibilityLabel("Send")
             }
         }
-        .disabled(chat.phase != .live)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+        }
+        .disabled(chat.phase != .live)
         .background(.bar)
     }
 
@@ -197,11 +235,20 @@ struct ChatView: View {
         }
     }
 
-    private func answer(_ ask: Ask, allow: Bool) {
+    private func answer(_ ask: Ask, _ decision: ChatDecision) {
         answering = ask.id
         Task {
             defer { answering = nil }
-            do { try await chat.answer(ask.id, allow: allow) } catch { chat.error = error.localizedDescription }
+            do { try await chat.answer(ask.id, decision: decision) } catch { chat.error = error.localizedDescription }
         }
     }
+}
+
+/// A model id as a person would say it: `claude-opus-5-5[1m]` is Opus 5.5
+/// (1M). Anything that doesn't look like an id is left as it is.
+func modelName(_ id: String) -> String {
+    guard let m = id.wholeMatch(of: /claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?/) else { return id }
+    let family = m.1.prefix(1).uppercased() + m.1.dropFirst()
+    let name = "\(family) \(m.2)\(m.3.map { ".\($0)" } ?? "")"
+    return m.4 == nil ? name : "\(name) (1M)"
 }

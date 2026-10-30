@@ -10,16 +10,33 @@ public struct Ask: Equatable, Identifiable, Sendable {
     /// Claude Code's own sentence for it, when it has one.
     public var title: String?
     public var description: String?
+    public var displayName: String?
+    /// Why it asks rather than deciding.
+    public var reason: String?
+    /// A path outside the working copy that the call would touch.
+    public var blockedPath: String?
+    /// Whether "don't ask again" is on offer.
+    public var canRemember: Bool
+    /// Approving it mustn't be one stray tap.
+    public var defaultToNo: Bool
+    /// The subagent asking, when it isn't the main thread.
+    public var agent: String?
     /// Questions and plans need a choice a button can't carry.
     public var isQuestion: Bool { tool == "AskUserQuestion" || tool == "ExitPlanMode" }
 
-    init?(_ v: JSONValue) {
+    public init?(_ v: JSONValue) {
         guard let id = v["id"]?.string, let tool = v["tool"]?.string else { return nil }
         self.id = id
         self.tool = tool
         input = v["input"] ?? .object([:])
         title = v["title"]?.string
         description = v["description"]?.string
+        displayName = v["display_name"]?.string
+        reason = v["reason"]?.string
+        blockedPath = v["blocked_path"]?.string
+        canRemember = v["can_remember"]?.bool ?? false
+        defaultToNo = v["default_to_no"]?.bool ?? false
+        agent = v["agent"]?.string
     }
 
     /// One line saying what it asks, as the chat host describes it.
@@ -28,6 +45,22 @@ public struct Ask: Equatable, Identifiable, Sendable {
         let target = ["command", "file_path", "url", "path", "pattern"].lazy
             .compactMap { self.input[$0]?.string }.first { !$0.isEmpty }
         return target.map { "\(tool): \($0)" } ?? tool
+    }
+}
+
+/// A model Claude Code offers (`ChatModel`).
+public struct ChatModel: Equatable, Identifiable, Sendable {
+    public var value: String
+    public var displayName: String
+    public var description: String
+
+    public var id: String { value }
+
+    init?(_ v: JSONValue) {
+        guard let value = v["value"]?.string else { return nil }
+        self.value = value
+        displayName = v["display_name"]?.string ?? value
+        description = v["description"]?.string ?? ""
     }
 }
 
@@ -172,6 +205,17 @@ public final class Chat {
     /// `idle`, `running` or `waiting`.
     public private(set) var activity = "idle"
     public private(set) var pending: [Ask] = []
+    /// Claude Code's permission mode: `auto`, `default`, `acceptEdits`, `plan`.
+    public private(set) var mode: String?
+    public private(set) var model: String?
+    /// The models this account can switch to, once Claude Code has said.
+    public private(set) var models: [ChatModel] = []
+    /// Slash commands on offer, without the slash.
+    public private(set) var commands: [String] = []
+    /// What Claude Code is doing that isn't a turn: `compacting`.
+    public private(set) var status: String?
+    public private(set) var costUSD: Double?
+    public private(set) var contextPercentage: Double?
     /// The reply so far, before its message arrives whole.
     public private(set) var streaming = ""
     /// Why there is nothing yet, from hurad: a session still cloning, say.
@@ -223,21 +267,48 @@ public final class Chat {
     }
 
     public func send(_ text: String) async throws {
-        try await command(["op": .string("send"), "text": .string(text)])
+        struct Body: Encodable { var text: String }
+        try await command(Op(op: "send", body: Body(text: text)))
     }
 
     public func interrupt() async throws {
-        try await command(["op": .string("interrupt")])
+        try await command(Op(op: "interrupt", body: Nothing()))
     }
 
     public func answer(_ ask: String, allow: Bool) async throws {
-        try await command(["op": .string("answer"), "id": .string(ask), "decision": .object(["allow": .bool(allow)])])
+        try await answer(ask, decision: ChatDecision(allow: allow))
     }
 
-    private func command(_ command: [String: RequestJSON]) async throws {
+    public func answer(_ ask: String, decision: ChatDecision) async throws {
+        struct Body: Encodable {
+            var id: String
+            var decision: ChatDecision
+        }
+        try await command(Op(op: "answer", body: Body(id: ask, decision: decision)))
+    }
+
+    /// Switches the permission mode.
+    public func setMode(_ mode: String) async throws {
+        struct Body: Encodable { var mode: String }
+        try await command(Op(op: "mode", body: Body(mode: mode)))
+    }
+
+    /// Switches the model; nil for the account's default.
+    public func setModel(_ model: String?) async throws {
+        struct Body: Encodable {
+            var model: String?
+            enum CodingKeys: String, CodingKey { case model }
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(model, forKey: .model)
+            }
+        }
+        try await command(Op(op: "model", body: Body(model: model)))
+    }
+
+    private func command<C: Encodable>(_ command: C) async throws {
         guard let socket, phase == .live else { throw ServerError.malformed("not connected") }
-        let frame: [String: RequestJSON] = ["do": .string("chat"), "id": .number(Self.channel), "command": .object(command)]
-        try await socket.send(.text(JSONEncoder().encode(frame)))
+        try await socket.send(.text(JSONEncoder().encode(CommandFrame(id: Self.channel, command: command))))
     }
 
     /// One connection, until it ends. True when it got as far as the channel.
@@ -294,6 +365,13 @@ public final class Chat {
             guard let s = f["state"] else { return }
             activity = s["activity"]?.string ?? "idle"
             if case let .array(list)? = s["pending"] { pending = list.compactMap(Ask.init) } else { pending = [] }
+            mode = s["mode"]?.string
+            model = s["model"]?.string
+            if case let .array(list)? = s["models"] { models = list.compactMap(ChatModel.init) } else { models = [] }
+            if case let .array(list)? = s["commands"] { commands = list.compactMap(\.string) } else { commands = [] }
+            status = s["status"]?.string
+            if case let .number(n)? = s["cost_usd"] { costUSD = n } else { costUSD = nil }
+            if case let .number(n)? = s["context_percentage"] { contextPercentage = n } else { contextPercentage = nil }
             if activity == "idle" { streaming = "" }
         case "error":
             error = f["message"]?.string
@@ -316,4 +394,11 @@ public final class Chat {
         if raw["ev"]?["msg"]?["type"]?.string == "assistant" { streaming = "" }
         if let entry = ChatTranscript.entry(raw) { entries.append(entry) }
     }
+}
+
+/// `ClientFrame::Chat`: a command on a chat channel.
+private struct CommandFrame<C: Encodable>: Encodable {
+    var `do` = "chat"
+    var id: Int
+    var command: C
 }

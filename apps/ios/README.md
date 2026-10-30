@@ -1,9 +1,14 @@
 # hura for iOS
 
-The phone side of hura. It shows the sessions on your servers, and a chat
-session's conversation, live. You can answer a permission request with Allow
-or Deny, in the app or from the notification itself, and send the agent a
-message. It talks to `hurad` over the same paired, pinned TLS connection the
+The phone side of hura, working toward what the desktop window does. A
+server's worktrees are grouped under their projects; you can make a project
+from a repository on the server, start a worktree in it with the same form
+the desktop uses, and delete one. A chat session's conversations are live:
+answer a permission request, a question or a plan, switch the permission mode
+or the model, and open more conversations beside the agent's. A terminal
+session's agent, and any shell beside it, is a terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)),
+with a key bar for esc, ctrl, tab and the arrows. A permission request can
+also be answered from its notification. It talks to `hurad` over the same paired, pinned TLS connection the
 desktop application uses, and receives notifications through the
 [relay](../../relay). [docs/notifications.md](../../docs/notifications.md)
 covers the `hurad` side.
@@ -11,7 +16,7 @@ covers the `hurad` side.
 | Part | What it is |
 |---|---|
 | `Hura/` | the SwiftUI app |
-| `HuraKit/` | a Swift package with no UI: pairing, certificate pinning, the Keychain, `/rpc` and the chat websocket, and the push relay's client and encryption |
+| `HuraKit/` | a Swift package with no UI: pairing, certificate pinning, the Keychain, `/rpc`, the chat and terminal channels on the websocket, and the push relay's client and encryption |
 | `HuraNotificationService/` | a notification service extension that decrypts end-to-end encrypted notification text on the phone |
 
 ## Build

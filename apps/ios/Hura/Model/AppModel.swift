@@ -15,7 +15,8 @@ final class AppModel {
     private(set) var pushError: String?
     /// The session on screen, whose notifications aren't shown.
     var visibleSession: (serverID: String, session: String)?
-    /// Where tapping a notification asked to go; the server list consumes it.
+    /// Where to go next (a tapped notification, a worktree just made); the
+    /// server list consumes it.
     var pendingRoute: [Route]?
 
     @ObservationIgnored private let store: ServerStore
