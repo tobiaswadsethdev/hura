@@ -117,9 +117,6 @@ struct ServerView: View {
                     }
                 }
             }
-            if model.push.isAvailable {
-                NotificationSettings(server: server)
-            }
         }
         .navigationTitle(server.record.name)
         .refreshable { await server.refresh() }

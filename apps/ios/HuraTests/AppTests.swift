@@ -129,3 +129,17 @@ func namesModelsAsAPersonWould(id: String, name: String) {
     #expect(asPath("registry.npmjs.org", host: "registry.npmjs.org") == "/")
     #expect(asPath("https://other.org/x", host: "registry.npmjs.org") == "https://other.org/x")
 }
+
+/// A server's name is this phone's own, kept with its pairing.
+@Test @MainActor func renamesAServerAndKeepsTheName() throws {
+    let store = InMemoryServerStore()
+    let m = model(store)
+    let server = try m.add(record())
+    try m.rename(server, to: "  Laptop (WSL) ")
+    #expect(server.record.name == "Laptop (WSL)")
+    #expect(try store.loadAll().first?.name == "Laptop (WSL)")
+    // An empty name is no name: the old one stays.
+    try m.rename(server, to: "   ")
+    #expect(server.record.name == "Laptop (WSL)")
+    #expect(server.record.token == "tok", "the pairing is untouched")
+}
