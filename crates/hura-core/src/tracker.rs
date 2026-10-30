@@ -37,6 +37,7 @@ pub mod doc;
 mod edit;
 mod issue;
 pub mod markdown;
+mod pull;
 mod pulls;
 pub use edit::{
     Choice, EditField, EditForm, Editable, FieldChange, Transition, UserChoice, comment,
@@ -44,6 +45,10 @@ pub use edit::{
 };
 pub use issue::{
     Issue, IssueComment, Parent as IssueParent, Person as IssuePerson, Stage as IssueStage, issue,
+};
+pub use pull::{
+    PullCheck, PullCheckState, PullComment, PullDetail, PullFile, PullFiles, PullReviewer,
+    PullState, PullThread, PullVerdict, pull, pull_comment, pull_file, pull_files, pull_vote,
 };
 pub use pulls::{Checks, PullRequest, Review};
 
@@ -274,6 +279,38 @@ pub struct Ticket {
     pub repo: Option<String>,
 }
 
+/// The pull request a session was started from.
+///
+/// On the session record as a note of where the work came from, like
+/// [`Ticket`], and for one thing more: a session with one is seeded onto the
+/// pull request's own branch, which is already on the remote, rather than a
+/// new branch made from its base. See `seed::clone_and_branch`.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullOrigin {
+    pub tracker: String,
+    pub kind: Kind,
+    pub id: String,
+    /// `#58` or `!26056`.
+    pub key: String,
+    pub url: String,
+    /// `owner/name` on GitHub, the repository's name on Azure DevOps.
+    pub repo: String,
+}
+
+impl From<&PullRequest> for PullOrigin {
+    fn from(p: &PullRequest) -> Self {
+        PullOrigin {
+            tracker: p.tracker.clone(),
+            kind: p.kind,
+            id: p.id.clone(),
+            key: p.key.clone(),
+            url: p.url.clone(),
+            repo: p.repo.clone(),
+        }
+    }
+}
+
 impl From<&Task> for Ticket {
     fn from(t: &Task) -> Self {
         Ticket {
@@ -462,6 +499,7 @@ fragment issue on Issue {
 }
 fragment pull on PullRequest {
   number title url isDraft updatedAt headRefName baseRefName mergeable reviewDecision
+  isCrossRepository
   author { login }
   repository { nameWithOwner }
   comments { totalCount }

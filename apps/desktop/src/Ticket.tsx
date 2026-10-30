@@ -418,7 +418,7 @@ export function TicketPanel({
 /// A person, as initials and a name. Initials rather than the tracker's
 /// avatar: the window loads nothing from the network, and an avatar is a
 /// request per face.
-function Who({ person }: { person: IssuePerson }) {
+export function Who({ person }: { person: IssuePerson }) {
   const initials = person.name
     .split(/\s+/)
     .filter(Boolean)
@@ -436,13 +436,10 @@ function Who({ person }: { person: IssuePerson }) {
   );
 }
 
-function Nobody({ children }: { children: React.ReactNode }) {
+export function Nobody({ children }: { children: React.ReactNode }) {
   return <span className="nobody">{children}</span>;
 }
 
-/// How long ago a tracker's timestamp was, in the fewest words: `5m ago`,
-/// `3h ago`, `2d ago`. Null for anything it cannot read, which is then left
-/// off rather than shown wrong.
 /// A tracker's timestamp as milliseconds, or `null` when it is not one.
 ///
 /// Jira writes `+0000` where the format wants `+00:00`, and WebKit is strict
@@ -453,6 +450,9 @@ export function when(stamp: string | null): number | null {
   return Number.isNaN(at) ? null : at;
 }
 
+/// How long ago a tracker's timestamp was, in the fewest words: `5m ago`,
+/// `3h ago`, `2d ago`. Null for anything it cannot read, which is then left
+/// off rather than shown wrong.
 export function ago(stamp: string | null): string | null {
   const at = when(stamp);
   if (at === null) return null;

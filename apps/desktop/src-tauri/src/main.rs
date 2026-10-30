@@ -554,9 +554,26 @@ fn new_options(server: String) -> Result<NewOptions, Failed> {
 /// in `creating`.
 #[tauri::command(async)]
 fn create(server: String, session: NewSession) -> Result<String, Failed> {
-    let reply = remote(&server)?
-        .call(Request::Create(Box::new(session)))
-        .map_err(to_message)?;
+    // A session from a pull request is a request of its own, so a server that
+    // predates it refuses it rather than making a new branch with the pull
+    // request's name. See `Request::CreateFromPull`.
+    let from_pull = session.pull.is_some();
+    let request = if from_pull {
+        Request::CreateFromPull(Box::new(session))
+    } else {
+        Request::Create(Box::new(session))
+    };
+    let reply = remote(&server)?.call(request).map_err(|e| {
+        let said = to_message(e);
+        if from_pull && said.message.contains("`create-from-pull`") {
+            failed(
+                "this server is from before sessions could start from a pull request; \
+                 `hurad update` on it brings it up to date",
+            )
+        } else {
+            said
+        }
+    })?;
     expect_reply!(reply, Reply::Created { name } => name, "a created session")
 }
 
@@ -815,6 +832,68 @@ fn users(
 ) -> Result<Vec<hura_core::tracker::UserChoice>, Failed> {
     let stored = tracker_named(&load_trackers()?, &tracker)?;
     hura_core::tracker::users(&stored, &key, &query, assignable).map_err(failed)
+}
+
+// A pull request, read in full and reviewed from here. Read and written from
+// this machine with the tracker's own token, like the tickets: the server is
+// not involved.
+
+/// One pull request: its checks, its reviewers and its conversation.
+#[tauri::command(async)]
+fn pull(tracker: String, repo: String, id: String) -> Result<hura_core::tracker::PullDetail, Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::pull(&stored, &repo, &id).map_err(failed)
+}
+
+/// The files it changes, and the two commits it is measured between.
+#[tauri::command(async)]
+fn pull_files(
+    tracker: String,
+    repo: String,
+    id: String,
+) -> Result<hura_core::tracker::PullFiles, Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::pull_files(&stored, &repo, &id).map_err(failed)
+}
+
+/// Both sides of one of its files, for the diff editor. `repo`, `base` and
+/// `head` are what `pull_files` answered with.
+#[tauri::command(async)]
+fn pull_file(
+    tracker: String,
+    repo: String,
+    base: String,
+    head: String,
+    file: hura_core::tracker::PullFile,
+) -> Result<hura_core::git::FileDiff, Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::pull_file(&stored, &repo, &base, &head, &file).map_err(failed)
+}
+
+/// A comment on it, or a reply to one of its threads.
+#[tauri::command(async)]
+fn pull_comment(
+    tracker: String,
+    repo: String,
+    id: String,
+    body: String,
+    thread: Option<String>,
+) -> Result<(), Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::pull_comment(&stored, &repo, &id, &body, thread.as_deref()).map_err(failed)
+}
+
+/// A review: approve, ask for changes, or one of Azure DevOps' votes.
+#[tauri::command(async)]
+fn pull_vote(
+    tracker: String,
+    repo: String,
+    id: String,
+    verdict: hura_core::tracker::PullVerdict,
+    body: String,
+) -> Result<(), Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::pull_vote(&stored, &repo, &id, verdict, &body).map_err(failed)
 }
 
 /// One ticket in full (description, comments, the people on it), read from
@@ -1091,6 +1170,11 @@ fn main() {
             my_skills,
             tickets,
             ticket,
+            pull,
+            pull_files,
+            pull_file,
+            pull_comment,
+            pull_vote,
             edit_form,
             save_ticket,
             transitions,

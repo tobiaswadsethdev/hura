@@ -11,6 +11,10 @@ import type { Comment } from "./gen/Comment";
 import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
 import type { Issue } from "./gen/Issue";
+import type { PullDetail } from "./gen/PullDetail";
+import type { PullFile } from "./gen/PullFile";
+import type { PullFiles } from "./gen/PullFiles";
+import type { PullVerdict } from "./gen/PullVerdict";
 import type { EditForm } from "./gen/EditForm";
 import type { FieldChange } from "./gen/FieldChange";
 import type { Transition } from "./gen/Transition";
@@ -233,6 +237,27 @@ export const api = {
     invoke<void>("delete_comment", { tracker, key, id }),
   users: (tracker: string, key: string, query: string, assignable: boolean) =>
     invoke<UserChoice[]>("users", { tracker, key, query, assignable }),
+
+  // A pull request, read in full and reviewed, with the tracker's own token.
+  // `repo` is `owner/name` on GitHub; Azure DevOps finds a pull request by its
+  // number and ignores it. A file's two sides are asked for with what
+  // `pullFiles` answered, which on Azure DevOps names the repository by id.
+  pull: (tracker: string, repo: string, id: string) =>
+    invoke<PullDetail>("pull", { tracker, repo, id }),
+  pullFiles: (tracker: string, repo: string, id: string) =>
+    invoke<PullFiles>("pull_files", { tracker, repo, id }),
+  pullFile: (tracker: string, files: PullFiles, file: PullFile) =>
+    invoke<FileDiff>("pull_file", {
+      tracker,
+      repo: files.repo,
+      base: files.base,
+      head: files.head,
+      file,
+    }),
+  pullComment: (tracker: string, repo: string, id: string, body: string, thread: string | null) =>
+    invoke<void>("pull_comment", { tracker, repo, id, body, thread }),
+  pullVote: (tracker: string, repo: string, id: string, verdict: PullVerdict, body: string) =>
+    invoke<void>("pull_vote", { tracker, repo, id, verdict, body }),
 
   // The editable defaults in the server's config file. The server's, because
   // `branch_prefix` names the branch of every session on that machine and a

@@ -90,7 +90,9 @@ marked as one:
   from there, with nothing to configure on the server, and a notification when
   something of yours changes. Each row shows the worktree working on it, and
   one button turns a ticket into a session with the task, the name and the
-  branch already right.
+  branch already right. A pull request opens in the window, with its checks,
+  conversation and diffs, to comment on, approve or send back, and starts a
+  session on its own branch to work on it or to review it.
 - **Set up once, from the window.** The branch prefix a work branch is named
   under, and the base branch, policy and credentials a new session starts with,
   are edited on the settings screen and written into the server's own config
@@ -208,7 +210,7 @@ See [docs/toolchains.md](docs/toolchains.md).
 | [The server](docs/server.md)               | `hurad`, pairing a client on another machine, WSL, what a token is worth |
 | [Configuration](docs/configuration.md)     | `~/.config/hura/config.toml`, and which default wins                   |
 | [Policy and events](docs/policy.md)        | what is enforced, the audit feed, and acting on a denial              |
-| [Tickets](docs/tickets.md)                 | your tickets and pull requests, notifications, sessions from tickets  |
+| [Tickets](docs/tickets.md)                 | your tickets and pull requests, reviewing, sessions from both         |
 | [Git hosts](docs/git-hosts.md)             | GitHub and Azure DevOps, and how pushing keeps the token away         |
 | [Toolchains](docs/toolchains.md)           | node, .NET and Rust in a sandbox, and the registry each one may reach |
 | [Skills](docs/skills.md)                   | carrying your own skills into a sandbox                               |

@@ -6,7 +6,7 @@
 | [desktop.md](desktop.md) | the desktop workspace: projects and worktrees, files, git, the editor, the review |
 | [configuration.md](configuration.md) | `~/.config/hura/config.toml`, and which default wins |
 | [policy.md](policy.md) | the rules being enforced, the audit feed, and acting on a denial |
-| [tickets.md](tickets.md) | your tickets and pull requests, notifications, and sessions from tickets |
+| [tickets.md](tickets.md) | your tickets and pull requests, reviewing a pull request, notifications, and sessions from either |
 | [git-hosts.md](git-hosts.md) | GitHub and Azure DevOps, and how pushing keeps the token off your host |
 | [toolchains.md](toolchains.md) | node, .NET and Rust in a sandbox, and the registry each one may reach |
 | [skills.md](skills.md) | carrying your own skills into a sandbox, from either machine |

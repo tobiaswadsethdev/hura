@@ -36,13 +36,14 @@ import {
   Settings,
   Working,
 } from "./icons";
-import { InboxBar } from "./Inbox";
+import { InboxBar, pullProjects, pullSession, samePull } from "./Inbox";
 import { IntegrationsScreen } from "./Integrations";
 import { ServersScreen } from "./Connect";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Inbox } from "./gen/Inbox";
 import type { Project } from "./gen/Project";
 import type { Session } from "./gen/Session";
+import type { PullRequest } from "./gen/PullRequest";
 import type { Task } from "./gen/Task";
 import type { Poll } from "./gen/Poll";
 import { onSessions, reset as resetNotifications } from "./notify";
@@ -52,6 +53,7 @@ import { NewProjectDialog } from "./NewProject";
 import { NewWorktreeDialog } from "./NewWorktree";
 import { DEFAULTS, LIMITS, usePrefs } from "./prefs";
 import { SettingsScreen } from "./Settings";
+import { PullPanel, type PullStart } from "./Pull";
 import { TicketPanel } from "./Ticket";
 import { Split } from "./Split";
 import type { Against } from "./gen/Against";
@@ -210,6 +212,8 @@ export default function App() {
   const [creatingIn, setCreatingIn] = useState<Project | null>(null);
   /// The ticket a create was started from, carried from the sidebar to the form.
   const [fromTask, setFromTask] = useState<Task | null>(null);
+  /// Or the pull request, and whether the session is to work on it or review it.
+  const [fromPull, setFromPull] = useState<{ pull: PullRequest; mode: PullStart } | null>(null);
   // Every worktree's last poll: what its agent is doing, what it has spent, and
   // how full its context is. From a status channel each rather than a request
   // on a timer -- the server polls the sandbox and sends a frame only when
@@ -439,6 +443,8 @@ export default function App() {
   const [trackers, setTrackers] = useState<ConfiguredTracker[] | null>(null);
   /// The ticket open beside the sidebar.
   const [showing, setShowing] = useState<Task | null>(null);
+  /// Or the pull request: one at a time, since they open in the same place.
+  const [showingPull, setShowingPull] = useState<PullRequest | null>(null);
   // Read through a ref: turning notifications off is not a reason to ask
   // every tracker again, which a dependency would make it.
   const notifyTickets = useRef(prefs.notifyTickets);
@@ -584,7 +590,27 @@ export default function App() {
   const startFrom = (project: Project, task: Task) => {
     setScreen(null);
     setShowing(null);
+    setShowingPull(null);
+    setFromPull(null);
     setFromTask(task);
+    setCreatingIn(project);
+  };
+
+  /// Read a pull request beside the sidebar, or put it away if it is the one
+  /// already open. From its row, or from a worktree's mark in the tree.
+  const showPull = (pull: PullRequest) => {
+    setShowing(null);
+    setShowingPull((current) => (current && samePull(current, pull) ? null : pull));
+  };
+
+  /// The same, for a pull request: a worktree on its branch, to carry on with
+  /// it or to review it.
+  const startFromPull = (project: Project, pull: PullRequest, mode: PullStart) => {
+    setScreen(null);
+    setShowing(null);
+    setShowingPull(null);
+    setFromTask(null);
+    setFromPull({ pull, mode });
     setCreatingIn(project);
   };
 
@@ -772,6 +798,8 @@ export default function App() {
             polls={polls}
             selected={selected}
             onSelect={setSelected}
+            pulls={inbox?.pulls ?? []}
+            onPull={showPull}
             onNewWorktree={setCreatingIn}
             onForget={(p) => {
               if (!server) return;
@@ -1007,6 +1035,7 @@ export default function App() {
           projects={projects}
           currentProject={session?.project ?? null}
           showing={showing}
+          showingPull={showingPull}
           keys={TICKETS_KEYS}
           onFold={() => setPrefs({ inboxOpen: !inboxOpen })}
           onShut={(inboxShut) => setPrefs({ inboxShut })}
@@ -1020,12 +1049,15 @@ export default function App() {
             setScreen(null);
             setSelected(name);
           }}
-          onShow={(task) =>
+          onShow={(task) => {
+            setShowingPull(null);
             setShowing((current) =>
               current?.tracker === task.tracker && current.key === task.key ? null : task,
-            )
-          }
+            );
+          }}
+          onShowPull={showPull}
           onStart={startFrom}
+          onStartPull={startFromPull}
         />
 
         {/* The ticket, read in full beside the sidebar and over whatever is
@@ -1043,6 +1075,26 @@ export default function App() {
               currentProject={session?.project ?? null}
               onStart={startFrom}
               onClose={() => setShowing(null)}
+              onChanged={readInbox}
+            />
+          </div>
+        )}
+        {showingPull && (
+          <div
+            className="inbox-flyout wide"
+            style={{ right: inboxOpen ? prefs.inboxWidth : undefined }}
+          >
+            <PullPanel
+              key={`${showingPull.tracker}:${showingPull.repo}:${showingPull.id}`}
+              pull={showingPull}
+              projects={pullProjects(showingPull, projects)}
+              session={pullSession(showingPull, live)}
+              onStart={startFromPull}
+              onSelect={(name) => {
+                setScreen(null);
+                setSelected(name);
+              }}
+              onClose={() => setShowingPull(null)}
               onChanged={readInbox}
             />
           </div>
@@ -1067,13 +1119,16 @@ export default function App() {
           server={server}
           project={creatingIn}
           from={fromTask}
+          fromPull={fromPull}
           onClose={() => {
             setCreatingIn(null);
             setFromTask(null);
+            setFromPull(null);
           }}
           onCreated={(name) => {
             setCreatingIn(null);
             setFromTask(null);
+            setFromPull(null);
             // Selected before it exists, on purpose: the record is written as
             // soon as the server's thread reaches it, and the burst below is
             // what puts it in the sidebar rather than the next poll.

@@ -52,6 +52,11 @@ branch: string,
  */
 base: string, draft: boolean, 
 /**
+ * Opened from a fork, whose branch is not in this repository: a
+ * worktree here can neither check it out nor push to it.
+ */
+fork: boolean, 
+/**
  * Whether the forge says it cannot be merged as it stands.
  */
 conflicts: boolean, 

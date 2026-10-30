@@ -52,10 +52,13 @@ assignee field.
 
 **A row knows its worktree.** A ticket a session was started from, or one whose
 key a worktree's branch is named after (`tobias/PROJ-7-retry-uploads`), shows
-that worktree with its agent's state; so does a pull request whose branch a
-worktree in the same repository is working on. A click on it selects the
-worktree. A ticket with no worktree has a start button instead (see [What a
-ticket becomes](#what-a-ticket-becomes)).
+that worktree with its agent's state; so does a pull request a session was
+started from, or whose branch a worktree in the same repository is working on.
+A click on it selects the worktree. A row with no worktree has a start button
+instead (see [What a ticket becomes](#what-a-ticket-becomes) and [What a pull
+request becomes](#what-a-pull-request-becomes)). The tree says it the other way
+round: a worktree on one of these pull requests' branches has the pull
+request's number and checks on its branch line, and a click on them opens it.
 
 **Click a Jira ticket** (or focus it and press Enter) and it opens in full
 beside the sidebar, over the dock: its status, assignee, reporter, priority,
@@ -63,7 +66,8 @@ parent, labels and dates, the description, and the comments oldest first.
 Escape closes it, and so does clicking the row again. The ↗ in its header, and
 *Open in the browser* in a row's right-click menu, still go to Jira for what
 only Jira does: attaching, linking, logging work. GitHub and Azure DevOps
-tickets, and every pull request, open in the browser.
+tickets open in the browser; pull requests open here, as [Reading and
+reviewing a pull request](#reading-and-reviewing-a-pull-request) describes.
 
 It is one `GET /rest/api/3/issue/{key}` with the tracker's own token. The
 description and comments arrive in Jira's document format and are drawn from
@@ -155,6 +159,45 @@ if they matter.
 
 GitHub and Azure DevOps tickets are still changed in the browser.
 
+## Reading and reviewing a pull request
+
+**Click a pull request** and it opens beside the sidebar like a ticket, wider,
+because one of its tabs is a diff:
+
+* **overview**: the description, every check by name (failing first, each with
+  a link to its log), the reviewers and where each stands, and your own review;
+* **conversation**: comments, reviews and threads on lines, oldest first. A
+  resolved thread starts shut, showing its file, its line and who started it,
+  since a long review is mostly settled threads;
+* **files**: the files it changes with the lines added and removed, each opening
+  to both sides in the diff editor the dock uses, with unchanged stretches
+  folded away. Measured from where the branch left its base, the way the
+  forge's own page measures it, so what landed on the base since is not shown
+  as this pull request's.
+
+**From here you can comment, reply to a thread, approve and ask for changes.**
+On GitHub those are its two verdicts, and a request for changes needs a
+comment, as on GitHub. Your own pull request offers neither, because GitHub
+refuses a review of your own. Azure DevOps has its five votes (approve, approve
+with suggestions, wait for the author, reject, and resetting yours), and a
+comment written with one is posted beside it. Merging, resolving a thread and
+suggesting a change stay on the forge, one click away in the header.
+
+| What | GitHub | Azure DevOps |
+| --- | --- | --- |
+| the pull request, its checks, reviewers and conversation | one GraphQL query | `connectionData`, then `GET _apis/git/pullrequests/{id}`, its `threads` and `statuses`, and `_apis/policy/evaluations` for the branch policies |
+| the files | `GET /repos/{repo}/pulls/{n}`, then `compare/{base}...{head}` | the last of its `iterations`, and that one's `changes` |
+| both sides of a file | one GraphQL query for both blobs | `GET …/items` at each commit |
+| a comment, a reply | `POST /repos/{repo}/issues/{n}/comments`, `…/pulls/{n}/comments/{id}/replies` | `POST …/threads`, `…/threads/{id}/comments` |
+| a review, a vote | `POST /repos/{repo}/pulls/{n}/reviews` | `PUT …/reviewers/{you}` |
+
+The conversation is the newest hundred comments and the newest hundred threads;
+a longer one says how many more are on the forge. An Azure DevOps thread that
+only records something happening (a reviewer joining, a branch updated) is left
+out, except a vote, which is shown as the review it is. Its checks are two
+requests of their own, and a pull request whose checks could not be read still
+opens, saying so.
+
 ## Setting one up
 
 Trackers are the **trackers** section of the settings screen. With none set up,
@@ -163,8 +206,8 @@ the sidebar says so, and its **add a tracker** opens the settings screen there.
 | Tracker | Asks for | Token |
 | --- | --- | --- |
 | Jira | the site (`https://your-org.atlassian.net`) and the email of the account the token belongs to | an API token, from id.atlassian.com → Security → API tokens |
-| Azure DevOps | the organisation and the project | a personal access token with *Work Items (read)* for the tickets and *Code (read)* for the pull requests |
-| GitHub | a repository (`owner/name`), or nothing for every repository the token can see | a token that can read issues and pull requests |
+| Azure DevOps | the organisation and the project | a personal access token with *Work Items (read)* for the tickets and *Code (read)* for the pull requests, or *Code (read & write)* to comment and vote on them |
+| GitHub | a repository (`owner/name`), or nothing for every repository the token can see | a token that can read issues and pull requests, and write pull requests to comment and review |
 
 A **name** is optional, and only worth giving a second tracker of the same kind.
 
@@ -228,16 +271,53 @@ The session records which ticket it came from (tracker, key and link) as a
 note about where the work came from, and that is how the row finds it again.
 Nothing writes back through it.
 
+## What a pull request becomes
+
+A pull request's start button, *Work on it* and *Review it* in its right-click
+menu, and the two buttons at the foot of its panel all open the create form in
+a project that is a clone of its repository. A project cloned over SSH counts:
+`git@github.com:o/r.git` is the repository its pull requests call
+`https://github.com/o/r`. With no such project there is nothing to start in,
+and the panel says so.
+
+**Either way the worktree is on the pull request's own branch**, checked out
+from the remote and tracking it, rather than a new branch made from its base.
+The base is the branch it merges into, so the diff pane measures the whole of
+the pull request and not only what the agent adds to it. If the branch has gone
+from the remote by the time the sandbox clones (merged, say), the seeding fails
+and says so rather than making a new branch of that name.
+
+| | the task, filled in |
+| --- | --- |
+| **work on it** | its name, title and link, which branch this is and what it merges into, and that pushing updates the pull request; the instruction is yours to write under it |
+| **review it** | the same, then the instruction: read the changes with `git diff origin/<base>...HEAD`, run the tests that cover them, and report what is wrong, then what is risky, then anything smaller, with files and lines; and do not commit, push or comment on the pull request |
+
+A review that does not push is asked, not enforced: the session has the same
+policy and credentials as any other, because running the tests usually needs
+them. What goes on the pull request is still yours to say, from its panel.
+
+**A pull request opened from a fork cannot be started on.** Its branch is in
+the fork, which this worktree's clone does not have and could not push to, so
+its row says *fork* and has no start button.
+
+The session records which pull request it came from, beside where it records a
+ticket, and that is how its row and its tree mark find it. The create goes to
+the server as a request of its own, `create-from-pull`, so a server from before
+this answers that it does not know it, and the form says to `hurad update` it,
+rather than ignoring the pull request and making a new branch with its name.
+
 ## What it costs
 
 This computer holds a token that can read your tickets, in the same private
 state directory as the tokens for the servers it is paired with.
 
 A Jira API token acts as you, so it can do whatever your account can, and the
-window uses that to change tickets when you ask it to. Nothing else changes
-anything: the timer only reads. For Azure DevOps and GitHub, which this window
-only reads, scope the token to reading (*Work Items (read)* and *Code (read)*,
-a read-only GitHub token) rather than reusing an administrative one.
+window uses that to change tickets when you ask it to. On GitHub and Azure
+DevOps it writes only a comment, a reply or a review, and only when you press
+the button. Nothing else changes anything: the timer only reads. Scope those
+tokens to what you use rather than reusing an administrative one: *Work Items
+(read)* and *Code (read)*, or *Code (read & write)* to review from here, and a
+GitHub token that can read issues and write pull requests and nothing more.
 
 ---
 

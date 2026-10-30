@@ -71,6 +71,7 @@ import {
   GitCommitHorizontal,
   GitPullRequest,
   GitPullRequestDraft,
+  Eye,
   Info,
   LoaderCircle,
   Monitor,
@@ -216,6 +217,9 @@ export const Tracker = Ticket;
 // A pull request, and one still a draft: the forge's own two marks for them.
 export const PullRequest = GitPullRequest;
 export const PullDraft = GitPullRequestDraft;
+/// Starting a session that reads a pull request and reports back, rather than
+/// one that works on it.
+export const Review = Eye;
 // A pull request's checks: passed, failed, still running.
 export const Passing = CircleCheck;
 export const Failing = CircleX;

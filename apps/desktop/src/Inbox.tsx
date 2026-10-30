@@ -14,8 +14,10 @@
 //
 // **A row knows its worktree.** A ticket a session was started from, or a pull
 // request whose branch a worktree is working on, shows that worktree and its
-// agent's state, and selects it on a click. A ticket with none has the start
-// button instead, and starting is the create form, filled in.
+// agent's state, and selects it on a click. A row with none has the start
+// button instead, and starting is the create form, filled in. A pull request
+// starts in a project that is a clone of its repository, on its own branch,
+// either to work on it or to review it.
 //
 // **Folded, it is a rail of two counts**, because four columns do not fit a
 // laptop: tree, middle, dock and this leave little of the middle at 1280
@@ -33,6 +35,7 @@ import type { PullRequest as Pull } from "./gen/PullRequest";
 import type { Relation } from "./gen/Relation";
 import type { Session } from "./gen/Session";
 import type { Task } from "./gen/Task";
+import type { PullStart } from "./Pull";
 import {
   Chevron,
   Comments,
@@ -45,6 +48,7 @@ import {
   PullDraft,
   PullRequest,
   Refresh,
+  Review,
   Start,
   StateDot,
   Tracker,
@@ -73,6 +77,7 @@ export function InboxBar({
   projects,
   currentProject,
   showing,
+  showingPull,
   keys,
   onFold,
   onShut,
@@ -80,7 +85,9 @@ export function InboxBar({
   onSetup,
   onSelect,
   onShow,
+  onShowPull,
   onStart,
+  onStartPull,
 }: {
   /// How wide, in pixels, when open. From the window's own preferences and
   /// written by the handle on this sidebar's left edge.
@@ -103,8 +110,9 @@ export function InboxBar({
   /// The selected worktree's project, which is the likeliest answer to where
   /// a ticket should be started, so it is first on the start menu.
   currentProject: string | null;
-  /// The ticket open beside the sidebar, if any.
+  /// The ticket or pull request open beside the sidebar, if any.
   showing: Task | null;
+  showingPull: Pull | null;
   /// The shortcut that folds and unfolds this, for the tooltips.
   keys: { label: string; aria: string };
   onFold: () => void;
@@ -114,7 +122,10 @@ export function InboxBar({
   onSelect: (session: string) => void;
   /// Read a Jira ticket beside the sidebar.
   onShow: (task: Task) => void;
+  /// Read a pull request beside the sidebar.
+  onShowPull: (pull: Pull) => void;
   onStart: (project: Project, task: Task) => void;
+  onStartPull: (project: Project, pull: Pull, mode: PullStart) => void;
 }) {
   const tasks = useMemo(() => newestFirst(inbox?.tasks ?? []), [inbox]);
   const pulls = useMemo(() => newestFirst(inbox?.pulls ?? []), [inbox]);
@@ -243,7 +254,11 @@ export function InboxBar({
                         key={`${p.tracker}:${p.repo}:${p.id}`}
                         pull={p}
                         session={pullSession(p, sessions)}
+                        projects={pullProjects(p, projects)}
+                        on={samePull(showingPull, p)}
                         onSelect={onSelect}
+                        onShow={onShowPull}
+                        onStart={onStartPull}
                       />
                     ))}
                   </Group>
@@ -467,28 +482,56 @@ function TicketRow({
 function PullRow({
   pull,
   session,
+  projects,
+  on,
   onSelect,
+  onShow,
+  onStart,
 }: {
   pull: Pull;
   session: Session | null;
+  /// The projects that are clones of its repository.
+  projects: Project[];
+  on: boolean;
   onSelect: (session: string) => void;
+  onShow: (pull: Pull) => void;
+  onStart: (project: Project, pull: Pull, mode: PullStart) => void;
 }) {
   const menu = useContextMenu();
+  const startMenu = useButtonMenu();
+  // Two ways in each project: work on it, or review it.
+  const starts: MenuItem[] = pull.fork
+    ? []
+    : projects.flatMap((p) => [
+        {
+          label: projects.length > 1 ? `Work on it in ${p.name}` : "Work on it",
+          icon: Start,
+          run: () => onStart(p, pull, "work"),
+        },
+        {
+          label: projects.length > 1 ? `Review it in ${p.name}` : "Review it",
+          icon: Review,
+          run: () => onStart(p, pull, "review"),
+        },
+      ]);
   const menuProps = menu(() => [
+    { label: "Open", run: () => onShow(pull) },
     { label: "Open in the browser", icon: Elsewhere, run: () => openExternal(pull.url) },
     ...(session ? [{ label: `Go to ${session.name}`, run: () => onSelect(session.name) }] : []),
+    ...(starts.length > 0 && !session ? (["separator", ...starts] as MenuItem[]) : []),
     "separator",
     { label: "Copy branch", icon: Copy, hint: pull.branch, run: () => copy(pull.branch) },
     { label: "Copy link", icon: Copy, run: () => copy(pull.url) },
   ]);
   const updated = ago(pull.updated);
   const Mark = pull.draft ? PullDraft : PullRequest;
-  const open = () => openExternal(pull.url);
+  const open = () => onShow(pull);
 
   return (
     <li
-      className="inbox-row pull"
+      className={`inbox-row pull${on ? " on" : ""}`}
       tabIndex={0}
+      aria-current={on ? "true" : undefined}
       title={`${pullName(pull)} ${pull.title}\n${pull.branch} → ${pull.base}`}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("button")) return;
@@ -524,7 +567,25 @@ function PullRow({
             <Comments /> {pull.comments}
           </span>
         )}
-        {session && <Worktree session={session} onSelect={onSelect} />}
+        {pull.fork && <span title="opened from a fork">fork</span>}
+        {session ? (
+          <Worktree session={session} onSelect={onSelect} />
+        ) : (
+          !pull.fork && (
+            <button
+              className="quiet-icon inbox-start"
+              disabled={projects.length === 0}
+              title={
+                projects.length === 0
+                  ? `no project is a clone of ${pull.repo}`
+                  : "start a worktree on its branch"
+              }
+              onClick={(e) => startMenu(() => starts)(e)}
+            >
+              <Start aria-label="start" />
+            </button>
+          )
+        )}
       </div>
     </li>
   );
@@ -532,7 +593,7 @@ function PullRow({
 
 /// The checks as one mark. Nothing at all when the forge does not say, rather
 /// than a mark that reads as "none ran".
-function ChecksMark({ checks }: { checks: Pull["checks"] }) {
+export function ChecksMark({ checks }: { checks: Pull["checks"] }) {
   switch (checks) {
     case "passing":
       return <Passing className="inbox-checks ok" aria-label="checks passed" />;
@@ -606,23 +667,56 @@ export function ticketSession(task: Task, sessions: Session[]): Session | null {
 /// The worktree a pull request came from: the same branch, in the same
 /// repository.
 export function pullSession(pull: Pull, sessions: Session[]): Session | null {
-  const repo = bare(pull.repo_url);
+  const live = sessions.filter((s) => s.state !== "dead");
   return (
-    sessions.find(
-      (s) => s.state !== "dead" && s.work_branch === pull.branch && bare(s.repo) === repo,
-    ) ?? null
+    live.find((s) => startedFrom(s, pull)) ??
+    live.find((s) => onBranchOf(s, pull)) ??
+    null
   );
+}
+
+/// The open pull request a worktree is on: the one it was started from, or
+/// one whose branch it is working on in the same repository. Only the ones
+/// the sidebar knows of, which are yours and the ones waiting on you.
+export function sessionPull(session: Session, pulls: Pull[]): Pull | null {
+  return (
+    pulls.find((p) => startedFrom(session, p)) ??
+    pulls.find((p) => onBranchOf(session, p)) ??
+    null
+  );
+}
+
+/// The projects a pull request can start in: the clones of its repository.
+export function pullProjects(pull: Pull, projects: Project[]): Project[] {
+  const repo = bare(pull.repo_url);
+  return projects.filter((p) => bare(p.repo) === repo);
+}
+
+export function samePull(a: Pull | null, b: Pull): boolean {
+  return a !== null && a.tracker === b.tracker && a.repo === b.repo && a.id === b.id;
+}
+
+function startedFrom(s: Session, p: Pull): boolean {
+  return s.pull?.tracker === p.tracker && s.pull.repo === p.repo && s.pull.id === p.id;
+}
+
+function onBranchOf(s: Session, p: Pull): boolean {
+  return s.work_branch === p.branch && bare(s.repo) === bare(p.repo_url);
 }
 
 /// A repository's address with what varies between two spellings of it taken
 /// off: the scheme, a user before the host (Azure DevOps puts the organisation
-/// there), `.git`, a trailing slash, and case.
+/// there), `.git`, a trailing slash, and case. The scp-like form git uses for
+/// SSH, `git@github.com:o/r.git`, has its colon read as the slash it stands
+/// for, so a project cloned over SSH is still the repository its pull
+/// requests name over HTTPS.
 export function bare(url: string): string {
-  return url
+  const plain = url
     .trim()
     .toLowerCase()
-    .replace(/^[a-z]+:\/\//, "")
+    .replace(/^[a-z+]+:\/\//, "")
     .replace(/^[^@/]+@/, "")
     .replace(/\/+$/, "")
     .replace(/\.git$/, "");
+  return /^[a-z0-9.-]+:[^/\d]/.test(plain) ? plain.replace(":", "/") : plain;
 }

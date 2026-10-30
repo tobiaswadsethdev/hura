@@ -597,7 +597,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .wt-age { flex: none; color: var(--dimmer); font-variant-numeric: tabular-nums; }
 /* With no diff yet there is nothing to push the age over, so it does it. */
 .wt-stat + .wt-age { margin-left: 0; }
-.wt-branch + .wt-age { margin-left: auto; }
+.wt-branch + .wt-age, .wt-pull + .wt-age { margin-left: auto; }
 
 /* ------------------------------------------------------------------------- */
 /* what an agent is doing, as one mark                                       */
@@ -1119,6 +1119,8 @@ main { position: relative; }
   box-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
 }
 .inbox-flyout > .ticket-panel { flex: 1; }
+/* A pull request wants more room than a ticket: one of its tabs is a diff. */
+.inbox-flyout.wide { width: min(860px, 72%); }
 
 /* ------------------------------------------------------------------------- */
 /* the file tree, in the dock                                                */
@@ -2284,6 +2286,181 @@ main { position: relative; }
 .ticket-panel-foot .ticket-project { flex: 1; min-width: 0; height: 28px; }
 .ticket-panel-foot > .hint { flex: 1; color: var(--dimmer); font-size: 12px; }
 .ticket-panel-foot .go .lucide { width: 12px; height: 12px; }
+/* The panels' second buttons: cancel, review it, previous and next. Outlined,
+   so they read as buttons beside a filled one without competing with it. */
+.ticket-panel .quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.ticket-panel .quiet:hover:not(:disabled) { color: var(--text); border-color: var(--ring); }
+.ticket-panel .quiet:disabled { opacity: 0.5; cursor: default; }
+.ticket-panel .quiet .lucide { width: 12px; height: 12px; }
+
+/* ------------------------------------------------------------------------- */
+/* a pull request, read in full                                              */
+/* ------------------------------------------------------------------------- */
+
+/* Its mark: green while open, the way the forges colour one, dim once it is
+   a draft or over. */
+.pull-mark { flex: none; width: 15px; height: 15px; color: var(--ok); }
+.pull-mark.draft, .pull-mark.merged, .pull-mark.closed { color: var(--dimmer); }
+.pull-panel .tag, .pull-state {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 16px;
+  color: var(--dim);
+}
+
+/* Who wants what merged where: the branches as the identifiers they are. */
+.pull-line { margin: -6px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
+.pull-line .hint { color: var(--dimmer); }
+.pull-line code {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 18px;
+}
+.pull-line .pull-size { margin-left: auto; }
+.pull-size { flex: none; font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.pull-size .added { color: var(--ok); }
+.pull-size .removed { color: var(--bad); }
+
+/* The tabs, kept in view while the panel scrolls under them. */
+.pull-tabs {
+  position: sticky;
+  top: -14px;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  margin: 0 -18px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.pull-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pull-tabs button:hover { color: var(--text); }
+.pull-tabs button.on { color: var(--text); border-bottom-color: var(--text); }
+.pull-tabs .count { font-family: var(--font-mono); font-size: 10.5px; color: var(--dimmer); }
+/* The tabs' own rule is the first section's top. */
+.pull-tabs + .ticket-section, .pull-tabs + .pull-file { padding-top: 0; border-top: 0; }
+
+/* Checks and reviewers: a line each. */
+.pull-checks, .pull-reviewers, .pull-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.pull-checks li, .pull-reviewers li { display: flex; align-items: center; gap: 8px; min-height: 26px; min-width: 0; font-size: 12px; }
+.pull-check-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pull-check-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--dimmer); }
+.pull-checks li .quiet-icon { margin-left: auto; }
+.pull-verdict { flex: none; font-size: 11.5px; color: var(--dim); }
+.pull-verdict.ok { color: var(--ok); }
+.pull-verdict.bad { color: var(--bad); }
+.pull-reviewers .pull-verdict { margin-left: auto; }
+.pull-review > .hint { display: flex; gap: 4px; align-items: baseline; }
+
+/* The conversation. A verdict is an event rather than something written, so
+   it is a line without a card unless words came with it. */
+.pull-conversation > li.pull-verdict-entry:not(:has(.doc)) { padding: 2px 11px; border-color: transparent; background: none; }
+.pull-verdict-entry .comment-head { margin-bottom: 0; }
+.pull-verdict-entry .doc { margin-top: 6px; }
+.pull-comment + .pull-comment { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.pull-thread-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.pull-thread-head[aria-expanded="true"] { margin-bottom: 8px; }
+.pull-thread-at { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-family: var(--font-mono); font-size: 11.5px; }
+.pull-thread-head .hint { margin-left: auto; flex: none; color: var(--dimmer); font-size: 11px; }
+.pull-thread.resolved .pull-thread-at { color: var(--dimmer); }
+.pull-reply { margin-top: 8px; padding: 0; border: 0; background: none; color: var(--dim); font: inherit; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pull-reply:hover { color: var(--text); }
+
+/* The files: a line each, and then one of them, both sides. */
+.pull-files li button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.pull-files li button:hover { background: var(--hover); }
+.pull-files .pull-file-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 11.5px; }
+.pull-file-change { flex: none; width: 14px; font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-align: center; color: var(--dim); }
+.pull-file-change.added { color: var(--ok); }
+.pull-file-change.deleted { color: var(--bad); }
+.pull-file-change.renamed { color: var(--attention); }
+.pull-file { display: flex; flex-direction: column; gap: 8px; }
+.pull-file-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.pull-file-head .pull-file-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; }
+.pull-file-head .hint { flex: none; color: var(--dimmer); font-size: 11px; }
+.pull-file-sides { margin: 0; color: var(--dimmer); font-size: 11px; }
+.pull-monaco { height: max(320px, calc(100vh - 340px)); overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-md); }
+.pull-go { max-width: 100%; }
+
+/* A worktree on one of your pull requests' branches: its number and checks,
+   on the branch line. */
+.wt-pull {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px;
+  border-radius: var(--r-sm);
+  color: var(--dim);
+  cursor: pointer;
+}
+.wt-pull:hover { background: var(--line); color: var(--text); }
+.wt-pull .lucide { width: 11px; height: 11px; }
 
 /* A tracker's rich text. Prose in the UI font at a reading size; code in the
    mono one, sunken, as everywhere else in the window. */

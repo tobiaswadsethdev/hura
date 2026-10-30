@@ -606,16 +606,28 @@ the two.
 
 **A row knows its worktree.** A ticket a session was started from, or one a
 worktree's branch is named after, shows that worktree and its agent's state;
-so does a pull request whose branch a worktree in the same repository is on.
-Clicking it selects the worktree. A ticket with no worktree has a start button,
-which asks which project (the selected worktree's first) and opens the create
+so does a pull request a session was started from, or whose branch a worktree
+in the same repository is on. Clicking it selects the worktree. A row with no
+worktree has a start button. For a ticket it asks which project (the selected
+worktree's first); for a pull request it offers to **work on it** or **review
+it**, in a project that is a clone of its repository. Either opens the create
 form filled in.
 
 **A Jira ticket opens beside the sidebar**, over the dock rather than in a
 column of its own: it is read and put away, and the workspace should not reflow
 for it. It is the same panel the tickets screen had, status, fields and
-comments all changeable. Pull requests and other trackers' tickets open in the
-browser.
+comments all changeable. Other trackers' tickets open in the browser.
+
+**So does a pull request**, wider, in three tabs: the overview (description,
+every check by name, the reviewers and your own review), the conversation
+(comments, reviews and threads on lines, with replies), and the files, each
+opening to its diff in the same Monaco editor the dock's diff pane uses. You can
+comment, reply, approve and ask for changes from there; merging and resolving
+threads stay on the forge, one click away in its header.
+
+**A worktree on one of those pull requests says so in the tree**: its number
+and checks sit on the branch line, and a click on them opens the pull request
+rather than selecting the worktree.
 
 What is worth interrupting for is something *changing*: a ticket's status,
 somebody else's comment, a ticket newly yours, a review asked of you, your
