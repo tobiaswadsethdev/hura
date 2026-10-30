@@ -624,6 +624,7 @@ mod tests {
             name: "a".into(),
             branch: None,
             ticket: None,
+            pull: None,
             project: None,
             repo: "https://example.com/r.git".into(),
             task: "t".into(),

@@ -26,6 +26,7 @@ import {
   Integrations,
   Policy,
   Publish,
+  PullRequest as PullMark,
   Secret,
   Skill,
   Start,
@@ -37,7 +38,11 @@ import type { Interface } from "./gen/Interface";
 import type { NewOptions } from "./gen/NewOptions";
 import type { Picked } from "./gen/Picked";
 import type { Project } from "./gen/Project";
+import type { PullOrigin } from "./gen/PullOrigin";
+import type { PullRequest } from "./gen/PullRequest";
 import type { Task } from "./gen/Task";
+import { pullName } from "./inboxNotify";
+import type { PullStart } from "./Pull";
 import { Pill } from "./Pill";
 import { Select } from "./Select";
 
@@ -45,6 +50,7 @@ export function NewWorktreeDialog({
   server,
   project,
   from,
+  fromPull,
   onClose,
   onCreated,
 }: {
@@ -55,6 +61,8 @@ export function NewWorktreeDialog({
   // derived in `hura_core::tracker`, so the terminal and the window would agree
   // if the terminal had a tickets screen.
   from?: Task | null;
+  /// Or the pull request, and whether it is to be worked on or reviewed.
+  fromPull?: { pull: PullRequest; mode: PullStart } | null;
   onClose: () => void;
   onCreated: (name: string) => void;
 }) {
@@ -88,6 +96,7 @@ export function NewWorktreeDialog({
             server={server}
             project={project}
             from={from ?? null}
+            fromPull={fromPull ?? null}
             options={options}
             onClose={onClose}
             onCreated={onCreated}
@@ -103,6 +112,7 @@ function Form({
   server,
   project,
   from,
+  fromPull,
   options,
   onClose,
   onCreated,
@@ -110,6 +120,7 @@ function Form({
   server: string;
   project: Project;
   from: Task | null;
+  fromPull: { pull: PullRequest; mode: PullStart } | null;
   options: NewOptions;
   onClose: () => void;
   onCreated: (name: string) => void;
@@ -118,13 +129,21 @@ function Form({
   // the key and the link as well as the title: the agent's first instruction is
   // the whole of what it knows about why it exists, and `PROJ-123` in it is
   // what makes its commits and its pull request say so too.
-  const [task, setTask] = useState(from ? `${from.key}: ${from.title}\n\n${from.url}` : "");
+  const [task, setTask] = useState(
+    from
+      ? `${from.key}: ${from.title}\n\n${from.url}`
+      : fromPull
+        ? pullTask(fromPull.pull, fromPull.mode)
+        : "",
+  );
   const [name, setName] = useState(from?.session_name ?? "");
-  // Only sent when it came from a ticket. Left empty, the server names the
-  // branch by the convention in its own config file -- which is the one place
-  // that decides it.
-  const [branch] = useState(from?.branch ?? "");
-  const [base, setBase] = useState(options.default_base ?? "");
+  // Only sent when it came from a ticket or a pull request. Left empty, the
+  // server names the branch by the convention in its own config file, which is
+  // the one place that decides it. A pull request's is its own branch, and its
+  // base is the branch it merges into, so the diff pane measures the whole of
+  // it and not only what the agent adds.
+  const [branch] = useState(from?.branch ?? fromPull?.pull.branch ?? "");
+  const [base, setBase] = useState(fromPull?.pull.base ?? options.default_base ?? "");
   const [policy, setPolicy] = useState(options.default_policy);
   const [toolchains, setToolchains] = useState<string[]>([]);
   const [providers, setProviders] = useState<string[]>(options.default_providers);
@@ -154,12 +173,13 @@ function Form({
     api
       // The project stores a path; which branch that checkout is on is a fact
       // only the server can read, so it comes back with the rest.
-      .inspect(server, project.path, null)
+      .inspect(server, project.path, fromPull?.pull.base ?? null)
       .then((picked: Picked) => {
         if (!live) return;
         setFacts(picked.facts);
         setToolchains(picked.facts.toolchains);
-        if (picked.branch) setBase(picked.branch);
+        // A pull request's base is not the checkout's to decide.
+        if (picked.branch && !fromPull) setBase(picked.branch);
         // Empty when the config file names providers, since an explicit list
         // replaces the rule rather than adding to it -- so the defaults already
         // in state stand.
@@ -167,13 +187,13 @@ function Form({
         // A branch that has never been pushed cannot be cloned from, so the
         // remote's default is used instead of handing the sandbox a clone that
         // is going to fail.
-        if (!picked.facts.base_on_remote) setBase("");
+        if (!picked.facts.base_on_remote && !fromPull) setBase("");
       })
       .catch((e) => live && setError(messageOf(e)));
     return () => {
       live = false;
     };
-  }, [server, project.path]);
+  }, [server, project.path, fromPull]);
 
   const toggle = (list: string[], set: (v: string[]) => void, value: string) =>
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
@@ -202,6 +222,9 @@ function Form({
         branch: branch || null,
         // A note on the session of where the work came from.
         ticket: from ? ticketOf(from) : null,
+        // The same for a pull request, and what has the server check out its
+        // branch rather than make one.
+        pull: fromPull ? pullOrigin(fromPull.pull) : null,
         // Blank means "derive it", which is what `hura new` without `--name`
         // does. The rule lives on the server so there is one of it.
         name: name.trim() || null,
@@ -249,6 +272,22 @@ function Form({
         {project.repo}
       </p>
 
+      {fromPull && (
+        <p className="from-ticket">
+          <PullMark />
+          <a href={fromPull.pull.url} target="_blank" rel="noreferrer">
+            {pullName(fromPull.pull)}
+          </a>
+          <span className="hint">on</span>
+          <code>{fromPull.pull.branch}</code>
+          <span className="hint">
+            {fromPull.mode === "review"
+              ? "to review it: the agent is asked not to push"
+              : "to work on it: its pushes update the pull request"}
+          </span>
+        </p>
+      )}
+
       {from && (
         <p className="from-ticket">
           <Tracker />
@@ -281,12 +320,20 @@ function Form({
             onChange={(e) => setName(e.target.value)}
           />
         </label>
-        <label className="chip-field" title="base branch (the remote's default when blank)">
+        <label
+          className="chip-field"
+          title={
+            fromPull
+              ? "the branch the pull request merges into"
+              : "base branch (the remote's default when blank)"
+          }
+        >
           <Branch />
           <input
             value={base}
             placeholder="default branch"
             spellCheck={false}
+            readOnly={fromPull !== null}
             onChange={(e) => setBase(e.target.value)}
           />
         </label>
@@ -416,6 +463,42 @@ function PickRow({
       <div className="pills">{children}</div>
     </div>
   );
+}
+
+/// The agent's first instruction for a session started from a pull request.
+///
+/// Both say which branch this is and what it merges into, because the agent
+/// has no other way to know it is on somebody's pull request rather than a
+/// branch of its own. Work leaves the instruction to you, under the link.
+/// Review is the instruction: read it, run what covers it, report, and touch
+/// nothing that reaches the pull request, since what is said there is yours to
+/// decide.
+function pullTask(pull: PullRequest, mode: PullStart): string {
+  const where =
+    `This worktree is on the pull request's own branch, \`${pull.branch}\`, ` +
+    `which merges into \`${pull.base}\`.`;
+  if (mode === "review") {
+    return (
+      `Review ${pullName(pull)}: ${pull.title}\n${pull.url}\n\n${where} ` +
+      `Read what it changes with \`git diff origin/${pull.base}...HEAD\` and its commits with ` +
+      `\`git log origin/${pull.base}..HEAD\`, run the tests that cover it, and report what you ` +
+      `find: what is wrong first, then what is risky, then anything smaller, each with its file ` +
+      `and line. Do not commit, push, or comment on the pull request.`
+    );
+  }
+  return `${pullName(pull)}: ${pull.title}\n${pull.url}\n\n${where} Pushing updates the pull request.\n\n`;
+}
+
+/// The pull request, as the session records it.
+function pullOrigin(pull: PullRequest): PullOrigin {
+  return {
+    tracker: pull.tracker,
+    kind: pull.kind,
+    id: pull.id,
+    key: pull.key,
+    url: pull.url,
+    repo: pull.repo,
+  };
 }
 
 /// The ticket, as the session records it.

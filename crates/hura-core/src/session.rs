@@ -371,6 +371,13 @@ pub struct Session {
     /// See [`crate::tracker::Ticket`].
     #[serde(default)]
     pub ticket: Option<crate::tracker::Ticket>,
+    /// The pull request this session was started from, if it was.
+    ///
+    /// Also what makes the seeder check out `work_branch` from the remote
+    /// rather than make it: a pull request's branch already exists, and the
+    /// work is to be pushed onto it.
+    #[serde(default)]
+    pub pull: Option<crate::tracker::PullOrigin>,
     #[serde(default)]
     pub policy: Option<String>,
     #[serde(default)]
@@ -464,6 +471,7 @@ impl Session {
             base_branch: None,
             task,
             ticket: None,
+            pull: None,
             policy: None,
             providers: Vec::new(),
             skills: Vec::new(),

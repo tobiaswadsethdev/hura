@@ -224,7 +224,7 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             Ok(cfg) => Reply::NewOptions(ops::new_options(backends, &cfg)).into(),
             Err(e) => Failure::failed(format!("could not read the config file: {e}")).into(),
         },
-        Request::Create(new) => create(*new),
+        Request::Create(new) | Request::CreateFromPull(new) => create(*new),
 
         // The list, and not an acknowledgement: `destroy` answers whether it
         // deleted a sandbox or only a record, and neither is what a client

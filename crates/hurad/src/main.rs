@@ -748,6 +748,7 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
         branch: Some(format!("{}/{name}", cfg.branch_prefix())),
         // No inbox here: a session started from a ticket is the window's.
         ticket: None,
+        pull: None,
         // The terminal has no projects; see `Session::project`.
         project: None,
         name,

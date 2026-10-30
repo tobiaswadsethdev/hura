@@ -262,6 +262,16 @@ pub enum Request {
     /// optional ticket -- and an unboxed variant would make every `Request`
     /// that big, including the `Poll` that goes out every second.
     Create(Box<NewSession>),
+    /// The same, for a session started from a pull request: one whose
+    /// [`NewSession::pull`] is set.
+    ///
+    /// A request of its own rather than a field on `Create`, because the
+    /// field changes what the seeder does with the branch. A server from
+    /// before it would read `Create`, ignore the field, and make a new branch
+    /// with the pull request's name from its base, which a push could only
+    /// replace the pull request's branch with. Sent as this, an older server
+    /// answers `unsupported`, which says what to do about it.
+    CreateFromPull(Box<NewSession>),
 
     /// Destroy one: its sandbox, and then its record.
     ///
@@ -380,7 +390,7 @@ impl Request {
             | Request::Comment { name, .. }
             | Request::Uncomment { name, .. }
             | Request::SendComments { name } => Some(name),
-            Request::Create(new) => new.name.as_deref(),
+            Request::Create(new) | Request::CreateFromPull(new) => new.name.as_deref(),
             Request::Destroy { name } => Some(name),
         }
     }
@@ -711,6 +721,7 @@ mod tests {
                 Request::UploadSkills { skills: Vec::new() },
                 "upload-skills",
             ),
+            (Request::CreateFromPull(Box::default()), "create-from-pull"),
         ] {
             let v: serde_json::Value = serde_json::to_value(&req).unwrap();
             assert_eq!(v["op"], op, "{req:?}");

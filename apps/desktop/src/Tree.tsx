@@ -27,11 +27,14 @@ import type { DiffStat } from "./gen/DiffStat";
 import type { Poll } from "./gen/Poll";
 import type { Usage } from "./gen/Usage";
 import type { Project } from "./gen/Project";
+import type { PullRequest as Pull } from "./gen/PullRequest";
 import type { Session } from "./gen/Session";
 import { copy, useContextMenu } from "./ContextMenu";
+import { ChecksMark, sessionPull } from "./Inbox";
+import { pullName } from "./inboxNotify";
 import { usePreviews } from "./previews";
 import { Empty } from "./Empty";
-import { Branch, Chevron, Copy, Forget, Plus, Ports, StateDot } from "./icons";
+import { Branch, Chevron, Copy, Forget, Plus, Ports, PullRequest, StateDot } from "./icons";
 
 export type Group = {
   /// The project, or `null` for the by-repository groups at the bottom.
@@ -86,6 +89,8 @@ export function Tree({
   polls,
   selected,
   onSelect,
+  pulls,
+  onPull,
   onNewWorktree,
   onForget,
   onDestroy,
@@ -104,6 +109,10 @@ export function Tree({
   polls: Record<string, Poll>;
   selected: string | null;
   onSelect: (name: string) => void;
+  /// The open pull requests the sidebar on the right knows of. A worktree
+  /// on one of their branches says so, and opens it.
+  pulls: Pull[];
+  onPull: (pull: Pull) => void;
   onNewWorktree: (project: Project) => void;
   onForget: (project: Project) => void;
   onDestroy: (session: Session) => void;
@@ -230,7 +239,9 @@ export function Tree({
                         usage={polls[s.name]?.usage ?? null}
                         listening={polls[s.name]?.ports.map((l) => l.port) ?? []}
                         on={s.name === selected}
+                        pull={sessionPull(s, pulls)}
                         onSelect={onSelect}
+                        onPull={onPull}
                         onDestroy={onDestroy}
                       />
                     ))
@@ -312,7 +323,9 @@ function Worktree({
   usage,
   listening,
   on,
+  pull,
   onSelect,
+  onPull,
   onDestroy,
 }: {
   session: Session;
@@ -320,7 +333,10 @@ function Worktree({
   usage: Usage | null;
   listening: number[];
   on: boolean;
+  /// The open pull request on this worktree's branch, if the sidebar knows it.
+  pull: Pull | null;
   onSelect: (name: string) => void;
+  onPull: (pull: Pull) => void;
   onDestroy: (session: Session) => void;
 }) {
   const menu = useContextMenu();
@@ -336,6 +352,9 @@ function Worktree({
       {...menu(() => [
         { label: "Copy name", icon: Copy, hint: s.name, run: () => copy(s.name) },
         { label: "Copy branch", icon: Branch, hint: s.work_branch, run: () => copy(s.work_branch) },
+        ...(pull
+          ? [{ label: `Open ${pullName(pull)}`, icon: PullRequest, run: () => onPull(pull) }]
+          : []),
         "separator",
         {
           label: "Destroy worktree",
@@ -385,6 +404,23 @@ function Worktree({
         <span className="wt-meta">
           <Branch className="wt-branch-icon" />
           <span className="wt-branch">{s.work_branch}</span>
+          {/* Inside the row's button, so a span and not a button of its own:
+              a click on it opens the pull request instead of selecting the
+              worktree, and the row's menu has the same for the keyboard. */}
+          {pull && (
+            <span
+              className="wt-pull"
+              title={`${pullName(pull)} ${pull.title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPull(pull);
+              }}
+            >
+              <PullRequest />
+              {pull.key}
+              <ChecksMark checks={pull.checks} />
+            </span>
+          )}
           {stat && <Stat stat={stat} />}
           <span className="wt-age" title="how long this worktree has existed">
             {age(s.created_at)}

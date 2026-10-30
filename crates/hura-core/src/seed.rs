@@ -136,7 +136,7 @@ git config user.email {gemail}
 if [ -n "$git_auth" ]; then
   git config "http.extraHeader" "$auth_header"
 fi
-git switch --quiet -c {branch} 2>/dev/null || git switch --quiet {branch}
+{switch}
 "#,
         prelude = prelude,
         repo = sh_quote(&paths.repo),
@@ -144,10 +144,30 @@ git switch --quiet -c {branch} 2>/dev/null || git switch --quiet {branch}
         url = sh_quote(&url),
         gname = sh_quote(&name),
         gemail = sh_quote(&email),
-        branch = sh_quote(&session.work_branch),
+        switch = switch_script(session),
         tries = CLONE_ATTEMPTS,
         delay = CLONE_RETRY_SECS,
     )
+}
+
+/// Onto the work branch: a new one from the base, or, for a session started
+/// from a pull request, the pull request's own from the remote.
+///
+/// A pull request's branch is never made here. `git switch <name>` with no
+/// local branch of that name checks out the remote's and tracks it, which is
+/// what pushing back onto the pull request needs; making a new branch of the
+/// same name from the base instead would be a different branch that a push
+/// could only replace the pull request's with. So when the remote has no such
+/// branch (merged and deleted since, say) the seeding fails and says why.
+fn switch_script(session: &Session) -> String {
+    let branch = sh_quote(&session.work_branch);
+    if session.pull.is_some() {
+        format!(
+            "git switch --quiet {branch} || {{ printf 'the branch %s is not on the remote; the pull request may have been merged or its branch deleted\\n' {branch} >&2; exit 1; }}"
+        )
+    } else {
+        format!("git switch --quiet -c {branch} 2>/dev/null || git switch --quiet {branch}")
+    }
 }
 
 /// Shell command that writes the metadata record.
@@ -793,6 +813,101 @@ mkdir -p "$dest/.git"
         assert!(!ok, "must fail rather than loop");
         assert_eq!(attempts, CLONE_ATTEMPTS, "bounded: {stderr}");
         assert!(stderr.contains("CONNECT tunnel failed"), "{stderr}");
+    }
+
+    /// A session started from a pull request lands on the pull request's own
+    /// branch as the remote has it, tracking it, rather than on a new branch of
+    /// the same name made from the base. Run against real git, because "checks
+    /// out the remote's branch" is git's behaviour and not this script's text.
+    #[test]
+    fn a_pull_request_session_checks_out_the_branch_it_already_has() {
+        let dir = TempDir::new("pull-branch");
+        let git = |cwd: &std::path::Path, args: &[&str]| -> String {
+            let out = Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .expect("git");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let remote = dir.0.join("remote");
+        std::fs::create_dir_all(&remote).unwrap();
+        git(&remote, &["init", "-q", "-b", "main"]);
+        git(&remote, &["commit", "-q", "--allow-empty", "-m", "base"]);
+        git(&remote, &["switch", "-q", "-c", "sam/retry"]);
+        git(
+            &remote,
+            &["commit", "-q", "--allow-empty", "-m", "the pull request"],
+        );
+        let tip = git(&remote, &["rev-parse", "HEAD"]);
+        git(&remote, &["switch", "-q", "main"]);
+
+        let mut s = Session::new(
+            "x".into(),
+            remote.to_string_lossy().into_owned(),
+            "t".into(),
+        );
+        s.base_branch = Some("main".into());
+        s.work_branch = "sam/retry".into();
+        s.pull = Some(crate::tracker::PullOrigin {
+            tracker: "github".into(),
+            kind: crate::tracker::Kind::GitHub,
+            id: "61".into(),
+            key: "#61".into(),
+            url: "https://github.com/o/r/pull/61".into(),
+            repo: "o/r".into(),
+        });
+        let seed = |s: &Session, repo: &str| {
+            let paths = Paths {
+                repo: dir.0.join(repo).to_string_lossy().into_owned(),
+                hura: dir.0.join("hura").to_string_lossy().into_owned(),
+            };
+            Command::new("sh")
+                .arg("-c")
+                .arg(format!("set -eu\n{}", clone_and_branch(s, &paths)))
+                .output()
+                .expect("sh")
+        };
+
+        let out = seed(&s, "repo");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let repo = dir.0.join("repo");
+        assert_eq!(
+            git(&repo, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            "sam/retry"
+        );
+        assert_eq!(
+            git(&repo, &["rev-parse", "HEAD"]),
+            tip,
+            "the pull request's commit, not main's"
+        );
+        assert_eq!(
+            git(&repo, &["rev-parse", "--abbrev-ref", "@{upstream}"]),
+            "origin/sam/retry",
+            "a push goes back onto the pull request"
+        );
+
+        // Seeding again, as a restarted sandbox does, finds it where it was.
+        assert!(seed(&s, "repo").status.success());
+
+        s.work_branch = "sam/gone".into();
+        let out = seed(&s, "repo-gone");
+        assert!(
+            !out.status.success(),
+            "a branch that is not there is not made"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("not on the remote"), "{stderr}");
     }
 
     /// The 403 a denied connection produces reads as an expired token, and the

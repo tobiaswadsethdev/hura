@@ -47,6 +47,10 @@ pub struct PullRequest {
     /// The branch it merges into.
     pub base: String,
     pub draft: bool,
+    /// Opened from a fork, whose branch is not in this repository: a
+    /// worktree here can neither check it out nor push to it.
+    #[serde(default)]
+    pub fork: bool,
     /// Whether the forge says it cannot be merged as it stands.
     pub conflicts: bool,
     /// Its checks as one verdict. `None` where the forge's list does not say:
@@ -136,6 +140,10 @@ pub(super) fn github(
         branch: string(p, "headRefName"),
         base: string(p, "baseRefName"),
         draft: p.get("isDraft").and_then(Value::as_bool).unwrap_or(false),
+        fork: p
+            .get("isCrossRepository")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         // `UNKNOWN` while GitHub is still working it out, which is not a
         // conflict.
         conflicts: string(p, "mergeable") == "CONFLICTING",
@@ -306,6 +314,7 @@ fn azure_pull(p: &Value, source: &Source, relation: Relation) -> Option<PullRequ
         branch: refs("sourceRefName"),
         base: refs("targetRefName"),
         draft: p.get("isDraft").and_then(Value::as_bool).unwrap_or(false),
+        fork: p.get("forkSource").is_some_and(|f| !f.is_null()),
         conflicts,
         checks: None,
         review,

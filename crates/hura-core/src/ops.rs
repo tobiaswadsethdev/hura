@@ -442,6 +442,15 @@ pub struct NewSession {
     /// posted on the wrong ticket in a tracker the config file already names.
     #[serde(default)]
     pub ticket: Option<crate::tracker::Ticket>,
+    /// The pull request this is being started from, if it came from one. Its
+    /// branch is `branch`, and `base` is the branch it merges into.
+    ///
+    /// Sent as `hura_proto::Request::CreateFromPull` rather than `Create`
+    /// whenever it is set, so a server from before this field answers that it
+    /// does not know the request instead of ignoring the field and making a
+    /// new branch with the pull request's name.
+    #[serde(default)]
+    pub pull: Option<crate::tracker::PullOrigin>,
     /// A terminal or a chat. `None` is the config file's answer, so a client
     /// that has never heard of the choice gets the one this server makes.
     #[serde(default)]
@@ -497,6 +506,7 @@ impl NewSession {
             base: self.base.or_else(|| cfg.base.clone()),
             branch: Some(branch),
             ticket: self.ticket,
+            pull: self.pull,
             policy: self.policy,
             providers: self.providers,
             mcp: cfg.mcp_servers(),
@@ -543,6 +553,8 @@ pub struct Draft {
     /// The ticket this session is for, if any. Recorded on the session as a
     /// note of where the work came from.
     pub ticket: Option<crate::tracker::Ticket>,
+    /// The pull request this session is for, if any. See [`Session::pull`].
+    pub pull: Option<crate::tracker::PullOrigin>,
     /// The project this worktree is being started in, if it was started from
     /// one. See [`Session::project`].
     pub project: Option<String>,
@@ -851,6 +863,7 @@ fn record(draft: &Draft) -> Session {
     let mut s = Session::new(draft.name.clone(), draft.repo.clone(), draft.task.clone());
     s.base_branch = draft.base.clone();
     s.ticket = draft.ticket.clone();
+    s.pull = draft.pull.clone();
     if let Some(branch) = &draft.branch {
         s.work_branch = branch.clone();
     }

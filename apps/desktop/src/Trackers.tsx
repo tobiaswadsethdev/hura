@@ -359,7 +359,7 @@ const TOKEN_LABEL: Record<TrackerKind, string> = {
 const TOKEN_HINT: Record<TrackerKind, string> = {
   jira: "Created at id.atlassian.com → Security → API tokens. Stored on this computer only.",
   "azure-dev-ops":
-    "A personal access token with Work Items (read) for the tickets and Code (read) for the pull requests. Stored on this computer only.",
+    "A personal access token with Work Items (read) for the tickets and Code (read) for the pull requests, or Code (read & write) to comment and vote on them. Stored on this computer only.",
   "git-hub":
-    "A token that can read issues and pull requests. Stored on this computer only.",
+    "A token that can read issues and pull requests, and write pull requests to comment and review. Stored on this computer only.",
 };
