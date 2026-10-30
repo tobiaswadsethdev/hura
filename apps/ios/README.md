@@ -106,7 +106,7 @@ HURA_RELAY_HOST = hura-relay.example.workers.dev
 
 With it empty, the app builds without the Notifications section.
 
-Turn notifications on per server, on the server's screen. The app registers
+Turn notifications on per server, in the server's Settings (its ⋯ menu), where its name on this phone can also be changed. The app registers
 the phone with the relay, links the server, and gives `hurad` the link's push
 token together with a fresh encryption key. From then on the relay and Apple
 see only the kind of each notification, and the notification service

@@ -96,6 +96,17 @@ final class AppModel {
         servers.removeAll { $0 === server }
     }
 
+    /// What this phone calls a server. Its own name for it, kept with the
+    /// pairing in the Keychain; the server isn't told.
+    func rename(_ server: Server, to name: String) throws {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != server.record.name else { return }
+        var r = server.record
+        r.name = name
+        try store.save(r)
+        server.update(record: r)
+    }
+
     private func save(_ server: Server, pushLinkID: String?) throws {
         var r = server.record
         r.pushLinkID = pushLinkID

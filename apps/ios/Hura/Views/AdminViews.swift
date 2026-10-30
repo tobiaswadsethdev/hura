@@ -244,11 +244,47 @@ struct ServerSettingsView: View {
     @State private var failed: String?
     @State private var saving = false
 
+    @Environment(AppModel.self) private var model
+
     private var dirty: Bool { view.map { $0.settings != draft } ?? false }
 
     var body: some View {
-        Loaded(value: view, error: error) { view in
-            Form {
+        Form {
+            // This phone's own: what it calls the server, and whether the
+            // server may notify it. Both work while the server is offline.
+            Section {
+                ServerNameField(server: server)
+            } header: {
+                Text("On this phone")
+            }
+            if model.push.isAvailable {
+                NotificationSettings(server: server)
+            }
+            if let view {
+                serverSections(view)
+            } else if let error {
+                Section("Server") { Text(error).foregroundStyle(.secondary).font(.callout) }
+            } else {
+                Section("Server") { ProgressView().frame(maxWidth: .infinity) }
+            }
+        }
+        .navigationTitle("Settings")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                if saving {
+                    ProgressView()
+                } else if view != nil {
+                    Button("Save", action: save).disabled(!dirty)
+                }
+            }
+        }
+        .task { await load() }
+        .failure($failed)
+    }
+
+    /// The defaults in the server's config file.
+    @ViewBuilder
+    private func serverSections(_ view: SettingsView) -> some View {
                 Section {
                     LabeledContent("Branch prefix") {
                         TextField(view.defaultBranchPrefix, text: text(\.branchPrefix))
@@ -309,22 +345,8 @@ struct ServerSettingsView: View {
                 } header: {
                     Text("This server")
                 } footer: {
-                    Text("Written to \(view.path)\(view.present ? "" : ", which doesn't exist yet").")
+                    Text("Written to \(view.path)\(view.present ? "" : ", which doesn't exist yet"). Save writes these; the name and notifications above apply at once.")
                 }
-            }
-        }
-        .navigationTitle("Settings")
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                if saving {
-                    ProgressView()
-                } else {
-                    Button("Save", action: save).disabled(!dirty)
-                }
-            }
-        }
-        .task { await load() }
-        .failure($failed)
     }
 
     /// A text field over an optional string: empty is nil, the default.
@@ -404,5 +426,38 @@ struct AboutView: View {
             guard let server else { return }
             do { hello = try await server.api.hello() } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+/// A server's name on this phone, saved when editing ends.
+struct ServerNameField: View {
+    let server: Server
+    @Environment(AppModel.self) private var model
+    @State private var name = ""
+    @State private var failed: String?
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        LabeledContent("Name") {
+            TextField(server.record.host, text: $name)
+                .multilineTextAlignment(.trailing)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .focused($editing)
+                .onSubmit(save)
+        }
+        .onAppear { name = server.record.name }
+        .onChange(of: editing) { _, now in if !now { save() } }
+        .failure($failed)
+    }
+
+    private func save() {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An empty name goes back to what it was rather than to nothing.
+        guard !trimmed.isEmpty else {
+            name = server.record.name
+            return
+        }
+        do { try model.rename(server, to: trimmed) } catch { failed = error.localizedDescription }
     }
 }
