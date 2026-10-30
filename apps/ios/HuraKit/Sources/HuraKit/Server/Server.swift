@@ -25,6 +25,7 @@ public final class Server: Identifiable {
     public private(set) var record: ServerRecord
     public private(set) var state: State = .connecting
     public private(set) var sessions: [Session] = []
+    public private(set) var projects: [Project] = []
     /// The agent's state per session name, for the sessions that have one.
     public private(set) var reports: [String: AgentReport] = [:]
     /// Why the last refresh failed, when the server answered with a failure
@@ -73,8 +74,11 @@ public final class Server: Identifiable {
     public func refresh() async {
         let client = self.client
         do {
+            async let named = client.projects()
             let listed = try await client.sessions()
             sessions = listed
+            // An older hurad without projects still lists its sessions.
+            if let named = try? await named { projects = named }
             problem = nil
             state = .online
             let live = listed.filter(\.isLive).map(\.name)
@@ -106,6 +110,49 @@ public final class Server: Identifiable {
         }
     }
 
+    /// Sets what a refresh would have, for tests and previews.
+    func load(projects: [Project], sessions: [Session]) {
+        self.projects = projects
+        self.sessions = sessions
+        state = .online
+    }
+
+    /// The client, for a screen that asks something of this server once.
+    public var api: ServerClient { client }
+
+    /// A project's worktrees, newest first.
+    public func worktrees(in project: Project) -> [Session] {
+        sessions.filter { $0.project == project.name }.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// Sessions that belong to no project this server knows.
+    public var unfiled: [Session] {
+        let known = Set(projects.map(\.name))
+        return sessions.filter { $0.project.map { !known.contains($0) } ?? true }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    public func newProject(from repo: LocalRepo) async throws {
+        guard let origin = repo.origin else { throw ServerError.failed(kind: "bad_request", message: "\(repo.display) has no origin to clone.") }
+        projects = try await client.newProject(path: repo.path, repo: origin, name: nil)
+    }
+
+    public func forgetProject(_ name: String) async throws {
+        projects = try await client.forgetProject(name)
+    }
+
+    /// Starts a session and answers with its name, once the list has it.
+    public func create(_ session: NewSession) async throws -> String {
+        let name = try await client.create(session)
+        await refresh()
+        return name
+    }
+
+    public func destroy(_ name: String) async throws {
+        sessions = try await client.destroy(name)
+        reports[name] = nil
+    }
+
     public func session(named name: String) -> Session? {
         sessions.first { $0.name == name }
     }
@@ -119,7 +166,11 @@ public final class Server: Identifiable {
     /// in front. From a notification it isn't, and the few seconds iOS gives
     /// an action are for the answer alone.
     public func answer(session: String, ask: String, allow: Bool) async throws {
-        try await client.answer(session: session, ask: ask, allow: allow)
+        try await answer(session: session, ask: ask, decision: ChatDecision(allow: allow))
+    }
+
+    public func answer(session: String, ask: String, decision: ChatDecision) async throws {
+        try await client.answer(session: session, ask: ask, decision: decision)
         if loop != nil { await refresh() }
     }
 }

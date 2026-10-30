@@ -54,9 +54,103 @@ public struct ServerClient: Sendable {
     /// Answers the permission request `id` in the session `name`. Refused
     /// once the request has been answered anywhere.
     public func answer(session name: String, ask id: String, allow: Bool) async throws {
-        _ = try await call(["op": .string("answer"), "name": .string(name), "id": .string(id),
-                            "decision": .object(["allow": .bool(allow)])],
-                           as: Told.self)
+        try await answer(session: name, ask: id, decision: ChatDecision(allow: allow))
+    }
+
+    // MARK: Projects and worktrees
+
+    public func projects() async throws -> [Project] {
+        try await call("projects", Nothing(), as: ProjectsReply.self).projects
+    }
+
+    /// Makes a project of a checkout on the server; answers with every project.
+    public func newProject(path: String, repo: String, name: String?) async throws -> [Project] {
+        struct Body: Encodable {
+            var path: String
+            var repo: String
+            var name: String?
+        }
+        return try await call("new-project", Body(path: path, repo: repo, name: name), as: ProjectsReply.self).projects
+    }
+
+    /// Forgets a project. Its worktrees are left alone.
+    public func forgetProject(_ name: String) async throws -> [Project] {
+        try await call("forget-project", Named(name: name), as: ProjectsReply.self).projects
+    }
+
+    /// The checkouts on the server's disk.
+    public func repos() async throws -> Listing {
+        try await call("repos", Nothing(), as: Listing.self)
+    }
+
+    /// Git facts about a checkout, measured against `branch` (nil: its own).
+    public func inspect(path: String, branch: String?) async throws -> Picked {
+        struct Body: Encodable {
+            var path: String
+            var branch: String?
+        }
+        return try await call("inspect", Body(path: path, branch: branch), as: Picked.self)
+    }
+
+    public func newOptions() async throws -> NewOptions {
+        try await call("new-options", Nothing(), as: NewOptions.self)
+    }
+
+    /// Starts a session; answers with the name it got.
+    public func create(_ session: NewSession) async throws -> String {
+        try await call("create", session, as: CreatedReply.self).name
+    }
+
+    /// Ends a session and deletes its sandbox; answers with what is left.
+    public func destroy(_ name: String) async throws -> [Session] {
+        try await call("destroy", Named(name: name), as: Sessions.self).sessions
+    }
+
+    // MARK: Beside the agent
+
+    /// A chat session's conversations.
+    public func chats(_ name: String) async throws -> Chats {
+        try await call("chats", Named(name: name), as: Chats.self)
+    }
+
+    /// Opens another conversation; `opened` names it.
+    public func newChat(_ name: String) async throws -> Chats {
+        try await call("new-chat", Named(name: name), as: Chats.self)
+    }
+
+    public func closeChat(_ name: String, conversation: String) async throws -> Chats {
+        struct Body: Encodable {
+            var name: String
+            var conv: String
+        }
+        return try await call("close-chat", Body(name: name, conv: conversation), as: Chats.self)
+    }
+
+    /// The shells running in a session's sandbox, by tmux session name.
+    public func shells(_ name: String) async throws -> [String] {
+        try await call("shells", Named(name: name), as: ShellsReply.self).shells
+    }
+
+    public func newShell(_ name: String) async throws -> [String] {
+        try await call("new-shell", Named(name: name), as: ShellsReply.self).shells
+    }
+
+    public func killShell(_ name: String, tmux: String) async throws -> [String] {
+        struct Body: Encodable {
+            var name: String
+            var tmux: String
+        }
+        return try await call("kill-shell", Body(name: name, tmux: tmux), as: ShellsReply.self).shells
+    }
+
+    /// Answers a permission request, question or plan in full.
+    public func answer(session name: String, ask id: String, decision: ChatDecision) async throws {
+        struct Body: Encodable {
+            var name: String
+            var id: String
+            var decision: ChatDecision
+        }
+        _ = try await call("answer", Body(name: name, id: id, decision: decision), as: Told.self)
     }
 
     public func configurePush(relayURL: String, pushToken: String, pushKey: String?,
@@ -91,7 +185,15 @@ public struct ServerClient: Sendable {
     }
 
     func call<T: Decodable>(_ request: [String: RequestJSON], as: T.Type) async throws -> T {
-        let body = try JSONEncoder().encode(request)
+        try await post(JSONEncoder().encode(request), as: T.self)
+    }
+
+    /// `op` with the fields of `body` beside it.
+    func call<B: Encodable, T: Decodable>(_ op: String, _ body: B, as: T.Type) async throws -> T {
+        try await post(JSONEncoder().encode(Op(op: op, body: body)), as: T.self)
+    }
+
+    private func post<T: Decodable>(_ body: Data, as: T.Type) async throws -> T {
         let r = try await PinnedHTTP.request(
             host: record.host, port: record.port, pin: record.fingerprint, method: "POST", path: "/rpc",
             headers: [("Authorization", "Bearer \(record.token)"), ("Content-Type", "application/json")],
@@ -145,22 +247,46 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     /// `terminal` or `chat`. Only a chat session's requests can be answered
     /// from here.
     public var interface: String
+    /// The project it belongs to; nil for one made outside a project.
+    public var project: String?
+    /// Clone URL.
+    public var repo: String
+    public var baseBranch: String?
+    /// Epoch seconds.
+    public var createdAt: Int64
+    /// Why it failed, in the words of whatever refused it.
+    public var failure: String?
+    public var toolchains: [String]
+    public var providers: [String]
+    public var policy: String?
 
     public var id: String { name }
     public var isChat: Bool { interface == "chat" }
     public var isLive: Bool { !["creating", "seeding", "failed", "dead"].contains(state) }
 
     enum CodingKeys: String, CodingKey {
-        case name, state, task, interface
+        case name, state, task, interface, project, repo, failure, toolchains, providers, policy
         case workBranch = "work_branch"
+        case baseBranch = "base_branch"
+        case createdAt = "created_at"
     }
 
-    public init(name: String, state: String, workBranch: String = "", task: String = "", interface: String = "terminal") {
+    public init(name: String, state: String, workBranch: String = "", task: String = "", interface: String = "terminal",
+                project: String? = nil, repo: String = "", baseBranch: String? = nil, createdAt: Int64 = 0,
+                failure: String? = nil, toolchains: [String] = [], providers: [String] = [], policy: String? = nil) {
         self.name = name
         self.state = state
         self.workBranch = workBranch
         self.task = task
         self.interface = interface
+        self.project = project
+        self.repo = repo
+        self.baseBranch = baseBranch
+        self.createdAt = createdAt
+        self.failure = failure
+        self.toolchains = toolchains
+        self.providers = providers
+        self.policy = policy
     }
 
     public init(from decoder: Decoder) throws {
@@ -170,6 +296,14 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
         workBranch = try c.decodeIfPresent(String.self, forKey: .workBranch) ?? ""
         task = try c.decodeIfPresent(String.self, forKey: .task) ?? ""
         interface = try c.decodeIfPresent(String.self, forKey: .interface) ?? "terminal"
+        project = try c.decodeIfPresent(String.self, forKey: .project)
+        repo = try c.decodeIfPresent(String.self, forKey: .repo) ?? ""
+        baseBranch = try c.decodeIfPresent(String.self, forKey: .baseBranch)
+        createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        failure = try c.decodeIfPresent(String.self, forKey: .failure)
+        toolchains = try c.decodeIfPresent([String].self, forKey: .toolchains) ?? []
+        providers = try c.decodeIfPresent([String].self, forKey: .providers) ?? []
+        policy = try c.decodeIfPresent(String.self, forKey: .policy)
     }
 }
 

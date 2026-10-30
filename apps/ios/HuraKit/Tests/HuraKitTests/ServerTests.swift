@@ -57,7 +57,7 @@ struct WireTests {
         let json = #"{"name":"fix-tests","sandbox":"x","tmux":"t","repo":"r","work_branch":"hura/fix-tests","task":"Fix the tests","state":"waiting","interface":"chat","created_at":1}"#
         let s = try JSONDecoder().decode(Session.self, from: Data(json.utf8))
         #expect(s == Session(name: "fix-tests", state: "waiting", workBranch: "hura/fix-tests",
-                             task: "Fix the tests", interface: "chat"))
+                             task: "Fix the tests", interface: "chat", repo: "r", createdAt: 1))
         #expect(s.isChat && s.isLive)
         // An older record without the field is a terminal session.
         let old = try JSONDecoder().decode(Session.self, from: Data(#"{"name":"a","state":"dead","work_branch":"b"}"#.utf8))

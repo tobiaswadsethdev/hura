@@ -45,7 +45,7 @@ struct ServerListView: View {
                 case let .server(id):
                     if let s = model.server(id) { ServerView(server: s) }
                 case let .session(serverID, name):
-                    if let s = model.server(serverID) { SessionView(server: s, name: name) }
+                    if let s = model.server(serverID) { WorktreeView(server: s, name: name) }
                 }
             }
             .sheet(isPresented: $pairing) {

@@ -86,3 +86,22 @@ private func model(_ store: ServerStore = InMemoryServerStore()) -> AppModel {
     m.open(try #require(NotificationTarget(userInfo: ["hura": ["server_id": "h_aaaabbbbccccdddd"]])))
     #expect(m.pendingRoute == [.server("h_aaaabbbbccccdddd")])
 }
+
+/// The model picker says what the desktop window says.
+@Test(arguments: [
+    ("claude-opus-5-5", "Opus 5.5"),
+    ("claude-sonnet-5-5[1m]", "Sonnet 5.5 (1M)"),
+    ("claude-haiku-5-5-20260301", "Haiku 5.5"),
+    ("claude-fable-5", "Fable 5"),
+    ("opus", "opus"),
+])
+func namesModelsAsAPersonWould(id: String, name: String) {
+    #expect(modelName(id) == name)
+}
+
+@Test func labelsTabsByWhatTheyAre() {
+    #expect(WorkTab.chat("agent").label == "Agent" && WorkTab.chat("agent").isAgent)
+    #expect(WorkTab.terminal(nil).label == "Agent" && WorkTab.terminal(nil).isAgent)
+    #expect(WorkTab.chat("2").label == "2" && !WorkTab.chat("2").isAgent)
+    #expect(WorkTab.terminal("shell-1").label == "shell-1")
+}

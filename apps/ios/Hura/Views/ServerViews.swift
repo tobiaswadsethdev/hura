@@ -57,10 +57,17 @@ struct ServerDot: View {
     }
 }
 
-/// A hura server's sessions, and its notifications.
+/// A hura server: its projects with their worktrees, then sessions that
+/// belong to none, then its notifications. Shaped like the desktop window's
+/// tree.
 struct ServerView: View {
     let server: Server
     @Environment(AppModel.self) private var model
+    @State private var addingProject = false
+    @State private var creatingIn: Project?
+    @State private var destroying: Session?
+    @State private var forgetting: Project?
+    @State private var error: String?
 
     var body: some View {
         List {
@@ -78,13 +85,34 @@ struct ServerView: View {
                         .foregroundStyle(.orange)
                 }
             }
-            Section("Sessions") {
-                if server.sessions.isEmpty {
-                    Text("No sessions").foregroundStyle(.secondary)
+            ForEach(server.projects) { project in
+                Section {
+                    let worktrees = server.worktrees(in: project)
+                    ForEach(worktrees) { row($0) }
+                    Button {
+                        creatingIn = project
+                    } label: {
+                        Label("New Worktree", systemImage: "plus")
+                    }
+                    .disabled(server.state != .online)
+                } header: {
+                    ProjectHeader(project: project) { forgetting = project }
                 }
-                ForEach(server.sessions) { s in
-                    NavigationLink(value: Route.session(serverID: server.id, name: s.name)) {
-                        SessionRow(session: s, report: server.reports[s.name])
+            }
+            if !server.unfiled.isEmpty {
+                Section(server.projects.isEmpty ? "Sessions" : "Not in a project") {
+                    ForEach(server.unfiled) { row($0) }
+                }
+            }
+            if server.state == .online, server.projects.isEmpty, server.sessions.isEmpty {
+                Section {
+                    ContentUnavailableView {
+                        Label("No projects", systemImage: "folder")
+                    } description: {
+                        Text("A project is a repository on this server that you start worktrees from.")
+                    } actions: {
+                        Button("New Project") { addingProject = true }
+                            .buttonStyle(.borderedProminent)
                     }
                 }
             }
@@ -94,6 +122,94 @@ struct ServerView: View {
         }
         .navigationTitle(server.record.name)
         .refreshable { await server.refresh() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button { addingProject = true } label: { Label("New Project", systemImage: "folder.badge.plus") }
+                    if !server.projects.isEmpty {
+                        Menu {
+                            ForEach(server.projects) { p in
+                                Button(p.name) { creatingIn = p }
+                            }
+                        } label: {
+                            Label("New Worktree", systemImage: "arrow.triangle.branch")
+                        }
+                    }
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .disabled(server.state != .online)
+            }
+        }
+        .sheet(isPresented: $addingProject) {
+            NewProjectView(server: server)
+        }
+        .sheet(item: $creatingIn) { project in
+            NewWorktreeView(server: server, project: project) { name in
+                model.pendingRoute = [.server(server.id), .session(serverID: server.id, name: name)]
+            }
+        }
+        .confirmationDialog("Delete \(destroying?.name ?? "")?", isPresented: .constant(destroying != nil),
+                            titleVisibility: .visible, presenting: destroying) { s in
+            Button("Delete Worktree", role: .destructive) {
+                destroying = nil
+                act { try await server.destroy(s.name) }
+            }
+            Button("Cancel", role: .cancel) { destroying = nil }
+        } message: { _ in
+            Text("Its sandbox is deleted, with everything in it that hasn't been pushed.")
+        }
+        .confirmationDialog("Forget \(forgetting?.name ?? "")?", isPresented: .constant(forgetting != nil),
+                            titleVisibility: .visible, presenting: forgetting) { p in
+            Button("Forget Project", role: .destructive) {
+                forgetting = nil
+                act { try await server.forgetProject(p.name) }
+            }
+            Button("Cancel", role: .cancel) { forgetting = nil }
+        } message: { _ in
+            Text("Its worktrees keep running. The checkout on the server isn't touched.")
+        }
+        .alert("Couldn't do that", isPresented: .constant(error != nil)) {
+            Button("OK") { error = nil }
+        } message: {
+            Text(error ?? "")
+        }
+    }
+
+    private func row(_ s: Session) -> some View {
+        NavigationLink(value: Route.session(serverID: server.id, name: s.name)) {
+            SessionRow(session: s, report: server.reports[s.name])
+        }
+        .swipeActions {
+            Button("Delete", role: .destructive) { destroying = s }
+        }
+    }
+
+    private func act(_ work: @escaping () async throws -> Void) {
+        Task {
+            do { try await work() } catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
+/// A project's name and where it clones from, with its menu.
+private struct ProjectHeader: View {
+    let project: Project
+    let forget: () -> Void
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(project.name).font(.subheadline.weight(.semibold)).textCase(nil)
+                Text(project.repo).font(.caption2.monospaced()).textCase(nil).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+            Menu {
+                Button("Forget Project", systemImage: "folder.badge.minus", role: .destructive, action: forget)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
     }
 }
 
@@ -110,7 +226,12 @@ struct SessionRow: View {
                 Spacer()
                 StatusBadge(status: agentStatus(session, report))
             }
-            if let prompt = report?.state == "waiting" ? (report?.prompt ?? report?.detail) : nil {
+            if let failure = session.failure, ["failed", "dead"].contains(session.state) {
+                Text(failure)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            } else if let prompt = report?.state == "waiting" ? (report?.prompt ?? report?.detail) : nil {
                 Text(prompt)
                     .font(.caption.monospaced())
                     .foregroundStyle(.orange)
@@ -132,153 +253,5 @@ func agentStatus(_ session: Session, _ report: AgentReport?) -> String {
     case "waiting": "needs_input"
     case "running": "working"
     case let other: other
-    }
-}
-
-/// One session. A chat session opens on its conversation, with its details a
-/// tap away; a terminal session, whose conversation is a screen this app
-/// can't draw, shows its details and what it waits on.
-struct SessionView: View {
-    let server: Server
-    let name: String
-    @Environment(AppModel.self) private var model
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var answering = false
-    @State private var error: String?
-    @State private var chat: Chat?
-    @State private var showingDetails = false
-
-    private var session: Session? { server.session(named: name) }
-
-    var body: some View {
-        Group {
-            if let chat {
-                ChatView(chat: chat)
-                    .toolbar {
-                        ToolbarItem(placement: .primaryAction) {
-                            Button { showingDetails = true } label: { Label("Details", systemImage: "info.circle") }
-                        }
-                    }
-                    .sheet(isPresented: $showingDetails) {
-                        NavigationStack {
-                            details
-                                .navigationTitle(name)
-                                .navigationBarTitleDisplayMode(.inline)
-                                .toolbar {
-                                    ToolbarItem(placement: .confirmationAction) {
-                                        Button("Done") { showingDetails = false }
-                                    }
-                                }
-                        }
-                        .presentationDetents([.medium, .large])
-                    }
-            } else {
-                details
-            }
-        }
-        .navigationTitle(name)
-        .navigationBarTitleDisplayMode(.inline)
-        // Opened from a notification before the list has arrived: the chat
-        // starts once the session is known.
-        .task(id: session?.isChat == true ? session?.name : nil) {
-            guard chat == nil, let session, session.isChat else { return }
-            let c = Chat(record: server.record, session: session.name)
-            chat = c
-            c.start()
-        }
-        .onChange(of: scenePhase) { _, phase in
-            // iOS drops the socket in the background anyway; reopen on return,
-            // asking only for what was missed.
-            if phase == .background { chat?.stop() } else if phase == .active { chat?.start() }
-        }
-        .onAppear { model.visibleSession = (server.id, name) }
-        .onDisappear {
-            chat?.stop()
-            if model.visibleSession?.session == name { model.visibleSession = nil }
-        }
-    }
-
-    private var details: some View {
-        List {
-            if let session {
-                let report = server.reports[session.name]
-                Section {
-                    LabeledContent("State") { StatusBadge(status: agentStatus(session, report)) }
-                    if !session.workBranch.isEmpty {
-                        LabeledContent("Branch") {
-                            Text(session.workBranch).font(.footnote.monospaced())
-                        }
-                    }
-                    LabeledContent("Interface", value: session.isChat ? "Chat" : "Terminal")
-                }
-                // In a chat the conversation shows what waits, with its buttons.
-                if chat == nil, let report, report.state == "waiting" {
-                    waiting(session, report)
-                }
-                if !session.task.isEmpty {
-                    Section("Task") {
-                        Text(session.task).font(.callout)
-                    }
-                }
-            } else {
-                ContentUnavailableView("Session not found", systemImage: "questionmark.circle",
-                                       description: Text(server.state == .online ? "It may have been removed." : server.state.label))
-            }
-        }
-        .refreshable { await server.refresh() }
-        .alert("Couldn't answer", isPresented: .constant(error != nil)) {
-            Button("OK") { error = nil }
-        } message: {
-            Text(error ?? "")
-        }
-    }
-
-    @ViewBuilder
-    private func waiting(_ session: Session, _ report: AgentReport) -> some View {
-        Section {
-            Text(report.prompt ?? report.detail ?? "Claude is waiting")
-                .font(.callout.monospaced())
-                .textSelection(.enabled)
-            if let ask = report.ask, session.isChat {
-                HStack {
-                    Button {
-                        answer(session, ask, allow: true)
-                    } label: {
-                        Label("Allow", systemImage: "checkmark").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    Button(role: .destructive) {
-                        answer(session, ask, allow: false)
-                    } label: {
-                        Label("Deny", systemImage: "xmark")
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                }
-                .disabled(answering)
-            }
-        } header: {
-            Text("Waiting on you")
-        } footer: {
-            if !session.isChat {
-                Text("A terminal session's prompt is answered in its terminal.")
-            } else if report.ask == nil {
-                Text("This is a question or a plan, which needs the full window to answer.")
-            }
-        }
-    }
-
-    private func answer(_ session: Session, _ ask: String, allow: Bool) {
-        answering = true
-        Task {
-            defer { answering = false }
-            do {
-                try await server.answer(session: session.name, ask: ask, allow: allow)
-            } catch {
-                self.error = error.localizedDescription
-            }
-        }
     }
 }
