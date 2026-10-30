@@ -8,17 +8,20 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "observability": { "enabled": true },
+  // The app reaches the relay at hura-relay.<account>.workers.dev.
+  "workers_dev": true,
+  "preview_urls": false,
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "hura-relay",
       // From `npx wrangler d1 create hura-relay`.
-      "database_id": "",
+      "database_id": "0e85a680-1981-4460-915d-bccceecdf8b2",
       "migrations_dir": "migrations"
     }
   ],
   "vars": {
-    "APNS_KEY_ID": "9M8S43LG8U",
+    "APNS_KEY_ID": "DV9JF5ZU2F",
     "APNS_TEAM_ID": "5CLNYT78JN",
     // The hura iOS app's bundle ID.
     "APNS_TOPIC": "dev.tobiaswadseth.hura.ios",
