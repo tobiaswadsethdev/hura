@@ -8,7 +8,13 @@ answer a permission request, a question or a plan, switch the permission mode
 or the model, and open more conversations beside the agent's. A terminal
 session's agent, and any shell beside it, is a terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)),
 with a key bar for esc, ctrl, tab and the arrows. A permission request can
-also be answered from its notification. It talks to `hurad` over the same paired, pinned TLS connection the
+also be answered from its notification.
+
+Beside the tabs, a worktree's dock has what the desktop's has: its files,
+read-only; its git, to stage, commit, push and pull, with each file's diff;
+review remarks on a diff's lines, sent to the agent as one message; the
+events, grouped by endpoint, to allow (the whole host or only some paths) or
+block from; its network policy, to remove rules from; and what it has spent. It talks to `hurad` over the same paired, pinned TLS connection the
 desktop application uses, and receives notifications through the
 [relay](../../relay). [docs/notifications.md](../../docs/notifications.md)
 covers the `hurad` side.
