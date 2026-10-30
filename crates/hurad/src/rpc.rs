@@ -206,6 +206,23 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 .map(|message| Reply::Told { message })
                 .map_err(Failure::failed)
         }),
+        Request::Answer { name, id, decision } => with_session(&name, |s| {
+            if s.interface != chat::Interface::Chat {
+                return Err(Failure::failed(format!(
+                    "`{name}` is a terminal session; its prompts are answered in its terminal"
+                )));
+            }
+            chat::answer(backends.for_session(s), s, &id, &decision)
+                .map(|()| Reply::Told {
+                    message: if decision.allow {
+                        "allowed"
+                    } else {
+                        "declined"
+                    }
+                    .into(),
+                })
+                .map_err(Failure::failed)
+        }),
         Request::Projects => Reply::Projects {
             projects: projects::list(),
         }
@@ -272,6 +289,15 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 Ok(cfg) => Reply::Settings(hura_core::settings::view(&cfg)).into(),
                 Err(e) => Failure::failed(e.to_string()).into(),
             }
+        }
+        // A route belongs to the token a request came with, which only the
+        // listener knows: it answers these itself, in `push::handle`, and one
+        // arriving here came some other way.
+        Request::PushConfigure(_)
+        | Request::PushStatus
+        | Request::PushRemove
+        | Request::PushTest => {
+            Failure::failed("push settings belong to a paired connection").into()
         }
     }
 }

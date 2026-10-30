@@ -21,9 +21,12 @@
 use serde::{Deserialize, Serialize};
 
 pub mod pairing;
+pub mod push;
 pub mod stream;
 pub use pairing::Pairing;
+pub use push::{PushRoute, PushView};
 
+use hura_core::chat::ChatDecision;
 use hura_core::comments::{Comment, NewComment};
 use hura_core::endpoints::Route;
 use hura_core::events::Event;
@@ -249,6 +252,15 @@ pub enum Request {
     /// Send the review to the agent and forget it. One message, once: see
     /// `hura_core::comments`.
     SendComments { name: String },
+    /// Answer one of a chat session's permission requests by its id, from
+    /// outside the conversation: what a notification on a phone sends. The
+    /// id is the one the notification carried, so the answer goes to that
+    /// request and is refused once it has been answered anywhere.
+    Answer {
+        name: String,
+        id: String,
+        decision: ChatDecision,
+    },
     /// Start a session, and answer as soon as the record exists rather than when
     /// the agent is running.
     ///
@@ -326,6 +338,19 @@ pub enum Request {
     /// of the `Comment` variant already here, and nowhere near the eight
     /// strings that made a `NewSession` worth a pointer.
     SetSettings(Settings),
+    /// Send this connection's notifications to a phone, through Radix.
+    ///
+    /// Belongs to the token the request came with, so it is answered by the
+    /// listener rather than by [`Request::session`]'s dispatch: see
+    /// [`push`]. Configuring again replaces the route.
+    PushConfigure(PushRoute),
+    /// This connection's route, if it has one.
+    PushStatus,
+    /// Stop sending this connection notifications.
+    PushRemove,
+    /// Send this connection a test notification, through the same queue a
+    /// real one takes.
+    PushTest,
 }
 
 /// What to do to a managed MCP container.
@@ -361,7 +386,11 @@ impl Request {
             | Request::UploadSkills { .. }
             | Request::ForgetSkill { .. }
             | Request::Settings
-            | Request::SetSettings(_) => None,
+            | Request::SetSettings(_)
+            | Request::PushConfigure(_)
+            | Request::PushStatus
+            | Request::PushRemove
+            | Request::PushTest => None,
             Request::Poll { name }
             | Request::Diff { name }
             | Request::Policy { name }
@@ -389,7 +418,8 @@ impl Request {
             | Request::Comments { name }
             | Request::Comment { name, .. }
             | Request::Uncomment { name, .. }
-            | Request::SendComments { name } => Some(name),
+            | Request::SendComments { name }
+            | Request::Answer { name, .. } => Some(name),
             Request::Create(new) | Request::CreateFromPull(new) => new.name.as_deref(),
             Request::Destroy { name } => Some(name),
         }
@@ -503,6 +533,9 @@ pub enum Reply {
     /// as the built-in default -- so a client patching the copy it had would
     /// be inventing the answer.
     Settings(SettingsView),
+    /// This connection's push route, which is what every push request answers
+    /// with.
+    Push(PushView),
 }
 
 impl From<Refreshed> for Reply {

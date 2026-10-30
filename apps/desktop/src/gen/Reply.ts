@@ -11,6 +11,7 @@ import type { Picked } from "./Picked";
 import type { Poll } from "./Poll";
 import type { PortsView } from "./PortsView";
 import type { Project } from "./Project";
+import type { PushView } from "./PushView";
 import type { Session } from "./Session";
 import type { SettingsView } from "./SettingsView";
 import type { Status } from "./Status";
@@ -30,4 +31,4 @@ adopted: Array<string>, dead: Array<string>, warnings: Array<string>, } | { "rep
 /**
  * The conversation just opened, when that is what was asked for.
  */
-opened: string | null, } | { "reply": "ports" } & PortsView | { "reply": "files" } & Dir | { "reply": "file" } & FileText | { "reply": "git", said: string, status: Status, } | { "reply": "git-diff" } & FileDiff | { "reply": "told", message: string, } | { "reply": "projects", projects: Array<Project>, } | { "reply": "repos" } & Listing | { "reply": "inspect" } & Picked | { "reply": "new-options" } & NewOptions | { "reply": "created", name: string, } | { "reply": "integrations" } & Integrations | { "reply": "settings" } & SettingsView;
+opened: string | null, } | { "reply": "ports" } & PortsView | { "reply": "files" } & Dir | { "reply": "file" } & FileText | { "reply": "git", said: string, status: Status, } | { "reply": "git-diff" } & FileDiff | { "reply": "told", message: string, } | { "reply": "projects", projects: Array<Project>, } | { "reply": "repos" } & Listing | { "reply": "inspect" } & Picked | { "reply": "new-options" } & NewOptions | { "reply": "created", name: string, } | { "reply": "integrations" } & Integrations | { "reply": "settings" } & SettingsView | { "reply": "push" } & PushView;

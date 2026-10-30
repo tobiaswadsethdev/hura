@@ -11,6 +11,7 @@
 //! that, two clients and one slow `sbx` call are enough to stall the whole
 //! server, including the `/version` that would have explained why.
 
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
@@ -20,7 +21,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use hura_proto::{Failure, Hello, Outcome, Request};
 
-use crate::auth::Tokens;
+use crate::auth::{Entry, Tokens};
+use crate::push::{self, Pusher};
 use crate::rpc;
 
 pub struct Server {
@@ -28,6 +30,19 @@ pub struct Server {
     /// change can be `hurad revoke` in another terminal while a request is in
     /// flight.
     pub tokens: RwLock<Tokens>,
+    /// Where each connection's notifications go. See [`crate::push`].
+    pub push: Arc<Pusher>,
+}
+
+impl Server {
+    /// The hashes of the tokens this server accepts now, re-read if the file
+    /// has changed. `None` when the lock is poisoned, which is no answer
+    /// rather than an empty one: an empty set would drop every route.
+    pub fn token_hashes(&self) -> Option<HashSet<String>> {
+        refresh(self);
+        let tokens = self.tokens.read().ok()?;
+        Some(tokens.list().iter().map(|e| e.hash.clone()).collect())
+    }
 }
 
 type Shared = Arc<Server>;
@@ -67,9 +82,9 @@ async fn rpc_route(
     headers: HeaderMap,
     body: String,
 ) -> Result<Json<Outcome>, StatusCode> {
-    if !authorised(&server, &headers) {
+    let Some(caller) = caller(&server, &headers) else {
         return Err(StatusCode::UNAUTHORIZED);
-    }
+    };
 
     // A body that is not a request at all is a transport-level problem -- a
     // client speaking the wrong protocol, or nothing -- so it is a status
@@ -84,9 +99,14 @@ async fn rpc_route(
         Err(_) => return Err(StatusCode::BAD_REQUEST),
     };
 
-    let outcome = tokio::task::spawn_blocking(move || rpc::dispatch(&rpc::backends(), request))
-        .await
-        .unwrap_or_else(|e| Failure::failed(format!("the server dropped the request: {e}")).into());
+    // Push requests are about the connection rather than the server, so they
+    // are answered here, where the token they came with is known.
+    let outcome = tokio::task::spawn_blocking(move || {
+        push::handle(&server.push, &caller, &request)
+            .unwrap_or_else(|| rpc::dispatch(&rpc::backends(), request))
+    })
+    .await
+    .unwrap_or_else(|e| Failure::failed(format!("the server dropped the request: {e}")).into());
 
     Ok(Json(outcome))
 }
@@ -97,10 +117,23 @@ async fn rpc_route(
 /// parameter: a token in a URL ends up in logs and in a browser's history, and
 /// there is no browser here that would need it to.
 fn authorised(server: &Server, headers: &HeaderMap) -> bool {
-    let Some(token) = bearer_token(headers) else {
-        return false;
-    };
+    caller(server, headers).is_some()
+}
 
+/// The token entry a request's bearer token belongs to, if it is one this
+/// server minted. [`authorised`], for the requests that need to know who.
+fn caller(server: &Server, headers: &HeaderMap) -> Option<Entry> {
+    let token = bearer_token(headers)?;
+    refresh(server);
+    server
+        .tokens
+        .read()
+        .ok()
+        .and_then(|tokens| tokens.verify(&token).cloned())
+}
+
+/// Re-read the tokens if the file has changed.
+fn refresh(server: &Server) {
     // Checked per request, so `hurad pair` reaches a running server and -- the
     // direction that matters -- `hurad revoke` does too. It is a `stat`, and
     // this is not a server anyone is making thousands of requests a second to.
@@ -111,11 +144,6 @@ fn authorised(server: &Server, headers: &HeaderMap) -> bool {
     if let (true, Ok(mut tokens)) = (changed, server.tokens.write()) {
         let _ = tokens.reload();
     }
-
-    server
-        .tokens
-        .read()
-        .is_ok_and(|tokens| tokens.verify(&token).is_some())
 }
 
 /// The token out of an `Authorization: Bearer` header, if there is one.
@@ -180,6 +208,14 @@ mod tests {
         (tokens, token, path)
     }
 
+    fn server(tokens: Tokens) -> Server {
+        let dir = std::env::temp_dir().join(format!("hurad-serve-push-{}", std::process::id()));
+        Server {
+            tokens: RwLock::new(tokens),
+            push: Arc::new(Pusher::open(dir).unwrap()),
+        }
+    }
+
     fn bearer(v: &str) -> HeaderMap {
         let mut h = HeaderMap::new();
         h.insert(
@@ -192,9 +228,7 @@ mod tests {
     #[test]
     fn a_request_with_no_token_is_not_authorised() {
         let (tokens, _, path) = paired("nobody");
-        let server = Server {
-            tokens: RwLock::new(tokens),
-        };
+        let server = server(tokens);
         assert!(!authorised(&server, &HeaderMap::new()));
         assert!(!authorised(&server, &bearer("Bearer wrong")));
         // A token in the right place but the wrong scheme is still no.
@@ -206,9 +240,7 @@ mod tests {
     #[test]
     fn a_minted_token_is_authorised_and_survives_surrounding_space() {
         let (tokens, token, path) = paired("laptop");
-        let server = Server {
-            tokens: RwLock::new(tokens),
-        };
+        let server = server(tokens);
 
         assert!(authorised(&server, &bearer(&format!("Bearer {token}"))));
         assert!(authorised(&server, &bearer(&format!("Bearer {token} "))));
@@ -222,9 +254,7 @@ mod tests {
     #[test]
     fn pairing_and_revoking_reach_a_running_server() {
         let (tokens, first, path) = paired("running");
-        let server = Server {
-            tokens: RwLock::new(tokens),
-        };
+        let server = server(tokens);
         assert!(authorised(&server, &bearer(&format!("Bearer {first}"))));
 
         // Another process pairs a second client.
@@ -250,9 +280,7 @@ mod tests {
     #[test]
     fn deleting_the_token_file_revokes_every_token() {
         let (tokens, token, path) = paired("deleted");
-        let server = Server {
-            tokens: RwLock::new(tokens),
-        };
+        let server = server(tokens);
         assert!(authorised(&server, &bearer(&format!("Bearer {token}"))));
 
         std::fs::remove_file(&path).unwrap();
@@ -268,9 +296,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let tokens = Tokens::load_from(&path).unwrap();
         assert!(tokens.is_empty());
-        let server = Server {
-            tokens: RwLock::new(tokens),
-        };
+        let server = server(tokens);
         assert!(!authorised(&server, &bearer("Bearer ")));
         assert!(!authorised(&server, &bearer("Bearer anything")));
     }

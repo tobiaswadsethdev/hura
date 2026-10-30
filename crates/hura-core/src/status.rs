@@ -106,6 +106,17 @@ pub struct Report {
     /// Tool name or prompt message, when one is known.
     pub detail: Option<String>,
     pub source: Source,
+    /// While waiting, the id of the request waited on, when the agent says:
+    /// a chat session's host does, and a terminal agent's screen cannot.
+    /// What an answer from outside the window names, so it answers that
+    /// request and not whichever one is waiting by the time it arrives.
+    #[serde(default)]
+    pub ask: Option<String>,
+    /// While waiting on [`Report::ask`], one line saying what it asks:
+    /// `Bash: npm test`. What a notification that can answer it shows, since
+    /// Allow is only an answer if the screen says what is being allowed.
+    #[serde(default)]
+    pub prompt: Option<String>,
 }
 
 /// The record `hura-status` writes inside the sandbox.
@@ -119,6 +130,12 @@ pub struct HookStatus {
     pub at: u64,
     #[serde(default)]
     pub detail: String,
+    /// The request waited on. Written by a chat session's host only.
+    #[serde(default)]
+    pub ask: Option<String>,
+    /// What that request asks, in one line.
+    #[serde(default)]
+    pub prompt: Option<String>,
 }
 
 /// What the agent's screen says it is doing.
@@ -233,6 +250,8 @@ pub fn combine(hook: Option<&HookStatus>, pane: Option<PaneSignal>, now: u64) ->
             state: State::Waiting,
             detail: tool(),
             source: Source::Pane,
+            ask: None,
+            prompt: None,
         }),
         // The input box is ready and there is no spinner, so no turn is in
         // flight -- whatever the last event to fire happened to be. No detail:
@@ -241,21 +260,35 @@ pub fn combine(hook: Option<&HookStatus>, pane: Option<PaneSignal>, now: u64) ->
             state: State::Idle,
             detail: None,
             source: Source::Pane,
+            ask: None,
+            prompt: None,
         }),
         // Working. The screen does not say what on, so the file does.
         Some(PaneSignal::Running) => Some(Report {
             state: State::Running,
             detail: tool(),
             source: Source::Pane,
+            ask: None,
+            prompt: None,
         }),
         // No agent pane: an unstarted session, or tmux is gone. The file is all
         // there is.
         None => {
             let h = fresh?;
+            let state = map_hook_state(&h.state)?;
             Some(Report {
-                state: map_hook_state(&h.state)?,
+                state,
                 detail: detail(&h.detail),
                 source: Source::Hook,
+                // Only a wait has a request to name; a stale one left behind
+                // in a running report would be answered by mistake.
+                ask: (state == State::Waiting)
+                    .then(|| h.ask.clone())
+                    .flatten()
+                    .filter(|a| !a.is_empty()),
+                prompt: (state == State::Waiting)
+                    .then(|| h.prompt.as_deref().and_then(detail))
+                    .flatten(),
             })
         }
     }
@@ -389,6 +422,8 @@ mod tests {
             state: state.to_string(),
             at,
             detail: detail.to_string(),
+            ask: None,
+            prompt: None,
         }
     }
 
@@ -467,6 +502,29 @@ mod tests {
 
         // Stale, with nothing to fall back on: report nothing rather than a lie.
         assert!(combine(Some(&h), None, 1001 + HOOK_STALE_SECS).is_none());
+    }
+
+    /// A chat session's host names the request it waits on, and only a wait
+    /// carries it: one left in a file that has moved on would be answered by
+    /// mistake.
+    #[test]
+    fn a_wait_names_its_request_and_nothing_else_does() {
+        let h = parse_hook(
+            r#"{"state":"waiting","at":1000,"detail":"Bash","ask":"toolu_01","prompt":"Bash: npm test"}"#,
+        )
+        .unwrap();
+        let r = combine(Some(&h), None, 1001).unwrap();
+        assert_eq!(r.state, State::Waiting);
+        assert_eq!(r.ask.as_deref(), Some("toolu_01"));
+        assert_eq!(r.prompt.as_deref(), Some("Bash: npm test"));
+
+        let h = parse_hook(r#"{"state":"running","at":1000,"detail":"Bash","ask":"toolu_01"}"#)
+            .unwrap();
+        assert_eq!(combine(Some(&h), None, 1001).unwrap().ask, None);
+
+        // A terminal agent's file has no such field, and still reads.
+        let h = parse_hook(r#"{"state":"waiting","at":1000,"detail":"Bash"}"#).unwrap();
+        assert_eq!(combine(Some(&h), None, 1001).unwrap().ask, None);
     }
 
     #[test]
