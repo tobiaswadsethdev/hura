@@ -11,6 +11,7 @@ struct DockView: View {
         case git = "Git"
         case events = "Events"
         case policy = "Policy"
+        case ports = "Ports"
         case facts = "Facts"
 
         var id: String { rawValue }
@@ -20,6 +21,7 @@ struct DockView: View {
             case .git: "arrow.triangle.branch"
             case .events: "waveform.path.ecg"
             case .policy: "shield.lefthalf.filled"
+            case .ports: "point.3.connected.trianglepath.dotted"
             case .facts: "info.circle"
             }
         }
@@ -44,6 +46,7 @@ struct DockView: View {
             case .git: GitPane(server: server, name: name)
             case .events: EventsPane(server: server, name: name)
             case .policy: PolicyPane(server: server, name: name)
+            case .ports: PortsPane(server: server, name: name)
             case .facts: FactsPane(server: server, name: name)
             }
         }

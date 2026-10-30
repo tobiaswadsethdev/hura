@@ -14,7 +14,10 @@ Beside the tabs, a worktree's dock has what the desktop's has: its files,
 read-only; its git, to stage, commit, push and pull, with each file's diff;
 review remarks on a diff's lines, sent to the agent as one message; the
 events, grouped by endpoint, to allow (the whole host or only some paths) or
-block from; its network policy, to remove rules from; and what it has spent.
+block from; its network policy, to remove rules from; its ports and
+processes; and what it has spent. A port can be previewed: it is opened on
+the phone's own loopback, at the same number when that's free, tunnelled to
+the sandbox over the paired connection, and shown in Safari's in-app browser.
 
 A server's menu has its integrations (MCP servers to start, restart or stop,
 the secrets they're given, and the skills new sessions get), its settings

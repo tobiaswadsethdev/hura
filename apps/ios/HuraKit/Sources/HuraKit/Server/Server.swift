@@ -36,6 +36,8 @@ public final class Server: Identifiable {
     public nonisolated let serverID: String
     public nonisolated var id: String { serverID }
 
+    /// Ports in this server's sandboxes, forwarded to this phone.
+    public let previews: PreviewHub
     @ObservationIgnored fileprivate var client: ServerClient
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private let every: Duration
@@ -44,6 +46,7 @@ public final class Server: Identifiable {
         self.record = record
         serverID = record.serverID
         client = ServerClient(record: record)
+        previews = PreviewHub(record: record)
         self.every = every
     }
 
@@ -68,6 +71,8 @@ public final class Server: Identifiable {
     public func suspend() {
         loop?.cancel()
         loop = nil
+        // iOS closes listeners behind an app in the background anyway.
+        previews.stopAll()
     }
 
     /// The list, then each live session's state, all at once.

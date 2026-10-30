@@ -438,6 +438,14 @@ public struct Poll: Decodable, Equatable, Sendable {
     /// What the session has spent, once its agent has reported.
     public var usage: Usage?
     public var stat: DiffStat?
+    /// What the sandbox listens on.
+    public var ports: [Listening]?
+
+    public struct Listening: Decodable, Equatable, Sendable {
+        public var port: Int
+        /// `v4` or `v6`.
+        public var host: String
+    }
 }
 
 struct Told: Decodable {
