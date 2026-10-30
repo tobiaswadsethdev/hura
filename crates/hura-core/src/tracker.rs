@@ -1082,6 +1082,76 @@ fn send(
     curl(url, auth, &[], Some((method, &body, JSON)))
 }
 
+/// One request as the trackers are sent it: every header written out, the
+/// credential's included, ready for a client to put on the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpRequest {
+    pub method: String,
+    pub url: String,
+    /// `Name: value` lines.
+    pub headers: Vec<String>,
+    pub body: Option<String>,
+    /// Seconds before giving up.
+    pub timeout: u64,
+}
+
+/// Something that can send an [`HttpRequest`] and answer with the status and
+/// the body.
+///
+/// `curl` is how the desktop and the command line send them, and needs no
+/// such thing. A platform that cannot run a program -- iOS -- brings its own
+/// client and installs it once with [`use_transport`]; everything above this
+/// layer, and how an answer is read, is the same either way.
+pub trait Transport: Send + Sync {
+    fn send(&self, request: &HttpRequest) -> Result<(u16, String), String>;
+}
+
+static TRANSPORT: std::sync::OnceLock<Box<dyn Transport>> = std::sync::OnceLock::new();
+
+/// Send every tracker request through `transport` rather than `curl`, for the
+/// life of the process. Only the first call counts.
+pub fn use_transport(transport: Box<dyn Transport>) {
+    let _ = TRANSPORT.set(transport);
+}
+
+/// One request, through the installed transport when there is one, and
+/// otherwise through curl.
+fn curl(
+    url: &str,
+    auth: &str,
+    headers: &[&str],
+    body: Option<(&str, &str, &str)>,
+) -> Result<serde_json::Value, String> {
+    let Some(transport) = TRANSPORT.get() else {
+        return run_curl(url, auth, headers, body);
+    };
+    let mut lines = vec![
+        auth_header(auth),
+        format!("Accept: {JSON}"),
+        // GitHub refuses a request with no user agent.
+        "User-Agent: hura".to_string(),
+    ];
+    lines.extend(headers.iter().map(|h| h.to_string()));
+    let (method, body) = match body {
+        Some((method, body, content_type)) => {
+            if !body.is_empty() {
+                lines.push(format!("Content-Type: {content_type}"));
+            }
+            (method, (!body.is_empty()).then(|| body.to_string()))
+        }
+        None => ("GET", None),
+    };
+    let request = HttpRequest {
+        method: method.to_string(),
+        url: url.to_string(),
+        headers: lines,
+        body,
+        timeout: TIMEOUT.parse().unwrap_or(20),
+    };
+    let (code, body) = transport.send(&request)?;
+    answer(&body, code)
+}
+
 /// One request, with the credential on stdin.
 ///
 /// `-K -` makes curl read its configuration from standard input, which is how
@@ -1093,7 +1163,7 @@ fn send(
 /// The status code is asked for separately and printed after the body, because
 /// curl's exit code is about the transport: a 401 is a request that worked and
 /// an answer that has to be read as one.
-fn curl(
+fn run_curl(
     url: &str,
     auth: &str,
     headers: &[&str],
@@ -1175,7 +1245,12 @@ fn interpret(stdout: &str) -> Result<serde_json::Value, String> {
     let (body, code) = stdout
         .rsplit_once('\n')
         .ok_or("the request produced nothing at all")?;
-    let code: u16 = code.trim().parse().unwrap_or(0);
+    answer(body, code.trim().parse().unwrap_or(0))
+}
+
+/// Read an answer as its status asks for: the JSON of a success, and the
+/// tracker's own words for a failure.
+fn answer(body: &str, code: u16) -> Result<serde_json::Value, String> {
     let body = body.trim();
 
     if (200..300).contains(&code) {

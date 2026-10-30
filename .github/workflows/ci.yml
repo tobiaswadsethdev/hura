@@ -136,7 +136,7 @@ jobs:
       - run: npm test
 
   # The iOS app's package, on the Mac: pairing, pinning, the chat translation,
-  # and the push encryption against hurad's own test vector
+  # the tracker client linked from Rust, and the push encryption against hurad's own test vector
   # (crates/hurad/src/push/push-crypto.json), which keeps the two ends in step.
   hurakit:
     name: HuraKit
@@ -146,6 +146,14 @@ jobs:
         working-directory: apps/ios/HuraKit
     steps:
       - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      # hura-core's tracker client, which HuraKit links (crates/hura-mobile).
+      - name: Build the Rust core for iOS
+        working-directory: .
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin
+          apps/ios/Tools/build-core.sh
       - run: xcodebuild -version && swift --version
       - run: swift test
 
@@ -157,6 +165,14 @@ jobs:
         working-directory: apps/ios
     steps:
       - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      # hura-core's tracker client, which HuraKit links (crates/hura-mobile).
+      - name: Build the Rust core for iOS
+        working-directory: .
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin
+          apps/ios/Tools/build-core.sh
       - run: brew install xcodegen
       - run: xcodegen
       - name: Build and test on a simulator

@@ -97,8 +97,11 @@ public struct ServerClient: Sendable {
     }
 
     /// Starts a session; answers with the name it got.
+    /// A session from a pull request goes as `create-from-pull`, so a server
+    /// from before pull requests refuses it rather than making a new branch
+    /// with the pull request's name.
     public func create(_ session: NewSession) async throws -> String {
-        try await call("create", session, as: CreatedReply.self).name
+        try await call(session.pull == nil ? "create" : "create-from-pull", session, as: CreatedReply.self).name
     }
 
     /// Ends a session and deletes its sandbox; answers with what is left.
@@ -352,13 +355,17 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public var skills: [String]
     /// MCP servers it was given, by name.
     public var mcp: [String]
+    /// What it was started from, if anything.
+    public var ticket: TicketOrigin?
+    public var pull: PullOrigin?
 
     public var id: String { name }
     public var isChat: Bool { interface == "chat" }
     public var isLive: Bool { !["creating", "seeding", "failed", "dead"].contains(state) }
 
     enum CodingKeys: String, CodingKey {
-        case name, state, task, interface, project, repo, failure, toolchains, providers, policy, sandbox, agent, skills, mcp
+        case name, state, task, interface, project, repo, failure, toolchains, providers, policy, sandbox, agent, skills, mcp,
+             ticket, pull
         case workBranch = "work_branch"
         case baseBranch = "base_branch"
         case createdAt = "created_at"
@@ -407,6 +414,8 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
         struct Named: Decodable { var name: String }
         skills = (try c.decodeIfPresent([Named].self, forKey: .skills) ?? []).map(\.name)
         mcp = (try c.decodeIfPresent([Named].self, forKey: .mcp) ?? []).map(\.name)
+        ticket = try? c.decodeIfPresent(TicketOrigin.self, forKey: .ticket)
+        pull = try? c.decodeIfPresent(PullOrigin.self, forKey: .pull)
     }
 }
 

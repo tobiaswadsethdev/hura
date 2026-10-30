@@ -34,6 +34,11 @@ public struct ChangedFile: Decodable, Equatable, Hashable, Sendable {
     public var path: String
     /// `added`, `modified`, `deleted`, `renamed`, `untracked` or `conflicted`.
     public var change: String
+
+    public init(path: String, change: String) {
+        self.path = path
+        self.change = change
+    }
 }
 
 public struct GitStatus: Decodable, Equatable, Sendable {
@@ -311,9 +316,24 @@ public struct Usage: Decodable, Equatable, Sendable {
     public var linesRemoved: Int64?
     public var contextUsedPercentage: Double?
     public var contextSize: Int64?
+    /// The account's rate-limit windows, not this session's.
+    public var windows: [Window]?
+
+    public struct Window: Decodable, Equatable, Sendable {
+        public var label: String
+        public var usedPercentage: Double
+        /// Epoch seconds.
+        public var resetsAt: Int64?
+
+        enum CodingKeys: String, CodingKey {
+            case label
+            case usedPercentage = "used_percentage"
+            case resetsAt = "resets_at"
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
-        case model
+        case model, windows
         case costUSD = "cost_usd"
         case durationMS = "duration_ms"
         case linesAdded = "lines_added"

@@ -84,6 +84,27 @@ struct FactsPane: View {
                 Text("Spending shows here once the agent has reported.").foregroundStyle(.secondary)
             }
         }
+        // The account's, not this session's: what the desktop shows in its
+        // header beside the worktree.
+        if let windows = usage?.windows, !windows.isEmpty {
+            Section("Account limits") {
+                ForEach(windows, id: \.label) { w in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(w.label)
+                            Spacer()
+                            Text("\(Int(w.usedPercentage.rounded()))%").foregroundStyle(w.usedPercentage >= 80 ? .orange : .secondary)
+                        }
+                        ProgressView(value: min(100, max(0, w.usedPercentage)), total: 100)
+                            .tint(w.usedPercentage >= 80 ? .orange : .accentColor)
+                        if let r = w.resetsAt {
+                            Text("Resets \(Date(timeIntervalSince1970: TimeInterval(r)).formatted(.relative(presentation: .named)))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func list(_ values: [String]) -> String { values.isEmpty ? "none" : values.joined(separator: ", ") }

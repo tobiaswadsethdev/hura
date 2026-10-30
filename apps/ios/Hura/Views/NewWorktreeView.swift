@@ -3,9 +3,17 @@ import SwiftUI
 
 /// Starting a worktree in a project: the task, and what the sandbox gets. The
 /// same form as the desktop window's, with the same defaults from the server.
+/// Where a worktree's work comes from, when it isn't typed.
+enum WorkOrigin: Hashable {
+    case ticket(TrackerTask)
+    /// A pull request, to work on (its pushes update it) or to review.
+    case pull(PullRequestSummary, review: Bool)
+}
+
 struct NewWorktreeView: View {
     let server: Server
     let project: Project
+    var origin: WorkOrigin?
     /// Opens the new worktree once it exists.
     var onCreated: (String) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
@@ -21,6 +29,8 @@ struct NewWorktreeView: View {
     @State private var providers: Set<String> = []
     @State private var busy = false
     @State private var error: String?
+    /// The work branch a ticket or a pull request names; empty otherwise.
+    @State private var branch = ""
 
     var body: some View {
         NavigationStack {
@@ -55,6 +65,26 @@ struct NewWorktreeView: View {
 
     @ViewBuilder
     private func form(_ options: NewOptions) -> some View {
+        switch origin {
+        case let .ticket(t)?:
+            Section {
+                LabeledContent(t.key) { Text(t.title).lineLimit(2) }
+                LabeledContent("Branch") { Text(branch).font(.footnote.monospaced()) }
+            } header: {
+                Text("From a ticket")
+            }
+        case let .pull(p, review)?:
+            Section {
+                LabeledContent(pullName(p)) { Text(p.title).lineLimit(2) }
+                LabeledContent("Branch") { Text(p.branch).font(.footnote.monospaced()) }
+            } header: {
+                Text("From a pull request")
+            } footer: {
+                Text(review ? "To review it: the agent is asked not to push." : "To work on it: its pushes update the pull request.")
+            }
+        case nil:
+            EmptyView()
+        }
         Section {
             TextField("What should the agent do? Leave blank to start it idle.", text: $task, axis: .vertical)
                 .lineLimit(4...12)
@@ -70,8 +100,9 @@ struct NewWorktreeView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
-            LabeledContent("Base branch") {
+            LabeledContent(isPull ? "Merges into" : "Base branch") {
                 TextField("default branch", text: $base)
+                    .disabled(isPull)
                     .multilineTextAlignment(.trailing)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -145,6 +176,8 @@ struct NewWorktreeView: View {
         }
     }
 
+    private var isPull: Bool { if case .pull? = origin { true } else { false } }
+
     private func member(_ value: String, of set: Binding<Set<String>>) -> Binding<Bool> {
         Binding(get: { set.wrappedValue.contains(value) },
                 set: { on in if on { set.wrappedValue.insert(value) } else { set.wrappedValue.remove(value) } })
@@ -158,16 +191,42 @@ struct NewWorktreeView: View {
             agentInterface = o.defaultInterface
             base = o.defaultBase ?? ""
             options = o
+            await prefill()
             // The checkout's own facts: its branch as the base, the
-            // toolchains it points at, the providers to tick.
-            let picked = try await server.api.inspect(path: project.path, branch: nil)
+            // toolchains it points at, the providers to tick. A pull
+            // request's base is its own.
+            var pullBase: String?
+            if case let .pull(p, _)? = origin { pullBase = p.base }
+            let picked = try await server.api.inspect(path: project.path, branch: pullBase)
             facts = picked.facts
             toolchains = Set(picked.facts.toolchains)
-            if let b = picked.branch { base = b }
-            if !picked.facts.baseOnRemote { base = "" }
+            if pullBase == nil {
+                if let b = picked.branch { base = b }
+                if !picked.facts.baseOnRemote { base = "" }
+            }
             if !picked.providers.isEmpty { providers = Set(picked.providers) }
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    /// The task, name and branch a ticket or a pull request suggests, as the
+    /// desktop's form fills them in.
+    private func prefill() async {
+        switch origin {
+        case let .ticket(t)?:
+            task = "\(t.key): \(t.title)\n\n\(t.url)"
+            name = t.sessionName
+            // The branch under this server's prefix, which is what a session
+            // here will be given.
+            let prefix = (try? await server.api.settings()).map { $0.settings.branchPrefix ?? $0.defaultBranchPrefix } ?? "hura"
+            branch = (try? await TrackerCore.branch(prefix: prefix, key: t.key, title: t.title)) ?? t.branch
+        case let .pull(p, review)?:
+            task = pullTask(p, review: review)
+            branch = p.branch
+            base = p.base
+        case nil:
+            break
         }
     }
 
@@ -180,10 +239,10 @@ struct NewWorktreeView: View {
             return t.isEmpty ? nil : t
         }
         let session = NewSession(project: project.name, name: trimmed(name), repo: project.repo, task: task,
-                                 base: trimmed(base), policy: policy,
+                                 base: trimmed(base), branch: trimmed(branch), policy: policy,
                                  providers: options.providers.map(\.name).filter(providers.contains),
                                  toolchains: options.toolchains.map(\.name).filter(toolchains.contains),
-                                 interface: agentInterface)
+                                 interface: agentInterface, ticket: ticketOrigin, pull: pullOrigin)
         Task {
             defer { busy = false }
             do {
@@ -195,4 +254,33 @@ struct NewWorktreeView: View {
             }
         }
     }
+
+    private var ticketOrigin: TicketOrigin? {
+        guard case let .ticket(t)? = origin else { return nil }
+        return TicketOrigin(tracker: t.tracker, kind: t.kind, id: t.id, key: t.key, url: t.url, repo: t.repo)
+    }
+
+    private var pullOrigin: PullOrigin? {
+        guard case let .pull(p, _)? = origin else { return nil }
+        return PullOrigin(tracker: p.tracker, kind: p.kind, id: p.id, key: p.key, url: p.url, repo: p.repo)
+    }
+}
+
+/// `repo #12`, as the desktop names a pull request.
+func pullName(_ p: PullRequestSummary) -> String {
+    "\(p.repo.split(separator: "/").last.map(String.init) ?? p.repo) \(p.key)"
+}
+
+/// The task a pull request starts with: `pullTask` in the desktop's
+/// NewWorktree.tsx.
+func pullTask(_ p: PullRequestSummary, review: Bool) -> String {
+    let where_ = "This worktree is on the pull request's own branch, `\(p.branch)`, which merges into `\(p.base)`."
+    if review {
+        return "Review \(pullName(p)): \(p.title)\n\(p.url)\n\n\(where_) "
+            + "Read what it changes with `git diff origin/\(p.base)...HEAD` and its commits with "
+            + "`git log origin/\(p.base)..HEAD`, run the tests that cover it, and report what you "
+            + "find: what is wrong first, then what is risky, then anything smaller, each with its file "
+            + "and line. Do not commit, push, or comment on the pull request."
+    }
+    return "\(pullName(p)): \(p.title)\n\(p.url)\n\n\(where_) Pushing updates the pull request.\n\n"
 }

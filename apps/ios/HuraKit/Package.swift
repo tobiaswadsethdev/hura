@@ -9,7 +9,10 @@ let package = Package(
         .library(name: "HuraKit", targets: ["HuraKit"]),
     ],
     targets: [
-        .target(name: "HuraKit"),
+        // hura-core's tracker client, built from crates/hura-mobile by
+        // Tools/build-core.sh.
+        .binaryTarget(name: "HuraCoreFFI", path: "Build/HuraCore.xcframework"),
+        .target(name: "HuraKit", dependencies: ["HuraCoreFFI"]),
         .testTarget(name: "HuraKitTests", dependencies: ["HuraKit"]),
     ]
 )
