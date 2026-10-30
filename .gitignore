@@ -3,3 +3,7 @@
 # never commit credentials or minted tokens
 *.token
 .env
+
+# the push relay
+/relay/node_modules/
+/relay/.wrangler/
