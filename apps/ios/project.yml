@@ -1,0 +1,130 @@
+# XcodeGen project: `cd apps/ios && xcodegen`, then open Hura.xcodeproj.
+# The .xcodeproj is generated and not checked in.
+
+name: Hura
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+configFiles:
+  Debug: Config/Hura.xcconfig
+  Release: Config/Hura.xcconfig
+
+packages:
+  HuraKit:
+    path: HuraKit
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  Hura:
+    type: application
+    platform: iOS
+    sources:
+      - Hura
+    dependencies:
+      - package: HuraKit
+      - target: HuraNotificationService
+    info:
+      path: Hura/Info.plist
+      properties:
+        CFBundleDisplayName: hura
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        NSCameraUsageDescription: hura uses the camera to scan a pairing code.
+        NSFaceIDUsageDescription: hura locks with Face ID because it can approve what an agent runs on your servers.
+        CFBundleURLTypes:
+          # `hurad pair` prints a hura:// URL; opening one starts pairing.
+          - CFBundleURLName: hura-pair
+            CFBundleURLSchemes: [hura]
+        ITSAppUsesNonExemptEncryption: false
+        HuraRelayHost: $(HURA_RELAY_HOST)
+        HuraKeychainGroup: $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+    entitlements:
+      path: Hura/Hura.entitlements
+      properties:
+        # Xcode switches this to production when exporting for TestFlight.
+        aps-environment: development
+        # The app's own group comes first, so items without an explicit group
+        # (server records with their tokens) stay out of the shared one.
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(HURA_BUNDLE_ID)
+          - $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(HURA_BUNDLE_ID)
+        DEVELOPMENT_TEAM: $(HURA_TEAM_ID)
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: true
+
+  # Decrypts end-to-end encrypted notification text (docs/relay-api.md). It
+  # can read the push keys in the shared Keychain group and nothing else.
+  HuraNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - HuraNotificationService
+    dependencies:
+      - package: HuraKit
+    info:
+      path: HuraNotificationService/Info.plist
+      properties:
+        CFBundleDisplayName: hura Notifications
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        HuraKeychainGroup: $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    entitlements:
+      path: HuraNotificationService/HuraNotificationService.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(HURA_BUNDLE_ID).notificationservice
+        DEVELOPMENT_TEAM: $(HURA_TEAM_ID)
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+
+  HuraTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - HuraTests
+    dependencies:
+      - target: Hura
+      - package: HuraKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(HURA_BUNDLE_ID).tests
+        DEVELOPMENT_TEAM: $(HURA_TEAM_ID)
+        GENERATE_INFOPLIST_FILE: true
+
+schemes:
+  Hura:
+    build:
+      targets:
+        Hura: all
+    test:
+      targets:
+        - HuraTests

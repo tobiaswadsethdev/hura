@@ -134,3 +134,40 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  # The iOS app's package, on the Mac: pairing, pinning, the chat translation,
+  # and the push encryption against hurad's own test vector
+  # (crates/hurad/src/push/push-crypto.json), which keeps the two ends in step.
+  hurakit:
+    name: HuraKit
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: apps/ios/HuraKit
+    steps:
+      - uses: actions/checkout@v7
+      - run: xcodebuild -version && swift --version
+      - run: swift test
+
+  ios:
+    name: iOS app
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: apps/ios
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install xcodegen
+      - run: xcodegen
+      - name: Build and test on a simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j \
+            | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
+          echo "simulator $udid"
+          # CI has no Apple account, so build without the team in Hura.xcconfig.
+          xcodebuild -project Hura.xcodeproj -scheme Hura \
+            -destination "platform=iOS Simulator,id=$udid" \
+            -skipPackagePluginValidation -skipMacroValidation \
+            HURA_TEAM_ID= \
+            test
+
