@@ -65,10 +65,12 @@ struct InboxView: View {
         if !rows.isEmpty {
             Section(title) {
                 ForEach(rows) { t in
-                    NavigationLink(value: t) { TicketRow(task: t, session: ticketSession(t)) }
+                    let on = ticketSession(t)
+                    NavigationLink(value: t) { TicketRow(task: t, session: on?.name) }
                         .swipeActions {
                             Button("Start") { starting = .ticket(t) }.tint(.green)
                         }
+                        .contextMenu { rowMenu(on, url: t.url, copy: t.key) }
                 }
             }
         }
@@ -79,14 +81,30 @@ struct InboxView: View {
         if !rows.isEmpty {
             Section(title) {
                 ForEach(newestFirst(rows)) { p in
-                    NavigationLink(value: p) { PullRow(pull: p, session: pullSession(p)) }
+                    let on = pullSession(p)
+                    NavigationLink(value: p) { PullRow(pull: p, session: on?.name) }
                         .swipeActions {
                             Button("Review") { starting = .pull(p, review: true) }.tint(.blue)
                             Button("Work") { starting = .pull(p, review: false) }.tint(.green)
                         }
+                        .contextMenu { rowMenu(on, url: p.url, copy: p.branch) }
                 }
             }
         }
+    }
+
+    /// Going to the worktree already on it, and the rest of the desktop's
+    /// row menu.
+    @ViewBuilder
+    private func rowMenu(_ on: (server: String, name: String)?, url: String, copy: String) -> some View {
+        if let on {
+            Button("Go to \(on.name)", systemImage: "arrow.right.circle") {
+                model.pendingRoute = [.server(on.server), .session(serverID: on.server, name: on.name)]
+            }
+        }
+        Button("Open in the Browser", systemImage: "safari") { if let u = URL(string: url) { UIApplication.shared.open(u) } }
+        Button("Copy \(copy)", systemImage: "doc.on.doc") { UIPasteboard.general.string = copy }
+        Button("Copy Link", systemImage: "link") { UIPasteboard.general.string = url }
     }
 
     private func newestFirst<T>(_ rows: [T]) -> [T] where T: Identifiable {
@@ -98,27 +116,27 @@ struct InboxView: View {
     }
 
     /// A worktree already on this ticket, on any server.
-    private func ticketSession(_ t: TrackerTask) -> String? {
+    private func ticketSession(_ t: TrackerTask) -> (server: String, name: String)? {
         for server in model.servers {
             let live = server.sessions.filter { $0.state != "dead" }
-            if let s = live.first(where: { $0.ticket?.tracker == t.tracker && $0.ticket?.key == t.key }) { return s.name }
+            if let s = live.first(where: { $0.ticket?.tracker == t.tracker && $0.ticket?.key == t.key }) { return (server.id, s.name) }
             if t.key.wholeMatch(of: /[A-Z][A-Z0-9]+-\d+/) != nil,
                let s = live.first(where: {
                    let last = $0.workBranch.split(separator: "/").last.map(String.init) ?? ""
                    return last == t.key || last.hasPrefix("\(t.key)-")
-               }) { return s.name }
+               }) { return (server.id, s.name) }
         }
         return nil
     }
 
     /// A worktree already on this pull request: started from it, or on its
     /// branch in its repository.
-    private func pullSession(_ p: PullRequestSummary) -> String? {
+    private func pullSession(_ p: PullRequestSummary) -> (server: String, name: String)? {
         for server in model.servers {
             let live = server.sessions.filter { $0.state != "dead" }
             if let s = live.first(where: { $0.pull?.tracker == p.tracker && $0.pull?.repo == p.repo && $0.pull?.id == p.id })
                 ?? live.first(where: { $0.workBranch == p.branch && bareRepo($0.repo) == bareRepo(p.repoURL) }) {
-                return s.name
+                return (server.id, s.name)
             }
         }
         return nil
