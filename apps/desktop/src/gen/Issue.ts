@@ -24,7 +24,7 @@ stage: IssueStage, item_type: string, priority: string | null, assignee: IssuePe
  */
 parent: IssueParent | null, 
 /**
- * In the tracker's own format, as on the board.
+ * In the tracker's own format, as in the sidebar.
  */
 created: string | null, updated: string | null, due: string | null, description: Array<DocBlock>, 
 /**

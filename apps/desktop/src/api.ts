@@ -11,8 +11,6 @@ import type { Comment } from "./gen/Comment";
 import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
 import type { Issue } from "./gen/Issue";
-import type { Boards } from "./gen/Boards";
-import type { BoardView } from "./gen/BoardView";
 import type { EditForm } from "./gen/EditForm";
 import type { FieldChange } from "./gen/FieldChange";
 import type { Transition } from "./gen/Transition";
@@ -208,23 +206,16 @@ export const api = {
   trackers: () => invoke<ConfiguredTracker[]>("trackers"),
   addTracker: (tracker: Tracker, token: string | null) =>
     invoke<ConfiguredTracker[]>("add_tracker", { tracker, token }),
-  // Replaced by the name it has now; its token stays. How filters are edited.
-  updateTracker: (name: string, tracker: Tracker) =>
-    invoke<ConfiguredTracker[]>("update_tracker", { name, tracker }),
   setTrackerToken: (name: string, token: string) =>
     invoke<ConfiguredTracker[]>("set_tracker_token", { name, token }),
   forgetTracker: (name: string) => invoke<ConfiguredTracker[]>("forget_tracker", { name }),
 
-  // The tickets, read from this machine. The server is asked only for its
-  // branch prefix, so a ticket suggests the branch its session will get.
+  // What is yours on every tracker, tickets and pull requests, read from this
+  // machine. The server is asked only for its branch prefix, so a ticket
+  // suggests the branch its session will get.
   tickets: (server: string | null) => invoke<Inbox>("tickets", { server }),
   // One of them in full, from the same place with the same token.
   ticket: (tracker: string, key: string) => invoke<Issue>("ticket", { tracker, key }),
-  // The Jira boards those trackers can see, and one of them as Jira draws it:
-  // its columns, each with its cards. Same machine, same tokens.
-  boards: () => invoke<Boards>("boards"),
-  board: (server: string | null, tracker: string, id: string) =>
-    invoke<BoardView>("board", { server, tracker, id }),
   // Changing a Jira ticket, with the same token: its fields, its status, its
   // comments. Each answers with nothing; the ticket is read again after.
   editForm: (tracker: string, key: string) => invoke<EditForm>("edit_form", { tracker, key }),

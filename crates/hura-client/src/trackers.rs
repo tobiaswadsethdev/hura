@@ -86,21 +86,6 @@ impl Trackers {
         Ok(())
     }
 
-    /// Replace one's entry, found by the name it has now. The token stays: an
-    /// edited filter is not a reason to paste it again.
-    pub fn update(&mut self, name: &str, source: &Source) -> Result<(), String> {
-        let source = checked(source)?;
-        if source.name != name && self.trackers.iter().any(|t| t.source.name == source.name) {
-            return Err(format!(
-                "there is already a tracker called `{}`",
-                source.name
-            ));
-        }
-        let entry = self.find(name)?;
-        entry.source = source;
-        Ok(())
-    }
-
     /// Store or replace one's token.
     pub fn set_token(&mut self, name: &str, token: &str) -> Result<(), String> {
         let token = token.trim();
@@ -141,7 +126,7 @@ fn checked(source: &Source) -> Result<Source, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hura_core::tracker::{Filter, Kind};
+    use hura_core::tracker::Kind;
 
     fn jira(name: &str) -> Source {
         Source {
@@ -182,24 +167,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
-    /// Editing the filters keeps the token, and a rename cannot take a name
-    /// another tracker has.
+    /// A file written when trackers had filters still reads: the filters are
+    /// gone, and the tracker and its token are not.
     #[test]
-    fn an_edit_keeps_the_token_and_the_names_stay_distinct() {
+    fn a_file_with_filters_from_before_still_reads() {
+        let path = path("old-filters");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"trackers":[{"source":{"kind":"jira","name":"work","site":"https://example.atlassian.net","email":"you@example.com","filters":[{"name":"ready","query":"status = Ready"}]},"token":"tok"}]}"#,
+        )
+        .unwrap();
+        let back = Trackers::load_from(&path).unwrap();
+        assert_eq!(back.list().len(), 1);
+        assert_eq!(back.list()[0].source.name, "work");
+        assert!(back.views()[0].token_set);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn two_trackers_cannot_share_a_name() {
         let mut t = Trackers::default();
         t.add(&jira("work"), Some("tok")).unwrap();
-        t.add(&jira("home"), None).unwrap();
-
-        let mut edited = jira("work");
-        edited.filters = vec![Filter {
-            name: "ready to start".into(),
-            query: "status = Ready".into(),
-        }];
-        t.update("work", &edited).unwrap();
-        assert_eq!(t.list()[0].token.as_deref(), Some("tok"));
-        assert_eq!(t.list()[0].source.filters, edited.filters);
-
-        assert!(t.update("work", &jira("home")).is_err(), "name taken");
         assert!(t.add(&jira("work"), None).is_err(), "name taken");
     }
 

@@ -41,7 +41,7 @@ export function TicketPanel({
   onStart: (project: Project, task: Task) => void;
   onClose: () => void;
   /// Something about the ticket was changed from here, so whatever the
-  /// board or the filters say about it is out of date.
+  /// sidebar says about it is out of date.
   onChanged?: () => void;
 }) {
   const [issue, setIssue] = useState<Issue | null>(null);
@@ -443,13 +443,20 @@ function Nobody({ children }: { children: React.ReactNode }) {
 /// How long ago a tracker's timestamp was, in the fewest words: `5m ago`,
 /// `3h ago`, `2d ago`. Null for anything it cannot read, which is then left
 /// off rather than shown wrong.
-export function ago(stamp: string | null): string | null {
+/// A tracker's timestamp as milliseconds, or `null` when it is not one.
+///
+/// Jira writes `+0000` where the format wants `+00:00`, and WebKit is strict
+/// about it.
+export function when(stamp: string | null): number | null {
   if (!stamp) return null;
-  // Jira writes `+0000` where the format wants `+00:00`, and WebKit is strict
-  // about it.
-  const when = Date.parse(stamp.replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
-  if (Number.isNaN(when)) return null;
-  const secs = Math.max(0, (Date.now() - when) / 1000);
+  const at = Date.parse(stamp.replace(/([+-]\d\d)(\d\d)$/, "$1:$2"));
+  return Number.isNaN(at) ? null : at;
+}
+
+export function ago(stamp: string | null): string | null {
+  const at = when(stamp);
+  if (at === null) return null;
+  const secs = Math.max(0, (Date.now() - at) / 1000);
   if (secs < 60) return "just now";
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;

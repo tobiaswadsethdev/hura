@@ -36,7 +36,6 @@ export function Screen({
   children,
   onClose,
   actions,
-  wide = false,
   narrow = false,
 }: {
   /// The same glyph as the header button that opens this screen. The pairing is
@@ -48,9 +47,6 @@ export function Screen({
   /// Whatever this screen does that is not about one row -- pushing skills,
   /// saving settings. To the left of the close button, which is always last.
   actions?: React.ReactNode;
-  /// The whole width and height, for a screen that lays itself out -- the
-  /// ticket board's columns -- rather than a measured column of sentences.
-  wide?: boolean;
   /// A column the width of its fields rather than of the screen's measure,
   /// for a screen that is one form. Without it the settings sat against the
   /// left edge of a 940-pixel column with a third of it empty beside them.
@@ -77,13 +73,9 @@ export function Screen({
           one screen is open at a time and the app is what knows which. Four
           copies of the same key handler is how two of them end up disagreeing
           about what Escape does. */}
-      {wide ? (
-        <div className="screen-body wide">{children}</div>
-      ) : (
-        <div className="screen-body scrollbar-sleek">
-          <div className={`screen-inner${narrow ? " narrow" : ""}`}>{children}</div>
-        </div>
-      )}
+      <div className="screen-body scrollbar-sleek">
+        <div className={`screen-inner${narrow ? " narrow" : ""}`}>{children}</div>
+      </div>
     </section>
   );
 }

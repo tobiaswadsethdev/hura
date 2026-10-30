@@ -26,6 +26,8 @@ export type Prefs = {
   /// disagrees with.
   treeWidth: number;
   dockWidth: number;
+  /// The sidebar of your tickets and pull requests, on the far right.
+  inboxWidth: number;
   /// How often the worktree list is re-read, in milliseconds. A round trip to a
   /// server that may be a continent away, which is the reason this is worth a
   /// preference at all: three seconds is right on a LAN and wrong over a VPN.
@@ -36,20 +38,18 @@ export type Prefs = {
   /// terminal. Off is for somebody who keeps it on screen anyway and does not
   /// want their notification centre to hold a record of it.
   notify: boolean;
-  /// Whether the window reads your tickets on a timer and says when a ticket in
-  /// one of your filters changes status, gets a comment or turns up.
+  /// Whether the OS is told when one of your tickets or pull requests changes:
+  /// a status moved, somebody else's comment, a ticket newly yours, a review
+  /// asked of you, your checks failing or your review coming back.
   ///
-  /// On by default, and costs nothing without a tracker: the server answers an
-  /// empty list without asking anyone. Off also stops the timer, so no
-  /// tracker is asked on this window's behalf.
+  /// On by default. Off silences the notifications and not the reading: the
+  /// sidebar is read on its timer either way, because it is on screen.
   notifyTickets: boolean;
-  /// Which reading of your tickets the tickets screen opens on: the filters'
-  /// columns, or a board's. Whichever was last looked at, because the screen
-  /// is somewhere you go back to and it should be where you left it.
-  ticketsView: "filters" | "board";
-  /// The board the board view shows, by tracker and Jira's id. `null` until
-  /// one is picked, and then the first board on the list.
-  board: { tracker: string; id: string } | null;
+  /// Whether the sidebar is open, or folded to its rail of counts.
+  inboxOpen: boolean;
+  /// The sidebar's groups that are shut, by key: `tickets:created`, say.
+  /// Remembered because the one somebody shuts is the one they never read.
+  inboxShut: string[];
 };
 
 /// The bounds, and the reasons.
@@ -64,6 +64,9 @@ export const LIMITS = {
   // 280 fits the file tree's deepest realistic path; 900 is where the middle
   // stops being where you work.
   dockWidth: { min: 280, max: 900 },
+  // 240 still fits a key, a status and a title's first words; past 520 it is
+  // taking the width a diff needs, for rows that are two lines tall.
+  inboxWidth: { min: 240, max: 520 },
   // The ceiling is the config file's own -- past a minute the list has stopped
   // being live and the window would be better closed. The floor is *not*: the
   // file allows 250ms because there it scaled an exec inside a sandbox on this
@@ -78,11 +81,12 @@ export const DEFAULTS: Prefs = {
   // the first time it runs a build that can change them.
   treeWidth: 260,
   dockWidth: 400,
+  inboxWidth: 300,
   refreshMs: 3000,
   notify: true,
   notifyTickets: true,
-  ticketsView: "filters",
-  board: null,
+  inboxOpen: true,
+  inboxShut: [],
 };
 
 function clamp(value: number, { min, max }: { min: number; max: number }): number {
@@ -105,19 +109,16 @@ export function sanitize(stored: unknown): Prefs {
   return {
     treeWidth: number(raw.treeWidth, LIMITS.treeWidth, DEFAULTS.treeWidth),
     dockWidth: number(raw.dockWidth, LIMITS.dockWidth, DEFAULTS.dockWidth),
+    inboxWidth: number(raw.inboxWidth, LIMITS.inboxWidth, DEFAULTS.inboxWidth),
     refreshMs: number(raw.refreshMs, LIMITS.refreshMs, DEFAULTS.refreshMs),
     notify: typeof raw.notify === "boolean" ? raw.notify : DEFAULTS.notify,
     notifyTickets:
       typeof raw.notifyTickets === "boolean" ? raw.notifyTickets : DEFAULTS.notifyTickets,
-    ticketsView: raw.ticketsView === "board" ? "board" : "filters",
-    board: boardOf(raw.board),
+    inboxOpen: typeof raw.inboxOpen === "boolean" ? raw.inboxOpen : DEFAULTS.inboxOpen,
+    inboxShut: Array.isArray(raw.inboxShut)
+      ? raw.inboxShut.filter((k): k is string => typeof k === "string")
+      : DEFAULTS.inboxShut,
   };
-}
-
-function boardOf(value: unknown): Prefs["board"] {
-  if (typeof value !== "object" || value === null) return null;
-  const { tracker, id } = value as Record<string, unknown>;
-  return typeof tracker === "string" && typeof id === "string" ? { tracker, id } : null;
 }
 
 function read(): Prefs {

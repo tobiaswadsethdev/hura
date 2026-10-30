@@ -31,8 +31,7 @@ import type { Session } from "./gen/Session";
 import { copy, useContextMenu } from "./ContextMenu";
 import { usePreviews } from "./previews";
 import { Empty } from "./Empty";
-import { Branch, Chevron, Copy, Forget, Plus, Ports, StateDot, Tracker } from "./icons";
-import { useHeldTickets } from "./ticketNotify";
+import { Branch, Chevron, Copy, Forget, Plus, Ports, StateDot } from "./icons";
 
 export type Group = {
   /// The project, or `null` for the by-repository groups at the bottom.
@@ -40,17 +39,6 @@ export type Group = {
   label: string;
   hint: string;
   worktrees: Session[];
-};
-
-/// The way to the tickets screen from the top of the sidebar. Only ever seen
-/// with the screen shut: a screen covers the sidebar, so there is no lit state
-/// and the way back is the header's button, Escape or the shortcut.
-export type TicketsEntry = {
-  disabled: boolean;
-  /// The shortcut: as this platform writes it, and as `aria-keyshortcuts`
-  /// spells it.
-  keys: { label: string; aria: string };
-  onOpen: () => void;
 };
 
 /// Sort sessions into their projects.
@@ -101,12 +89,10 @@ export function Tree({
   onNewWorktree,
   onForget,
   onDestroy,
-  tickets,
 }: {
   /// How wide, in pixels. From the window's own preferences and written by the
   /// handle on this sidebar's right edge -- see `prefs.ts` and `Split.tsx`.
   width: number;
-  tickets: TicketsEntry;
   groups: Group[];
   /// Each worktree's diff against its base, by session name, as the last poll
   /// reported it. Absent for a session that has not been polled yet, which is
@@ -136,10 +122,7 @@ export function Tree({
     });
 
   return (
-    // The tickets above the projects and outside their scroll, so the way to
-    // them is in the same place however long the list of worktrees gets.
     <div className="sidebar" style={{ width }}>
-      <TicketsRow {...tickets} />
       <nav className="tree scrollbar-sleek" aria-label="projects and worktrees">
         {groups.map((g) => {
           const key = keyOf(g);
@@ -260,34 +243,6 @@ export function Tree({
         <Spend groups={groups} polls={polls} />
       </nav>
     </div>
-  );
-}
-
-/// The tickets, as a row the width of the sidebar.
-///
-/// The header's button is the same destination, and it stays: this is the
-/// one people reach for many times a day, and a 28-pixel glyph in a strip of
-/// five was a target to find rather than a place to go. The count is how many
-/// tickets the filters held at the last read, so the row says whether there
-/// is anything there before it is opened.
-function TicketsRow({ disabled, keys, onOpen }: TicketsEntry) {
-  const held = useHeldTickets();
-  return (
-    <button
-      className="tickets-row"
-      disabled={disabled}
-      title={`tickets (${keys.label})`}
-      aria-keyshortcuts={keys.aria}
-      onClick={onOpen}
-    >
-      <Tracker />
-      <span className="tickets-label">tickets</span>
-      {held !== null && held > 0 && (
-        <span className="tickets-count" title={`${held} in your filters at the last read`}>
-          {held}
-        </span>
-      )}
-    </button>
   );
 }
 
