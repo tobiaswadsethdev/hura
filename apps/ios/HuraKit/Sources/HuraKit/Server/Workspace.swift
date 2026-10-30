@@ -130,10 +130,15 @@ public struct NewSession: Encodable, Equatable, Sendable {
     public var start: Bool
     /// `chat` or `terminal`; nil for the server's default.
     public var interface: String?
+    /// The ticket it was started from: a note about where the work came from.
+    public var ticket: TicketOrigin?
+    /// The pull request it was started from; `branch` is the pull request's,
+    /// and `base` what it merges into.
+    public var pull: PullOrigin?
 
     public init(project: String?, name: String?, repo: String, task: String, base: String?,
                 branch: String? = nil, policy: String, providers: [String], toolchains: [String],
-                start: Bool = true, interface: String?) {
+                start: Bool = true, interface: String?, ticket: TicketOrigin? = nil, pull: PullOrigin? = nil) {
         self.project = project
         self.name = name
         self.repo = repo
@@ -145,6 +150,8 @@ public struct NewSession: Encodable, Equatable, Sendable {
         self.toolchains = toolchains
         self.start = start
         self.interface = interface
+        self.ticket = ticket
+        self.pull = pull
     }
 
     enum CodingKeys: String, CodingKey {
@@ -168,8 +175,46 @@ public struct NewSession: Encodable, Equatable, Sendable {
         try c.encode(toolchains, forKey: .toolchains)
         try c.encode(start, forKey: .start)
         try c.encode(interface, forKey: .interface)
-        try c.encodeNil(forKey: .ticket)
-        try c.encodeNil(forKey: .pull)
+        try c.encode(ticket, forKey: .ticket)
+        try c.encode(pull, forKey: .pull)
+    }
+}
+
+/// The ticket a session was started from (`Ticket` in hura-core).
+public struct TicketOrigin: Codable, Equatable, Sendable {
+    public var tracker: String
+    public var kind: String
+    public var id: String
+    public var key: String
+    public var url: String
+    public var repo: String?
+
+    public init(tracker: String, kind: String, id: String, key: String, url: String, repo: String?) {
+        self.tracker = tracker
+        self.kind = kind
+        self.id = id
+        self.key = key
+        self.url = url
+        self.repo = repo
+    }
+}
+
+/// The pull request a session was started from.
+public struct PullOrigin: Codable, Equatable, Sendable {
+    public var tracker: String
+    public var kind: String
+    public var id: String
+    public var key: String
+    public var url: String
+    public var repo: String
+
+    public init(tracker: String, kind: String, id: String, key: String, url: String, repo: String) {
+        self.tracker = tracker
+        self.kind = kind
+        self.id = id
+        self.key = key
+        self.url = url
+        self.repo = repo
     }
 }
 

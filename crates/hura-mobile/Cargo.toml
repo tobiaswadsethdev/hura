@@ -1,0 +1,19 @@
+[package]
+name = "hura-mobile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "hura-core's tracker client for the iOS app, behind a C function that takes and answers JSON"
+publish = false
+
+[lib]
+# A static library for the app, and an rlib so `cargo test` can reach it.
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+hura-core = { path = "../hura-core" }
+serde.workspace = true
+serde_json.workspace = true
+ureq = { version = "3", default-features = false, features = ["rustls"] }

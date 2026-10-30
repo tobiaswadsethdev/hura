@@ -34,6 +34,11 @@ public struct ChangedFile: Decodable, Equatable, Hashable, Sendable {
     public var path: String
     /// `added`, `modified`, `deleted`, `renamed`, `untracked` or `conflicted`.
     public var change: String
+
+    public init(path: String, change: String) {
+        self.path = path
+        self.change = change
+    }
 }
 
 public struct GitStatus: Decodable, Equatable, Sendable {

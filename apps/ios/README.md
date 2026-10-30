@@ -19,6 +19,16 @@ processes; and what it has spent. A port can be previewed: it is opened on
 the phone's own loopback, at the same number when that's free, tunnelled to
 the sandbox over the paired connection, and shown in Safari's in-app browser.
 
+The Inbox tab is what is yours on GitHub, Azure DevOps and Jira: tickets
+assigned to you or created by you, and pull requests you opened or that wait
+on your review. A Jira ticket opens in full, to move its status, edit its
+fields and comment; a pull request opens with its checks, reviewers and
+conversation, to reply, give a review, and read its files. Either starts a
+worktree, on the branch the desktop would give it. Trackers are set up on the
+phone and their tokens stay in its Keychain: they are read by hura-core's own
+tracker code, built for iOS from [`crates/hura-mobile`](../../crates/hura-mobile),
+so no server holds a tracker or a token.
+
 A server's menu has its integrations (MCP servers to start, restart or stop,
 the secrets they're given, and the skills new sessions get), its settings
 (what new sessions start from, and whether it updates itself), and what
@@ -38,6 +48,14 @@ covers the `hurad` side.
 You need Xcode 16 or newer and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 (`brew install xcodegen`). The project is generated from `project.yml`, and the
 `.xcodeproj` is not checked in.
+
+The app links hura-core's tracker client, built from Rust. Build it once,
+and again after changing the Rust:
+
+```sh
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+apps/ios/Tools/build-core.sh    # makes HuraKit/Build/HuraCore.xcframework
+```
 
 ```sh
 cd apps/ios

@@ -1,0 +1,4 @@
+module HuraCoreFFI {
+    header "hura_mobile.h"
+    export *
+}
