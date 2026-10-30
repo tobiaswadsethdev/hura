@@ -83,12 +83,14 @@ marked as one:
   servers run on the host, holding their own credentials, and each session is
   granted the ones it is given; `hurad` can own their containers and their
   secrets, with a screen that says what each one is doing.
-- **Tickets.** Named filters over Jira, Azure DevOps and GitHub -- "ready to
-  start", "assigned to me" -- set up token and all in the desktop application
-  and read from there, with nothing to configure on the server, and a
-  notification when a ticket changes status, gets a comment or turns up. One
-  button turns a ticket into a session with the task, the name and the branch
-  already right.
+- **Your tickets and pull requests, beside your work.** A sidebar of what is
+  yours on Jira, Azure DevOps and GitHub: tickets assigned to you or created by
+  you, and pull requests you opened or that wait on your review, with their
+  checks and reviews. Set up token and all in the desktop application and read
+  from there, with nothing to configure on the server, and a notification when
+  something of yours changes. Each row shows the worktree working on it, and
+  one button turns a ticket into a session with the task, the name and the
+  branch already right.
 - **Set up once, from the window.** The branch prefix a work branch is named
   under, and the base branch, policy and credentials a new session starts with,
   are edited on the settings screen and written into the server's own config
@@ -206,7 +208,7 @@ See [docs/toolchains.md](docs/toolchains.md).
 | [The server](docs/server.md)               | `hurad`, pairing a client on another machine, WSL, what a token is worth |
 | [Configuration](docs/configuration.md)     | `~/.config/hura/config.toml`, and which default wins                   |
 | [Policy and events](docs/policy.md)        | what is enforced, the audit feed, and acting on a denial              |
-| [Tickets](docs/tickets.md)                 | trackers and their filters, notifications, and sessions from tickets  |
+| [Tickets](docs/tickets.md)                 | your tickets and pull requests, notifications, sessions from tickets  |
 | [Git hosts](docs/git-hosts.md)             | GitHub and Azure DevOps, and how pushing keeps the token away         |
 | [Toolchains](docs/toolchains.md)           | node, .NET and Rust in a sandbox, and the registry each one may reach |
 | [Skills](docs/skills.md)                   | carrying your own skills into a sandbox                               |

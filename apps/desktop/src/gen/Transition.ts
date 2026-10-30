@@ -10,7 +10,6 @@ export type Transition = { id: string,
  */
 name: string, 
 /**
- * The status it lands in, by id -- which is how a board column is
- * matched -- and by name.
+ * The status it lands in, by id and by name.
  */
 to_id: string, to: string, stage: IssueStage, };

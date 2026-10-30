@@ -1,5 +1,6 @@
-// The workspace: projects on the left, what is open in the middle, and what is
-// true about the worktree on the right.
+// The workspace: projects on the left, what is open in the middle, what is
+// true about the worktree beside it, and what is yours on your trackers on the
+// far right.
 //
 // Shaped like an editor rather than like the terminal interface it grew out of.
 // The list of sessions was the right thing when a session was the unit of work;
@@ -10,11 +11,13 @@
 // and the decisions it made.
 //
 // **The window has destinations now, and the workspace is one of them.** The
-// tickets, the integrations, the servers and the settings used to be modal
+// integrations, the servers and the settings used to be modal
 // dialogs stacked over this; they are screens, and `Screen.tsx` says at length
 // why. What that costs here is the two things a router has to do: hold which
 // screen is showing, and keep the workspace *mounted* while another one is --
-// see `hidden` on `.workspace` below, which is the load-bearing half.
+// see `hidden` on `.workspace` below, which is the load-bearing half. The
+// sidebar of tickets and pull requests is not a destination: it stays beside
+// whatever is showing, which is the reason it replaced a tickets screen.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -31,23 +34,25 @@ import {
   NoServer,
   Servers,
   Settings,
-  Tracker,
   Working,
 } from "./icons";
-import { TicketsScreen } from "./Tickets";
+import { InboxBar } from "./Inbox";
 import { IntegrationsScreen } from "./Integrations";
 import { ServersScreen } from "./Connect";
+import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
+import type { Inbox } from "./gen/Inbox";
 import type { Project } from "./gen/Project";
 import type { Session } from "./gen/Session";
 import type { Task } from "./gen/Task";
 import type { Poll } from "./gen/Poll";
 import { onSessions, reset as resetNotifications } from "./notify";
-import { onTickets } from "./ticketNotify";
+import { onInbox } from "./inboxNotify";
 import { close, nextChannelId, open } from "./stream";
 import { NewProjectDialog } from "./NewProject";
 import { NewWorktreeDialog } from "./NewWorktree";
 import { DEFAULTS, LIMITS, usePrefs } from "./prefs";
 import { SettingsScreen } from "./Settings";
+import { TicketPanel } from "./Ticket";
 import { Split } from "./Split";
 import type { Against } from "./gen/Against";
 import { keyOf, Tabs, type Tab } from "./Tabs";
@@ -64,16 +69,18 @@ import { Select } from "./Select";
 /// is what the window *is* when nothing is over it. Writing it as one of five
 /// equal names would invite code that tears it down to show another, which is
 /// the one thing that must not happen -- the terminals live in it.
-type Screen = "tickets" | "integrations" | "servers" | "settings" | "about";
+type Screen = "integrations" | "servers" | "settings" | "about";
 
-/// How often the tickets are read for changes. See the effect that uses it.
-const TICKET_POLL_MS = 3 * 60_000;
+/// How often your tickets and pull requests are read. See the effect that
+/// uses it.
+const INBOX_POLL_MS = 3 * 60_000;
 
 const MAC = navigator.userAgent.includes("Mac");
 
-/// The tickets screen from anywhere. With Shift, because Ctrl+T on its own is
-/// a terminal's: bash and readline transpose two characters with it, and the
-/// shortcut is taken before a terminal sees the key.
+/// Fold or unfold the sidebar of tickets and pull requests, from anywhere.
+/// With Shift, because Ctrl+T on its own is a terminal's: bash and readline
+/// transpose two characters with it, and the shortcut is taken before a
+/// terminal sees the key.
 const TICKETS_KEYS = MAC
   ? { label: "⌘⇧T", aria: "Meta+Shift+T" }
   : { label: "Ctrl+Shift+T", aria: "Control+Shift+T" };
@@ -181,6 +188,9 @@ export default function App() {
   /// together, and nothing enforced it -- opening the tickets from the settings
   /// screen put both on screen at once, each with its own scrim.
   const [screen, setScreen] = useState<Screen | null>(null);
+  /// The settings screen opened at its trackers, because the sidebar's "add a
+  /// tracker" is what opened it.
+  const [settingsAt, setSettingsAt] = useState<"trackers" | null>(null);
   /// This window's own version, for the wordmark. Asked once: it cannot change
   /// without a restart.
   const [version, setVersion] = useState<string | null>(null);
@@ -198,7 +208,7 @@ export default function App() {
   }, [server]);
   const [creatingProject, setCreatingProject] = useState(false);
   const [creatingIn, setCreatingIn] = useState<Project | null>(null);
-  /// The ticket a create was started from, carried from the tickets screen to the form.
+  /// The ticket a create was started from, carried from the sidebar to the form.
   const [fromTask, setFromTask] = useState<Task | null>(null);
   // Every worktree's last poll: what its agent is doing, what it has spent, and
   // how full its context is. From a status channel each rather than a request
@@ -250,22 +260,23 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [screen]);
 
-  // The tickets shortcut. In the capture phase, so it is this window's before
-  // a focused terminal takes the key and sends it to the sandbox. Not while a
-  // dialog is up: that is asking a question, and the screen would change
-  // under it.
+  // The sidebar's shortcut. In the capture phase, so it is this window's
+  // before a focused terminal takes the key and sends it to the sandbox. Not
+  // while a dialog is up: that is asking a question, and the window would
+  // change under it.
   const dialogOpen = creatingProject || creatingIn !== null || confirmation !== null;
+  const inboxOpen = prefs.inboxOpen;
   useEffect(() => {
     if (!server || dialogOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!isTicketsKey(e)) return;
       e.preventDefault();
       e.stopPropagation();
-      setScreen((current) => (current === "tickets" ? null : "tickets"));
+      setPrefs({ inboxOpen: !inboxOpen });
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [server, dialogOpen]);
+  }, [server, dialogOpen, inboxOpen, setPrefs]);
 
   // Keyed on the *names*, joined, rather than on the array: the list is a new
   // array every few seconds and re-subscribing to four sandboxes that often
@@ -412,27 +423,56 @@ export default function App() {
     onSessions(live, prefs.notify);
   }, [live, prefs.notify]);
 
-  // The tickets, on a timer, for what has changed in them. Minutes rather than
-  // the session list's seconds: every read is one search per filter against
-  // somebody else's API, and a ticket that moved two minutes ago is news
-  // enough. The first read on start is the baseline, or catches up with what
-  // moved while the window was closed.
+  // What is yours on your trackers, for the sidebar and for what has changed
+  // in it, on one timer. Minutes rather than the session list's seconds: every
+  // read is a few searches against somebody else's API, and a ticket that
+  // moved two minutes ago is news enough. The first read on start is the
+  // notifications' baseline, or catches up with what moved while the window
+  // was closed.
   //
   // Not gated on a server: the trackers are this machine's. A server only
-  // lends its branch prefix to the suggested branch names.
+  // lends its branch prefix to the suggested branch names, so the read waits
+  // for the list of servers to say which one that is.
+  const [inbox, setInbox] = useState<Inbox | null>(null);
+  const [inboxError, setInboxError] = useState<string | null>(null);
+  const [inboxReading, setInboxReading] = useState(false);
+  const [trackers, setTrackers] = useState<ConfiguredTracker[] | null>(null);
+  /// The ticket open beside the sidebar.
+  const [showing, setShowing] = useState<Task | null>(null);
+  // Read through a ref: turning notifications off is not a reason to ask
+  // every tracker again, which a dependency would make it.
+  const notifyTickets = useRef(prefs.notifyTickets);
+  notifyTickets.current = prefs.notifyTickets;
+  // One read at a time: a refresh pressed while the timer's read is out would
+  // otherwise be two answers racing to be the one shown.
+  const inFlight = useRef(false);
+  const readInbox = useCallback(() => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setInboxReading(true);
+    api
+      .tickets(server)
+      .then(
+        (v) => {
+          onInbox(v, notifyTickets.current);
+          setInbox(v);
+          setInboxError(null);
+        },
+        (e) => setInboxError(messageOf(e)),
+      )
+      .finally(() => {
+        inFlight.current = false;
+        setInboxReading(false);
+      });
+  }, [server]);
+  const ready = servers !== null;
   useEffect(() => {
-    if (!prefs.notifyTickets) return;
-    const read = () =>
-      api
-        .tickets(server)
-        .then((tickets) => onTickets(tickets))
-        // A tracker that cannot be read is the tickets screen's to say; a
-        // timer has nowhere to put it.
-        .catch(() => {});
-    void read();
-    const timer = setInterval(read, TICKET_POLL_MS);
+    if (!ready) return;
+    api.trackers().then(setTrackers, () => setTrackers([]));
+    readInbox();
+    const timer = setInterval(readInbox, INBOX_POLL_MS);
     return () => clearInterval(timer);
-  }, [server, prefs.notifyTickets]);
+  }, [ready, readInbox]);
 
   const groups = useMemo(() => group(projects, live), [projects, live]);
 
@@ -536,6 +576,17 @@ export default function App() {
     setActive((a) => ({ ...a, [worktree]: key }));
   };
   const activeTab = session ? (active[session.name] ?? keyOf(openTabs[0])) : "";
+
+  /// Start a worktree for a ticket: straight into the create form, filled in.
+  /// The sidebar's whole point is that starting work on a ticket is one step.
+  /// Whatever was over the workspace goes, because the form answers back to
+  /// the workspace, which is where the session will appear.
+  const startFrom = (project: Project, task: Task) => {
+    setScreen(null);
+    setShowing(null);
+    setFromTask(task);
+    setCreatingIn(project);
+  };
 
   // Nothing paired: the one screen a new install is guaranteed to see, and the
   // only empty state in the window that has to be instructions. The glyph
@@ -667,15 +718,6 @@ export default function App() {
           </button>
           <span className="dest-split" />
           <Destination
-            icon={Tracker}
-            label="tickets"
-            keys={TICKETS_KEYS}
-            on={screen === "tickets"}
-            disabled={!server}
-            onOpen={() => setScreen("tickets")}
-            onClose={() => setScreen(null)}
-          />
-          <Destination
             icon={Integrations}
             label="integrations"
             on={screen === "integrations"}
@@ -695,7 +737,10 @@ export default function App() {
             label="settings"
             on={screen === "settings"}
             disabled={!server}
-            onOpen={() => setScreen("settings")}
+            onOpen={() => {
+              setSettingsAt(null);
+              setScreen("settings");
+            }}
             onClose={() => setScreen(null)}
           />
         </nav>
@@ -736,11 +781,6 @@ export default function App() {
                 .catch((e) => setError(messageOf(e)));
             }}
             onDestroy={destroy}
-            tickets={{
-              disabled: !server,
-              keys: TICKETS_KEYS,
-              onOpen: () => setScreen("tickets"),
-            }}
           />
 
           <Split
@@ -907,28 +947,6 @@ export default function App() {
           )}
         </div>
 
-        {screen === "tickets" && server && (
-          <TicketsScreen
-            server={server}
-            notify={prefs.notifyTickets}
-            prefs={prefs}
-            onPrefs={setPrefs}
-            projects={projects}
-            currentProject={sessions.find((s) => s.name === selected)?.project ?? null}
-            onClose={() => setScreen(null)}
-            onStart={(project, task) => {
-              // Straight into the create form, pre-filled: the list's whole
-              // point is that starting work on a ticket is one step. The screen
-              // closes under the dialog rather than behind it -- the form
-              // answers back to the workspace, which is where the session will
-              // appear.
-              setScreen(null);
-              setFromTask(task);
-              setCreatingIn(project);
-            }}
-          />
-        )}
-
         {screen === "integrations" && server && (
           <IntegrationsScreen server={server} onClose={() => setScreen(null)} />
         )}
@@ -955,8 +973,79 @@ export default function App() {
             server={server}
             prefs={prefs}
             onPrefs={setPrefs}
+            at={settingsAt}
+            onTrackers={(list) => {
+              setTrackers(list);
+              readInbox();
+            }}
             onClose={() => setScreen(null)}
           />
+        )}
+
+        {/* Beside the workspace and beside every screen, which is the point
+            of it being a sidebar rather than a destination. */}
+        {inboxOpen && (
+          <Split
+            label="tickets sidebar width"
+            value={prefs.inboxWidth}
+            min={LIMITS.inboxWidth.min}
+            max={LIMITS.inboxWidth.max}
+            reset={DEFAULTS.inboxWidth}
+            grows="left"
+            onChange={(inboxWidth) => setPrefs({ inboxWidth })}
+          />
+        )}
+        <InboxBar
+          width={prefs.inboxWidth}
+          open={inboxOpen}
+          shut={prefs.inboxShut}
+          inbox={inbox}
+          reading={inboxReading}
+          error={inboxError}
+          trackers={trackers}
+          sessions={live}
+          projects={projects}
+          currentProject={session?.project ?? null}
+          showing={showing}
+          keys={TICKETS_KEYS}
+          onFold={() => setPrefs({ inboxOpen: !inboxOpen })}
+          onShut={(inboxShut) => setPrefs({ inboxShut })}
+          onRefresh={readInbox}
+          onSetup={() => {
+            setSettingsAt("trackers");
+            setScreen("settings");
+          }}
+          onSelect={(name) => {
+            // Going to a worktree is going back to the workspace.
+            setScreen(null);
+            setSelected(name);
+          }}
+          onShow={(task) =>
+            setShowing((current) =>
+              current?.tracker === task.tracker && current.key === task.key ? null : task,
+            )
+          }
+          onStart={startFrom}
+        />
+
+        {/* The ticket, read in full beside the sidebar and over whatever is
+            under it, rather than in a column of its own: it is read and put
+            away, and the workspace should not reflow for it. */}
+        {showing && (
+          <div
+            className="inbox-flyout"
+            style={{ right: inboxOpen ? prefs.inboxWidth : undefined }}
+          >
+            <TicketPanel
+              key={`${showing.tracker}:${showing.key}`}
+              task={showing}
+              projects={projects}
+              currentProject={session?.project ?? null}
+              onStart={startFrom}
+              onClose={() => setShowing(null)}
+              onChanged={readInbox}
+            />
+          </div>
         )}
       </main>
 

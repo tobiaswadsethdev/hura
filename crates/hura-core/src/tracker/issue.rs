@@ -1,14 +1,15 @@
-//! One ticket, read in full: what the board's card leaves out.
+//! One ticket, read in full: what the sidebar's row leaves out.
 //!
-//! The board is a search, and a search answers with a line per ticket. Reading
-//! one means its description, its comments and the people on it -- which used
-//! to mean opening it in a browser, leaving the window for the one thing the
-//! window had just shown you a title of. This is the same read Jira's own page
-//! makes, made from here with the token the board already uses.
+//! The sidebar is a search, and a search answers with a line per ticket.
+//! Reading one means its description, its comments and the people on it,
+//! which used to mean opening it in a browser and leaving the window for the
+//! one thing the window had just shown you a title of. This is the same read
+//! Jira's own page makes, made from here with the token the sidebar already
+//! uses.
 //!
 //! Jira only, for now. A GitHub issue or an Azure DevOps work item is the same
 //! shape, and a reader for either is a function here; until there is one, the
-//! card links out as it always did.
+//! row links out as it always did.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -38,7 +39,7 @@ pub struct Issue {
     pub labels: Vec<String>,
     /// The epic or parent issue, when there is one.
     pub parent: Option<Parent>,
-    /// In the tracker's own format, as on the board.
+    /// In the tracker's own format, as in the sidebar.
     pub created: Option<String>,
     pub updated: Option<String>,
     pub due: Option<String>,

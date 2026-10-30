@@ -138,21 +138,22 @@ neutral. Generated, it is a type error.
 ## What it shows
 
 A workspace, not a list. **Projects** on the left containing **worktrees**, what
-you have open in the middle as tabs, and a **dock** on the right carrying what
-is true about the selected worktree.
+you have open in the middle as tabs, a **dock** beside it carrying what is true
+about the selected worktree, and on the far right **your tickets and pull
+requests**, whatever is selected.
 
 ```
-   +-----------+--------------------------+-----------+
-   | projects  |  agent | diff | ...       |  events   |
-   |  worktree |                          |  policy   |
-   |  worktree |   whatever is open       |  facts    |
-   | projects  |                          |           |
-   +-----------+--------------------------+-----------+
-               ^                          ^
-               both edges drag
+   +-----------+---------------------+-----------+-----------+
+   | projects  |  agent | diff | ...  |  events   |  tickets  |
+   |  worktree |                     |  policy   |  pull     |
+   |  worktree |   whatever is open  |  facts    |  requests |
+   | projects  |                     |           |           |
+   +-----------+---------------------+-----------+-----------+
+               ^                     ^           ^
+               every edge drags
 ```
 
-**Both sidebars drag.** The handle is zero pixels wide in the layout and its hit
+**Every sidebar drags.** The handle is zero pixels wide in the layout and its hit
 area overhangs the border in both directions, so what you aim at is the line
 that was already on screen -- there is no gutter, because a visible grab strip
 is what makes an application look like a prototype of one. A double-click puts
@@ -161,10 +162,10 @@ one back; the separator is focusable and takes arrow keys, `Home`, `End` and
 change at all. Widths are this window's own and kept on this machine -- see
 [settings](#settings).
 
-**Tickets are at the top of the sidebar**, above the projects and outside their
-scroll, with the number your filters held at the last read. **Ctrl+Shift+T**
-(⌘⇧T on macOS) opens them from anywhere and goes back again. See
-[tickets.md](tickets.md).
+**Your tickets and pull requests are the sidebar on the far right**, beside the
+workspace and beside every screen. **Ctrl+Shift+T** (⌘⇧T on macOS) folds it to a
+rail of two counts and opens it again, from anywhere. See [Tickets and pull
+requests](#tickets-and-pull-requests) and [tickets.md](tickets.md).
 
 **Worktrees are indented under their project, with a rule down the indent.** The
 rule is the part doing the work rather than the offset: project headers are
@@ -420,11 +421,11 @@ because it is done forty times an hour.
 
 ## Where it goes, and why it is all icons
 
-The window has five destinations in the top-right of the header: new project,
-then the tickets, the integrations, the servers and the settings. **None of them
-carries a word.** The row used to read `inbox  new project  integrations
-servers  settings` -- about 210 pixels of label for five things pressed once
-each per sitting, in a 40-pixel strip that also has to hold a rate-limit
+The window has four buttons in the top-right of the header: new project, then
+the integrations, the servers and the settings. **None of them carries a
+word.** The row used to read `inbox  new project  integrations servers
+settings`, about 210 pixels of label for five things pressed once each per
+sitting, in a 40-pixel strip that also has to hold a rate-limit
 reading and an error message.
 
 The old note in `icons.tsx` said an icon-only toolbar is a quiz. It was right
@@ -432,7 +433,7 @@ about the failure mode and wrong that there was no answer, and the answer is
 three things that had to be built rather than asserted:
 
 - every button carries a `title` and an `aria-label`, so the word is one hover
-  away for as long as it takes to learn five glyphs -- and a button whose only
+  away for as long as it takes to learn four glyphs, and a button whose only
   content is an SVG has no accessible name at all without the second one;
 - the screen each button opens is **headed by the same glyph beside its name**,
   so pressing one teaches what it was;
@@ -443,20 +444,22 @@ three things that had to be built rather than asserted:
 
 A tooltip on its own would have been the quiz with an answer key.
 
-One hairline divides `new project` from the four after it, because that one is
-an **action** and the rest are **places**. Without it the header is five
-buttons of which one does not come back.
+One hairline divides `new project` from the three after it, because that one is
+an **action** and the rest are **places**. Without it the header is four
+buttons of which one does not come back. The tickets used to be a fourth place;
+they are a sidebar now, because what is yours is worth seeing while you work
+and not only when you go and look.
 
-**The four places are screens, not dialogs.** They were modal, and being modal
-was wrong for all four in the same way: a dialog is the right shape for a
+**The places are screens, not dialogs.** They were modal, and being modal
+was wrong for all of them in the same way: a dialog is the right shape for a
 question that must be answered before anything else can happen, and none of
 these asks anything -- they are places you go to look at a list and change
 something in it. What it cost concretely: the integrations screen is a
 container per row with its own log under it, living in a 760-pixel box with a
 `max-height: 82vh` and a scrollbar of its own inside a window that already had
 one, while the scrim reserved a third of the display to draw black over. These
-screens also *explain* the workspace behind them -- a tracker with no
-credential is why the tickets are empty -- and a scrim dimmed the evidence while
+screens also *explain* the workspace behind them (a secret that is not stored
+is why an MCP server will not start), and a scrim dimmed the evidence while
 you read about it.
 
 The create forms stayed dialogs, and so did the destroy confirmation. Those are
@@ -586,48 +589,41 @@ of the distribution that built it. On Linux the window is built from the tree,
 so there is nothing for an updater to fetch: the about screen says the build is
 from source, and no badge ever appears.
 
-## Tickets
+## Tickets and pull requests
 
-The ticket icon in the header is your trackers and what they say, on one
-screen. It replaced an inbox that showed the tickets and a section of the
-integrations screen that set up where they came from — the second was the one
-nobody found, and a tracker with no token is exactly why its list is empty.
+The sidebar on the far right is what is yours on your trackers: the tickets
+assigned to you or created by you, and the pull requests you opened or that are
+waiting on you, each heading in those two groups. It replaced a tickets screen
+that hid the workspace to show one column per filter, and the filters and the
+Jira board went with it. Every tracker is asked the same question, so there is
+nothing to write, and the sidebar means the same thing whichever tracker it
+reads.
 
-**The board is what it opens on**: one column per filter, side by side and each
-scrolling on its own, with a card per ticket — its key, type and status, the
-title, how long since it changed, its comments — and a start button. The
-**trackers** button in the screen's header switches to the setup and back, and
-with no trackers yet the screen opens there instead.
+It sits in `main` beside the workspace *and* beside any screen, so it does not
+go away when the settings are open. Folded, it is a 40-pixel rail with the two
+counts; the fold button, a click on the rail and **Ctrl+Shift+T** move between
+the two.
 
-**The trackers** are kept on this computer and read from here — the
-server never sees a tracker or its token. Each row is one tracker: its kind,
-where it points, and whether its token is stored, with a field beside it to
-paste one or replace it; the window is never shown a token again. Under each
-Jira or Azure DevOps tracker are its **filters**, the named queries ("ready to
-start", "assigned to me") with edit, remove and *add filter*. Below the rows is
-**add a tracker**: labelled fields for what that kind needs — a Jira site and
-email, an Azure DevOps organisation and project, an optional GitHub repository
-— and the token, with the required ones marked. Removing a tracker removes its
-token with it.
+**A row knows its worktree.** A ticket a session was started from, or one a
+worktree's branch is named after, shows that worktree and its agent's state;
+so does a pull request whose branch a worktree in the same repository is on.
+Clicking it selects the worktree. A ticket with no worktree has a start button,
+which asks which project (the selected worktree's first) and opens the create
+form filled in.
 
-Starting from a card fills in the task, the name and the branch, and the
-session notes which ticket it came from.
+**A Jira ticket opens beside the sidebar**, over the dock rather than in a
+column of its own: it is read and put away, and the workspace should not reflow
+for it. It is the same panel the tickets screen had, status, fields and
+comments all changeable. Pull requests and other trackers' tickets open in the
+browser.
 
-There is no count on that icon: a badge is a number nobody is waiting on. What
-is worth interrupting for is a ticket *changing* — its status, somebody else's
-comment, a ticket turning up in a filter — and the window reads the tickets every
-few minutes to say so, as an OS notification. It is a switch on the settings
-screen; see [tickets.md](tickets.md#notifications).
-
-A card carries a project chooser, because **a ticket does not know which
-repository it is about**: a Jira issue names a project and a work item names an
-area path, and neither is a clone URL. The tracker says what to do and you say
-where. It opens on the project of whatever is selected in the tree, which is the
-most likely answer.
-
-A tracker that could not be read says so above the board rather than
-leaving its column quietly missing — a list short of a tracker looks exactly
-like having nothing assigned. [tickets.md](tickets.md) is the whole of it.
+What is worth interrupting for is something *changing*: a ticket's status,
+somebody else's comment, a ticket newly yours, a review asked of you, your
+pull request's checks failing or its review coming back. The window reads the
+sidebar every three minutes and says so as an OS notification; it is a switch on
+the settings screen. A tracker that could not be read says so at the top of the
+sidebar rather than leaving its rows quietly missing.
+[tickets.md](tickets.md) is the whole of it.
 
 ## Integrations
 
@@ -635,8 +631,8 @@ The integrations icon in the header opens what the server holds on your
 sessions' behalf: the MCP servers and what each one is doing, the secret names it has, and the skills this machine has pushed to it. Three
 things that used to be three procedures in a document -- a `docker run` line to
 copy, a `-e` argument in a shell history, a path in a config file that cannot
-reach your laptop. Trackers used to be here too; they are on the tickets screen
-now, and this one links to it.
+reach your laptop. Trackers used to be here too; they are on the settings
+screen now, beside the other things kept on this machine.
 
 Every button there answers with the whole view, re-read, for the reason the git
 view does the same: they explain each other, and a container that will not start
@@ -675,9 +671,11 @@ that file may be on another machine. See
 [configuration.md](configuration.md#editing-it-from-the-window) for what it does
 and does not touch, and why it edits the file rather than regenerating it.
 
-The bottom half never leaves this machine: the two sidebar widths, how often the
-worktree list is re-read, and whether the OS is told when an agent starts
-waiting. `localStorage`, which for a Tauri window is a file in its own data
+The bottom half never leaves this machine: the three sidebar widths, how often
+the worktree list is re-read, whether the OS is told when an agent starts
+waiting or when your tickets and pull requests change, and the **trackers** the
+sidebar reads, tokens included. Those are kept in their own owner-only file
+rather than with the rest; see [tickets.md](tickets.md#setting-one-up). `localStorage`, which for a Tauri window is a file in its own data
 directory -- so it survives the window closing without a request, a round trip
 or a file format. Every value is read back through a validator, because the
 store is on disk and an older build may have written something else into it.

@@ -3,10 +3,10 @@
 //!
 //! The tickets screen began as a reader, on the reasoning that REST is for
 //! what the interface shows and an agent's MCP server for what changes. That
-//! held until the board: a board you can read but not move a card on sends
-//! you to Jira for the one thing a board is for. So this writes -- with the
-//! token the board reads with, from this machine, and only when somebody
-//! presses a button. Nothing here runs on a timer.
+//! held until a ticket could be read in the window: one you can read but not
+//! move sends you to Jira for the one thing you came to do. So this writes,
+//! with the token the sidebar reads with, from this machine, and only when
+//! somebody presses a button. Nothing here runs on a timer.
 //!
 //! **What is editable is Jira's answer, not ours.** `?expand=editmeta` says
 //! which fields the ticket's edit screen has, what type each is, whether it
@@ -130,8 +130,7 @@ pub struct Transition {
     pub id: String,
     /// What the workflow calls the move: `Start progress`.
     pub name: String,
-    /// The status it lands in, by id -- which is how a board column is
-    /// matched -- and by name.
+    /// The status it lands in, by id and by name.
     pub to_id: String,
     pub to: String,
     pub stage: Stage,

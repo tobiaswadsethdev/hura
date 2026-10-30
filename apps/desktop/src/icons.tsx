@@ -52,6 +52,8 @@ import {
   CircleArrowUp,
   CircleCheck,
   CircleQuestionMark,
+  CircleX,
+  CircleDashed,
   CloudDownload,
   CloudUpload,
   Copy as CopyGlyph,
@@ -67,10 +69,14 @@ import {
   GlobeLock,
   GitBranch,
   GitCommitHorizontal,
+  GitPullRequest,
+  GitPullRequestDraft,
   Info,
   LoaderCircle,
   Monitor,
   Package,
+  PanelRightClose,
+  PanelRightOpen,
   KeyRound,
   List,
   ListMinus,
@@ -207,6 +213,16 @@ export const Restart = RotateCw;
 export const Store = Save;
 export const Secret = KeyRound;
 export const Tracker = Ticket;
+// A pull request, and one still a draft: the forge's own two marks for them.
+export const PullRequest = GitPullRequest;
+export const PullDraft = GitPullRequestDraft;
+// A pull request's checks: passed, failed, still running.
+export const Passing = CircleCheck;
+export const Failing = CircleX;
+export const Pending = CircleDashed;
+// The sidebar on the right, folded to its rail and opened again.
+export const Fold = PanelRightClose;
+export const Unfold = PanelRightOpen;
 /// Editing a line in place: a tracker's filter.
 export const Edit = Pencil;
 /// A ticket's comments, beside how many there are.

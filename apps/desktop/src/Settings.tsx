@@ -1,7 +1,7 @@
-// The settings screen: what a new session starts with, and how this window
-// looks.
+// The settings screen: what a new session starts with, how this window looks,
+// and the trackers the sidebar of tickets and pull requests reads.
 //
-// Two sections, and the split between them is the only structure this screen
+// Two halves, and the split between them is the only structure this screen
 // has -- because it is the only structure that matters. **Who owns the answer.**
 // A branch prefix names the work branch of every session on the server,
 // including the ones `hura new` starts from a terminal, so it is a line in the
@@ -26,6 +26,7 @@ import { useEffect, useState } from "react";
 
 import { api, messageOf } from "./api";
 import { Waiting } from "./Empty";
+import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { NewOptions } from "./gen/NewOptions";
 import type { Settings } from "./gen/Settings";
 import type { SettingsView } from "./gen/SettingsView";
@@ -34,16 +35,24 @@ import { DEFAULTS, LIMITS, type Prefs } from "./prefs";
 import { Screen } from "./Screen";
 import { Pill } from "./Pill";
 import { Select } from "./Select";
+import { TrackersSection } from "./Trackers";
 
 export function SettingsScreen({
   server,
   prefs,
   onPrefs,
+  at,
+  onTrackers,
   onClose,
 }: {
   server: string;
   prefs: Prefs;
   onPrefs: (change: Partial<Prefs>) => void;
+  /// Where to open it: at the trackers, when the sidebar sent you here to add
+  /// one.
+  at: "trackers" | null;
+  /// The trackers after a change, so the sidebar reads them again.
+  onTrackers: (trackers: ConfiguredTracker[]) => void;
   onClose: () => void;
 }) {
   const [view, setView] = useState<SettingsView | null>(null);
@@ -310,6 +319,15 @@ export function SettingsScreen({
             onChange={(dockWidth) => onPrefs({ dockWidth })}
           />
         </label>
+
+        <label>
+          <span>tickets width</span>
+          <Pixels
+            value={prefs.inboxWidth}
+            limit={LIMITS.inboxWidth}
+            onChange={(inboxWidth) => onPrefs({ inboxWidth })}
+          />
+        </label>
         <p className="hint indent">Or drag a sidebar's edge; double-click to reset.</p>
 
         <label>
@@ -339,9 +357,12 @@ export function SettingsScreen({
             checked={prefs.notifyTickets}
             onChange={(e) => onPrefs({ notifyTickets: e.target.checked })}
           />
-          <span>notify when my tickets change</span>
+          <span>notify when my tickets or pull requests change</span>
         </label>
-        <p className="hint indent">Status changes and other people's comments, checked every few minutes.</p>
+        <p className="hint indent">
+          A status moved, somebody else's comment, a ticket newly yours, a review asked of you, and
+          your pull requests' checks and reviews. Checked every few minutes.
+        </p>
 
         <div className="setting-actions">
           <button className="quiet" onClick={() => onPrefs(DEFAULTS)}>
@@ -349,6 +370,10 @@ export function SettingsScreen({
           </button>
         </div>
       </section>
+
+      {/* Scrolled to once the server's half has drawn above it, or it lands
+          where the section was before that half pushed it down. */}
+      <TrackersSection focus={at === "trackers" && (view !== null || error !== null)} onChanged={onTrackers} />
     </Screen>
   );
 }

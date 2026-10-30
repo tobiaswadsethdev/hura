@@ -76,7 +76,7 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `endpoints.rs` | the global allow and block lists applied to every new session |
 | `events.rs` | the allow/deny feed, merged and kept on disk per session |
 | `forge.rs` | which git host a session works against, derived from the repo URL |
-| `tracker.rs` | reading tickets from GitHub, Azure DevOps and Jira over REST, with a token handed in -- the desktop application calls it with its own, and the server never does. The parsers are pure and tested against captured answers, because reading somebody else's JSON is the part that is easy to get wrong quietly |
+| `tracker.rs` | reading your tickets and pull requests from GitHub, Azure DevOps and Jira over REST, with a token handed in: the desktop application calls it with its own, and the server never does. The parsers are pure and tested against captured answers, because reading somebody else's JSON is the part that is easy to get wrong quietly |
 | `image.rs` | the sandbox image, with its whole build context embedded in the binary; built by Docker and loaded into the runtime's own store |
 | `credentials.rs` | the credentials a session can be given, and the sandbox-scoped secret each becomes. hura holds a command or a reference, never a value |
 | `toolchain.rs` | the toolchains, their image variants, and the registry each one opens |

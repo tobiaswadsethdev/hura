@@ -1,4 +1,10 @@
-//! Tickets: what your trackers' filters and boards hold, read over REST.
+//! Tickets and pull requests: what is yours on each tracker, read over REST.
+//!
+//! **Yours, and nothing else.** Every tracker is asked the same question: the
+//! tickets assigned to you or created by you that are not done, and on GitHub
+//! and Azure DevOps the open pull requests you opened or that wait on you. No
+//! query language is involved, so the sidebar means the same thing whichever
+//! tracker it reads.
 //!
 //! **Read by the client, with the client's own tokens.** A tracker is set up in
 //! the desktop application and stored on the machine it runs on, and the
@@ -7,9 +13,9 @@
 //! sandbox -- or the machine hosting them -- has any business holding.
 //!
 //! REST is for what the *interface* shows: a list, on a timer, rendered as
-//! rows -- and, since the board, what a person changes from it: a card moved,
-//! a field edited, a comment written, each when somebody presses something
-//! and never on the timer (see [`edit`]). What an *agent* does with a ticket
+//! rows. It is also what a person changes from there (a status moved, a field
+//! edited, a comment written), each when somebody presses something and never
+//! on the timer (see [`edit`]). What an *agent* does with a ticket
 //! goes through an MCP server when the agent decides to, which is a different
 //! consumer with different failure modes.
 //!
@@ -27,12 +33,11 @@
 
 use serde::{Deserialize, Serialize};
 
-mod board;
 pub mod doc;
 mod edit;
 mod issue;
 pub mod markdown;
-pub use board::{Board, BoardColumn, BoardView, Boards, board, boards};
+mod pulls;
 pub use edit::{
     Choice, EditField, EditForm, Editable, FieldChange, Transition, UserChoice, comment,
     delete_comment, edit_comment, edit_form, save, transition, transitions, users,
@@ -40,6 +45,7 @@ pub use edit::{
 pub use issue::{
     Issue, IssueComment, Parent as IssueParent, Person as IssuePerson, Stage as IssueStage, issue,
 };
+pub use pulls::{Checks, PullRequest, Review};
 
 /// A tracker this knows how to read.
 // `TrackerKind` on the wire: `session::Kind` is already `Kind` in the one flat
@@ -86,24 +92,20 @@ impl Kind {
 #[serde(default)]
 pub struct Source {
     pub kind: Kind,
-    /// What the tickets screen calls it. Defaults to the kind, which is right
-    /// until somebody has two Jira sites.
+    /// What the sidebar calls it. Defaults to the kind, which is right until
+    /// somebody has two Jira sites.
     pub name: String,
-    /// GitHub: `owner/name`, or `None` for everything assigned to you.
+    /// GitHub: `owner/name` to read one repository, or `None` for every one the
+    /// token can see.
     pub repo: Option<String>,
-    /// Azure DevOps organisation, and the project the query runs in.
+    /// Azure DevOps organisation, and the project its work items and pull
+    /// requests are read from.
     pub org: Option<String>,
     pub project: Option<String>,
     /// Jira site, `https://your-org.atlassian.net`, and the account the token
     /// belongs to -- Jira Cloud is Basic auth with the email as the username.
     pub site: Option<String>,
     pub email: Option<String>,
-    /// Named queries, each its own section of the tickets screen: "ready to
-    /// start", "assigned to me". Empty means the one [`DEFAULT_FILTER`].
-    ///
-    /// Jira and Azure DevOps only, because they are the two with a query
-    /// language this reads. A GitHub tracker lists what is assigned to you.
-    pub filters: Vec<Filter>,
 }
 
 impl Default for Source {
@@ -120,65 +122,11 @@ impl Default for Source {
             project: None,
             site: None,
             email: None,
-            filters: Vec::new(),
         }
     }
 }
-
-/// One named query on a tracker.
-///
-/// A name rather than only a query, because the name is what the inbox shows
-/// and what a notification says a ticket turned up in: `PROJ-12 is ready to
-/// start` is a sentence, and a line of JQL is not.
-#[cfg_attr(
-    feature = "ts",
-    derive(ts_rs::TS),
-    ts(export, rename = "TrackerFilter")
-)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Filter {
-    pub name: String,
-    /// JQL for Jira, WIQL for Azure DevOps.
-    pub query: String,
-}
-
-/// What a tracker with no query of its own asks for: assigned to me, not done.
-///
-/// Per kind, and public, because a client editing a tracker's filters starts
-/// from the one it has been reading -- and that has to be the same text the
-/// server would have sent, not a client's guess at it.
-pub fn default_query(kind: Kind) -> &'static str {
-    match kind {
-        // `statusCategory != Done` rather than a list of status names: every
-        // Jira project renames its statuses and none of them rename the
-        // categories.
-        Kind::Jira => "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
-        Kind::AzureDevOps => {
-            "SELECT [System.Id] FROM WorkItems \
-             WHERE [System.AssignedTo] = @Me \
-             AND [System.State] NOT IN ('Closed', 'Done', 'Removed', 'Resolved') \
-             ORDER BY [System.ChangedDate] DESC"
-        }
-        // Not a query: GitHub's `/issues` is asked with parameters.
-        Kind::GitHub => "",
-    }
-}
-
-/// The name of the filter a tracker without any has.
-pub const DEFAULT_FILTER: &str = "assigned to me";
 
 impl Source {
-    /// The filters this tracker actually runs: its own, or the kind's default.
-    pub fn effective(&self) -> Vec<Filter> {
-        if !self.filters.is_empty() {
-            return self.filters.clone();
-        }
-        vec![Filter {
-            name: DEFAULT_FILTER.to_string(),
-            query: default_query(self.kind).to_string(),
-        }]
-    }
-
     /// Trim every field, and fall back to the kind for an unnamed tracker.
     pub fn normalized(&self) -> Source {
         let text = |v: &Option<String>| {
@@ -200,22 +148,11 @@ impl Source {
             project: text(&self.project),
             site: text(&self.site),
             email: text(&self.email),
-            filters: self
-                .filters
-                .iter()
-                .map(|f| Filter {
-                    name: f.name.trim().to_string(),
-                    query: f.query.trim().to_string(),
-                })
-                .collect(),
         }
     }
 
     /// What is missing, if anything.
     pub fn problem(&self) -> Option<String> {
-        if let Some(problem) = self.filter_problem() {
-            return Some(problem);
-        }
         let missing = |what: &str| {
             Some(format!(
                 "`{}` is a {} tracker with no {what}",
@@ -246,40 +183,6 @@ impl Source {
             }
             Kind::GitHub => None,
         }
-    }
-
-    fn filter_problem(&self) -> Option<String> {
-        if self.filters.is_empty() {
-            return None;
-        }
-        if self.kind == Kind::GitHub {
-            return Some(format!(
-                "`{}` is a github tracker, which takes no filters: it lists what is assigned to you",
-                self.name
-            ));
-        }
-        let mut seen = std::collections::BTreeSet::new();
-        for f in &self.filters {
-            if f.name.trim().is_empty() {
-                return Some(format!("`{}` has a filter with no name", self.name));
-            }
-            if f.query.trim().is_empty() {
-                return Some(format!(
-                    "`{}` has a filter `{}` with no query",
-                    self.name, f.name
-                ));
-            }
-            // The inbox's sections and a notification's sentence both name a
-            // filter, and two with one name would be two sections nobody can
-            // tell apart.
-            if !seen.insert(f.name.trim()) {
-                return Some(format!(
-                    "`{}` has two filters called `{}`",
-                    self.name, f.name
-                ));
-            }
-        }
-        None
     }
 }
 
@@ -316,12 +219,13 @@ pub struct Task {
     pub branch: String,
     /// `owner/name`, for a GitHub issue. `None` for the other two, whose
     /// write-back is addressed by organisation and project from the config
-    /// file. Carried because `/issues` spans repositories: a comment has to go
+    /// file. Carried because a search spans repositories: a comment has to go
     /// to the one the issue is actually in, which the entry may not name.
     pub repo: Option<String>,
-    /// Which of the tracker's filters this row came from. A ticket two filters
-    /// match is two rows, one in each section.
-    pub filter: String,
+    /// Whether it is assigned to you, or only created by you. One row per
+    /// ticket: one that is both is assigned, because that is the part that
+    /// asks something of you.
+    pub relation: Relation,
     /// When the tracker last saw it change, in the tracker's own format. Only
     /// ever compared with an earlier value of itself.
     pub updated: Option<String>,
@@ -333,6 +237,22 @@ pub struct Task {
     /// Whether the newest comment is the credential owner's own -- which is
     /// the one comment nobody needs to be told about.
     pub last_comment_mine: bool,
+}
+
+/// Which side of "mine" a ticket or a pull request is on.
+///
+/// The sidebar's two groups under each heading. Not a filter anybody wrote: it
+/// is read off the ticket, the same way on every tracker.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Relation {
+    /// A ticket assigned to you. A pull request somebody asked you to
+    /// review, or assigned to you, that you did not open.
+    Assigned,
+    /// A ticket you created that is not assigned to you, or a pull request
+    /// you opened.
+    Created,
 }
 
 /// What a session remembers about the ticket it was started from.
@@ -367,32 +287,32 @@ impl From<&Task> for Ticket {
     }
 }
 
-/// The inbox, and whatever could not be read.
+/// What is yours on every tracker, and whatever could not be read.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Inbox {
     pub tasks: Vec<Task>,
-    /// One per tracker that failed, in words. A tracker that cannot be read is
-    /// a row missing from a list, which is invisible -- so it is said out loud
-    /// rather than left as an empty inbox.
+    /// Open pull requests, from the GitHub and Azure DevOps trackers. Jira
+    /// has none to give.
+    #[serde(default)]
+    pub pulls: Vec<PullRequest>,
+    /// One per tracker, or half of one, that failed, in words. A tracker that
+    /// cannot be read is a row missing from a list, which is invisible, so it
+    /// is said out loud rather than left as an empty sidebar.
     pub warnings: Vec<String>,
-    /// Every filter that was read, in order, whether or not it matched
-    /// anything.
+    /// The trackers whose tickets were read, whether or not they held any.
     ///
-    /// What lets a client tell "nothing matches" from "could not ask": a
-    /// filter missing from here was not read, so a ticket missing from it has
-    /// not left it -- and one appearing in it after an outage has not just
+    /// What lets a client tell "nothing is yours" from "could not ask": a
+    /// tracker missing from here was not read, so a ticket missing from it has
+    /// not gone anywhere, and one appearing in it after an outage has not just
     /// arrived.
     #[serde(default)]
-    pub read: Vec<FilterRead>,
-}
-
-/// One filter an inbox read.
-#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FilterRead {
-    pub tracker: String,
-    pub filter: String,
+    pub read: Vec<String>,
+    /// The same, for pull requests. Kept apart from `read` because Azure
+    /// DevOps reads them with a scope its work items do not need, so one half
+    /// of a tracker can answer while the other is refused.
+    #[serde(default)]
+    pub pulls_read: Vec<String>,
 }
 
 /// How long to give a tracker before giving up on it.
@@ -424,23 +344,18 @@ pub struct Stored {
 pub struct Configured {
     pub source: Source,
     pub token_set: bool,
-    /// The filters it runs, the implied default included. What an editor
-    /// starts from, so the first filter somebody adds does not silently
-    /// replace the "assigned to me" they have been reading.
-    pub filters: Vec<Filter>,
 }
 
 impl From<&Stored> for Configured {
     fn from(s: &Stored) -> Self {
         Configured {
             token_set: s.token.as_deref().is_some_and(|t| !t.trim().is_empty()),
-            filters: s.source.effective(),
             source: s.source.clone(),
         }
     }
 }
 
-/// Read every tracker, one filter at a time.
+/// Read every tracker, one after another.
 ///
 /// Sequentially, because there are one or two of them and a thread per tracker
 /// would buy milliseconds at the cost of ordering the result.
@@ -458,154 +373,340 @@ pub fn inbox(trackers: &[Stored], branch_prefix: &str) -> Inbox {
             ));
             continue;
         };
-        let reader = match Reader::new(source, token) {
-            Ok(reader) => reader,
-            Err(e) => {
-                out.warnings.push(format!("{}: {e}", source.name));
-                continue;
-            }
-        };
-        for filter in source.effective() {
-            match reader.read(&filter, branch_prefix) {
-                Ok(mut tasks) => {
-                    for t in &mut tasks {
-                        t.filter = filter.name.clone();
-                    }
-                    out.tasks.append(&mut tasks);
-                    out.read.push(FilterRead {
-                        tracker: source.name.clone(),
-                        filter: filter.name.clone(),
-                    });
+        let name = &source.name;
+        match source.kind {
+            Kind::Jira => match jira(source, token, branch_prefix) {
+                Ok(tasks) => {
+                    out.tasks.extend(tasks);
+                    out.read.push(name.clone());
                 }
-                Err(e) => out
-                    .warnings
-                    .push(format!("{} · {}: {e}", source.name, filter.name)),
+                Err(e) => out.warnings.push(format!("{name}: {e}")),
+            },
+            // One request for both halves, so they answer or fail together.
+            Kind::GitHub => match github(source, token, branch_prefix) {
+                Ok(mine) => {
+                    out.tasks.extend(mine.tasks);
+                    out.pulls.extend(mine.pulls);
+                    out.warnings
+                        .extend(mine.warnings.into_iter().map(|w| format!("{name}: {w}")));
+                    out.read.push(name.clone());
+                    out.pulls_read.push(name.clone());
+                }
+                Err(e) => out.warnings.push(format!("{name}: {e}")),
+            },
+            Kind::AzureDevOps => {
+                // Who the token belongs to, asked once: the work items are
+                // sorted by it and the pull requests are searched by it. The
+                // request is the cheapest one there is, so a failure here
+                // stands for both halves rather than one warning each.
+                let me = match azure_me(source, token) {
+                    Ok(me) => me,
+                    Err(e) => {
+                        out.warnings.push(format!("{name}: {e}"));
+                        continue;
+                    }
+                };
+                match azure(source, token, &me, branch_prefix) {
+                    Ok(tasks) => {
+                        out.tasks.extend(tasks);
+                        out.read.push(name.clone());
+                    }
+                    Err(e) => out.warnings.push(format!("{name} · work items: {e}")),
+                }
+                match pulls::azure(source, token, &me) {
+                    Ok(pulls) => {
+                        out.pulls.extend(pulls);
+                        out.pulls_read.push(name.clone());
+                    }
+                    Err(e) => out.warnings.push(format!(
+                        "{name} · pull requests: {}",
+                        pulls::azure_refusal(&e)
+                    )),
+                }
             }
         }
     }
     out
 }
 
-/// One tracker, with its credential, for as many filters as it has.
-struct Reader<'a> {
-    source: &'a Source,
-    token: &'a str,
-    /// Jira's account id for the credential's owner, asked once per read
-    /// rather than once per filter.
-    me: Option<String>,
-}
-
-impl<'a> Reader<'a> {
-    /// Refused when Jira will not say who the token belongs to. That request
-    /// is the one every search would have failed the same way, so it stands
-    /// for all of them: one warning, rather than one per filter each waiting
-    /// out the timeout against a site that is not answering.
-    fn new(source: &'a Source, token: &'a str) -> Result<Self, String> {
-        let me = match source.kind {
-            Kind::Jira => jira_me(source, token)?,
-            _ => None,
-        };
-        Ok(Reader { source, token, me })
-    }
-
-    fn read(&self, filter: &Filter, prefix: &str) -> Result<Vec<Task>, String> {
-        match self.source.kind {
-            Kind::GitHub => github(self.source, self.token, prefix),
-            Kind::AzureDevOps => azure(self.source, self.token, &filter.query, prefix),
-            Kind::Jira => jira(
-                self.source,
-                self.token,
-                &filter.query,
-                self.me.as_deref(),
-                prefix,
-            ),
-        }
-    }
-}
-
 // ---------------------------------------------------------------- GitHub
 
-fn github(source: &Source, token: &str, prefix: &str) -> Result<Vec<Task>, String> {
-    let auth = format!("Bearer {token}");
-    // The repository's own issues when one is named, and everything assigned to
-    // the token's owner otherwise -- which is what `/issues` means, and is the
-    // whole inbox in one request.
-    let url = match &source.repo {
-        Some(repo) => format!(
-            "https://api.github.com/repos/{repo}/issues?assignee=@me&state=open&per_page=50"
-        ),
-        None => "https://api.github.com/issues?filter=assigned&state=open&per_page=50".to_string(),
+/// What one GitHub tracker holds. Both halves come back from one request.
+struct GitHubMine {
+    tasks: Vec<Task>,
+    pulls: Vec<PullRequest>,
+    /// What GitHub said went wrong beside an answer: an organisation behind
+    /// SAML the token is not authorised for, say. The rest still counts.
+    warnings: Vec<String>,
+}
+
+/// Every search a GitHub tracker makes, as one GraphQL request.
+///
+/// GraphQL rather than `/issues` and `/search`, because it is the one way to
+/// ask five questions in a request, and the only one that says in the same
+/// answer whether a pull request's checks pass and whether it is approved.
+/// REST would be a request per pull request for each of those.
+const GITHUB_QUERY: &str = r#"query($assigned: String!, $created: String!, $mine: String!, $review: String!, $assignee: String!) {
+  viewer { login }
+  assigned: search(type: ISSUE, first: 50, query: $assigned) { nodes { ...issue } }
+  created: search(type: ISSUE, first: 50, query: $created) { nodes { ...issue } }
+  mine: search(type: ISSUE, first: 50, query: $mine) { nodes { ...pull } }
+  review: search(type: ISSUE, first: 50, query: $review) { nodes { ...pull } }
+  assignee: search(type: ISSUE, first: 50, query: $assignee) { nodes { ...pull } }
+}
+fragment issue on Issue {
+  number title url state updatedAt
+  repository { nameWithOwner }
+  labels(first: 1) { nodes { name } }
+  comments(last: 1) { totalCount nodes { author { login } } }
+}
+fragment pull on PullRequest {
+  number title url isDraft updatedAt headRefName baseRefName mergeable reviewDecision
+  author { login }
+  repository { nameWithOwner }
+  comments { totalCount }
+  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+}"#;
+
+/// The five searches, scoped to the tracker's repository when it names one.
+///
+/// `review-requested` rather than `user-review-requested`, so a review asked
+/// of a team you are on counts: that is how most reviews are asked for.
+fn github_searches(repo: Option<&str>) -> serde_json::Value {
+    let open = "is:open archived:false sort:updated-desc";
+    let scoped = |q: &str| match repo {
+        Some(repo) => format!("{q} {open} repo:{repo}"),
+        None => format!("{q} {open}"),
     };
-    let body = get(&url, &auth, &["Accept: application/vnd.github+json"])?;
-    parse_github(&body, source, prefix)
+    serde_json::json!({
+        "assigned": scoped("is:issue assignee:@me"),
+        "created": scoped("is:issue author:@me"),
+        "mine": scoped("is:pr author:@me"),
+        "review": scoped("is:pr review-requested:@me"),
+        "assignee": scoped("is:pr assignee:@me"),
+    })
+}
+
+fn github(source: &Source, token: &str, prefix: &str) -> Result<GitHubMine, String> {
+    let body = serde_json::json!({
+        "query": GITHUB_QUERY,
+        "variables": github_searches(source.repo.as_deref()),
+    });
+    let answer = post(
+        "https://api.github.com/graphql",
+        &format!("Bearer {token}"),
+        &body.to_string(),
+        JSON,
+    )?;
+    parse_github(&answer, source, prefix)
 }
 
 /// GitHub's answer, flattened. Separate from the request so every shape it
-/// sends can be asserted on without a network -- which is the only way to have
+/// sends can be asserted on without a network, which is the only way to have
 /// any confidence in a reader of somebody else's JSON.
 fn parse_github(
     body: &serde_json::Value,
     source: &Source,
     prefix: &str,
-) -> Result<Vec<Task>, String> {
-    let items = body.as_array().ok_or("github did not answer with a list")?;
-
-    Ok(items
-        .iter()
-        // `/issues` returns pull requests too -- they are issues to GitHub --
-        // and a pull request is not a task to start work on.
-        .filter(|i| i.get("pull_request").is_none())
-        .filter_map(|i| {
-            let number = i.get("number")?.as_u64()?;
-            let title = string(i, "title");
-            let repo = i
-                .get("repository")
-                .map(|r| string(r, "full_name"))
-                .filter(|s| !s.is_empty())
-                .or_else(|| source.repo.clone())
-                .unwrap_or_default();
-            let key = format!("#{number}");
-            Some(Task {
-                tracker: source.name.clone(),
-                kind: Kind::GitHub,
-                id: number.to_string(),
-                session_name: session_name(&key, &title),
-                branch: branch(prefix, &key, &title),
-                key,
-                title,
-                url: string(i, "html_url"),
-                status: string(i, "state"),
-                item_type: label_of(i).unwrap_or_default(),
-                repo: (!repo.is_empty()).then_some(repo),
-                filter: String::new(),
-                updated: Some(string(i, "updated_at")).filter(|s| !s.is_empty()),
-                comments: i.get("comments").and_then(|c| c.as_u64()).map(|c| c as u32),
-                // `/issues` counts comments but does not say whose the last
-                // one is; finding out is a request per issue.
-                last_commenter: None,
-                last_comment_mine: false,
-            })
+) -> Result<GitHubMine, String> {
+    // GraphQL answers 200 with its errors in the body, and with whatever it
+    // could read beside them.
+    let errors: Vec<String> = body
+        .get("errors")
+        .and_then(|e| e.as_array())
+        .map(|e| {
+            e.iter()
+                .map(|e| string(e, "message"))
+                .filter(|m| !m.is_empty())
+                .collect()
         })
-        .collect())
+        .unwrap_or_default();
+    let Some(data) = body.get("data").filter(|d| !d.is_null()) else {
+        return Err(if errors.is_empty() {
+            "github did not answer with any data".to_string()
+        } else {
+            errors.join("; ")
+        });
+    };
+    let me = data
+        .get("viewer")
+        .map(|v| string(v, "login"))
+        .unwrap_or_default();
+    let nodes = |alias: &str| -> Vec<serde_json::Value> {
+        data.get(alias)
+            .and_then(|s| s.get("nodes"))
+            .and_then(|n| n.as_array())
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    // Assigned first, so a ticket that is both is the one that asks
+    // something of you.
+    let mut tasks: Vec<Task> = Vec::new();
+    for (alias, relation) in [
+        ("assigned", Relation::Assigned),
+        ("created", Relation::Created),
+    ] {
+        for node in nodes(alias) {
+            let Some(task) = github_issue(&node, source, &me, relation, prefix) else {
+                continue;
+            };
+            if !tasks.iter().any(|t| t.repo == task.repo && t.id == task.id) {
+                tasks.push(task);
+            }
+        }
+    }
+
+    // Yours first, the other way round: assigning yourself your own pull
+    // request is a habit, and it does not make it a review.
+    let mut pulls: Vec<PullRequest> = Vec::new();
+    for (alias, relation, review) in [
+        ("mine", Relation::Created, false),
+        ("review", Relation::Assigned, true),
+        ("assignee", Relation::Assigned, false),
+    ] {
+        for node in nodes(alias) {
+            let Some(pull) = pulls::github(&node, &source.name, relation, review) else {
+                continue;
+            };
+            if !pulls.iter().any(|p| p.repo == pull.repo && p.id == pull.id) {
+                pulls.push(pull);
+            }
+        }
+    }
+
+    Ok(GitHubMine {
+        tasks,
+        pulls,
+        warnings: errors,
+    })
+}
+
+fn github_issue(
+    i: &serde_json::Value,
+    source: &Source,
+    me: &str,
+    relation: Relation,
+    prefix: &str,
+) -> Option<Task> {
+    let number = i.get("number")?.as_u64()?;
+    let title = string(i, "title");
+    let repo = i
+        .get("repository")
+        .map(|r| string(r, "nameWithOwner"))
+        .filter(|s| !s.is_empty())
+        .or_else(|| source.repo.clone());
+    let key = format!("#{number}");
+    let comments = i.get("comments");
+    let last = comments
+        .and_then(|c| c.get("nodes"))
+        .and_then(|n| n.as_array())
+        .and_then(|n| n.last())
+        .and_then(|c| c.get("author"))
+        .map(|a| string(a, "login"))
+        .filter(|s| !s.is_empty());
+    Some(Task {
+        tracker: source.name.clone(),
+        kind: Kind::GitHub,
+        id: number.to_string(),
+        session_name: session_name(&key, &title),
+        branch: branch(prefix, &key, &title),
+        key,
+        title,
+        url: string(i, "url"),
+        // `OPEN` in GraphQL, `open` everywhere else GitHub says it.
+        status: string(i, "state").to_lowercase(),
+        item_type: label_of(i).unwrap_or_default(),
+        repo,
+        relation,
+        updated: Some(string(i, "updatedAt")).filter(|s| !s.is_empty()),
+        comments: comments
+            .and_then(|c| c.get("totalCount"))
+            .and_then(|c| c.as_u64())
+            .map(|c| c as u32),
+        last_comment_mine: !me.is_empty() && last.as_deref() == Some(me),
+        last_commenter: last,
+    })
 }
 
 /// The first label, which is the closest GitHub has to a type.
 fn label_of(issue: &serde_json::Value) -> Option<String> {
-    let labels = issue.get("labels")?.as_array()?;
-    labels.first().map(|l| string(l, "name"))
+    let labels = issue.get("labels")?.get("nodes")?.as_array()?;
+    labels
+        .first()
+        .map(|l| string(l, "name"))
+        .filter(|s| !s.is_empty())
 }
 
 // ---------------------------------------------------------- Azure DevOps
 
-fn azure(source: &Source, token: &str, wiql: &str, prefix: &str) -> Result<Vec<Task>, String> {
+/// Who an Azure DevOps token belongs to: the identity a work item's assignee
+/// and a pull request's reviewers are compared with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AzureMe {
+    id: String,
+    /// The sign-in name, `you@example.com`. A second way to recognise the
+    /// account, for an answer that carries the name and not the id.
+    account: Option<String>,
+}
+
+impl AzureMe {
+    fn is(&self, identity: &serde_json::Value) -> bool {
+        let id = string(identity, "id");
+        if !id.is_empty() && id.eq_ignore_ascii_case(&self.id) {
+            return true;
+        }
+        let name = string(identity, "uniqueName");
+        self.account
+            .as_deref()
+            .is_some_and(|a| !name.is_empty() && a.eq_ignore_ascii_case(&name))
+    }
+}
+
+fn azure_me(source: &Source, token: &str) -> Result<AzureMe, String> {
+    let org = source.org.as_deref().unwrap_or_default();
+    let url = format!("https://dev.azure.com/{org}/_apis/connectionData");
+    let body = get(&url, &azure_auth(token), &[])?;
+    parse_azure_me(&body)
+}
+
+fn parse_azure_me(body: &serde_json::Value) -> Result<AzureMe, String> {
+    let user = body
+        .get("authenticatedUser")
+        .ok_or("azure devops did not say who the token belongs to")?;
+    let id = string(user, "id");
+    if id.is_empty() {
+        return Err("azure devops did not say who the token belongs to".into());
+    }
+    let account = user
+        .get("properties")
+        .and_then(|p| p.get("Account"))
+        .and_then(|a| a.get("$value"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    Ok(AzureMe { id, account })
+}
+
+/// Assigned to you or created by you, in this project, and not finished.
+///
+/// A list of state names rather than a category: WIQL has no state category to
+/// ask by, and these four are what the shipped processes call "over".
+const AZURE_MINE: &str = "SELECT [System.Id] FROM WorkItems \
+     WHERE [System.TeamProject] = @project \
+     AND ([System.AssignedTo] = @Me OR [System.CreatedBy] = @Me) \
+     AND [System.State] NOT IN ('Closed', 'Done', 'Removed', 'Resolved') \
+     ORDER BY [System.ChangedDate] DESC";
+
+fn azure(source: &Source, token: &str, me: &AzureMe, prefix: &str) -> Result<Vec<Task>, String> {
     let org = source.org.as_deref().unwrap_or_default();
     let project = source.project.as_deref().unwrap_or_default();
     let auth = azure_auth(token);
 
     // Two requests, and there is no way around it: WIQL answers with ids only.
     let query_url =
-        format!("https://dev.azure.com/{org}/{project}/_apis/wit/wiql?api-version=7.1&$top=50");
-    let body = serde_json::json!({ "query": wiql });
+        format!("https://dev.azure.com/{org}/{project}/_apis/wit/wiql?api-version=7.1&$top=100");
+    let body = serde_json::json!({ "query": AZURE_MINE });
     let answer = post(&query_url, &auth, &body.to_string(), JSON)?;
 
     let ids = parse_azure_ids(&answer);
@@ -614,13 +715,13 @@ fn azure(source: &Source, token: &str, wiql: &str, prefix: &str) -> Result<Vec<T
     }
 
     // `fields` rather than the whole work item: a work item with its history is
-    // tens of kilobytes and four of those fields are the whole row.
+    // tens of kilobytes and these are the whole row.
     let detail_url = format!(
-        "https://dev.azure.com/{org}/{project}/_apis/wit/workitems?ids={}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.ChangedDate,System.CommentCount&api-version=7.1",
+        "https://dev.azure.com/{org}/{project}/_apis/wit/workitems?ids={}&fields=System.Id,System.Title,System.State,System.WorkItemType,System.ChangedDate,System.CommentCount,System.AssignedTo&api-version=7.1",
         ids.join(",")
     );
     let detail = get(&detail_url, &auth, &[])?;
-    parse_azure(&detail, source, prefix)
+    parse_azure(&detail, source, me, prefix)
 }
 
 /// The ids a WIQL query answered with. Its own function because the two-request
@@ -643,6 +744,7 @@ fn parse_azure_ids(body: &serde_json::Value) -> Vec<String> {
 fn parse_azure(
     detail: &serde_json::Value,
     source: &Source,
+    me: &AzureMe,
     prefix: &str,
 ) -> Result<Vec<Task>, String> {
     let org = source.org.as_deref().unwrap_or_default();
@@ -659,6 +761,7 @@ fn parse_azure(
             let fields = i.get("fields")?;
             let title = string(fields, "System.Title");
             let key = format!("AB#{id}");
+            let mine = fields.get("System.AssignedTo").is_some_and(|a| me.is(a));
             Some(Task {
                 tracker: source.name.clone(),
                 kind: Kind::AzureDevOps,
@@ -673,7 +776,11 @@ fn parse_azure(
                 status: string(fields, "System.State"),
                 item_type: string(fields, "System.WorkItemType"),
                 repo: None,
-                filter: String::new(),
+                relation: if mine {
+                    Relation::Assigned
+                } else {
+                    Relation::Created
+                },
                 updated: Some(string(fields, "System.ChangedDate")).filter(|s| !s.is_empty()),
                 comments: fields
                     .get("System.CommentCount")
@@ -716,11 +823,11 @@ fn jira_auth(source: &Source, token: &str) -> String {
 }
 
 /// The credential owner's account id, which is how a comment says who wrote
-/// it. Emails are hidden on most Jira Cloud sites, so the configured one
-/// cannot be matched against an author.
+/// it and an assignee says whose it is. Emails are hidden on most Jira Cloud
+/// sites, so the configured one cannot be matched against either.
 ///
 /// Also the cheapest question that says whether the site and the token work
-/// at all: a failure here is the answer for every filter too.
+/// at all: a failure here is the answer for the search too.
 fn jira_me(source: &Source, token: &str) -> Result<Option<String>, String> {
     let url = format!("{}/rest/api/3/myself", jira_site(source));
     let body = get(
@@ -731,27 +838,30 @@ fn jira_me(source: &Source, token: &str) -> Result<Option<String>, String> {
     Ok(Some(string(&body, "accountId")).filter(|s| !s.is_empty()))
 }
 
-fn jira(
-    source: &Source,
-    token: &str,
-    jql: &str,
-    me: Option<&str>,
-    prefix: &str,
-) -> Result<Vec<Task>, String> {
+/// Assigned to you or reported by you, and not done.
+///
+/// `statusCategory != Done` rather than a list of status names: every Jira
+/// project renames its statuses and none of them rename the categories.
+const JIRA_MINE: &str = "(assignee = currentUser() OR reporter = currentUser()) \
+     AND statusCategory != Done ORDER BY updated DESC";
+
+fn jira(source: &Source, token: &str, prefix: &str) -> Result<Vec<Task>, String> {
+    let me = jira_me(source, token)?;
     let site = jira_site(source);
     // `/search/jql`, not `/search`: the older endpoint is deprecated on Jira
     // Cloud and answers 410 on newer sites. `comment` is what makes a new
-    // comment noticeable without a request per issue.
+    // comment noticeable without a request per issue, and `assignee` is what
+    // says which group a ticket goes in.
     let url = format!(
-        "{site}/rest/api/3/search/jql?jql={}&fields=summary,status,issuetype,updated,comment&maxResults=50",
-        urlencode(jql)
+        "{site}/rest/api/3/search/jql?jql={}&fields=summary,status,issuetype,updated,comment,assignee&maxResults=100",
+        urlencode(JIRA_MINE)
     );
     let body = get(
         &url,
         &jira_auth(source, token),
         &["Accept: application/json"],
     )?;
-    parse_jira(&body, source, me, prefix)
+    parse_jira(&body, source, me.as_deref(), prefix)
 }
 
 fn parse_jira(
@@ -770,9 +880,7 @@ fn parse_jira(
         .collect())
 }
 
-/// One issue from a Jira search, as a task. Its own function because a board
-/// is a search too, answered in the same shape, and its cards have to be the
-/// same cards.
+/// One issue from a Jira search, as a task.
 fn jira_task(
     i: &serde_json::Value,
     source: &Source,
@@ -793,6 +901,10 @@ fn jira_task(
         .and_then(|c| c.get("comments"))
         .and_then(|c| c.as_array())
         .and_then(|list| list.iter().max_by_key(|c| string(c, "created")));
+    let assignee = fields
+        .get("assignee")
+        .map(|a| string(a, "accountId"))
+        .filter(|s| !s.is_empty());
     Some(Task {
         tracker: source.name.clone(),
         kind: Kind::Jira,
@@ -813,7 +925,13 @@ fn jira_task(
             .map(|t| string(t, "name"))
             .unwrap_or_default(),
         repo: None,
-        filter: String::new(),
+        // The search matched it as assigned or as reported. Without knowing
+        // who "me" is, an assignee is the better guess at which.
+        relation: match (me, assignee.as_deref()) {
+            (Some(me), Some(assignee)) if me == assignee => Relation::Assigned,
+            (None, Some(_)) => Relation::Assigned,
+            _ => Relation::Created,
+        },
         updated: Some(string(fields, "updated")).filter(|s| !s.is_empty()),
         comments: comment
             .and_then(|c| c.get("total"))
@@ -1166,52 +1284,149 @@ mod tests {
             project: Some("tools".into()),
             site: Some("https://example.atlassian.net".into()),
             email: Some("you@example.com".into()),
-            filters: Vec::new(),
         }
     }
 
-    /// The shape `GET /issues?filter=assigned` answers with, trimmed to the
-    /// fields this reads -- including a pull request, which GitHub returns from
-    /// the same endpoint because a pull request *is* an issue to it.
-    const GITHUB: &str = r#"[
-      {
-        "number": 45,
-        "title": "Readme says the wrong port",
-        "html_url": "https://github.com/o/r/issues/45",
-        "state": "open",
-        "labels": [{ "name": "bug" }, { "name": "docs" }],
-        "repository": { "full_name": "o/r" }
-      },
-      {
-        "number": 46,
-        "title": "Bump the lockfile",
-        "html_url": "https://github.com/o/r/pull/46",
-        "state": "open",
-        "labels": [],
-        "repository": { "full_name": "o/r" },
-        "pull_request": { "url": "https://api.github.com/repos/o/r/pulls/46" }
+    /// The GraphQL answer's shape, measured against a real one and trimmed to
+    /// what is read: an issue in both of its searches, one only created, a
+    /// pull request of yours that you also assigned yourself, and one
+    /// waiting on your review.
+    const GITHUB: &str = r#"{
+      "data": {
+        "viewer": { "login": "me" },
+        "assigned": { "nodes": [
+          {
+            "number": 45,
+            "title": "Readme says the wrong port",
+            "url": "https://github.com/o/r/issues/45",
+            "state": "OPEN",
+            "updatedAt": "2026-10-20T10:00:00Z",
+            "repository": { "nameWithOwner": "o/r" },
+            "labels": { "nodes": [{ "name": "bug" }] },
+            "comments": { "totalCount": 3, "nodes": [{ "author": { "login": "me" } }] }
+          }
+        ] },
+        "created": { "nodes": [
+          {
+            "number": 45,
+            "title": "Readme says the wrong port",
+            "url": "https://github.com/o/r/issues/45",
+            "state": "OPEN",
+            "repository": { "nameWithOwner": "o/r" },
+            "labels": { "nodes": [] },
+            "comments": { "totalCount": 3, "nodes": [] }
+          },
+          {
+            "number": 9,
+            "title": "Flaky spec",
+            "url": "https://github.com/o/other/issues/9",
+            "state": "OPEN",
+            "repository": { "nameWithOwner": "o/other" },
+            "labels": { "nodes": [] },
+            "comments": { "totalCount": 1, "nodes": [{ "author": { "login": "sam" } }] }
+          }
+        ] },
+        "mine": { "nodes": [
+          { "number": 46, "title": "Bump the lockfile", "url": "https://github.com/o/r/pull/46",
+            "headRefName": "me/bump", "baseRefName": "main", "repository": { "nameWithOwner": "o/r" } }
+        ] },
+        "review": { "nodes": [
+          { "number": 50, "title": "Cache the dashboard", "url": "https://github.com/o/r/pull/50",
+            "headRefName": "sam/cache", "baseRefName": "main", "repository": { "nameWithOwner": "o/r" } },
+          {}
+        ] },
+        "assignee": { "nodes": [
+          { "number": 46, "title": "Bump the lockfile", "url": "https://github.com/o/r/pull/46",
+            "headRefName": "me/bump", "baseRefName": "main", "repository": { "nameWithOwner": "o/r" } }
+        ] }
       }
-    ]"#;
+    }"#;
 
     #[test]
-    fn a_github_issue_becomes_a_task_and_a_pull_request_does_not() {
-        let tasks = parse_github(
+    fn github_issues_and_pull_requests_come_back_once_each() {
+        let mine = parse_github(
             &serde_json::from_str(GITHUB).unwrap(),
             &source(Kind::GitHub),
             "tobias",
         )
         .unwrap();
 
-        assert_eq!(tasks.len(), 1, "a pull request is not a task: {tasks:?}");
-        let t = &tasks[0];
-        assert_eq!(t.key, "#45");
+        // #45 is assigned and created: one row, in the group that asks
+        // something of you.
+        let keys: Vec<(&str, Relation)> = mine
+            .tasks
+            .iter()
+            .map(|t| (t.key.as_str(), t.relation))
+            .collect();
+        assert_eq!(
+            keys,
+            [("#45", Relation::Assigned), ("#9", Relation::Created)]
+        );
+        let t = &mine.tasks[0];
         assert_eq!(t.id, "45");
-        assert_eq!(t.title, "Readme says the wrong port");
-        assert_eq!(t.status, "open");
+        assert_eq!(t.status, "open", "the word GitHub uses everywhere else");
         assert_eq!(t.item_type, "bug", "the first label is the closest thing");
         assert_eq!(t.repo.as_deref(), Some("o/r"), "a comment needs it");
+        assert_eq!(t.comments, Some(3));
+        assert!(t.last_comment_mine, "the viewer wrote the last one");
         assert_eq!(t.session_name, "45-readme-says-the-wrong-port");
         assert_eq!(t.branch, "tobias/45-readme-says-the-wrong-port");
+        assert_eq!(mine.tasks[1].last_commenter.as_deref(), Some("sam"));
+        assert!(!mine.tasks[1].last_comment_mine);
+
+        // #46 is yours even though you assigned it to yourself; #50 waits on
+        // your review; the empty node is one the token could not see.
+        let pulls: Vec<(&str, Relation, bool)> = mine
+            .pulls
+            .iter()
+            .map(|p| (p.key.as_str(), p.relation, p.review_requested))
+            .collect();
+        assert_eq!(
+            pulls,
+            [
+                ("#46", Relation::Created, false),
+                ("#50", Relation::Assigned, true)
+            ]
+        );
+        assert!(mine.warnings.is_empty());
+    }
+
+    /// GraphQL answers 200 either way. Errors with no data are a failure;
+    /// errors beside data are said, and the data still counts.
+    #[test]
+    fn a_graphql_error_is_a_failure_only_without_data() {
+        let refused = serde_json::json!({
+            "data": null,
+            "errors": [{ "message": "Bad credentials" }]
+        });
+        let e = parse_github(&refused, &source(Kind::GitHub), "t")
+            .err()
+            .unwrap();
+        assert!(e.contains("Bad credentials"), "{e}");
+
+        let partial = serde_json::json!({
+            "data": { "viewer": { "login": "me" }, "assigned": { "nodes": [] } },
+            "errors": [{ "message": "Resource protected by organization SAML enforcement" }]
+        });
+        let mine = parse_github(&partial, &source(Kind::GitHub), "t").unwrap();
+        assert_eq!(mine.warnings.len(), 1);
+    }
+
+    /// Every search is the same question, scoped to the repository when the
+    /// tracker names one.
+    #[test]
+    fn the_github_searches_are_mine_and_open() {
+        let all = github_searches(None);
+        assert_eq!(
+            all["review"],
+            "is:pr review-requested:@me is:open archived:false sort:updated-desc"
+        );
+        let one = github_searches(Some("o/r"));
+        for alias in ["assigned", "created", "mine", "review", "assignee"] {
+            let q = one[alias].as_str().unwrap();
+            assert!(q.ends_with(" repo:o/r"), "{alias}: {q}");
+            assert!(q.contains("is:open"), "{alias}: {q}");
+        }
     }
 
     /// Two requests, because WIQL answers with ids only.
@@ -1237,24 +1452,44 @@ mod tests {
             "System.Id": 1234,
             "System.Title": "Order backfill throws on empty batch",
             "System.State": "Active",
-            "System.WorkItemType": "Bug"
+            "System.WorkItemType": "Bug",
+            "System.AssignedTo": { "id": "ME-1", "displayName": "You", "uniqueName": "you@example.com" }
+          }
+        },
+        {
+          "id": 77,
+          "fields": {
+            "System.Title": "Filed, and handed to somebody else",
+            "System.State": "New",
+            "System.WorkItemType": "Task",
+            "System.AssignedTo": { "id": "them-2", "uniqueName": "them@example.com" }
           }
         }
       ]
     }"#;
+
+    fn azure_me_() -> AzureMe {
+        AzureMe {
+            id: "me-1".into(),
+            account: Some("you@example.com".into()),
+        }
+    }
 
     #[test]
     fn a_work_item_becomes_a_task_with_a_url_that_was_not_in_the_answer() {
         let tasks = parse_azure(
             &serde_json::from_str(AZURE).unwrap(),
             &source(Kind::AzureDevOps),
+            &azure_me_(),
             "tobias",
         )
         .unwrap();
 
-        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks.len(), 2);
         let t = &tasks[0];
         assert_eq!(t.key, "AB#1234");
+        assert_eq!(t.relation, Relation::Assigned, "ids compare without case");
+        assert_eq!(tasks[1].relation, Relation::Created);
         assert_eq!(t.id, "1234");
         assert_eq!(t.status, "Active");
         assert_eq!(t.item_type, "Bug");
@@ -1277,7 +1512,17 @@ mod tests {
           "fields": {
             "summary": "Add the changelog",
             "status": { "name": "In Progress", "statusCategory": { "key": "indeterminate" } },
-            "issuetype": { "name": "Story" }
+            "issuetype": { "name": "Story" },
+            "assignee": { "accountId": "me-1" }
+          }
+        },
+        {
+          "key": "PROJ-124",
+          "fields": {
+            "summary": "Reported, and nobody has it",
+            "status": { "name": "To Do" },
+            "issuetype": { "name": "Bug" },
+            "assignee": null
           }
         }
       ]
@@ -1288,12 +1533,18 @@ mod tests {
         let tasks = parse_jira(
             &serde_json::from_str(JIRA).unwrap(),
             &source(Kind::Jira),
-            None,
+            Some("me-1"),
             "tobias",
         )
         .unwrap();
 
-        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].relation, Relation::Assigned);
+        assert_eq!(
+            tasks[1].relation,
+            Relation::Created,
+            "reported, not assigned"
+        );
         let t = &tasks[0];
         assert_eq!(t.key, "PROJ-123");
         assert_eq!(t.id, "PROJ-123", "jira addresses writes by key");
@@ -1357,33 +1608,6 @@ mod tests {
         assert!(tasks[0].last_comment_mine);
     }
 
-    /// A tracker with no filters runs the kind's default, and its own filters
-    /// replace it rather than sitting beside it.
-    #[test]
-    fn a_tracker_without_filters_runs_the_default() {
-        let s = source(Kind::Jira);
-        let f = s.effective();
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0].name, DEFAULT_FILTER);
-        assert_eq!(f[0].query, default_query(Kind::Jira));
-
-        let s = Source {
-            filters: vec![
-                Filter {
-                    name: "ready".into(),
-                    query: "status = Ready".into(),
-                },
-                Filter {
-                    name: "mine".into(),
-                    query: "assignee = currentUser()".into(),
-                },
-            ],
-            ..source(Kind::Jira)
-        };
-        let names: Vec<String> = s.effective().into_iter().map(|f| f.name).collect();
-        assert_eq!(names, ["ready", "mine"]);
-    }
-
     /// The token is the one thing a webview is never handed: it learns there
     /// is one, and that is all.
     #[test]
@@ -1404,23 +1628,31 @@ mod tests {
         assert!(!blank.token_set, "whitespace is not a token");
     }
 
+    /// Who an Azure DevOps token belongs to, from `connectionData`.
     #[test]
-    fn filters_that_cannot_work_are_refused() {
-        let with = |kind: Kind, filters: Vec<Filter>| Source {
-            filters,
-            ..source(kind)
-        };
-        let f = |name: &str, query: &str| Filter {
-            name: name.into(),
-            query: query.into(),
-        };
-        let dup = with(Kind::Jira, vec![f("a", "x = 1"), f("a", "y = 2")]);
-        assert!(dup.problem().unwrap().contains("two filters called `a`"));
-        let empty = with(Kind::Jira, vec![f("a", "  ")]);
-        assert!(empty.problem().unwrap().contains("no query"));
-        let github = with(Kind::GitHub, vec![f("a", "x")]);
-        assert!(github.problem().unwrap().contains("takes no filters"));
-        assert_eq!(with(Kind::Jira, vec![f("a", "x = 1")]).problem(), None);
+    fn an_azure_token_says_whose_it_is() {
+        let body = serde_json::json!({
+            "authenticatedUser": {
+                "id": "a9c18208-1768-682e-a929-635c8db024ca",
+                "providerDisplayName": "You",
+                "properties": { "Account": { "$type": "System.String", "$value": "you@example.com" } }
+            }
+        });
+        let me = parse_azure_me(&body).unwrap();
+        assert_eq!(me.id, "a9c18208-1768-682e-a929-635c8db024ca");
+        assert_eq!(me.account.as_deref(), Some("you@example.com"));
+        assert!(me.is(&serde_json::json!({ "uniqueName": "YOU@example.com" })));
+        assert!(!me.is(&serde_json::json!({ "id": "", "uniqueName": "" })));
+        assert!(parse_azure_me(&serde_json::json!({})).is_err());
+    }
+
+    /// The questions are fixed, and these are them.
+    #[test]
+    fn the_queries_ask_for_what_is_mine_and_not_done() {
+        assert!(JIRA_MINE.contains("assignee = currentUser() OR reporter = currentUser()"));
+        assert!(JIRA_MINE.contains("statusCategory != Done"));
+        assert!(AZURE_MINE.contains("[System.AssignedTo] = @Me OR [System.CreatedBy] = @Me"));
+        assert!(AZURE_MINE.contains("@project"));
     }
 
     /// The convention this whole loop exists to keep. The key keeps its case in

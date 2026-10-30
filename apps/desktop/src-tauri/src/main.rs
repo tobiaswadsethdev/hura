@@ -608,13 +608,6 @@ fn add_tracker(tracker: TrackerSource, token: Option<String>) -> Result<Vec<Conf
     change_trackers(|t| t.add(&tracker, token.as_deref()))
 }
 
-/// Replace a tracker by its current name, which is how its filters are edited.
-/// Its token stays.
-#[tauri::command(async)]
-fn update_tracker(name: String, tracker: TrackerSource) -> Result<Vec<Configured>, Failed> {
-    change_trackers(|t| t.update(&name, &tracker))
-}
-
 #[tauri::command(async)]
 fn set_tracker_token(name: String, token: String) -> Result<Vec<Configured>, Failed> {
     change_trackers(|t| t.set_token(&name, &token))
@@ -705,7 +698,9 @@ fn my_skills() -> Vec<String> {
         .collect()
 }
 
-/// Your tickets: what each tracker's filters match, read from this machine.
+/// What is yours on every tracker: the tickets assigned to you or created by
+/// you, and the pull requests you opened or that wait on you, read from this
+/// machine.
 ///
 /// The server is asked one thing, and only for the branch names: its
 /// `branch_prefix`, so a ticket suggests the branch a session started from it
@@ -822,36 +817,8 @@ fn users(
     hura_core::tracker::users(&stored, &key, &query, assignable).map_err(failed)
 }
 
-/// Every board the Jira trackers' accounts can see: the board view's picker.
-#[tauri::command(async)]
-fn boards() -> Result<hura_core::tracker::Boards, Failed> {
-    Ok(hura_core::tracker::boards(load_trackers()?.list()))
-}
-
-/// One board, its columns and the cards in each, read from this machine like
-/// the filters -- and like them, the server is asked only for the branch
-/// prefix its cards suggest.
-#[tauri::command(async)]
-fn board(
-    server: Option<String>,
-    tracker: String,
-    id: String,
-) -> Result<hura_core::tracker::BoardView, Failed> {
-    let trackers = load_trackers()?;
-    let stored = trackers
-        .list()
-        .iter()
-        .find(|t| t.source.name == tracker)
-        .ok_or_else(|| failed(format!("no tracker called `{tracker}`")))?;
-    // A board with a wrong prefix on its branches is still a board; the
-    // filters say why when the server is not answering, and saying it twice
-    // is noise.
-    let (prefix, _) = branch_prefix(server.as_deref());
-    hura_core::tracker::board(stored, &id, &prefix).map_err(failed)
-}
-
-/// One ticket in full -- description, comments, the people on it -- read
-/// from this machine with the tracker's stored token, like the board.
+/// One ticket in full (description, comments, the people on it), read from
+/// this machine with the tracker's stored token, like the sidebar.
 #[tauri::command(async)]
 fn ticket(tracker: String, key: String) -> Result<hura_core::tracker::Issue, Failed> {
     let trackers = load_trackers()?;
@@ -1117,7 +1084,6 @@ fn main() {
             secret,
             trackers,
             add_tracker,
-            update_tracker,
             set_tracker_token,
             forget_tracker,
             upload_skills,
@@ -1125,8 +1091,6 @@ fn main() {
             my_skills,
             tickets,
             ticket,
-            boards,
-            board,
             edit_form,
             save_ticket,
             transitions,
