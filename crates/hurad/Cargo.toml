@@ -32,3 +32,6 @@ portable-pty = "0.9"
 rand = "0.10"
 sha2 = "0.11"
 subtle = "2"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+base64 = "0.22"
+ring = "0.17"

@@ -1,0 +1,108 @@
+[
+  {
+    "ask_id": "toolu_01abc",
+    "body": "Bash: npm test -- --runInBand && echo \"<done>\"",
+    "encrypted": "oKGio6SlpqeoqaqrnToIRDGnZ51YR-G6f1e0uwPYKjK-lTEZ_npP8hPOVzvwBTOKy0s8H3O-ZqdtA6HDZVknOwrqOhAxMysqwQPxkJmRpUId15GOvYy9eeGq7JzrK87Hra65JsxJWvXf_3PIraZWkn4AdSeGaFnG385mNrej0g",
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "kind": "claude_permission",
+    "name": "permission request",
+    "nonce": "oKGio6Slpqeoqaqr",
+    "plaintext": "{\"title\":\"fix-tests\",\"subtitle\":\"studio\",\"body\":\"Bash: npm test -- --runInBand && echo \\\"<done>\\\"\"}",
+    "server_id": "h_aaaabbbbccccdddd",
+    "session": "fix-tests",
+    "subtitle": "studio",
+    "title": "fix-tests"
+  },
+  {
+    "ask_id": null,
+    "body": "Claude needs your input",
+    "encrypted": "oKGio6SlpqeoqaqrnToIRDGnZ51YR-G6f1e0uwPYKjK-lTEZ_npP8hPOVzvwBTOKy0s8H3O-ZqdtA6HDZVgqKRe0f14vO24611D838HOpQZe1ZGU1p8DuxNn-VbOlmpseVZiHnEQ",
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "kind": "claude_needs_input",
+    "name": "needs input",
+    "nonce": "oKGio6Slpqeoqaqr",
+    "plaintext": "{\"title\":\"fix-tests\",\"subtitle\":\"studio\",\"body\":\"Claude needs your input\"}",
+    "server_id": "h_aaaabbbbccccdddd",
+    "session": "fix-tests",
+    "subtitle": "studio",
+    "title": "fix-tests"
+  },
+  {
+    "ask_id": null,
+    "body": "Test notification from studio",
+    "encrypted": "oKGio6SlpqeoqaqrnToIRDGnZ51YR--mdRvi8lLONnTrlXhOyGtV8l_FGnW7EC6czlY6UjG8YrpmF6OKM24iIQ3yZxivWgnw4cSrMggjps1Twgo",
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "kind": "test",
+    "name": "test without session or subtitle",
+    "nonce": "oKGio6Slpqeoqaqr",
+    "plaintext": "{\"title\":\"hura\",\"body\":\"Test notification from studio\"}",
+    "server_id": "h_aaaabbbbccccdddd",
+    "session": null,
+    "subtitle": "",
+    "title": "hura"
+  },
+  {
+    "ask_id": null,
+    "body": "Done.",
+    "encrypted": "oKGio6SlpqeoqaqrnToIRDGnZ51YR0R6xNMDd7MFmrlRHoHFX6flL7wCtqgR34RWbIuQlJw1x2HK00BQhLKF4aF52deC98j3Z9lGGXcVRsbzDCdJN0s8sUxnDxMOomgNBmha0y3c_TNyM449TC3oAsAHTDJdcsX5RiEugef5ogcdnFiV7GYdDXf8MeQGuHPWEOtDvvTwPSLR41J_S3Buwn15OSU-ZH5cbG73ggWx3Bh1w4O_QaPoi6x7dUi0jz4xwc9tl0ErtZCfK9z-95-PYKN4eEQw9INmio3xHLBpQsoTQavNj7UxkTGj-F1KIkZU3QS2HeyeIDAmcmJFKfmtUex8UvotBEH3Xl0YUqg58WdK65y9",
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "kind": "claude_turn_finished",
+    "name": "clipped title",
+    "nonce": "oKGio6Slpqeoqaqr",
+    "plaintext": "{\"title\":\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé…\",\"subtitle\":\"studio\",\"body\":\"Done.\"}",
+    "server_id": "h_aaaabbbbccccdddd",
+    "session": "readme",
+    "subtitle": "studio",
+    "title": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+  },
+  {
+    "ask_id": "toolu_02xyz",
+    "encrypted": "oKGio6SlpqeoqaqrnToIRDGnZ51YR-G6f1e0uwPYKjK-lTEZ_npP8hPOVzvwBTOKy0s8H3O-ZqdtA6HDZVknOwrqOhAxMysqwQPxkJmRpUId15GOvYy9eeGq7JzrK87Hra65JsxJWvXf_3PIraZWkn4AdSeGaFnG385mNrej0g",
+    "fails": true,
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "kind": "claude_permission",
+    "name": "another request",
+    "server_id": "h_aaaabbbbccccdddd",
+    "session": "fix-tests"
+  },
+  {
+    "ask_id": null,
+    "encrypted": "oKGio6SlpqeoqaqrnToIRDGnZ51YR-G6f1e0uwPYKjK-lTEZ_npP8hPOVzvwBTOKy0s8H3O-ZqdtA6HDZVknOwrqOhAxMysqwQPxkJmRpUId15GOvYy9eeGq7JzrK87Hra65JsxJWvXf_3PIraZWkn4AdSeGaFnG385mNrej0g",
+    "fails": true,
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "kind": "claude_permission",
+    "name": "no request",
+    "server_id": "h_aaaabbbbccccdddd",
+    "session": "fix-tests"
+  },
+  {
+    "ask_id": "toolu_01abc",
+    "encrypted": "oKGio6SlpqeoqaqrnToIRDGnZ51YR-G6f1e0uwPYKjK-lTEZ_npP8hPOVzvwBTOKy0s8H3O-ZqdtA6HDZVknOwrqOhAxMysqwQPxkJmRpUId15GOvYy9eeGq7JzrK87Hra65JsxJWvXf_3PIraZWkn4AdSeGaFnG385mNrej0g",
+    "fails": true,
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "kind": "claude_permission",
+    "name": "another session",
+    "server_id": "h_aaaabbbbccccdddd",
+    "session": "readme"
+  },
+  {
+    "ask_id": "toolu_01abc",
+    "encrypted": "oKGio6SlpqeoqaqrnToIRDGnZ51YR-G6f1e0uwPYKjK-lTEZ_npP8hPOVzvwBTOKy0s8H3O-ZqdtA6HDZVknOwrqOhAxMysqwQPxkJmRpUId15GOvYy9eeGq7JzrK87Hra65JsxJWvXf_3PIraZWkn4AdSeGaFnG385mNrej0g",
+    "fails": true,
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "kind": "claude_permission",
+    "name": "another server",
+    "server_id": "h_eeeeffffgggghhhh",
+    "session": "fix-tests"
+  },
+  {
+    "ask_id": "toolu_01abc",
+    "encrypted": "oKGio6SlpqeoqaqrnToIRDGnZ51YR-G6f1e0uwPYKjK-lTEZ_npP8hPOVzvwBTOKy0s8H3O-ZqdtA6HDZVknOwrqOhAxMysqwQPxkJmRpUId15GOvYy9eeGq7JzrK87Hra65JsxJWvXf_3PIraZWkn4AdSeGaFnG385mNrej0g",
+    "fails": true,
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "kind": "claude_needs_input",
+    "name": "another kind",
+    "server_id": "h_aaaabbbbccccdddd",
+    "session": "fix-tests"
+  }
+]

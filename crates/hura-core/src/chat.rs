@@ -385,6 +385,35 @@ fn is_closable(name: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// Answer one permission request by its id, in whichever conversation holds
+/// it: what an answer from a notification is, since it knows the request and
+/// not the conversation. Refused by the host once the request has been
+/// answered, from here or anywhere else.
+pub fn answer(
+    backend: &dyn Backend,
+    session: &Session,
+    id: &str,
+    decision: &ChatDecision,
+) -> Result<(), String> {
+    let decision = serde_json::to_string(decision).map_err(|e| e.to_string())?;
+    let out = backend
+        .exec_stdin(
+            session,
+            &["sh", "-c", &format!("hura-agent answer {}", sh_quote(id))],
+            decision.as_bytes(),
+        )
+        .map_err(|e| e.to_string())?;
+    if !out.ok() {
+        let why = out.stderr.trim();
+        return Err(if why.is_empty() {
+            format!("hura-agent exited with {}", out.exit_code)
+        } else {
+            why.strip_prefix("hura-agent: ").unwrap_or(why).to_string()
+        });
+    }
+    Ok(())
+}
+
 /// Say something to the agent's conversation, as you.
 ///
 /// What [`crate::ops::tell`] is for a chat session: a review goes in as one

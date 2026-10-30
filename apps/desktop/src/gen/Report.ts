@@ -6,4 +6,17 @@ export type Report = { state: State,
 /**
  * Tool name or prompt message, when one is known.
  */
-detail: string | null, source: Source, };
+detail: string | null, source: Source, 
+/**
+ * While waiting, the id of the request waited on, when the agent says:
+ * a chat session's host does, and a terminal agent's screen cannot.
+ * What an answer from outside the window names, so it answers that
+ * request and not whichever one is waiting by the time it arrives.
+ */
+ask: string | null, 
+/**
+ * While waiting on [`Report::ask`], one line saying what it asks:
+ * `Bash: npm test`. What a notification that can answer it shows, since
+ * Allow is only an answer if the screen says what is being allowed.
+ */
+prompt: string | null, };

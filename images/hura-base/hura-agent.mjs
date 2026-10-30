@@ -117,6 +117,31 @@ export class Inbox {
   }
 }
 
+/// One line saying what a request asks, for a notification that can answer
+/// it: Allow on a lock screen is only an answer if the screen says what is
+/// being allowed. Claude Code's own sentence when it has one, otherwise the
+/// tool and the thing it would act on.
+export function describeAsk(request) {
+  const input = request.input ?? {};
+  const target = [input.command, input.file_path, input.url, input.path, input.pattern].find(
+    (v) => typeof v === "string" && v.trim(),
+  );
+  const line = request.title?.trim() || (target ? `${request.tool}: ${target.trim()}` : request.tool);
+  // Short enough for a notification body, and one line of it.
+  const flat = line.replace(/\s+/g, " ");
+  return flat.length > 300 ? flat.slice(0, 299) + "…" : flat;
+}
+
+/// The conversation holding the request `id`, among them all.
+///
+/// A request id is the tool call's own, so it names one request in one
+/// conversation; an answer from outside the window -- a notification on a
+/// phone -- knows the id and not which conversation it came from.
+export function holding(conversations, id) {
+  for (const c of conversations) if (c.pending.has(id)) return c;
+  return null;
+}
+
 /// What the answer to a permission request becomes, for the SDK.
 ///
 /// Two tools are questions rather than permissions, and answering them is
@@ -144,12 +169,22 @@ export function permissionResult(tool, input, suggestions, decision) {
 /// The session's state across every conversation, as `hura-status` writes it.
 ///
 /// Waiting wins, because a conversation waiting on you is the thing the list
-/// exists to say; then working; then idle.
+/// exists to say; then working; then idle. A wait also names the request it
+/// is waiting on, which is what lets a notification on a phone answer that
+/// request and no other: see `hura-agent answer`.
 export function sessionStatus(conversations, now = Date.now()) {
   let running = null;
   for (const c of conversations) {
     const ask = c.pending.values().next().value;
-    if (ask) return { state: "waiting", at: Math.floor(now / 1000), detail: ask.request.tool };
+    if (ask) {
+      return {
+        state: "waiting",
+        at: Math.floor(now / 1000),
+        detail: ask.request.tool,
+        ask: ask.request.id,
+        prompt: describeAsk(ask.request),
+      };
+    }
     if (c.activity === "running" && !running) running = c;
   }
   if (running) {
@@ -753,6 +788,16 @@ class Client {
         await target.send(String(req.text ?? ""));
         return this.#reply({});
       }
+      // Answer a request by its id alone, without attaching: what an answer
+      // from a notification is, since it knows which request and nothing
+      // else. Refused once the request has been answered from anywhere.
+      case "decide": {
+        const id = String(req.id);
+        const target = holding(this.host.conversations.values(), id);
+        if (!target) throw new Error("that question has already been answered");
+        target.answer(id, req.decision ?? {});
+        return this.#reply({});
+      }
     }
     if (!c) throw new Error("attach to a conversation first");
     switch (req.op) {
@@ -881,8 +926,16 @@ async function main(argv) {
       await request({ op: "tell", conv: name ?? AGENT, text });
       return;
     }
+    // `hura-agent answer ID`, with the decision as JSON on stdin:
+    // `{"allow": true}`. On stdin for the reason `send` takes its text there.
+    case "answer": {
+      if (!name) throw new Error("usage: hura-agent answer ID");
+      const decision = JSON.parse((await readStdin()).trim() || "{}");
+      await request({ op: "decide", id: name, decision });
+      return;
+    }
     default:
-      throw new Error("usage: hura-agent serve|list|new|close NAME|send NAME");
+      throw new Error("usage: hura-agent serve|list|new|close NAME|send NAME|answer ID");
   }
 }
 

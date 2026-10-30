@@ -12,6 +12,8 @@
 | [skills.md](skills.md) | carrying your own skills into a sandbox, from either machine |
 | [mcp.md](mcp.md) | MCP servers the server runs or you do, their secrets, and what an MCP server costs you |
 | [server.md](server.md) | running `hurad`, pairing a client on another machine, and what a token is worth |
+| [notifications.md](notifications.md) | being told on a phone when a session waits on you, and answering it from there |
+| [relay-api.md](relay-api.md) | the push relay between `hurad` and the iOS app: its API, and how notification text is encrypted |
 | [sandbox-image.md](sandbox-image.md) | what the image bakes in, and why the agent runs in auto mode |
 | [architecture.md](architecture.md) | the crates, the modules, and three rules worth knowing before changing them |
 | [sbx-daemon.service](sbx-daemon.service) | the systemd user unit for the sandbox runtime's daemon |

@@ -6,6 +6,8 @@ import test from "node:test";
 
 import {
   Inbox,
+  describeAsk,
+  holding,
   kept,
   nextName,
   permissionResult,
@@ -98,11 +100,33 @@ test("waiting outranks working, and working outranks idle", () => {
   const idle = conversation();
   const working = conversation({ activity: "running", tool: "Bash" });
   const asking = conversation({
-    pending: new Map([["t1", { request: { tool: "Edit" } }]]),
+    pending: new Map([["t1", { request: { id: "t1", tool: "Edit" } }]]),
   });
   assert.deepEqual(sessionStatus([idle], now), { state: "idle", at: 1_700_000_000, detail: "" });
   assert.deepEqual(sessionStatus([idle, working], now), { state: "running", at: 1_700_000_000, detail: "Bash" });
-  assert.deepEqual(sessionStatus([working, asking], now), { state: "waiting", at: 1_700_000_000, detail: "Edit" });
+  assert.deepEqual(sessionStatus([working, asking], now), {
+    state: "waiting",
+    at: 1_700_000_000,
+    detail: "Edit",
+    ask: "t1",
+    prompt: "Edit",
+  });
+});
+
+test("a request is described by what it would do", () => {
+  assert.equal(describeAsk({ tool: "Bash", input: { command: "npm  test\n  -- --watch" } }), "Bash: npm test -- --watch");
+  assert.equal(describeAsk({ tool: "Edit", input: { file_path: "/sandbox/repo/README.md" } }), "Edit: /sandbox/repo/README.md");
+  assert.equal(describeAsk({ tool: "Bash", title: "Claude wants to run make", input: { command: "make" } }), "Claude wants to run make");
+  assert.equal(describeAsk({ tool: "Mystery", input: {} }), "Mystery");
+  assert.equal(describeAsk({ tool: "Bash", input: { command: "x".repeat(400) } }).length, 300);
+});
+
+test("a request is found by its id in whichever conversation holds it", () => {
+  const first = conversation({ pending: new Map([["t1", { request: { id: "t1", tool: "Edit" } }]]) });
+  const second = conversation({ pending: new Map([["t2", { request: { id: "t2", tool: "Bash" } }]]) });
+  assert.equal(holding([first, second], "t2"), second);
+  assert.equal(holding([first, second], "t1"), first);
+  assert.equal(holding([first, second], "gone"), null);
 });
 
 test("the usage file reads like a status line payload", () => {

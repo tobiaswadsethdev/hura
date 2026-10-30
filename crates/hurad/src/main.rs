@@ -14,6 +14,7 @@
 mod attach;
 mod auth;
 mod forward;
+mod push;
 mod relay;
 mod rpc;
 mod serve;
@@ -1427,9 +1428,20 @@ fn serve(opts: Serve) -> Fallible {
         }
     }
 
+    let pusher = Arc::new(push::Pusher::open(push::Pusher::default_dir())?);
     let server = Arc::new(serve::Server {
         tokens: std::sync::RwLock::new(tokens),
+        push: pusher.clone(),
     });
+
+    // Delivery blocks on HTTPS, so it has a thread of its own rather than a
+    // runtime worker.
+    {
+        let pusher = pusher.clone();
+        std::thread::Builder::new()
+            .name("push".into())
+            .spawn(move || pusher.run(&push::Https::new()))?;
+    }
 
     // Whether to look for new releases while running. On by default: a server
     // that sits behind a window for months is exactly the thing that goes stale
@@ -1448,6 +1460,7 @@ fn serve(opts: Serve) -> Fallible {
             tokio::spawn(watch_for_releases());
         }
         tokio::spawn(keep_feeds());
+        tokio::spawn(push::watch::run(server.clone(), pusher));
 
         let config = axum_server::tls_rustls::RustlsConfig::from_pem(
             identity.cert_pem.into_bytes(),
