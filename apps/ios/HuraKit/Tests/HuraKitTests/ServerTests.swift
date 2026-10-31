@@ -118,6 +118,26 @@ struct PushCryptoTests {
         }
     }
 
+    /// The phone's name for the server first, then the project the server
+    /// named; once, when the server is named after its own host.
+    @Test func aNotificationIsSubtitledWithThePhonesNameForItsServer() throws {
+        let keys = InMemoryPushKeyStore()
+        let payload: [AnyHashable: Any] = ["hura": ["server_id": "h_aaaabbbbccccdddd", "kind": "claude_turn_finished"]]
+        #expect(PushCrypto.serverName(of: payload, keys: keys) == nil)
+        try keys.saveName("Mac", serverID: "h_aaaabbbbccccdddd")
+        let name = PushCrypto.serverName(of: payload, keys: keys)
+        #expect(name == "Mac")
+
+        #expect(PushCrypto.subtitle("scope-creep", serverName: name) == "Mac · scope-creep")
+        #expect(PushCrypto.subtitle("narcissus", serverName: "narcissus") == "narcissus")
+        #expect(PushCrypto.subtitle(nil, serverName: name) == "Mac")
+        #expect(PushCrypto.subtitle("scope-creep", serverName: nil) == "scope-creep")
+        #expect(PushCrypto.subtitle(nil, serverName: nil) == "")
+
+        try keys.delete(serverID: "h_aaaabbbbccccdddd")
+        #expect(PushCrypto.serverName(of: payload, keys: keys) == nil)
+    }
+
     /// What hurad clips a title to: 100 code points, the last an ellipsis.
     private func clipped(_ s: String) -> String {
         s.count <= 100 ? s : String(s.prefix(99)) + "…"

@@ -29,7 +29,10 @@ a notification, and that is all it can do. The relay stores only a hash of it.
 | A turn finishes: running or waiting, then idle | `claude_turn_finished` | `Claude finished and is waiting for you` |
 | A session fails | `claude_failed` | `The session failed` |
 
-The title is the session's name, and the subtitle is this machine's hostname.
+The title is the session's name, and the subtitle is its project -- or, for a
+session filed under none, this machine's hostname. The phone puts its own name
+for the server in front, as `Mac · scope-creep`, because the server does not
+know what the phone calls it.
 `claude_permission` follows the `claude_needs_input` preference, because to a
 person they are the same thing.
 

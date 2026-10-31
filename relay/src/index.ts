@@ -52,6 +52,7 @@ const routes: Array<[string, RegExp, Handler]> = [
   ["POST", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})\/test$/, testDevice],
   ["POST", /^\/v1\/servers$/, createLink],
   ["GET", /^\/v1\/servers$/, listLinks],
+  ["PATCH", /^\/v1\/servers\/(?<link>l_[a-z2-7]{16})$/, renameLink],
   ["DELETE", /^\/v1\/servers\/(?<link>l_[a-z2-7]{16})$/, deleteLink],
   ["GET", /^\/v1\/link$/, checkLink],
   ["POST", /^\/v1\/events$/, postEvent],
@@ -221,6 +222,20 @@ async function listLinks(req: Request, env: RelayEnv): Promise<Response> {
       last_event_at: iso(l.last_event_at),
     })),
   });
+}
+
+/// A new label, for when the server is renamed on the phone: it is the title
+/// of a notification the phone could not decrypt.
+async function renameLink(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
+  const dev = await authDevice(req, env);
+  const body = await readJSON(req);
+  const label = str(body, "label", { max: 100 })!.trim();
+  if (!label) throw badRequest("label must not be empty");
+  const r = await env.DB.prepare("UPDATE links SET label = ? WHERE id = ? AND device_id = ?")
+    .bind(label, p.link, dev.id)
+    .run();
+  if (!r.meta.changes) throw notFound();
+  return json(204, null);
 }
 
 async function deleteLink(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {

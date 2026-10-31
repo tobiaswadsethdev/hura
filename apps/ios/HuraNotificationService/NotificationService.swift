@@ -19,7 +19,8 @@ final class NotificationService: UNNotificationServiceExtension {
         let keys = KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup)
         if let text = PushCrypto.open(payload: content.userInfo, keys: keys) {
             content.title = text.title
-            content.subtitle = text.subtitle ?? ""
+            content.subtitle = PushCrypto.subtitle(text.subtitle, serverName: PushCrypto.serverName(of: content.userInfo,
+                                                                                                    keys: keys))
             content.body = text.body
         }
         contentHandler(content)

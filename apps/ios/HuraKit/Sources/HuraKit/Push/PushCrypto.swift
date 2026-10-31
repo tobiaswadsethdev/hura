@@ -64,6 +64,20 @@ public enum PushCrypto {
         return try? open(enc, key: key, serverID: serverID, kind: kind,
                          session: h["session"] as? String, askID: h["ask_id"] as? String)
     }
+
+    /// What this phone calls the server a notification is from.
+    public static func serverName(of payload: [AnyHashable: Any], keys: PushKeyStore) -> String? {
+        guard let h = payload["hura"] as? [String: Any], let serverID = h["server_id"] as? String else { return nil }
+        return (try? keys.name(serverID: serverID)).flatMap { $0 }
+    }
+
+    /// The phone's name for the server, then what the server said: its
+    /// project, or its host name for a session with none.
+    public static func subtitle(_ said: String?, serverName: String?) -> String {
+        let parts = [serverName, said].compactMap { $0?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        // A server named after its own host would say so twice.
+        return (parts.count == 2 && parts[0] == parts[1] ? [parts[0]] : parts).joined(separator: " · ")
+    }
 }
 
 extension Data {
@@ -81,23 +95,29 @@ extension Data {
     }
 }
 
-/// Push keys, one per server. The notification service extension reads
-/// them, so they live in a Keychain group shared with it, apart from the
-/// server records: the extension can decrypt notifications but never sees
-/// a pairing token.
+/// Push keys, one per server, and what this phone calls each server. The
+/// notification service extension reads them, so they live in a Keychain
+/// group shared with it, apart from the server records: the extension can
+/// decrypt notifications and name their server but never sees a pairing
+/// token.
 public protocol PushKeyStore: Sendable {
     func key(serverID: String) throws -> Data?
     func save(_ key: Data, serverID: String) throws
+    /// Removes the key and the name.
     func delete(serverID: String) throws
+    func name(serverID: String) throws -> String?
+    func saveName(_ name: String, serverID: String) throws
 }
 
 public struct KeychainPushKeyStore: PushKeyStore {
     private let items: KeychainItems
+    private let names: KeychainItems
 
     /// `accessGroup` is the group shared with the extension; nil uses the
     /// app's own (tests).
     public init(service: String = "hura.pushkeys", accessGroup: String?) {
         items = KeychainItems(service: service, accessGroup: accessGroup)
+        names = KeychainItems(service: service + ".names", accessGroup: accessGroup)
     }
 
     /// The shared group from the `HuraKeychainGroup` Info.plist key, which
@@ -108,17 +128,38 @@ public struct KeychainPushKeyStore: PushKeyStore {
 
     public func key(serverID: String) throws -> Data? { try items.get(account: serverID) }
     public func save(_ key: Data, serverID: String) throws { try items.set(key, account: serverID) }
-    public func delete(serverID: String) throws { try items.delete(account: serverID) }
+    public func delete(serverID: String) throws {
+        try items.delete(account: serverID)
+        try names.delete(account: serverID)
+    }
+
+    public func name(serverID: String) throws -> String? {
+        try names.get(account: serverID).map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    public func saveName(_ name: String, serverID: String) throws {
+        guard try self.name(serverID: serverID) != name else { return }
+        try names.set(Data(name.utf8), account: serverID)
+    }
 }
 
 /// For tests and previews.
 public final class InMemoryPushKeyStore: PushKeyStore, @unchecked Sendable {
     private let lock = NSLock()
     private var keys: [String: Data] = [:]
+    private var names: [String: String] = [:]
 
     public init() {}
 
     public func key(serverID: String) throws -> Data? { lock.withLock { keys[serverID] } }
     public func save(_ key: Data, serverID: String) throws { lock.withLock { keys[serverID] = key } }
-    public func delete(serverID: String) throws { _ = lock.withLock { keys.removeValue(forKey: serverID) } }
+    public func delete(serverID: String) throws {
+        lock.withLock {
+            keys[serverID] = nil
+            names[serverID] = nil
+        }
+    }
+
+    public func name(serverID: String) throws -> String? { lock.withLock { names[serverID] } }
+    public func saveName(_ name: String, serverID: String) throws { lock.withLock { names[serverID] = name } }
 }

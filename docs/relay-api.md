@@ -106,6 +106,16 @@ Links a server to the device. The app then hands the push token to that
                   "created_at": "2026-10-30T21:00:00.000Z", "last_event_at": null}]}
 ```
 
+### `PATCH /v1/servers/{link_id}`
+
+```json
+→ {"label": "Mac"}
+```
+
+Renames the link, when the server is renamed on the phone. The label is the
+title of a notification the phone could not decrypt. `204`; `404` for a link
+that is not this device's.
+
 ### `DELETE /v1/servers/{link_id}`
 
 Deletes the link; its push token stops working at once. `204`.

@@ -105,6 +105,7 @@ final class AppModel {
         r.name = name
         try store.save(r)
         server.update(record: r)
+        Task { try? await push.renamed(server) }
     }
 
     private func save(_ server: Server, pushLinkID: String?) throws {
@@ -183,6 +184,7 @@ final class AppModel {
     /// lost the route or had its token rejected.
     private func repairPush(_ server: Server) async {
         guard server.record.pushLinkID != nil, push.device != nil else { return }
+        push.remember(server)
         do {
             if needsRelink.remove(server.id) != nil {
                 let prefs = try? await server.pushStatus().prefs

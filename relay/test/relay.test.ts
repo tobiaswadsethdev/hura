@@ -195,8 +195,16 @@ describe("links", () => {
     const check = await call("GET", "/v1/link", { auth: l.push_token });
     expect(check.json).toEqual({ link_id: l.link_id, label: "studio", device_enabled: true });
 
-    // Another device can't delete it.
+    // Renamed by its own device only.
     const other = await device();
+    const rename = (auth: string, label: string) =>
+      call("PATCH", `/v1/servers/${l.link_id}`, { auth, body: { label } });
+    expect((await rename(other.device_secret, "mine")).status).toBe(404);
+    expect((await rename(d.device_secret, "  ")).status).toBe(400);
+    expect((await rename(d.device_secret, "Mac")).status).toBe(204);
+    expect((await call("GET", "/v1/link", { auth: l.push_token })).json.label).toBe("Mac");
+
+    // Another device can't delete it.
     expect((await call("DELETE", `/v1/servers/${l.link_id}`, { auth: other.device_secret })).status).toBe(404);
     expect((await call("DELETE", `/v1/servers/${l.link_id}`, { auth: d.device_secret })).status).toBe(204);
     expect((await call("GET", "/v1/link", { auth: l.push_token })).status).toBe(401);

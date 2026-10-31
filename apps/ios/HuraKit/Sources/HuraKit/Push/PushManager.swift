@@ -98,7 +98,23 @@ public final class PushManager {
             throw error
         }
         try keys.save(key, serverID: server.id)
+        try? keys.saveName(server.record.name, serverID: server.id)
         return link.linkID
+    }
+
+    /// Tells the notification extension what this phone calls `server`, which
+    /// it puts before what the server says: the server knows only its own
+    /// host name.
+    public func remember(_ server: Server) {
+        try? keys.saveName(server.record.name, serverID: server.id)
+    }
+
+    /// After `server` is renamed on this phone: the extension's copy, and the
+    /// relay's label, which titles a notification that could not be decrypted.
+    public func renamed(_ server: Server) async throws {
+        remember(server)
+        guard let relay, let device, let id = server.record.pushLinkID else { return }
+        try await relay.rename(id, label: server.record.name, device: device)
     }
 
     /// Stops notifications from `server`. Both halves are best effort: a

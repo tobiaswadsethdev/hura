@@ -1591,10 +1591,19 @@ fn pair(name: &str, host: Option<String>, port: u16, no_qr: bool) -> Fallible {
 }
 
 fn default_host() -> String {
+    // `/etc/hostname` is Linux's; a Mac has none, and asking `hostname` is
+    // what keeps it from being `localhost` there.
     std::fs::read_to_string("/etc/hostname")
         .ok()
+        .or_else(|| {
+            std::process::Command::new("hostname")
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        })
         .map(|h| h.trim().to_string())
-        .filter(|h| !h.is_empty())
+        .filter(|h| !h.is_empty() && !h.contains(char::is_whitespace))
         .unwrap_or_else(|| "localhost".to_string())
 }
 

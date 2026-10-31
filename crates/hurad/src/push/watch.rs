@@ -39,6 +39,9 @@ const EVERY: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seen {
     pub name: String,
+    /// The project it is filed under, which is what a notification is
+    /// subtitled with: a person knows their projects, not their host names.
+    pub project: Option<String>,
     /// The record's state: `failed` is the one that matters here.
     pub record: State,
     /// What the agent is doing, when the poll could tell.
@@ -203,6 +206,7 @@ fn observe() -> Vec<Seen> {
             };
             Seen {
                 name: s.name.clone(),
+                project: s.project.clone(),
                 record: s.state,
                 agent: report.as_ref().map(|r| r.state),
                 ask: report.as_ref().and_then(|r| r.ask.clone()),
@@ -213,10 +217,20 @@ fn observe() -> Vec<Seen> {
         .collect()
 }
 
+/// What a session's notification is subtitled with: its project, or the
+/// machine for one that has none.
+fn subtitle(seen: &[Seen], session: &str, host: &str) -> String {
+    seen.iter()
+        .find(|s| s.name == session)
+        .and_then(|s| s.project.clone())
+        .unwrap_or_else(|| host.to_string())
+}
+
 /// Watch until the process ends.
 pub async fn run(server: Arc<Server>, pusher: Arc<Pusher>) {
     let mut watch = Watch::default();
-    // Under each session's name, which machine it is on.
+    // Under each session's name, its project, or for one without, which
+    // machine it is on. The phone puts its own name for the server first.
     let host = crate::default_host();
     loop {
         tokio::time::sleep(EVERY).await;
@@ -235,12 +249,13 @@ pub async fn run(server: Arc<Server>, pusher: Arc<Pusher>) {
             continue;
         };
         for said in watch.look(&seen) {
+            let subtitle = subtitle(&seen, &said.session, &host);
             pusher.enqueue(
                 Notification {
                     event_id: pusher.event_id(),
                     kind: said.kind.into(),
                     title: said.session.clone(),
-                    subtitle: host.clone(),
+                    subtitle,
                     body: said.body,
                     session: Some(said.session),
                     ask_id: said.ask,
@@ -258,6 +273,7 @@ mod tests {
     fn seen(name: &str, record: State, agent: Option<State>) -> Seen {
         Seen {
             name: name.into(),
+            project: None,
             record,
             agent,
             detail: None,
@@ -359,6 +375,20 @@ mod tests {
             ..asking_for("a", "Bash", "toolu_1")
         }]);
         assert_eq!(said[0].body, "Bash: npm test");
+    }
+
+    #[test]
+    fn a_notification_is_subtitled_with_its_project_or_else_the_machine() {
+        let seen = [
+            Seen {
+                project: Some("scope-creep".into()),
+                ..seen("a", State::Running, None)
+            },
+            seen("b", State::Running, None),
+        ];
+        assert_eq!(subtitle(&seen, "a", "box"), "scope-creep");
+        assert_eq!(subtitle(&seen, "b", "box"), "box");
+        assert_eq!(subtitle(&seen, "gone", "box"), "box");
     }
 
     #[test]
