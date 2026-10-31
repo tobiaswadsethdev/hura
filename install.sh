@@ -102,17 +102,15 @@ cargo_bin() { printf '%s\n' "${CARGO_HOME:-$HOME/.cargo}/bin"; }
 
 # ------------------------------------------------------------------- platform
 
-# Only Linux, and only the two architectures releases are built for. The
-# isolation hura provides is kernel-enforced, so there is nothing to install
-# anywhere else -- but say that rather than failing on a 404 later.
+# Linux on the two architectures releases are built for, and Apple silicon.
+# Say so rather than failing on a 404 later.
 detect_target() {
     os="$(uname -s)"
-    [ "$os" = "Linux" ] || die "hura is Linux-only: the isolation is kernel-enforced.
-     (this is $os)"
-    case "$(uname -m)" in
-        x86_64 | amd64) printf 'x86_64-unknown-linux-musl\n' ;;
-        aarch64 | arm64) printf 'aarch64-unknown-linux-musl\n' ;;
-        *) die "no release is built for $(uname -m)
+    case "$os/$(uname -m)" in
+        Linux/x86_64 | Linux/amd64) printf 'x86_64-unknown-linux-musl\n' ;;
+        Linux/aarch64 | Linux/arm64) printf 'aarch64-unknown-linux-musl\n' ;;
+        Darwin/arm64) printf 'aarch64-apple-darwin\n' ;;
+        *) die "no release is built for $os on $(uname -m)
      fix: --from-source, which needs a Rust toolchain" ;;
     esac
 }
@@ -162,7 +160,7 @@ install_release() {
     # An unverified binary is not installed. `--ignore-missing` because the
     # file covers every architecture's asset and only one was downloaded.
     say "==> verifying"
-    (cd "$tmp" && sha256sum --check --ignore-missing --status SHA256SUMS) ||
+    (cd "$tmp" && $SHA256 --check --ignore-missing --status SHA256SUMS) ||
         die "checksum mismatch for ${asset} -- do not run it
      fix: report this at https://github.com/${REPO}/security/advisories/new"
 
@@ -233,7 +231,10 @@ have curl || die "curl is needed to download anything.
 if [ -n "$FROM_SOURCE" ]; then
     build_from_source
 else
-    have sha256sum || die "sha256sum is needed to verify the download (coreutils)"
+    # `shasum -a 256` where there is no `sha256sum`, as on an older macOS.
+    if have sha256sum; then SHA256=sha256sum
+    elif have shasum; then SHA256="shasum -a 256"
+    else die "sha256sum is needed to verify the download (coreutils)"; fi
     have tar || die "tar is needed to unpack the download"
     install_release
 fi

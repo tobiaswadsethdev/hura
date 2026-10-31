@@ -52,14 +52,15 @@ pub fn current() -> &'static str {
 
 /// The release this build of `hura` would install for itself.
 ///
-/// `None` on a platform no release is built for, which is every platform but
-/// Linux: the isolation is kernel-enforced, so there is nothing to run
-/// elsewhere, and a musl build runs on any distribution without asking about
-/// its libc.
+/// `None` on a platform no release is built for. Linux on both
+/// architectures, as musl builds that run on any distribution without asking
+/// about its libc, and Apple silicon, where a server runs worktree sessions
+/// for the work a Linux VM cannot do.
 fn target_for(os: &str, arch: &str) -> Option<&'static str> {
     match (os, arch) {
         ("linux", "x86_64") => Some("x86_64-unknown-linux-musl"),
         ("linux", "aarch64") => Some("aarch64-unknown-linux-musl"),
+        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
         _ => None,
     }
 }
@@ -514,9 +515,17 @@ fn download(url: &str, to: &Path) -> Result<(), String> {
 }
 
 fn sha256(path: &Path) -> Result<String, String> {
+    // `shasum` where there is no `sha256sum`, which is an older macOS. The
+    // two print the same line.
     let out = Command::new("sha256sum")
         .arg(path)
         .output()
+        .or_else(|_| {
+            Command::new("shasum")
+                .args(["-a", "256"])
+                .arg(path)
+                .output()
+        })
         .map_err(|e| format!("sha256sum: {e}"))?;
     if !out.status.success() {
         return Err(format!("could not hash {}", path.display()));
@@ -615,7 +624,7 @@ bbbb *hurad-v0.2.0-aarch64-unknown-linux-musl.tar.gz
     }
 
     #[test]
-    fn releases_are_built_for_linux_only() {
+    fn releases_are_built_for_linux_and_apple_silicon() {
         assert_eq!(
             target_for("linux", "x86_64"),
             Some("x86_64-unknown-linux-musl")
@@ -624,8 +633,8 @@ bbbb *hurad-v0.2.0-aarch64-unknown-linux-musl.tar.gz
             target_for("linux", "aarch64"),
             Some("aarch64-unknown-linux-musl")
         );
-        // The isolation is kernel-enforced, so there is nothing to ship here.
-        assert_eq!(target_for("macos", "aarch64"), None);
+        assert_eq!(target_for("macos", "aarch64"), Some("aarch64-apple-darwin"));
+        assert_eq!(target_for("macos", "x86_64"), None);
         assert_eq!(target_for("linux", "riscv64"), None);
     }
 
@@ -638,7 +647,11 @@ bbbb *hurad-v0.2.0-aarch64-unknown-linux-musl.tar.gz
     /// the agreement is a test rather than a convention.
     #[test]
     fn the_installer_the_workflow_and_the_updater_agree_on_the_names() {
-        for target in ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"] {
+        for target in [
+            "x86_64-unknown-linux-musl",
+            "aarch64-unknown-linux-musl",
+            "aarch64-apple-darwin",
+        ] {
             assert!(
                 RELEASE_WORKFLOW.contains(target),
                 "the release workflow does not build {target}, which this would try to download"
