@@ -1,0 +1,54 @@
+{
+  "allowed": [
+    {
+      "sandbox_id": "hura-probe",
+      "host": "example.com:443",
+      "proxy_type": "forward-bypass",
+      "count": 1,
+      "first_seen": "2026-10-31T09:25:06.836057+01:00",
+      "last_seen": "2026-10-31T09:25:06.836057+01:00"
+    }
+  ],
+  "blocked": [
+    {
+      "sandbox_id": "hura-probe",
+      "host": "github.com:443",
+      "proxy_type": "forward",
+      "rule": "no applicable policies for op(action=net:connect:tcp, resource=net:domain:github.com:443)",
+      "reason": "No matching allow rule (default deny)",
+      "count": 1,
+      "first_seen": "2026-10-31T09:25:06.875591+01:00",
+      "last_seen": "2026-10-31T09:25:06.875591+01:00"
+    },
+    {
+      "sandbox_id": "hura-probe",
+      "host": "ports.ubuntu.com:80",
+      "proxy_type": "forward",
+      "rule": "no applicable policies for op(action=net:connect:tcp, resource=net:domain:ports.ubuntu.com:80)",
+      "reason": "No matching allow rule (default deny)",
+      "count": 4,
+      "first_seen": "2026-10-31T09:24:42.215277+01:00",
+      "last_seen": "2026-10-31T09:24:42.216309+01:00"
+    },
+    {
+      "sandbox_id": "hura-probe",
+      "host": "download.docker.com:443",
+      "proxy_type": "forward",
+      "rule": "no applicable policies for op(action=net:connect:tcp, resource=net:domain:download.docker.com:443)",
+      "reason": "No matching allow rule (default deny)",
+      "count": 1,
+      "first_seen": "2026-10-31T09:24:42.215367+01:00",
+      "last_seen": "2026-10-31T09:24:42.215367+01:00"
+    },
+    {
+      "sandbox_id": "hura-probe",
+      "host": "cli.github.com:443",
+      "proxy_type": "forward",
+      "rule": "no applicable policies for op(action=net:connect:tcp, resource=net:domain:cli.github.com:443)",
+      "reason": "No matching allow rule (default deny)",
+      "count": 1,
+      "first_seen": "2026-10-31T09:24:42.215351+01:00",
+      "last_seen": "2026-10-31T09:24:42.215351+01:00"
+    }
+  ]
+}
