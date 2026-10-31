@@ -265,6 +265,42 @@ with it. `hurad doctor` warns when `sbx-daemon.service` is not active.
 cannot reach is a server that cannot tell you why. It says so (`the sandbox
 runtime did not answer at startup`) and carries on.
 
+## Running it on a Mac, under launchd
+
+A Mac runs `hurad` for [worktree sessions](worktrees.md) beside its sandboxes.
+A LaunchAgent starts it at login, starts it again if it stops, and is what a
+restart is asked of:
+
+```xml
+<!-- ~/Library/LaunchAgents/dev.hura.hurad.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.hura.hurad</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/.local/bin/hurad</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/hurad.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/hurad.log</string>
+</dict>
+</plist>
+```
+
+```sh
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.hura.hurad.plist
+launchctl kickstart -k gui/$(id -u)/dev.hura.hurad    # restart it
+launchctl bootout gui/$(id -u)/dev.hura.hurad         # stop it for good
+```
+
+A release `hurad serve` downloads is applied at its next start, so a
+`kickstart -k` is also how an update takes effect. Releases are built for
+Apple silicon; `install.sh` and `hurad update` pick that build on one.
+
 ---
 
 [← Documentation](README.md) · [README](../README.md)

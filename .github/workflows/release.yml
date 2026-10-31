@@ -48,6 +48,10 @@ jobs:
             runner: ubuntu-latest
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
+          # A Mac runs sessions too: worktree sessions, for the work a Linux
+          # VM cannot do, beside sandboxes that Docker Sandboxes runs there.
+          - target: aarch64-apple-darwin
+            runner: macos-latest
     steps:
       # The tag, explicitly, and not whatever ref the run was started from. On
       # a tag push those are the same thing; on a `workflow_dispatch` they are
@@ -73,8 +77,10 @@ jobs:
       # needs nothing but the linker.
       - name: Install Rust and musl
         run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update
+            sudo apt-get install -y musl-tools
+          fi
           rustup toolchain install stable --profile minimal
           rustup target add ${{ matrix.target }}
           rustup default stable
@@ -110,7 +116,8 @@ jobs:
           # rename, because the `hurad` it installs is the server alone and has
           # no `update` of its own. One `install.sh`, and never again.
           tar -czf "hurad-${TAG}-${{ matrix.target }}.tar.gz" -C "$bin" hurad
-          sha256sum "hurad-${TAG}-${{ matrix.target }}.tar.gz" > "${{ matrix.target }}.sha256"
+          # `shasum`, which both runners have; its output is `sha256sum`'s.
+          shasum -a 256 "hurad-${TAG}-${{ matrix.target }}.tar.gz" > "${{ matrix.target }}.sha256"
 
       - uses: actions/upload-artifact@v7
         with:

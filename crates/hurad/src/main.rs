@@ -902,7 +902,14 @@ fn cmd_update(check: bool, tag: Option<&str>, force: bool) -> Fallible {
             // running server on the old inode until something restarts it, and
             // one still answering the previous version is exactly the confusion
             // this line exists to prevent.
-            println!("  restart it to pick this up: systemctl --user restart hurad");
+            println!(
+                "  restart it to pick this up: {}",
+                if cfg!(target_os = "macos") {
+                    "launchctl kickstart -k gui/$(id -u)/dev.hura.hurad"
+                } else {
+                    "systemctl --user restart hurad"
+                }
+            );
             // The sandbox image is versioned separately and an update is the
             // moment its recipe most likely changed underneath it.
             println!("  `hurad image build` picks up any change to the sandbox image");
