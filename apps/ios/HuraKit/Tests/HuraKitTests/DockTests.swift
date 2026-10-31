@@ -53,6 +53,21 @@ struct EventTargetTests {
 }
 
 struct UnifiedDiffTests {
+    /// An edit is highlighted where it changed; a line with nothing in common
+    /// with its partner, or with none, is not.
+    @Test func anEditedLineKnowsWhereItChanged() {
+        let lines = UnifiedDiff.lines(original: "let url = 'sqlite'\nkeep\nold\n",
+                                      modified: "let url = process.env.DB\nkeep\nnew thing\nextra\n")
+        let spans = UnifiedDiff.changedSpans(lines)
+        let removed = lines.first { $0.kind == .removed && $0.old == 1 }!
+        let added = lines.first { $0.kind == .added && $0.new == 1 }!
+        #expect(spans[removed.id] == 10..<18)
+        #expect(spans[added.id] == 10..<24)
+        // "old" and "new thing" share nothing; "extra" has no partner.
+        #expect(spans.count == 2)
+        #expect(UnifiedDiff.span(Array("abc"), Array("abc")).map { [$0.0, $0.1] } == [3..<3, 3..<3])
+    }
+
     @Test func linesUpBothSides() {
         let lines = UnifiedDiff.lines(original: "a\nb\nc\n", modified: "a\nB\nc\nd\n")
         #expect(lines.map(\.kind) == [.same, .removed, .added, .same, .added])
