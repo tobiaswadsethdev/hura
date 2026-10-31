@@ -68,15 +68,18 @@ public struct TranscriptBlock: Codable, Equatable, Sendable {
     public var isError: Bool?
     public var images: Int?
     public var truncated: Bool?
+    /// tool_result: the images it answered with, such as a picture `Read`.
+    public var pictures: [Picture]?
 
     enum CodingKeys: String, CodingKey {
-        case type, text, id, name, input, images, truncated
+        case type, text, id, name, input, images, truncated, pictures
         case toolUseID = "tool_use_id"
         case isError = "is_error"
     }
 
     public init(type: String, text: String? = nil, id: String? = nil, name: String? = nil, input: JSONValue? = nil,
-                toolUseID: String? = nil, isError: Bool? = nil, images: Int? = nil, truncated: Bool? = nil) {
+                toolUseID: String? = nil, isError: Bool? = nil, images: Int? = nil, truncated: Bool? = nil,
+                pictures: [Picture]? = nil) {
         self.type = type
         self.text = text
         self.id = id
@@ -86,6 +89,7 @@ public struct TranscriptBlock: Codable, Equatable, Sendable {
         self.isError = isError
         self.images = images
         self.truncated = truncated
+        self.pictures = pictures
     }
 }
 

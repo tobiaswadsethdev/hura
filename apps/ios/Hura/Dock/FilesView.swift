@@ -74,7 +74,16 @@ struct FileView: View {
 
     var body: some View {
         Loaded(value: file, error: error) { file in
-            if file.binary {
+            if let image = file.image {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        PictureView(picture: image, maxHeight: .infinity)
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(file.bytes), countStyle: .file))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding()
+                }
+            } else if file.binary {
                 ContentUnavailableView("Binary file", systemImage: "doc.questionmark",
                                        description: Text("\(file.bytes) bytes, so there's nothing to show."))
             } else {

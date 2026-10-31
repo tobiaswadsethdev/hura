@@ -143,3 +143,15 @@ func namesModelsAsAPersonWould(id: String, name: String) {
     #expect(server.record.name == "Laptop (WSL)")
     #expect(server.record.token == "tok", "the pairing is untouched")
 }
+
+/// An image on a line of its own is drawn; one inside a sentence or a fence
+/// stays text.
+struct MarkdownImageTests {
+    @Test func anImageLineIsItsOwnSegment() {
+        let s = MarkdownText.segments("Here it is:\n\n![the login page](docs/login.png)\n\nLooks right.")
+        #expect(s == [.prose("Here it is:"), .image(alt: "the login page", src: "docs/login.png"), .prose("Looks right.")])
+        #expect(MarkdownText.image(#"![x](<a b.png> "title")"#)! == ("x", "a b.png"))
+        #expect(MarkdownText.image("see ![x](a.png) here") == nil)
+        #expect(MarkdownText.segments("```\n![x](a.png)\n```") == [.code("![x](a.png)")])
+    }
+}

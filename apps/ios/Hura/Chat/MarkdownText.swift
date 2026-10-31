@@ -21,6 +21,8 @@ struct MarkdownText: View {
                     CodeBlock(text: c)
                 case let .table(rows):
                     TableView(rows: rows)
+                case let .image(alt, src):
+                    MarkdownPicture(alt: alt, src: src)
                 }
             }
         }
@@ -32,6 +34,8 @@ struct MarkdownText: View {
         case heading(Int, String)
         case code(String)
         case table([[String]])
+        /// `![alt](src)` on a line of its own.
+        case image(alt: String, src: String)
     }
 
     /// Splits on ``` fences. An unclosed fence (a reply still being
@@ -54,6 +58,11 @@ struct MarkdownText: View {
             if !inCode, let (level, h) = heading(trimmed) {
                 flushProse()
                 out.append(.heading(level, h))
+                continue
+            }
+            if !inCode, let (alt, src) = image(trimmed) {
+                flushProse()
+                out.append(.image(alt: alt, src: src))
                 continue
             }
             if !inCode, trimmed.hasPrefix("|"), i < lines.count, isSeparator(lines[i]) {
@@ -90,6 +99,19 @@ struct MarkdownText: View {
         let hashes = line.prefix { $0 == "#" }.count
         guard (1...6).contains(hashes), line.dropFirst(hashes).first == " " else { return nil }
         return (hashes, String(line.dropFirst(hashes + 1)))
+    }
+
+    /// `![alt](src)`, or `![alt](src "title")`, and nothing else on the line.
+    nonisolated static func image(_ line: String) -> (String, String)? {
+        guard line.hasPrefix("!["), line.hasSuffix(")"), let close = line.range(of: "](") else { return nil }
+        let alt = String(line[line.index(line.startIndex, offsetBy: 2)..<close.lowerBound])
+        var src = String(line[close.upperBound..<line.index(before: line.endIndex)])
+        if src.hasPrefix("<"), let end = src.firstIndex(of: ">") {
+            src = String(src[src.index(after: src.startIndex)..<end])
+        } else if let space = src.firstIndex(of: " ") {
+            src = String(src[..<space])
+        }
+        return src.isEmpty || alt.contains("]") ? nil : (alt, src)
     }
 
     nonisolated static func isSeparator(_ line: String) -> Bool {

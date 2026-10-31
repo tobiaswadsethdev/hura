@@ -131,7 +131,12 @@ struct WorktreeView: View {
         // Made in `switchTo`, never here: state set while drawing is dropped.
         switch tab {
         case let .chat(conv):
-            if let c = chats[conv] { ChatView(chat: c) }
+            if let c = chats[conv] {
+                ChatView(chat: c)
+                    .environment(\.readPicture) { [server, name] path in
+                        try? await server.api.file(name, path: path).image
+                    }
+            }
         case let .terminal(tmux):
             if let t = terminals[tmux ?? ""] { TerminalScreen(channel: t) }
         }

@@ -123,8 +123,10 @@ public enum ChatTranscript {
             guard case let .array(blocks)? = content else { return nil }
             let results: [TranscriptBlock] = blocks.compactMap { b in
                 guard b["type"]?.string == "tool_result", let id = b["tool_use_id"]?.string else { return nil }
+                let pictures = resultPictures(b["content"])
                 return TranscriptBlock(type: "tool_result", text: resultText(b["content"]), toolUseID: id,
-                                       isError: b["is_error"]?.bool ?? false)
+                                       isError: b["is_error"]?.bool ?? false,
+                                       pictures: pictures.isEmpty ? nil : pictures)
             }
             if !results.isEmpty {
                 return TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.toolResult, blocks: results)
@@ -155,6 +157,16 @@ public enum ChatTranscript {
         case let .string(s)?: s
         case let .array(parts)?: parts.compactMap { $0["text"]?.string }.joined(separator: "\n")
         default: ""
+        }
+    }
+
+    /// The images in a tool result, sent whole as base64.
+    static func resultPictures(_ content: JSONValue?) -> [Picture] {
+        guard case let .array(parts)? = content else { return [] }
+        return parts.compactMap { p in
+            guard p["type"]?.string == "image", let source = p["source"], source["type"]?.string == "base64",
+                  let mime = source["media_type"]?.string, let data = source["data"]?.string else { return nil }
+            return Picture(mime: mime, data: data)
         }
     }
 

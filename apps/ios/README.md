@@ -8,10 +8,12 @@ answer a permission request, a question or a plan, switch the permission mode
 or the model, and open more conversations beside the agent's. A terminal
 session's agent, and any shell beside it, is a terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)),
 with a key bar for esc, ctrl, tab and the arrows. A permission request can
-also be answered from its notification.
+also be answered from its notification. Images in a chat are drawn, as on the
+desktop: a screenshot a tool answered with, and a file of the working copy a
+reply names.
 
 Beside the tabs, a worktree's dock has what the desktop's has: its files,
-read-only; its git, to stage, commit, push and pull, with each file's diff;
+read-only, with images shown and zoomable; its git, to stage, commit, push and pull, with each file's diff;
 review remarks on a diff's lines, sent to the agent as one message; the
 events, grouped by endpoint, to allow (the whole host or only some paths) or
 block from; its network policy, to remove rules from; its ports and

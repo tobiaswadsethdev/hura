@@ -21,10 +21,11 @@ import type {
   SystemMessage,
   UserMessage,
 } from "../sdk";
+import type { Picture } from "../gen/Picture";
 
 /// `stopped` is a call that never finished because you interrupted the turn,
 /// which Claude Code reports as an error and which is not one.
-export type ToolResult = { text: string; isError: boolean; stopped: boolean };
+export type ToolResult = { text: string; isError: boolean; stopped: boolean; images: Picture[] };
 
 /// What Claude Code puts in a tool result it cut short at an interrupt.
 const INTERRUPTED = /^(The user doesn't want to proceed with this tool use|\[Request interrupted)/;
@@ -55,13 +56,27 @@ export type Item =
   | { kind: "turn"; key: string; ok: boolean; text: string }
   | { kind: "divider"; key: string; text: string };
 
-/// The text in a tool result, however it was sent.
+/// The text in a tool result, however it was sent. An image is left out:
+/// it is drawn, by `resultImages`.
 function resultText(content: Extract<Block, { type: "tool_result" }>["content"]): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
+    .filter((part) => part.type !== "image")
     .map((part) => (part.type === "text" ? (part.text ?? "") : `[${part.type}]`))
     .join("\n");
+}
+
+/// The images in a tool result: what `Read` answers with for a picture, and a
+/// screenshot from a browser tool.
+function resultImages(content: Extract<Block, { type: "tool_result" }>["content"]): Picture[] {
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((part) => {
+    const source = (part as { source?: { type?: string; media_type?: string; data?: string } }).source;
+    return part.type === "image" && source?.type === "base64" && source.media_type && source.data
+      ? [{ mime: source.media_type, data: source.data }]
+      : [];
+  });
 }
 
 function seconds(ms: number | undefined): string {
@@ -167,7 +182,12 @@ export function build(entries: ChatEntry[]): Item[] {
             if (call) {
               const text = resultText(block.content);
               const isError = Boolean(block.is_error);
-              call.result = { text, isError, stopped: isError && INTERRUPTED.test(text) };
+              call.result = {
+                text,
+                isError,
+                stopped: isError && INTERRUPTED.test(text),
+                images: resultImages(block.content),
+              };
             }
           } else if (block.type === "text" && "text" in block) {
             note(m, block.text, `${key}.${i}`);

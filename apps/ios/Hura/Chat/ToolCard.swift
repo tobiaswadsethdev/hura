@@ -69,6 +69,7 @@ struct ToolCard: View {
     /// Errors, todos and small edits are worth seeing without a tap.
     private var opensItself: Bool {
         if call.failed && !call.stopped { return true }
+        if call.result?.pictures?.isEmpty == false { return true }
         switch call.name {
         case "TodoWrite": return true
         case "Edit":
@@ -112,6 +113,9 @@ struct ToolCard: View {
                 }
                 output
             }
+            ForEach(Array((call.result?.pictures ?? []).enumerated()), id: \.offset) { _, p in
+                PictureView(picture: p)
+            }
             if call.inputTruncated {
                 Text("Input cut to 16 KiB per field.").font(.caption2).foregroundStyle(.secondary)
             }
@@ -131,7 +135,7 @@ struct ToolCard: View {
                         .font(.caption)
                 }
             }
-            if let n = r.images {
+            if let n = r.images, r.pictures == nil {
                 Label("\(n) image\(n == 1 ? "" : "s")", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
             }
             if r.truncated == true {

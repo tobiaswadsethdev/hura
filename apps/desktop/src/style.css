@@ -759,6 +759,13 @@ main { display: flex; flex: 1; min-height: 0; }
    reaches its container's edges -- the radii are for cards and controls, which
    are objects sitting *on* a surface. */
 .file .monaco { flex: 1; min-height: 0; overflow: hidden; }
+/* An image, at its own size or the pane's, whichever is smaller, on the
+   checkerboard that says where a transparent one ends. */
+.file.picture { align-items: center; justify-content: center; overflow: auto; }
+.file.picture img {
+  max-width: calc(100% - 32px); max-height: calc(100% - 64px); object-fit: contain;
+  background: repeating-conic-gradient(#222 0 25%, #2c2c2c 0 50%) 0 0 / 16px 16px;
+}
 
 /* ------------------------------------------------------------------------- */
 /* the splitters: the draggable edge of each sidebar                         */
@@ -2467,6 +2474,13 @@ main { position: relative; }
 .doc { font-size: 12.5px; line-height: 1.55; color: var(--text); overflow-wrap: anywhere; }
 .doc > :first-child { margin-top: 0; }
 .doc > :last-child { margin-bottom: 0; }
+/* An image a reply names from the working copy, and one a tool answered
+   with: never wider than the message, never taller than most of a screen. */
+.doc img.doc-img,
+.chat-image {
+  display: block; max-width: 100%; max-height: 60vh; object-fit: contain;
+  margin: 8px 0; border-radius: 6px;
+}
 .doc p { margin: 0 0 8px; }
 .doc :is(h3, h4, h5, h6) { margin: 14px 0 6px; font-size: 13px; font-weight: 600; }
 .doc h3 { font-size: 14px; }
