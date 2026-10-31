@@ -231,6 +231,14 @@ public struct ServerClient: Sendable {
         return try await call("block", Body(name: name, endpoint: endpoint, everywhere: everywhere), as: PolicyView.self)
     }
 
+    /// Has the runtime read each request to an endpoint, so a refused one
+    /// turns up in the events by its path. Lets nothing through;
+    /// `removeRule` with the id `watching` names stops it.
+    public func watch(_ name: String, endpoint: String) async throws -> PolicyView {
+        struct Body: Encodable { var name: String; var endpoint: String }
+        return try await call("watch", Body(name: name, endpoint: endpoint), as: PolicyView.self)
+    }
+
     /// Takes an endpoint off the lists new sessions start from.
     public func unlist(_ name: String, endpoint: String) async throws -> PolicyView {
         struct Body: Encodable { var name: String; var endpoint: String }

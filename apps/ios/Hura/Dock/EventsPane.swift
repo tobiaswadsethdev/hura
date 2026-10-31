@@ -86,6 +86,9 @@ struct EventsPane: View {
             if g.denied > 0, !s.whole {
                 Button("Allow") { asking = Asking(kind: .allow, endpoint: g.endpoint, requests: g.requests) }.tint(.green)
             }
+            if g.denied > 0, !s.whole, g.requests.isEmpty, s.watch == nil {
+                Button("Paths") { watch(g.endpoint) }.tint(.blue)
+            }
             if s.open, !s.denied {
                 Button("Block") { asking = Asking(kind: .block, endpoint: g.endpoint, requests: []) }.tint(.red)
             }
@@ -105,6 +108,9 @@ struct EventsPane: View {
                 if g.denied > 0 { Text("\(g.denied) denied").foregroundStyle(.red) }
                 if g.allowed > 0 { Text("\(g.allowed) allowed").foregroundStyle(.green) }
                 if let listed = s.listed { Text(listed == "allow" ? "allowed for new sessions" : "blocked for new sessions").foregroundStyle(.secondary) }
+                if s.watch != nil, g.requests.isEmpty, denied {
+                    Text("its next try shows the path").foregroundStyle(.secondary)
+                }
             }
             .font(.caption)
             ForEach(g.requests.prefix(3), id: \.self) { r in
@@ -153,7 +159,15 @@ struct EventsPane: View {
                 Button("Allow in This Session", systemImage: "checkmark.shield") { quick(endpoint, everywhere: false) }
                 Button("Allow in Every New Session Too", systemImage: "checkmark.shield") { quick(endpoint, everywhere: true) }
                 Button("Allow Only Some Paths…") { asking = Asking(kind: .allow, endpoint: endpoint, requests: [], scope: .paths) }
+                if s.watch == nil {
+                    // Refused before it said what it wanted; reading its
+                    // requests is what makes the next try say.
+                    Button("Show the Paths It Asks For", systemImage: "eye") { watch(endpoint) }
+                }
             }
+        }
+        if let id = s.watch {
+            Button("Stop Reading Its Requests", systemImage: "eye.slash") { change { try await $0.removeRule(name, id: id) } }
         }
         if s.open, !s.denied {
             Button("Block…", systemImage: "xmark.shield", role: .destructive) {
@@ -164,8 +178,18 @@ struct EventsPane: View {
     }
 
     private func quick(_ endpoint: String, everywhere: Bool) {
+        change { try await $0.allow(name, endpoint: endpoint, everywhere: everywhere) }
+    }
+
+    /// Has the runtime read the endpoint's requests, so a refused one is
+    /// named by its path. Lets nothing through.
+    private func watch(_ endpoint: String) {
+        change { try await $0.watch(name, endpoint: endpoint) }
+    }
+
+    private func change(_ work: @escaping (ServerClient) async throws -> PolicyView) {
         Task {
-            do { policy = try await server.api.allow(name, endpoint: endpoint, everywhere: everywhere) } catch {
+            do { policy = try await work(server.api) } catch {
                 failed = error.localizedDescription
             }
         }
@@ -236,8 +260,11 @@ struct Standing {
     var denied = false
     /// `allow` or `block` on the lists new sessions start from.
     var listed: String?
+    /// The rule that has the runtime read its requests, when one does.
+    var watch: String?
 
     init(policy: PolicyView?, endpoint: String) {
+        watch = policy?.watching?.first { hostMatches($0.host, endpoint) }?.id
         let rules = (policy?.rules ?? []).filter { $0.hosts.contains { hostMatches($0, endpoint) } }
         denied = rules.contains { !$0.allow && $0.methods.isEmpty }
         open = !denied && rules.contains(where: \.allow)
@@ -356,6 +383,12 @@ struct PolicyChangeSheet: View {
                                     }
                                     if let p = problems[i], !p.isEmpty {
                                         Text(p).font(.caption).foregroundStyle(.red)
+                                    } else if problems[i] == nil, routes[i].path.trimmingCharacters(in: .whitespaces) != "/**" {
+                                        Button("Everything under it: \(widen(routes[i].path))") {
+                                            routes[i].path = widen(routes[i].path)
+                                        }
+                                        .font(.caption)
+                                        .buttonStyle(.borderless)
                                     }
                                 }
                                 .swipeActions {
@@ -437,6 +470,15 @@ func pathProblem(_ path: String) -> String? {
     if p.split(separator: "/").contains("..") { return "No .. in a path" }
     if p.contains(where: \.isWhitespace) { return "No spaces" }
     return nil
+}
+
+/// One level wider: `/a/b/c` is `/a/b/**`, which is `/a/**`, and then `/**`,
+/// which is every path on the host.
+func widen(_ path: String) -> String {
+    var p = path.trimmingCharacters(in: .whitespaces)
+    if p.hasSuffix("/**") { p.removeLast(3) }
+    let parts = p.split(separator: "/").map(String.init)
+    return "/" + (parts.dropLast() + ["**"]).joined(separator: "/")
 }
 
 /// `https://host/a/b` or `host/a/b` as `/a/b`, when the host is this one.

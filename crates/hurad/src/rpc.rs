@@ -69,6 +69,11 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 .map(Reply::Policy)
                 .map_err(Failure::failed)
         }),
+        Request::Watch { name, endpoint } => with_session(&name, |s| {
+            ops::watch(backends.for_session(s), s, &endpoint)
+                .map(Reply::Policy)
+                .map_err(Failure::failed)
+        }),
         Request::RemoveRule { name, id } => with_session(&name, |s| {
             ops::remove_rule(backends.for_session(s), s, &id)
                 .map(Reply::Policy)

@@ -1206,6 +1206,16 @@ pub fn allow(
     backend
         .add_rules(session, &endpoints::allow_rules(&endpoint, &routes))
         .map_err(|e| format!("could not allow {endpoint}: {e}"))?;
+    // Nothing on a host open to every request is refused, so there is nothing
+    // left to watch for, and the watch alone keeps its traffic read.
+    if routes.is_empty() {
+        let view = policy(backend, session)?;
+        for w in view.watching.iter().filter(|w| w.host == endpoint) {
+            backend
+                .remove_rule(session, &w.id)
+                .map_err(|e| format!("could not stop watching {endpoint}: {e}"))?;
+        }
+    }
     if everywhere {
         edit_lists(|l| {
             if routes.is_empty() {
@@ -1214,6 +1224,24 @@ pub fn allow(
                 l.allow_routes(&endpoint, routes)
             }
         })?;
+    }
+    policy(backend, session)
+}
+
+/// Have the runtime read each request a session makes to an endpoint, so one
+/// it refuses is said by its method and path rather than only its host. Lets
+/// nothing through; see [`endpoints::watch_rule`]. Removing the rule the view
+/// names it by stops it.
+pub fn watch(
+    backend: &dyn Backend,
+    session: &Session,
+    endpoint: &str,
+) -> Result<policy::View, String> {
+    let endpoint = checked_endpoint(endpoint)?;
+    if policy(backend, session)?.watching(&endpoint).is_none() {
+        backend
+            .add_rules(session, &[endpoints::watch_rule(&endpoint)])
+            .map_err(|e| format!("could not watch {endpoint}: {e}"))?;
     }
     policy(backend, session)
 }

@@ -226,7 +226,17 @@ public struct PolicyLists: Decodable, Equatable, Sendable {
 public struct PolicyView: Decodable, Equatable, Sendable {
     public var template: String?
     public var rules: [PolicyRule]
+    /// Hosts whose requests the runtime reads one by one, so a refused one is
+    /// named by its path. None from a server older than this.
+    public var watching: [Watching]?
     public var lists: PolicyLists?
+}
+
+/// A host read request by request: an allow that lets nothing through, whose
+/// rule removing stops it.
+public struct Watching: Decodable, Equatable, Hashable, Sendable {
+    public var id: String
+    public var host: String
 }
 
 // MARK: Events

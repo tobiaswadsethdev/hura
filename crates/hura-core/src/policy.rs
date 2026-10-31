@@ -198,6 +198,7 @@ pub fn parse(name: &str, text: &str) -> Result<Vec<RuleSpec>, Error> {
                 resources: r.hosts,
                 methods: r.methods,
                 path: r.path,
+                query: Vec::new(),
             })
         })
         .collect()
@@ -252,6 +253,7 @@ pub fn read_only(hosts: Vec<String>) -> RuleSpec {
         resources: hosts,
         methods: READ_METHODS.map(String::from).to_vec(),
         path: Some("/**".to_string()),
+        query: Vec::new(),
     }
 }
 
@@ -271,8 +273,14 @@ pub struct View {
     /// The template the session was created from, which is recorded on the
     /// session rather than derivable from its rules.
     pub template: Option<String>,
-    /// Every network rule that applies to the session, its own first.
+    /// Every network rule that applies to the session, its own first, but for
+    /// the ones in `watching`.
     pub rules: Vec<Rule>,
+    /// The hosts whose requests are read one by one, so a refused one is said
+    /// by its path. Not among the rules, because each is an allow that opens
+    /// nothing; see [`crate::endpoints::watch_rule`].
+    #[serde(default)]
+    pub watching: Vec<Watching>,
     /// Omitted when the global lists are empty, which is the common case.
     pub lists: Option<ListsView>,
 }
@@ -296,6 +304,20 @@ pub struct Rule {
     /// Whether every sandbox has it, from the runtime's own policy, rather
     /// than this session alone. Only this session's can be changed here.
     pub global: bool,
+    /// A [`crate::endpoints::watch_rule`], which [`View::of`] takes out of
+    /// the rules into `watching`.
+    #[serde(skip)]
+    #[cfg_attr(feature = "ts", ts(skip))]
+    pub watch: bool,
+}
+
+/// A host whose requests are read one by one.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Watching {
+    /// The rule that does it, which removing stops it.
+    pub id: String,
+    pub host: String,
 }
 
 impl Rule {
@@ -344,15 +366,31 @@ pub fn host_matches(resource: &str, endpoint: &str) -> bool {
 
 impl View {
     pub fn of(rules: Vec<Rule>, template: Option<&str>, lists: &Lists) -> Self {
-        let mut rules = rules;
+        let (watch, mut rules): (Vec<Rule>, Vec<Rule>) = rules.into_iter().partition(|r| r.watch);
         // The session's own first, which are the ones a reader can change.
         rules.sort_by_key(|r| r.global);
         let lists = ListsView::of(&rules, lists);
         View {
             template: template.map(str::to_string),
             rules,
+            watching: watch
+                .into_iter()
+                .flat_map(|r| {
+                    r.hosts.into_iter().map(move |host| Watching {
+                        id: r.id.clone(),
+                        host,
+                    })
+                })
+                .collect(),
             lists,
         }
+    }
+
+    /// The watch on an endpoint, when it has one.
+    pub fn watching(&self, endpoint: &str) -> Option<&Watching> {
+        self.watching
+            .iter()
+            .find(|w| host_matches(&w.host, endpoint))
     }
 
     /// Whether a deny of the whole host is on it, which outranks any allow.
@@ -571,6 +609,7 @@ mod tests {
             methods: methods.iter().map(|m| (*m).to_string()).collect(),
             path: path.map(str::to_string),
             global: false,
+            watch: false,
         }
     }
 
@@ -680,6 +719,7 @@ mod tests {
                 methods: r.methods.clone(),
                 path: r.path.clone(),
                 global: false,
+                watch: false,
             })
             .collect();
         let lists = Lists::default();

@@ -141,10 +141,25 @@ segment and `**` any number. A path starts with `/` and has no query, fragment,
 percent-encoding or `..`.
 
 A denial of the host names no path, because the connection was refused before
-any request was made. So the first paths are typed, or pasted as a URL. After
-that the host is inspected, and anything outside the paths is refused with its
-request in the feed (`GET pkgs.example.com:443/...`), so the next path can be
-read off the denial. *Allow this path…* opens the panel on it.
+any request was made. *Show the paths it asks for* (**paths** on the row) fixes
+that: the runtime then lets the connection through and judges each request
+instead, so the agent's next try is refused by its method and path
+(`GET pkgs.example.com:443/raw/report.json`) and the feed shows it. Nothing gets
+through that did not before. It is an allow of a request nothing will make (a
+`HEAD /` carrying a random `hura-watch` query parameter), because Docker
+Sandboxes only reads a host's requests once an allow narrowed to paths names it.
+*Stop reading its requests* removes it, and allowing the whole host removes it
+too.
+
+*Allow this path…* then opens the panel on the refused request. **wider**
+beside a path widens it a level at a time (`/raw/a/report.json`, `/raw/a/**`,
+`/raw/**`, `/**`), and *the whole host* is the domain. Paths can also be typed,
+or pasted as a URL. Once a host is narrowed to paths, anything outside them is
+refused with its request in the feed, so the next path can be read off the
+denial.
+
+The method and path come from the runtime's pending approvals
+(`sbx policy approval ls`), since its log names only the host from v0.48 on.
 
 ---
 

@@ -130,6 +130,25 @@ func namesModelsAsAPersonWould(id: String, name: String) {
     #expect(asPath("https://other.org/x", host: "registry.npmjs.org") == "https://other.org/x")
 }
 
+@Test func widensAPathOneLevelAtATime() {
+    #expect(widen("/a/b/c") == "/a/b/**")
+    #expect(widen("/a/b/**") == "/a/**")
+    #expect(widen("/a/**") == "/**")
+    #expect(widen("/a") == "/**")
+    #expect(widen("/**") == "/**")
+}
+
+/// What a watched host's row offers, and that a watch opens nothing.
+@Test func aWatchedHostIsNotOpen() throws {
+    let view = try JSONDecoder().decode(PolicyView.self, from: Data("""
+    {"template":null,"rules":[],"watching":[{"id":"w1","host":"example.com:443"}],"lists":null}
+    """.utf8))
+    let s = Standing(policy: view, endpoint: "example.com:443")
+    #expect(s.watch == "w1")
+    #expect(!s.open && !s.whole)
+    #expect(Standing(policy: view, endpoint: "other.com:443").watch == nil)
+}
+
 /// A server's name is this phone's own, kept with its pairing.
 @Test @MainActor func renamesAServerAndKeepsTheName() throws {
     let store = InMemoryServerStore()

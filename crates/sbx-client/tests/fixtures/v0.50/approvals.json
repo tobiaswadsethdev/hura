@@ -1,0 +1,53 @@
+[
+  {
+    "created_at": "2026-10-31T13:44:13.9467+01:00",
+    "detail": "Protocol: TCP\nResource type: domain\nno matching allow rule (default deny)",
+    "id": "network:NkjAg_xR9V7CThBB5AFAgGSgXuVoxA_1YkvI-bipbEE",
+    "options": [
+      {
+        "id": "allow",
+        "label": "Allow"
+      },
+      {
+        "id": "dismiss",
+        "label": "Dismiss"
+      }
+    ],
+    "sandbox_name": "hura-pathprobe",
+    "title": "cli.github.com:443"
+  },
+  {
+    "created_at": "2026-10-31T13:47:07.010571+01:00",
+    "detail": "Protocol: HTTP\nMethod: GET\nTarget scope: example.net:443\nPath: /x/y\nno matching allow rule (default deny)",
+    "id": "network:88h5NPVOjNdOkVQn0a_U6FcX2FYU_ooycaLcaIcuePo",
+    "options": [
+      {
+        "id": "allow",
+        "label": "Allow"
+      },
+      {
+        "id": "dismiss",
+        "label": "Dismiss"
+      }
+    ],
+    "sandbox_name": "hura-pathprobe",
+    "title": "GET example.net:443/x/y"
+  },
+  {
+    "created_at": "2026-10-31T13:48:12.150761+01:00",
+    "detail": "Protocol: HTTP\nMethod: GET\nTarget scope: example.edu:443\nPath: /same\nno matching allow rule (default deny)",
+    "id": "network:bZkxEgYtIiv2hckdCB3CAYEFFKng294GN0o7a1ZzT7c",
+    "options": [
+      {
+        "id": "allow",
+        "label": "Allow"
+      },
+      {
+        "id": "dismiss",
+        "label": "Dismiss"
+      }
+    ],
+    "sandbox_name": "hura-pathprobe",
+    "title": "GET example.edu:443/same"
+  }
+]

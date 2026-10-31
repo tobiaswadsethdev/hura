@@ -333,6 +333,16 @@ fn unlist(server: String, name: String, endpoint: String) -> Result<PolicyView, 
     expect_reply!(reply, Reply::Policy(view) => view, "a policy")
 }
 
+/// Have the runtime read each request to an endpoint, so a refused one is
+/// said by its path. Lets nothing through.
+#[tauri::command(async)]
+fn watch_requests(server: String, name: String, endpoint: String) -> Result<PolicyView, Failed> {
+    let reply = remote(&server)?
+        .call(Request::Watch { name, endpoint })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Policy(view) => view, "a policy")
+}
+
 /// Remove one of a session's own rules. Answers with its policy re-read.
 #[tauri::command(async)]
 fn remove_rule(server: String, name: String, id: String) -> Result<PolicyView, Failed> {
@@ -1133,6 +1143,7 @@ fn main() {
             allow_paths,
             block,
             unlist,
+            watch_requests,
             remove_rule,
             diff,
             git_status,

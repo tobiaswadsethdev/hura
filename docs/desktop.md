@@ -332,6 +332,10 @@ may reach:
 - **Allow only some paths…** opens the same panel on *only these paths*: a
   method and a path glob per row, so a package feed can be opened without the
   rest of its host. A URL pasted into a row is cut down to its path.
+- **Show the paths it asks for** (or **paths** on the row) has the runtime
+  read each request to a host it refused outright, so the next try shows its
+  method and path. It lets nothing through; see
+  [policy](policy.md#only-some-paths).
 - **Allow this path…** replaces the two one-click allows on a denial that a
   rule's own paths made. It names the request it refused, and the panel starts
   from that request instead of handing over the whole host.

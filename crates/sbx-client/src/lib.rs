@@ -30,6 +30,12 @@
 //! * a new rule is `Added rule ID to policy local (...)`, and a secret
 //!   `Saved custom secret PH for target ...`
 //! * a missing sandbox exits 125, though it says so in the same words
+//! * `policy log` no longer names the method and path of a refused request,
+//!   only `HTTP request (query redacted)`; `policy approval ls` does, one
+//!   approval per request (see [`Approval`])
+//! * a host is read request by request only once an allow narrowed to paths
+//!   names it; a deny narrowed to paths does not do it, so until then every
+//!   connection to it is refused before anything is said
 
 use std::ffi::OsStr;
 use std::io::Write as _;
@@ -129,6 +135,7 @@ fn listing<T: serde::de::DeserializeOwned>(said: &str, key: &str) -> serde_json:
             Some(v) => serde_json::from_value(v),
             None => Ok(Vec::new()),
         },
+        serde_json::Value::Null => Ok(Vec::new()),
         v => serde_json::from_value(v),
     }
 }
@@ -239,6 +246,8 @@ pub struct RuleSpec {
     pub methods: Vec<String>,
     /// The path glob an HTTP rule is narrowed to. `None` is every path.
     pub path: Option<String>,
+    /// Query parameters an HTTP rule requires, as `name` and a value pattern.
+    pub query: Vec<(String, String)>,
 }
 
 impl RuleSpec {
@@ -259,6 +268,10 @@ impl RuleSpec {
         if let Some(p) = &self.path {
             out.push("--path".into());
             out.push(p.clone());
+        }
+        for (name, value) in &self.query {
+            out.push("--query".into());
+            out.push(format!("{name}={value}"));
         }
         out.push(self.resources.join(","));
         out
@@ -307,6 +320,34 @@ impl Rule {
 pub struct HttpTarget {
     pub host: String,
     pub path: String,
+    #[serde(default)]
+    pub query: Vec<QueryMatch>,
+}
+
+/// A query parameter an HTTP rule requires.
+#[derive(Debug, Clone, Deserialize)]
+pub struct QueryMatch {
+    pub name: String,
+    #[serde(default)]
+    pub value_pattern: String,
+}
+
+/// One of `sbx policy approval ls --json`: something the proxy refused for
+/// want of a rule, waiting to be allowed or dismissed.
+///
+/// The only place v0.50 names the request it refused. Its log counts by host,
+/// so `GET example.com:443/a` and `POST example.com:443/b` are one row there;
+/// here each method and path is one approval, titled
+/// `GET example.com:443/a`, with the query left off. A connection refused
+/// before any request was made is titled `example.com:443`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct Approval {
+    pub id: String,
+    #[serde(default)]
+    pub sandbox_name: String,
+    pub title: String,
+    #[serde(default)]
+    pub created_at: String,
 }
 
 #[derive(Deserialize)]
@@ -505,6 +546,12 @@ pub trait Sbx {
     fn remove_rule(&self, sandbox: &str, id: &str) -> Result<()>;
 
     fn log(&self, name: &str) -> Result<PolicyLog>;
+
+    /// The approvals waiting on one sandbox. None from a runtime that has no
+    /// such thing, which before v0.50 is every one.
+    fn approvals(&self, _name: &str) -> Result<Vec<Approval>> {
+        Ok(Vec::new())
+    }
 
     fn ports(&self, name: &str) -> Result<Vec<Port>>;
 
@@ -902,6 +949,15 @@ impl Sbx for CliClient {
         self.json(&strings(&["policy", "log", name, "--json"]), Some(name))
     }
 
+    fn approvals(&self, name: &str) -> Result<Vec<Approval>> {
+        // Every sandbox's at once; there is no asking for one.
+        let all: Vec<Approval> = self.list_of(
+            &strings(&["policy", "approval", "ls", "--json"]),
+            "approvals",
+        )?;
+        Ok(all.into_iter().filter(|a| a.sandbox_name == name).collect())
+    }
+
     fn ports(&self, name: &str) -> Result<Vec<Port>> {
         self.json(&strings(&["ports", name, "--json"]), Some(name))
     }
@@ -1047,6 +1103,18 @@ mod tests {
     }
 
     #[test]
+    fn an_approval_names_the_request_it_waits_on() {
+        let all: Vec<Approval> = listing(&fixture("v0.50/approvals.json"), "approvals").unwrap();
+        let titles: Vec<&str> = all.iter().map(|a| a.title.as_str()).collect();
+        assert!(titles.contains(&"GET example.edu:443/same"), "{titles:?}");
+        assert!(titles.contains(&"cli.github.com:443"), "{titles:?}");
+        assert!(all.iter().all(|a| a.sandbox_name == "hura-pathprobe"));
+        assert!(all.iter().all(|a| a.created_at.starts_with("2026-")));
+        let none: Vec<Approval> = listing("null", "approvals").unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[test]
     fn reads_ports_secrets_templates_and_the_version() {
         let ports: Vec<Port> = serde_json::from_str(&fixture("ports.json")).unwrap();
         assert!(ports.iter().all(|p| p.host_ip == "127.0.0.1"));
@@ -1174,10 +1242,24 @@ mod tests {
             resources: vec!["github.com".into()],
             methods: vec!["GET".into(), "POST".into()],
             path: Some("/**/info/refs*".into()),
+            query: Vec::new(),
         };
         assert_eq!(
             rule.args("hura-a").join(" "),
             "policy allow network --sandbox hura-a --method GET,POST --path /**/info/refs* github.com"
+        );
+
+        let watch = RuleSpec {
+            decision: Decision::Allow,
+            resources: vec!["example.com:443".into()],
+            methods: vec!["HEAD".into()],
+            path: Some("/".into()),
+            query: vec![("hura-watch".into(), "abc".into())],
+        };
+        assert_eq!(
+            watch.args("hura-a").join(" "),
+            "policy allow network --sandbox hura-a --method HEAD --path / \
+             --query hura-watch=abc example.com:443"
         );
 
         let secret = SecretSpec {

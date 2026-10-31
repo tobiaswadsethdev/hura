@@ -110,6 +110,7 @@ fn rules_are_added_listed_and_removed() {
                 resources: vec!["example.com:443".into()],
                 methods: vec!["GET".into()],
                 path: Some("/".into()),
+                query: Vec::new(),
             },
         )
         .unwrap();
@@ -120,6 +121,56 @@ fn rules_are_added_listed_and_removed() {
 
     c.remove_rule(&made.name, &id).unwrap();
     assert!(!c.rules(&made.name).unwrap().iter().any(|r| r.id == id));
+}
+
+/// What the events pane's "show the paths" rests on: an allow narrowed to a
+/// query nothing sends lets nothing through, yet has the proxy read every
+/// request to the host, and each refused one waits as an approval that names
+/// its method and path.
+#[test]
+#[ignore = "needs a signed-in sbx and KVM"]
+fn a_rule_nothing_matches_names_the_requests_it_refuses() {
+    let c = client();
+    let made = Made::new(&c, "hura-test-watch");
+    let id = c
+        .add_rule(
+            &made.name,
+            &RuleSpec {
+                decision: Decision::Allow,
+                resources: vec!["example.com:443".into()],
+                methods: vec!["HEAD".into()],
+                path: Some("/".into()),
+                query: vec![("hura-watch".into(), "0123456789abcdef".into())],
+            },
+        )
+        .unwrap();
+    let rule = c.rules(&made.name).unwrap();
+    let rule = rule.iter().find(|r| r.id == id).expect("the new rule");
+    assert_eq!(rule.http_targets[0].query[0].name, "hura-watch");
+
+    let said = c
+        .exec(
+            &made.name,
+            &[
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "https://example.com/watched/path?x=1",
+            ],
+        )
+        .unwrap();
+    assert_eq!(said.stdout, "403", "a watch lets nothing through");
+
+    let approvals = c.approvals(&made.name).unwrap();
+    assert!(
+        approvals
+            .iter()
+            .any(|a| a.title == "GET example.com:443/watched/path"),
+        "{approvals:?}"
+    );
 }
 
 /// Whether removing a sandbox takes its rules and secrets with it, which
@@ -140,6 +191,7 @@ fn removing_a_sandbox_takes_its_rules_and_secrets() {
                 resources: vec!["example.org".into()],
                 methods: vec![],
                 path: None,
+                query: Vec::new(),
             },
         )
         .unwrap();

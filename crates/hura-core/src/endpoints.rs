@@ -274,6 +274,7 @@ pub fn allow_rules(endpoint: &str, routes: &[Route]) -> Vec<RuleSpec> {
             resources: vec![endpoint.to_string()],
             methods: Vec::new(),
             path: None,
+            query: Vec::new(),
         }];
     }
     let mut by_path: Vec<(String, Vec<String>)> = Vec::new();
@@ -291,8 +292,30 @@ pub fn allow_rules(endpoint: &str, routes: &[Route]) -> Vec<RuleSpec> {
             resources: vec![endpoint.to_string()],
             methods,
             path: Some(path),
+            query: Vec::new(),
         })
         .collect()
+}
+
+/// The query parameter a watch rule requires, and so the mark of one.
+pub const WATCH: &str = "hura-watch";
+
+/// The rule that has the runtime read every request to an endpoint, so a
+/// refused one is said by its method and path, while letting none through.
+///
+/// The runtime reads requests to a host only once an allow narrowed to paths
+/// names it; until then it refuses the connection before any request is made,
+/// and there is no path to say. A deny narrowed to paths does not do it. So
+/// this is an allow, of a request nothing will make: it needs a query
+/// parameter whose value is random and kept out of the sandbox.
+pub fn watch_rule(endpoint: &str) -> RuleSpec {
+    RuleSpec {
+        decision: Decision::Allow,
+        resources: vec![endpoint.to_string()],
+        methods: vec!["HEAD".to_string()],
+        path: Some("/".to_string()),
+        query: vec![(WATCH.to_string(), crate::credentials::random_hex())],
+    }
 }
 
 /// The rule that closes an endpoint, whatever else opens it.
@@ -302,6 +325,7 @@ pub fn deny_rule(endpoint: &str) -> RuleSpec {
         resources: vec![endpoint.to_string()],
         methods: Vec::new(),
         path: None,
+        query: Vec::new(),
     }
 }
 
