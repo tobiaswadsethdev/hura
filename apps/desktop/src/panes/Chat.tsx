@@ -19,7 +19,8 @@ import type { ChatEntry } from "../gen/ChatEntry";
 import type { ChatFrame } from "../gen/ChatFrame";
 import type { ChatState } from "../gen/ChatState";
 import { Chat as ChatGlyph, Send, Stop, Working } from "../icons";
-import { Markdown } from "../Markdown";
+import { api } from "../api";
+import { Markdown, Pictures, type ReadPicture } from "../Markdown";
 import type { PartialMessage, ToolProgress } from "../sdk";
 import { Select } from "../Select";
 import { chat, close, nextChannelId, open } from "../stream";
@@ -311,6 +312,11 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
   const channel = useRef(0);
   const seq = useRef(0);
   seq.current = view.seq;
+  // An image a reply names, read from this session's working copy.
+  const readPicture = useMemo<ReadPicture>(
+    () => (path) => api.file(server, name, path).then((f) => f.image ?? undefined),
+    [server, name],
+  );
 
   useEffect(() => {
     let live = true;
@@ -385,8 +391,10 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
             ) : view.state ? (
               <Empty icon={ChatGlyph} />
             ) : null)}
-          <Items items={items} progress={view.progress} />
-          <Writing live={view.live} entries={view.entries} />
+          <Pictures.Provider value={readPicture}>
+            <Items items={items} progress={view.progress} />
+            <Writing live={view.live} entries={view.entries} />
+          </Pictures.Provider>
           {/* Under whatever is being written, for the whole turn, so a reply
               that has paused between two tool calls still says it is not
               finished. The word only while there is nothing else to look at. */}

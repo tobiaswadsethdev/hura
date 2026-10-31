@@ -806,6 +806,14 @@ a stray byte in it would otherwise come back altered. A NUL in the first block
 means binary, which is what git decides on too and is right more often than any
 extension list.
 
+**An image is shown, not withheld.** A PNG, JPEG, GIF or WebP -- told by its
+first bytes, not its name -- comes back whole, up to 16 MB, instead of capped at
+the half megabyte a text file is, because half a picture is no picture. The chat
+draws images too: one a tool answered with (a screenshot `Read` looked at), and
+one a reply names in Markdown when it is a file in the working copy, read the
+same way. A URL is never loaded: the window fetches nothing from the network on
+an agent's say-so, and an image elsewhere stays its alt text.
+
 ### Monaco, and the worker that is not optional
 
 The viewer is Monaco, and it renders correctly in WebKitGTK -- measured before

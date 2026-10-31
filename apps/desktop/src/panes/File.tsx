@@ -113,6 +113,14 @@ export function FilePane({
 
   if (error) return <p className="error">{error}</p>;
   if (!file) return <Waiting />;
+  if (file.image) {
+    return (
+      <div className="file picture">
+        <img src={`data:${file.image.mime};base64,${file.image.data}`} alt={path} />
+        <p className="notice">{size(file.bytes)}</p>
+      </div>
+    );
+  }
   // The path is already on the tab this pane is under, so it goes from the
   // sentence: what is worth saying is that there is nothing to show and how
   // big the thing being withheld is.
@@ -130,6 +138,13 @@ export function FilePane({
       <div className="monaco" ref={host} />
     </div>
   );
+}
+
+/// A size the way a person says it.
+function size(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /// Monaco's own id for the language, from the extension.

@@ -26,6 +26,38 @@ public struct FileText: Decodable, Equatable, Sendable {
     /// Only the first part was read.
     public var truncated: Bool
     public var binary: Bool
+    /// The whole file, when it is an image the server can tell by its bytes.
+    /// Absent from an older server.
+    public var image: Picture?
+}
+
+/// An image, whole: a file of the working copy, or one a tool answered with.
+public struct Picture: Codable, Equatable, Hashable, Sendable {
+    /// `image/png` and the like.
+    public var mime: String
+    /// Base64.
+    public var data: String
+
+    public init(mime: String, data: String) {
+        self.mime = mime
+        self.data = data
+    }
+
+    public var bytes: Data? { Data(base64Encoded: data) }
+
+    /// Where the working copy is in the sandbox.
+    static let repo = "/sandbox/repo/"
+
+    /// The working-copy path an image in a reply names, or nil for one that
+    /// is not a file there: a URL of any scheme. Nothing is loaded from the
+    /// network on an agent's say-so, as on the desktop.
+    public static func workingPath(_ src: String) -> String? {
+        if src.range(of: "^[A-Za-z][A-Za-z0-9+.-]*:", options: .regularExpression) != nil { return nil }
+        var path = src
+        if path.hasPrefix(repo) { path.removeFirst(repo.count) } else if path.hasPrefix("./") { path.removeFirst(2) }
+        path = path.removingPercentEncoding ?? path
+        return path.isEmpty || path.hasPrefix("/") ? nil : path
+    }
 }
 
 // MARK: Git

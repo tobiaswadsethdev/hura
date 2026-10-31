@@ -58,6 +58,21 @@ pub fn no_working_copy(session: &Session) -> String {
 /// much there is.
 const CAP: u64 = 512 * 1024;
 
+/// How big an image is sent whole. A picture cut off at [`CAP`] is no picture
+/// at all, so one is read to the end; past this it is a file to fetch some
+/// other way, not one to look at on a phone.
+const IMAGE_CAP: u64 = 16 * 1024 * 1024;
+
+/// An image, whole, for a viewer to draw.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Picture {
+    /// `image/png` and the like, decided by the bytes rather than the name.
+    pub mime: String,
+    /// Base64.
+    pub data: String,
+}
+
 /// One entry in a directory.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +106,28 @@ pub struct FileText {
     /// Decided by a NUL in the first block, which is what `git` does and is
     /// right far more often than any extension list.
     pub binary: bool,
+    /// The file as an image, when its first bytes say it is one a viewer can
+    /// draw and it is no bigger than [`IMAGE_CAP`]. Absent from an older
+    /// server, which is the same answer as a file that is not one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub image: Option<Picture>,
+}
+
+/// What kind of image the bytes start like, if any a viewer can draw. SVG is
+/// left out: it is text, and shown as such.
+fn image_kind(head: &[u8]) -> Option<&'static str> {
+    if head.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if head.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
 }
 
 /// Reject anything that is not a path inside the working copy.
@@ -229,6 +266,17 @@ pub fn read(backend: &dyn Backend, session: &Session, path: &str) -> Result<File
     let raw = decode_base64(encoded).ok_or("the file came back malformed")?;
 
     let binary = raw.contains(&0);
+    let image = match image_kind(&raw) {
+        Some(mime) if bytes <= CAP => Some(Picture {
+            mime: mime.into(),
+            data: encoded.to_string(),
+        }),
+        Some(mime) if bytes <= IMAGE_CAP => Some(Picture {
+            mime: mime.into(),
+            data: whole(backend, session, &absolute(&root, &rel))?,
+        }),
+        _ => None,
+    };
     Ok(FileText {
         path: rel,
         text: if binary {
@@ -238,8 +286,24 @@ pub fn read(backend: &dyn Backend, session: &Session, path: &str) -> Result<File
         },
         bytes,
         truncated: bytes > CAP,
-        binary,
+        binary: binary || image.is_some(),
+        image,
     })
+}
+
+/// A file read to the end, base64, for an image bigger than the first read.
+fn whole(backend: &dyn Backend, session: &Session, path: &str) -> Result<String, String> {
+    let script = format!(
+        "head -c {IMAGE_CAP} {path} | base64 | tr -d '\\n'",
+        path = sh_quote(path)
+    );
+    let out = backend
+        .exec(session, &["sh", "-c", &script])
+        .map_err(|e| e.to_string())?;
+    if !out.ok() {
+        return Err(gone_or(&out.stderr, "that file is not there any more"));
+    }
+    Ok(out.trimmed().to_string())
 }
 
 /// Base64, without a dependency for it.
@@ -292,6 +356,21 @@ mod tests {
         assert_eq!(absolute(root, "a/b"), format!("{root}/a/b"));
         // And the same rule wherever the working copy is.
         assert_eq!(absolute("/srv/worktrees/x", "a"), "/srv/worktrees/x/a");
+    }
+
+    /// By the bytes, not the name: a `.png` that is really text is text.
+    #[test]
+    fn images_are_told_by_their_first_bytes() {
+        assert_eq!(image_kind(b"\x89PNG\r\n\x1a\n\0\0"), Some("image/png"));
+        assert_eq!(image_kind(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
+        assert_eq!(image_kind(b"GIF89a..."), Some("image/gif"));
+        assert_eq!(image_kind(b"RIFF\x10\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(image_kind(b"RIFF\x10\0\0\0WAVEfmt "), None);
+        assert_eq!(
+            image_kind(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>"),
+            None
+        );
+        assert_eq!(image_kind(b""), None);
     }
 
     #[test]

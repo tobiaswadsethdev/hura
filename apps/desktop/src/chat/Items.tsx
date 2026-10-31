@@ -237,6 +237,7 @@ function ToolBody({ call }: { call: ToolCall }) {
 /// are waiting on you, and the card asking you shows the same thing.
 function opensItself(call: ToolCall): boolean {
   if (call.result?.isError && !call.result.stopped) return true;
+  if (call.result?.images.length) return true;
   switch (call.name) {
     case "TodoWrite":
       return true;
@@ -296,6 +297,9 @@ export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolC
       {shown && (
         <div className="chat-tool-body">
           <ToolBody call={call} />
+          {call.result?.images.map((p, i) => (
+            <img key={i} className="chat-image" src={`data:${p.mime};base64,${p.data}`} alt="" />
+          ))}
           {call.answer && !call.answer.allow && call.answer.message && (
             <p className="chat-quiet">you said: {call.answer.message}</p>
           )}
