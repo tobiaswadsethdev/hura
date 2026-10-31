@@ -31,7 +31,15 @@ struct FactsPane: View {
                     LabeledContent("Repository") {
                         Text(repoName(session.repo)).font(.footnote.monospaced())
                     }
-                    if !session.sandbox.isEmpty {
+                    if session.isWorktree {
+                        LabeledContent("Runs") {
+                            Label("On the server, not isolated", systemImage: "exclamationmark.shield")
+                                .foregroundStyle(.orange)
+                        }
+                        if let dir = session.workdir {
+                            LabeledContent("Directory") { Text(dir).font(.footnote.monospaced()) }
+                        }
+                    } else if !session.sandbox.isEmpty {
                         LabeledContent("Sandbox") { Text(session.sandbox).font(.footnote.monospaced()) }
                     }
                 }

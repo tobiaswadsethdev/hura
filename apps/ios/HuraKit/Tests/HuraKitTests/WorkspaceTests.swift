@@ -40,7 +40,19 @@ struct WorkspaceTests {
             "interface": .string("chat"),
             "ticket": .null,
             "pull": .null,
+            "worktree": .bool(false),
         ])
+    }
+
+    /// A session says where it runs; one from an older server says nothing
+    /// and is a sandbox.
+    @Test func readsWhereASessionRuns() throws {
+        let json = #"{"name": "ios", "state": "ready", "backend": "worktree", "workdir": "/Users/me/wt/ios"}"#
+        let worktree = try JSONDecoder().decode(Session.self, from: Data(json.utf8))
+        #expect(worktree.isWorktree)
+        #expect(worktree.workdir == "/Users/me/wt/ios")
+        let old = try JSONDecoder().decode(Session.self, from: Data(#"{"name": "a", "state": "ready"}"#.utf8))
+        #expect(!old.isWorktree)
     }
 
     @Test func sendsADecisionWhole() throws {

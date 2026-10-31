@@ -314,6 +314,9 @@ say done
 /// Returns as soon as it is running. `setsid` is what makes it outlive this exec:
 /// without a session of its own the seeder is torn down with the exec's process
 /// group, which is exactly the failure this whole arrangement exists to remove.
+/// macOS has no `setsid`, and a worktree session's exec there is a process
+/// group of its own already (see [`crate::backend::Worktree`]), so `nohup` is
+/// what it gets instead.
 /// Its output goes to a file because it has no terminal to write to and because a
 /// failure needs something to quote.
 pub fn launch(
@@ -329,7 +332,8 @@ pub fn launch(
     // its stdin replaced with /dev/null, so a `cat` there writes nothing.
     let launcher = format!(
         "mkdir -p {dir} && cat > {path} || exit 1\n\
-         setsid sh {path} > {log} 2>&1 < /dev/null &\n\
+         if command -v setsid >/dev/null 2>&1; then d=setsid; else d=nohup; fi\n\
+         $d sh {path} > {log} 2>&1 < /dev/null &\n\
          sleep 0.1",
         dir = sh_quote(&paths.hura),
         path = sh_quote(&paths.seed_script()),
@@ -349,11 +353,11 @@ pub fn launch(
 /// Ask the sandbox how the seeding is going.
 ///
 /// One exec, cheap enough to do twice a second while watching and once per stuck
-/// session when repairing records. The liveness check is a directory test in
-/// `/proc`, which costs nothing next to the round trip.
+/// session when repairing records. The liveness check is `kill -0`, which
+/// works wherever the seeder runs, `/proc` or not.
 pub fn seed_state(backend: &dyn Backend, session: &Session) -> SeedState {
     let script = format!(
-        "cat {state} 2>/dev/null || true;          pid=$(sed -n 's/^pid //p' {state} 2>/dev/null | tail -1);          if [ -n \"$pid\" ] && [ -d /proc/\"$pid\" ]; then echo 'alive'; fi",
+        "cat {state} 2>/dev/null || true;          pid=$(sed -n 's/^pid //p' {state} 2>/dev/null | tail -1);          if [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null; then echo 'alive'; fi",
         state = sh_quote(&backend.paths(session).seed_state()),
     );
     match backend.exec(session, &["sh", "-c", &script]) {
@@ -438,12 +442,13 @@ pub fn start_agent_script(backend: &dyn Backend, session: &Session) -> String {
         return crate::chat::start_script(backend, session);
     }
     let paths = backend.paths(session);
+    let agent = backend.agent_command(session);
     let launch = if session.task.trim().is_empty() {
-        session.agent.clone()
+        agent
     } else {
         // The task is read from a file at run time so it never has to survive
         // a second round of quoting inside send-keys.
-        format!("{} \"$(cat {})\"", session.agent, paths.task())
+        format!("{agent} \"$(cat {})\"", sh_quote(&paths.task()))
     };
 
     // This exec is the one that starts the *tmux server*, whose environment
@@ -499,7 +504,7 @@ pub fn agent_markers(paths: &Paths) -> String {
     format!(
         ": > {started} && : > {boot}",
         started = sh_quote(&paths.agent_started()),
-        boot = sh_quote(BOOT_MARKER),
+        boot = sh_quote(&paths.boot),
     )
 }
 
@@ -532,7 +537,7 @@ pub fn resume_check(backend: &dyn Backend, session: &Session) -> String {
             tmux_bin = backend.tmux(),
             tmux = sh_quote(&session.tmux),
             repo = sh_quote(&paths.repo),
-            launch = sh_quote(&format!("{} --continue", session.agent)),
+            launch = sh_quote(&format!("{} --continue", backend.agent_command(session))),
         ),
     };
     format!(
@@ -540,7 +545,7 @@ pub fn resume_check(backend: &dyn Backend, session: &Session) -> String {
          ( sh -c {restart} ) >/dev/null 2>&1 || true\n\
          fi",
         started = sh_quote(&paths.agent_started()),
-        boot = sh_quote(BOOT_MARKER),
+        boot = sh_quote(&paths.boot),
         tmux_bin = backend.tmux(),
         tmux = sh_quote(&session.tmux),
         restart = sh_quote(&restart),
@@ -769,6 +774,7 @@ mkdir -p "$dest/.git"
         let paths = Paths {
             repo: dir.0.join("repo").to_string_lossy().into_owned(),
             hura: dir.0.join("hura").to_string_lossy().into_owned(),
+            boot: dir.0.join("boot").to_string_lossy().into_owned(),
         };
         let script =
             clone_and_branch(&s, &paths).replace(&format!("sleep {CLONE_RETRY_SECS}"), "sleep 0");
@@ -867,6 +873,7 @@ mkdir -p "$dest/.git"
             let paths = Paths {
                 repo: dir.0.join(repo).to_string_lossy().into_owned(),
                 hura: dir.0.join("hura").to_string_lossy().into_owned(),
+                boot: dir.0.join("boot").to_string_lossy().into_owned(),
             };
             Command::new("sh")
                 .arg("-c")

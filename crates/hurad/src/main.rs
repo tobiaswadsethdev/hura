@@ -345,6 +345,11 @@ struct NewArgs {
     /// `interface` in the config file, else `chat`.
     #[arg(long, value_parser = parse_interface)]
     interface: Option<chat::Interface>,
+    /// A plain `git worktree` on this machine instead of a sandbox, running
+    /// with this machine's own rights. Needs `worktrees = true` in the config
+    /// file, and `--repo` to be a checkout on this machine.
+    #[arg(long)]
+    worktree: bool,
 }
 
 fn parse_interface(text: &str) -> Result<chat::Interface, String> {
@@ -442,6 +447,11 @@ fn main() -> ExitCode {
             // for it.
             checks.extend(doctor::check_wsl(DEFAULT_PORT));
             checks.extend(remote::checks());
+            // Only when they are on: a server that never asked for them has
+            // nothing to be missing.
+            if cfg.worktrees {
+                checks.push(backends.of_kind(session::Kind::Worktree).health());
+            }
             return match doctor::report(&checks) {
                 0 => ExitCode::SUCCESS,
                 _ => ExitCode::FAILURE,
@@ -786,7 +796,15 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
         toolchains: toolchain::resolve(&args.toolchains)?,
         start: !args.no_start,
         interface: args.interface.unwrap_or_else(|| cfg.interface()),
+        worktree: args.worktree,
     };
+    if draft.worktree && !cfg.worktrees {
+        return Err(format!(
+            "worktree sessions are off; set `worktrees = true` in {}",
+            cfg.path.display()
+        )
+        .into());
+    }
 
     // Here rather than inside ops::create, which never builds the image: the
     // build streams docker's output to the terminal, which only a command-line
@@ -794,6 +812,7 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     // variant; every one after it starts as fast as any other. A chat session
     // also needs an image new enough to carry its host.
     match draft.interface {
+        _ if draft.worktree => false,
         chat::Interface::Terminal => image::ensure_for(&draft.toolchains)?,
         chat::Interface::Chat => image::ensure_chat(&draft.toolchains)?,
     };
@@ -827,7 +846,10 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     println!();
     println!("session  {}", s.name);
     let backend = backends.for_session(&s);
-    println!("sandbox  {}", s.sandbox);
+    match s.backend {
+        session::Kind::Sandbox => println!("sandbox  {}", s.sandbox),
+        session::Kind::Worktree => println!("where    this machine, not isolated"),
+    }
     println!("policy   {}", s.policy.as_deref().unwrap_or("-"));
     if !s.toolchains.is_empty() {
         println!("tools    {}", s.toolchains.join(", "));

@@ -8,9 +8,21 @@
 //! implementation, [`Sandboxed`]: a session inside a sandbox of its own, with
 //! the sandbox's rules on everything that leaves it.
 //!
-//! There used to be a second, a plain `git worktree` on the server with no
-//! isolation at all. It was removed: two backends meant two of everything to
-//! keep working, and the isolation is the product.
+//! The other, [`Worktree`], is a plain `git worktree` on the server with no
+//! isolation at all, for the work a Linux VM cannot do: an iOS app wants a Mac
+//! and Xcode. It was removed once, because two backends meant two of
+//! everything to keep working and the isolation is the product, and came back
+//! behind `worktrees = true` in the config file, off by default. What the two
+//! differ in is only *where*:
+//!
+//! | | Sandboxed | Worktree |
+//! | --- | --- | --- |
+//! | `exec` | `sbx exec` | a child process on the server |
+//! | [`Paths::repo`] | `/sandbox/repo` | the worktree's own directory |
+//! | [`Paths::hura`] | `/sandbox/.hura` | under the server's state directory |
+//! | tmux | its own server, on the image's config | the server user's, names prefixed |
+//! | policy, events | the runtime's | none |
+//! | credentials | swapped in by the runtime's proxy | the server user's own |
 
 use sbx_client::RuleSpec;
 
@@ -20,8 +32,10 @@ use crate::ops::ProviderChoice;
 use crate::session::{self, Session};
 
 mod sandboxed;
+mod worktree;
 
 pub use sandboxed::{Sandboxed, Settings};
+pub use worktree::Worktree;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -84,6 +98,10 @@ pub struct Paths {
     pub repo: String,
     /// The directory holding everything hura itself writes about the session.
     pub hura: String,
+    /// A file that is there for one boot of whatever the agent runs in: its
+    /// absence beside an agent that once ran says it was stopped and started
+    /// since. See [`crate::seed::resume_check`].
+    pub boot: String,
 }
 
 impl Paths {
@@ -97,6 +115,7 @@ impl Paths {
         Paths {
             repo: session::REPO_PATH.to_string(),
             hura: SANDBOX_HURA_DIR.to_string(),
+            boot: crate::seed::BOOT_MARKER.to_string(),
         }
     }
 
@@ -150,7 +169,24 @@ pub enum Torn {
 /// invocation it should use. A backend that grew its own copy of the diff
 /// script would be a second answer to what a diff is.
 pub trait Backend {
+    /// Which kind of place this is, for a record and for a badge.
+    fn kind(&self) -> session::Kind;
+
     fn paths(&self, session: &Session) -> Paths;
+
+    /// The command a terminal agent is started with, before its task.
+    ///
+    /// The record's own `agent` in a sandbox, whose image carries the settings
+    /// that report its state. On the server the same hooks have to be handed
+    /// to it, since the server user's settings do not have them.
+    fn agent_command(&self, session: &Session) -> String {
+        session.agent.clone()
+    }
+
+    /// How to run `hura-agent`, the chat host, as a shell command.
+    fn hura_agent(&self, _session: &Session) -> String {
+        "hura-agent".to_string()
+    }
 
     fn exec(&self, session: &Session, argv: &[&str]) -> Result<ExecOutput>;
 
@@ -248,17 +284,28 @@ pub trait Backend {
     fn health(&self) -> Check;
 }
 
-/// The backend every session runs on, as configured.
+/// Both backends, and which of them a session belongs to.
 ///
-/// One of them since the worktree backend went; kept as the thing callers are
-/// handed so that a session-shaped call site reads the same as it always has.
+/// The one thing above the trait that knows there are two. Everything that
+/// works on a session is handed the right one by [`Backends::for_session`].
+/// The worktree backend is always here, whatever the config file says: what
+/// `worktrees = true` gates is making a new one, and a session made before it
+/// was turned off still has to be shown and removed.
 pub struct Backends {
     sandboxed: Sandboxed,
+    worktree: Worktree,
 }
 
 impl Backends {
     pub fn new(sandboxed: Sandboxed) -> Self {
-        Backends { sandboxed }
+        Backends::with_worktree(sandboxed, Worktree::new(Worktree::default_root()))
+    }
+
+    pub fn with_worktree(sandboxed: Sandboxed, worktree: Worktree) -> Self {
+        Backends {
+            sandboxed,
+            worktree,
+        }
     }
 
     pub fn from_client(client: Box<dyn sbx_client::Sbx>, settings: Settings) -> Self {
@@ -273,17 +320,31 @@ impl Backends {
         if let Some(bin) = &cfg.sbx {
             client = client.with_bin(bin);
         }
-        Backends::from_client(Box::new(client), Settings::from_config(cfg))
+        Backends::with_worktree(
+            Sandboxed::new(Box::new(client), Settings::from_config(cfg)),
+            Worktree::from_config(cfg),
+        )
     }
 
-    pub fn for_session(&self, _session: &Session) -> &dyn Backend {
-        &self.sandboxed
+    pub fn for_session(&self, session: &Session) -> &dyn Backend {
+        self.of_kind(session.backend)
     }
 
-    /// The backend itself, for the operations that are not about one session:
-    /// listing what exists, creating something new, and `hurad doctor`.
+    pub fn of_kind(&self, kind: session::Kind) -> &dyn Backend {
+        match kind {
+            session::Kind::Sandbox => &self.sandboxed,
+            session::Kind::Worktree => &self.worktree,
+        }
+    }
+
+    /// The sandboxed backend, for what is about the runtime rather than about
+    /// one session: the credentials it can hand out, and `hurad doctor`.
     pub fn sandboxed(&self) -> &dyn Backend {
         &self.sandboxed
+    }
+
+    pub fn each(&self) -> [&dyn Backend; 2] {
+        [&self.sandboxed, &self.worktree]
     }
 }
 

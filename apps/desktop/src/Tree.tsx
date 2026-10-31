@@ -34,7 +34,17 @@ import { ChecksMark, sessionPull } from "./Inbox";
 import { pullName } from "./inboxNotify";
 import { usePreviews } from "./previews";
 import { Empty } from "./Empty";
-import { Branch, Chevron, Copy, Forget, Plus, Ports, PullRequest, StateDot } from "./icons";
+import {
+  Branch,
+  Chevron,
+  Copy,
+  Forget,
+  Plus,
+  Ports,
+  PullRequest,
+  StateDot,
+  Unsandboxed,
+} from "./icons";
 
 export type Group = {
   /// The project, or `null` for the by-repository groups at the bottom.
@@ -359,7 +369,7 @@ function Worktree({
         {
           label: "Destroy worktree",
           icon: Forget,
-          hint: "and its sandbox",
+          hint: s.backend === "worktree" ? "and its directory" : "and its sandbox",
           danger: true,
           run: () => onDestroy(s),
         },
@@ -380,6 +390,11 @@ function Worktree({
         <span className="wt-head">
           <span className="wt-name">{s.name}</span>
           <span className="wt-signals">
+            {s.backend === "worktree" && (
+              <span className="wt-unsandboxed" title="a worktree on the server: not isolated">
+                <Unsandboxed />
+              </span>
+            )}
             {(listening.length > 0 || previewed.length > 0) && (
               <span
                 className={`wt-ports${previewed.length > 0 ? " on" : ""}`}

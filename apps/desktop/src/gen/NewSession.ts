@@ -62,4 +62,9 @@ pull: PullOrigin | null,
  * A terminal or a chat. `None` is the config file's answer, so a client
  * that has never heard of the choice gets the one this server makes.
  */
-interface: Interface | null, };
+interface: Interface | null, 
+/**
+ * A plain worktree on the server rather than a sandbox. Refused unless
+ * the server's config file allows it; see [`NewOptions::worktrees`].
+ */
+worktree: boolean, };

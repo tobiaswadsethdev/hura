@@ -366,14 +366,20 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     /// What it was started from, if anything.
     public var ticket: TicketOrigin?
     public var pull: PullOrigin?
+    /// `sandbox`, or `worktree` for one running on the server itself with
+    /// the server's own rights: no policy, no events.
+    public var backend: String
+    /// A worktree session's directory on the server.
+    public var workdir: String?
 
     public var id: String { name }
+    public var isWorktree: Bool { backend == "worktree" }
     public var isChat: Bool { interface == "chat" }
     public var isLive: Bool { !["creating", "seeding", "failed", "dead"].contains(state) }
 
     enum CodingKeys: String, CodingKey {
         case name, state, task, interface, project, repo, failure, toolchains, providers, policy, sandbox, agent, skills, mcp,
-             ticket, pull
+             ticket, pull, backend, workdir
         case workBranch = "work_branch"
         case baseBranch = "base_branch"
         case createdAt = "created_at"
@@ -382,7 +388,9 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public init(name: String, state: String, workBranch: String = "", task: String = "", interface: String = "terminal",
                 project: String? = nil, repo: String = "", baseBranch: String? = nil, createdAt: Int64 = 0,
                 failure: String? = nil, toolchains: [String] = [], providers: [String] = [], policy: String? = nil,
-                sandbox: String = "") {
+                sandbox: String = "", backend: String = "sandbox", workdir: String? = nil) {
+        self.backend = backend
+        self.workdir = workdir
         self.name = name
         self.state = state
         self.workBranch = workBranch
@@ -418,6 +426,8 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
         providers = try c.decodeIfPresent([String].self, forKey: .providers) ?? []
         policy = try c.decodeIfPresent(String.self, forKey: .policy)
         sandbox = try c.decodeIfPresent(String.self, forKey: .sandbox) ?? ""
+        backend = try c.decodeIfPresent(String.self, forKey: .backend) ?? "sandbox"
+        workdir = try c.decodeIfPresent(String.self, forKey: .workdir)
         agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? "claude"
         struct Named: Decodable { var name: String }
         skills = (try c.decodeIfPresent([Named].self, forKey: .skills) ?? []).map(\.name)

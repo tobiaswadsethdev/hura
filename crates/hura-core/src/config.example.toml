@@ -59,6 +59,15 @@
 # them. `HURA_REPO_ROOTS` still wins over this.
 # repo_roots = ["~/dev", "~/work"]
 
+# Let a new session be a plain `git worktree` on this machine instead of a
+# sandbox, for work the sandbox's Linux VM cannot do -- building an iOS app on a
+# Mac, say. Off by default, and worth thinking about before turning on: such a
+# session runs with this machine's own rights, files and credentials, with no
+# policy on what it reaches. It is added to a project's checkout, so it needs a
+# project. The working copies go under worktree_root, one directory each.
+# worktrees = true
+# worktree_root = "~/.local/share/hura/worktrees"
+
 # How often the TUI reads the sandboxes. One number, because the intervals
 # underneath it are measured and related to each other: this scales all of them,
 # so 2s polls half as often as the 1s default and 500ms twice as often. The cost

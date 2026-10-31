@@ -237,6 +237,11 @@ struct SessionRow: View {
                 Image(systemName: session.isChat ? "bubble.left.and.text.bubble.right" : "terminal")
                     .foregroundStyle(.secondary)
                 Text(session.name).font(.body.weight(.medium))
+                if session.isWorktree {
+                    Image(systemName: "exclamationmark.shield")
+                        .foregroundStyle(.orange)
+                        .accessibilityLabel("Worktree on the server, not isolated")
+                }
                 Spacer()
                 StatusBadge(status: agentStatus(session, report))
             }

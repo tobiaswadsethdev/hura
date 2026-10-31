@@ -179,8 +179,10 @@ specific answer wins:
 `repo_roots` is about the machine that *runs* the sessions, which with a server
 is not the machine with the window on it.
 
-`worktree_root` configured worktree sessions, which have been removed. It is
-still accepted, and ignored, so an existing file keeps loading.
+`worktrees = true` lets a session be a plain git worktree on the server instead
+of a sandbox, running with the server's own rights; `worktree_root` says where
+their working copies go. Both are about the machine that runs the sessions. See
+[worktrees.md](worktrees.md).
 
 Two things are deliberately *not* in this file. **Secret values** are not: a
 credential is a command or a reference, and a managed MCP server's secrets are

@@ -289,8 +289,10 @@ pub struct ChatModel {
 pub fn start_script(backend: &dyn Backend, session: &Session) -> String {
     let paths = backend.paths(session);
     let serve = format!(
-        "while :; do hura-agent serve --port {PORT} --cwd {repo} --task-file {task}; \
+        "while :; do {agent} serve --port {port} --cwd {repo} --task-file {task}; \
          echo 'hura-agent stopped; starting it again'; sleep 2; done",
+        agent = backend.hura_agent(session),
+        port = port(session),
         repo = sh_quote(&paths.repo),
         task = sh_quote(&paths.task()),
     );
@@ -318,6 +320,18 @@ printf '%s' {task} > {task_path}
     )
 }
 
+/// The port this session's host listens on: its own on the server, where
+/// every worktree session's host shares one loopback, and [`PORT`] in a
+/// sandbox, which has a loopback of its own.
+pub fn port(session: &Session) -> u16 {
+    session.agent_port.unwrap_or(PORT)
+}
+
+/// `hura-agent` with its arguments, as the session's backend runs it.
+fn command(backend: &dyn Backend, session: &Session, args: &str) -> String {
+    format!("{} {args}", backend.hura_agent(session))
+}
+
 /// Run `hura-agent` in the sandbox, and answer with what it printed.
 fn run(backend: &dyn Backend, session: &Session, script: &str) -> Result<String, String> {
     let out = backend
@@ -341,7 +355,7 @@ fn run(backend: &dyn Backend, session: &Session, script: &str) -> Result<String,
 /// Asked of the host rather than remembered here, for the reason the shells
 /// are asked of tmux: it outlives the window, the server and a second client.
 pub fn list(backend: &dyn Backend, session: &Session) -> Result<Vec<String>, String> {
-    let text = run(backend, session, "hura-agent list")?;
+    let text = run(backend, session, &command(backend, session, "list"))?;
     let mut names: Vec<String> =
         serde_json::from_str(&text).map_err(|e| format!("hura-agent answered `{text}`: {e}"))?;
     names.sort_by_key(|a| order(a));
@@ -361,7 +375,7 @@ fn order(name: &str) -> (bool, u64, String) {
 /// the reason the shells are named by the server: two windows asking at once
 /// would otherwise both pick `chat-2`.
 pub fn open(backend: &dyn Backend, session: &Session) -> Result<String, String> {
-    run(backend, session, "hura-agent new")
+    run(backend, session, &command(backend, session, "new"))
 }
 
 /// End a conversation and forget its transcript.
@@ -375,7 +389,7 @@ pub fn close(backend: &dyn Backend, session: &Session, name: &str) -> Result<(),
     run(
         backend,
         session,
-        &format!("hura-agent close {}", sh_quote(name)),
+        &command(backend, session, &format!("close {}", sh_quote(name))),
     )
     .map(drop)
 }
@@ -399,7 +413,11 @@ pub fn answer(
     let out = backend
         .exec_stdin(
             session,
-            &["sh", "-c", &format!("hura-agent answer {}", sh_quote(id))],
+            &[
+                "sh",
+                "-c",
+                &command(backend, session, &format!("answer {}", sh_quote(id))),
+            ],
             decision.as_bytes(),
         )
         .map_err(|e| e.to_string())?;
@@ -423,7 +441,11 @@ pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(
     let out = backend
         .exec_stdin(
             session,
-            &["sh", "-c", &format!("hura-agent send {}", sh_quote(AGENT))],
+            &[
+                "sh",
+                "-c",
+                &command(backend, session, &format!("send {}", sh_quote(AGENT))),
+            ],
             message.as_bytes(),
         )
         .map_err(|e| e.to_string())?;

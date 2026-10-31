@@ -52,6 +52,10 @@ const VIEWS = [
 ] as const;
 type View = (typeof VIEWS)[number]["key"];
 
+/// What a worktree on the server has nothing to show for: no proxy decides
+/// its requests, no policy holds it, and its ports are the server's own.
+const SANDBOX_ONLY: readonly View[] = ["events", "policy", "ports"];
+
 export function Dock({
   width,
   server,
@@ -79,12 +83,16 @@ export function Dock({
 }) {
   // Files first: it is the one you reach for without having decided anything
   // yet.
-  const [view, setView] = useState<View>("files");
+  const [chosen, setView] = useState<View>("files");
+  const sandboxed = session.backend !== "worktree";
+  const views = VIEWS.filter(({ key }) => sandboxed || !SANDBOX_ONLY.includes(key));
+  // A pane picked on a sandbox, then a worktree selected: back to the files.
+  const view: View = views.some(({ key }) => key === chosen) ? chosen : "files";
 
   return (
     <aside className="dock" style={{ width }}>
       <nav className="dock-tabs" aria-label="what is true about this worktree">
-        {VIEWS.map(({ key, label, icon: Mark }) => (
+        {views.map(({ key, label, icon: Mark }) => (
           <button
             key={key}
             className={key === view ? "on" : ""}

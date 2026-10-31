@@ -228,6 +228,10 @@ fn live_status(s: &Status) -> store::Status {
 }
 
 impl Backend for Sandboxed {
+    fn kind(&self) -> session::Kind {
+        session::Kind::Sandbox
+    }
+
     fn paths(&self, _session: &Session) -> Paths {
         Paths::in_sandbox()
     }
@@ -661,6 +665,7 @@ mod tests {
             toolchains: Vec::new(),
             start: false,
             interface: crate::chat::Interface::Terminal,
+            worktree: false,
         }
     }
 

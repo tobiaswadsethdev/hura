@@ -243,6 +243,36 @@ pub fn validate_name(name: &str) -> Result<(), NameError> {
     Ok(())
 }
 
+/// Where a session runs.
+///
+/// Stored on the record rather than worked out from what exists, because it
+/// decides how everything about the session is done: where an exec goes,
+/// where its files are, whether there is a policy at all.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// Its own microVM, with the runtime's proxy holding everything that
+    /// leaves it to the session's rules. The default, and the point of the
+    /// tool.
+    #[default]
+    Sandbox,
+    /// A `git worktree` on the server, running with the server's own rights:
+    /// no policy, no proxy, the server user's own credentials. Only offered
+    /// where the config file says `worktrees = true`. See
+    /// [`crate::backend::Worktree`].
+    Worktree,
+}
+
+impl Kind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::Sandbox => "sandbox",
+            Kind::Worktree => "worktree",
+        }
+    }
+}
+
 /// Whether a string is usable as a git branch name.
 ///
 /// A subset of what `git check-ref-format` allows, and deliberately: the branch
@@ -343,8 +373,24 @@ impl std::fmt::Display for State {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     pub name: String,
-    /// The sandbox this session owns, derived from its name.
+    /// Where this session runs. See [`Kind`]; a record without it is a
+    /// sandbox, which every session was until the server could say otherwise.
+    #[serde(default)]
+    pub backend: Kind,
+    /// The sandbox this session owns, derived from its name. Still set on a
+    /// worktree session, where nothing uses it, since it is a pure function of
+    /// the name either way.
     pub sandbox: String,
+    /// The worktree's own directory on the server, for a session that is one.
+    /// Chosen when the worktree is added and recorded, because nothing else
+    /// says afterwards where it went.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workdir: Option<String>,
+    /// The port a worktree session's chat host listens on. A sandbox has a
+    /// loopback of its own and every host there uses [`crate::chat::PORT`];
+    /// on the server they share one, so each is given its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_port: Option<u16>,
     /// Name of the tmux session inside the sandbox. Stored rather than assumed
     /// so an older session keeps working if the default ever changes.
     pub tmux: String,
@@ -462,7 +508,10 @@ pub fn humanize_age(created_at: u64, now: u64) -> String {
 impl Session {
     pub fn new(name: String, repo: String, task: String) -> Self {
         Session {
+            backend: Kind::Sandbox,
             sandbox: sandbox_name(&name),
+            workdir: None,
+            agent_port: None,
             tmux: TMUX_SESSION.to_string(),
             work_branch: format!("{DEFAULT_BRANCH_PREFIX}/{name}"),
             name,
@@ -490,11 +539,26 @@ impl Session {
 mod tests {
     use super::*;
 
-    /// A record written while there were worktree sessions still reads: the
-    /// `backend` and `workdir` fields it carries are ignored rather than being
-    /// a deserialization error that reads as a corrupt cache. A worktree
-    /// record is then one whose sandbox the runtime has never heard of, which
-    /// a refresh marks dead and `hurad rm` removes.
+    /// A record from before there was a choice is a sandbox.
+    #[test]
+    fn a_record_without_a_backend_is_a_sandbox() {
+        let old = r#"{
+            "name": "readme-fix",
+            "sandbox": "hura-readme-fix",
+            "tmux": "agent",
+            "repo": "https://github.com/you/hura.git",
+            "work_branch": "hura/readme-fix",
+            "created_at": 1788000000,
+            "state": "ready"
+        }"#;
+        let s: Session = serde_json::from_str(old).expect("an older record still reads");
+        assert_eq!(s.backend, Kind::Sandbox);
+        assert_eq!(s.workdir, None);
+        assert_eq!(s.agent_port, None);
+    }
+
+    /// A record written by the first worktree backend, before it was removed
+    /// and brought back, reads as the worktree it is.
     #[test]
     fn a_record_from_a_worktree_session_still_reads() {
         let old = r#"{
@@ -509,7 +573,11 @@ mod tests {
             "state": "ready"
         }"#;
         let s: Session = serde_json::from_str(old).expect("an older record still reads");
-        assert_eq!(s.sandbox, "hura-readme-fix");
+        assert_eq!(s.backend, Kind::Worktree);
+        assert_eq!(
+            s.workdir.as_deref(),
+            Some("/home/you/.local/share/hura/worktrees/readme-fix")
+        );
     }
 
     /// A variant tag is `IMAGE_REPO` plus the toolchains, and the base image is

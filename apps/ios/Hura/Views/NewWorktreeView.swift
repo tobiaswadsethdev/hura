@@ -25,6 +25,9 @@ struct NewWorktreeView: View {
     @State private var base = ""
     @State private var policy = ""
     @State private var agentInterface = "chat"
+    /// A worktree on the server instead of a sandbox; only offered where the
+    /// server's config allows it.
+    @State private var worktree = false
     @State private var toolchains: Set<String> = []
     @State private var providers: Set<String> = []
     @State private var busy = false
@@ -91,7 +94,28 @@ struct NewWorktreeView: View {
         } header: {
             Text("Task")
         } footer: {
-            Text("In \(project.name), cloned from \(project.repo).")
+            Text(worktree ? "In \(project.name), added to its checkout on the server."
+                          : "In \(project.name), cloned from \(project.repo).")
+        }
+        if options.worktrees == true {
+            Section {
+                Picker("Runs in", selection: $worktree) {
+                    Text("Sandbox").tag(false)
+                    Text("Worktree").tag(true)
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("Runs in")
+            } footer: {
+                if worktree {
+                    Label("A git worktree on the server, not isolated. The agent runs there as the server's user, "
+                          + "with its files, credentials and network, and no policy.",
+                          systemImage: "exclamationmark.shield")
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("Its own VM, under a network policy.")
+                }
+            }
         }
         Section {
             LabeledContent("Name") {
@@ -112,16 +136,27 @@ struct NewWorktreeView: View {
                 Text("Chat").tag("chat")
                 Text("Terminal").tag("terminal")
             }
-            Picker("Network policy", selection: $policy) {
-                ForEach(options.policies, id: \.spec) { p in
-                    Text(p.spec).tag(p.spec)
+            if !worktree {
+                Picker("Network policy", selection: $policy) {
+                    ForEach(options.policies, id: \.spec) { p in
+                        Text(p.spec).tag(p.spec)
+                    }
                 }
             }
         } footer: {
-            if let p = options.policies.first(where: { $0.spec == policy }) {
+            if !worktree, let p = options.policies.first(where: { $0.spec == policy }) {
                 Text(p.summary)
             }
         }
+        // A worktree is given none of these: no image, no proxy to swap a
+        // credential in, and the server user's own skills and MCP servers.
+        if !worktree {
+            sandboxSections(options)
+        }
+    }
+
+    @ViewBuilder
+    private func sandboxSections(_ options: NewOptions) -> some View {
         if !options.toolchains.isEmpty {
             Section("Toolchains") {
                 ForEach(options.toolchains, id: \.name) { t in
@@ -242,7 +277,8 @@ struct NewWorktreeView: View {
                                  base: trimmed(base), branch: trimmed(branch), policy: policy,
                                  providers: options.providers.map(\.name).filter(providers.contains),
                                  toolchains: options.toolchains.map(\.name).filter(toolchains.contains),
-                                 interface: agentInterface, ticket: ticketOrigin, pull: pullOrigin)
+                                 interface: agentInterface, ticket: ticketOrigin, pull: pullOrigin,
+                                 worktree: worktree)
         Task {
             defer { busy = false }
             do {

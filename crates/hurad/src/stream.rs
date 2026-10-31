@@ -313,10 +313,11 @@ async fn chat(
         .unwrap_or(false);
 
         if !still_seeding {
-            let lease = match crate::forward::acquire(session, chat::PORT, Loopback::V4).await {
-                Ok(lease) => lease,
-                Err(reason) => return Some(reason),
-            };
+            let lease =
+                match crate::forward::acquire(session, chat::port(session), Loopback::V4).await {
+                    Ok(lease) => lease,
+                    Err(reason) => return Some(reason),
+                };
             match tokio::net::TcpStream::connect(("127.0.0.1", lease.local)).await {
                 Ok(stream) => {
                     match converse(id, stream, conv, &mut since, &mut held, out, input).await {

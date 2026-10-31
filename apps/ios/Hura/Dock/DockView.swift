@@ -31,10 +31,17 @@ struct DockView: View {
     let name: String
     @State var pane: Pane = .files
 
+    /// A worktree on the server has no proxy deciding its requests, no policy
+    /// and no ports of its own, so it has no panes for them.
+    private var panes: [Pane] {
+        guard server.session(named: name)?.isWorktree == true else { return Pane.allCases }
+        return Pane.allCases.filter { ![.events, .policy, .ports].contains($0) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Picker("Pane", selection: $pane) {
-                ForEach(Pane.allCases) { p in
+                ForEach(panes) { p in
                     Image(systemName: p.icon).accessibilityLabel(p.rawValue).tag(p)
                 }
             }
