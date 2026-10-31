@@ -101,7 +101,7 @@ hura --server=work ls
 
 **`--host` is the flag that matters, and leaving it out is the usual failure.**
 The pairing string carries an address, and without `--host` that address is the
-machine's own `/etc/hostname` -- which is frequently not a name the client can
+machine's own `/etc/hostname` (`hostname` on a Mac) -- which is frequently not a name the client can
 resolve, and on a Debian-family box resolves *on the server itself* to
 `127.0.1.1` while `hurad serve` is bound to `127.0.0.1`. The result is
 `Connection refused` from a server that is running perfectly well, on the same

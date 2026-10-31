@@ -114,6 +114,13 @@ public struct RelayClient: Sendable {
         return RelayLink(linkID: r.link_id, pushToken: r.push_token)
     }
 
+    /// `PATCH /v1/servers/{id}`: the title of a notification the phone
+    /// could not decrypt.
+    public func rename(_ linkID: String, label: String, device: PushDevice) async throws {
+        let _: Empty = try await request("PATCH", "/v1/servers/\(linkID)", secret: device.deviceSecret,
+                                         body: ["label": label])
+    }
+
     /// `DELETE /v1/servers/{id}`; the link's push token stops working.
     public func unlink(_ linkID: String, device: PushDevice) async throws {
         let _: Empty = try await request("DELETE", "/v1/servers/\(linkID)", secret: device.deviceSecret)
