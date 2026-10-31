@@ -118,7 +118,13 @@ struct WorktreeView: View {
             guard case let .chat(conv)? = tab else { return }
             if phase == .background { chats[conv]?.stop() } else if phase == .active { chats[conv]?.start() }
         }
-        .onAppear { model.visibleSession = (server.id, name) }
+        .onAppear {
+            model.visibleSession = (server.id, name)
+            // Back from the dock, which is pushed on top of this and so
+            // made it disappear: the conversation on screen opens again,
+            // asking only for what it missed. A terminal reopens itself.
+            if case let .chat(conv)? = tab { chats[conv]?.start() }
+        }
         .onDisappear {
             chats.values.forEach { $0.stop() }
             terminals.values.forEach { $0.stop() }
