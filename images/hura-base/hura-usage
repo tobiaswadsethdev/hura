@@ -16,7 +16,8 @@
 # line waits for it. And it must not fail loudly: whatever happens here, the
 # agent should still draw a status line, so every path prints something and
 # exits 0.
-dir=/sandbox/.hura
+# A worktree session's agent runs on the server, and says where its directory is.
+dir=${HURA_DIR:-/sandbox/.hura}
 mkdir -p "$dir" 2>/dev/null
 
 payload=''

@@ -24,6 +24,7 @@ import {
   Skill,
   Toolchain,
   Tracker,
+  Unsandboxed,
 } from "../icons";
 
 export function Facts({ session, usage }: { session: Session; usage: Usage | null }) {
@@ -57,9 +58,18 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
             {repoName(session.repo)}
           </span>
         </Fact>
-        <Fact icon={Sandbox} label="sandbox">
-          <span className="mono">{session.sandbox}</span>
-        </Fact>
+        {session.backend === "worktree" ? (
+          <Fact icon={Unsandboxed} label="not isolated">
+            <span className="mono" title={session.workdir ?? undefined}>
+              {session.workdir ?? "a worktree on the server"}
+            </span>
+            <span className="quiet"> on the server, as its user, with no policy</span>
+          </Fact>
+        ) : (
+          <Fact icon={Sandbox} label="sandbox">
+            <span className="mono">{session.sandbox}</span>
+          </Fact>
+        )}
       </section>
 
       <section>

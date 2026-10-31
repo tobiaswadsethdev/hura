@@ -27,11 +27,13 @@ import {
   Policy,
   Publish,
   PullRequest as PullMark,
+  Sandbox,
   Secret,
   Skill,
   Start,
   Toolchain,
   Tracker,
+  Unsandboxed,
 } from "./icons";
 import type { Facts } from "./gen/Facts";
 import type { Interface } from "./gen/Interface";
@@ -148,6 +150,8 @@ function Form({
   const [toolchains, setToolchains] = useState<string[]>([]);
   const [providers, setProviders] = useState<string[]>(options.default_providers);
   const [agentInterface, setAgentInterface] = useState<Interface>(options.default_interface);
+  // A sandbox unless this server allows otherwise and you say so.
+  const [worktree, setWorktree] = useState(false);
   const [facts, setFacts] = useState<Facts | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -236,6 +240,7 @@ function Form({
         toolchains,
         start: true,
         interface: agentInterface,
+        worktree,
       });
       onCreated(created);
     } catch (e) {
@@ -306,7 +311,7 @@ function Form({
         value={task}
         // Said, because nothing else on the form does: this is the agent's first
         // prompt, sent the moment the clone finishes, and blank starts it idle.
-        placeholder="What should the agent do? It starts on this as soon as the sandbox is ready. Leave blank to start it idle."
+        placeholder={`What should the agent do? It starts on this as soon as the ${worktree ? "worktree" : "sandbox"} is ready. Leave blank to start it idle.`}
         onChange={(e) => setTask(e.target.value)}
       />
 
@@ -349,17 +354,46 @@ function Form({
             ]}
           />
         </label>
-        <label className="chip-field" title="network policy">
-          <Policy />
-          <Select
-            value={policy}
-            onChange={setPolicy}
-            aria-label="policy"
-            options={options.policies.map((p) => ({ value: p.spec, label: p.spec, hint: p.summary }))}
-          />
-        </label>
+        {options.worktrees && (
+          <label className="chip-field" title="where the agent runs">
+            {worktree ? <Unsandboxed /> : <Sandbox />}
+            <Select
+              value={worktree ? "worktree" : "sandbox"}
+              onChange={(v) => setWorktree(v === "worktree")}
+              aria-label="where"
+              options={[
+                { value: "sandbox", label: "sandbox", hint: "its own VM, under a policy" },
+                { value: "worktree", label: "worktree", hint: "on the server, as you" },
+              ]}
+            />
+          </label>
+        )}
+        {!worktree && (
+          <label className="chip-field" title="network policy">
+            <Policy />
+            <Select
+              value={policy}
+              onChange={setPolicy}
+              aria-label="policy"
+              options={options.policies.map((p) => ({ value: p.spec, label: p.spec, hint: p.summary }))}
+            />
+          </label>
+        )}
       </div>
 
+      {/* Said where the choice is made, because nothing afterwards stops it:
+          the agent is a process of the server user's, with their files, their
+          credentials and the whole network. */}
+      {worktree && (
+        <p className="unsandboxed-note">
+          <Unsandboxed />
+          A git worktree of {project.path} on the server. The agent runs there as the server's
+          user, with its files, credentials and network, and no policy. Its skills and MCP servers
+          are that user's own.
+        </p>
+      )}
+
+      {!worktree && (
       <div className="pick-rows">
         <PickRow icon={Toolchain} label="toolchains">
           {options.toolchains.map((t) => (
@@ -427,6 +461,7 @@ function Form({
           ))}
         </PickRow>
       </div>
+      )}
 
       {error && <p className="error">{error}</p>}
 

@@ -102,6 +102,7 @@ import {
   Shield,
   ShieldBan,
   ShieldCheck,
+  ShieldOff,
   Sparkles,
   Square,
   Terminal as TerminalGlyph,
@@ -261,6 +262,8 @@ export const Desktop = Monitor;
 export const Repo = FolderGit2;
 /// The sandbox itself, the box everything else is inside.
 export const Sandbox = Box;
+/// A session with no sandbox: a worktree on the server, with its rights.
+export const Unsandboxed = ShieldOff;
 
 // The about screen.
 /// A newer release is on offer. The header's badge and the screen's button.

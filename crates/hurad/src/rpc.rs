@@ -497,7 +497,9 @@ fn create(new: hura_core::ops::NewSession) -> Outcome {
                 eprintln!("hurad: {}: could not record why: {e}", draft.name);
             }
         };
+        // A worktree runs on this machine, from no image at all.
         let image = match draft.interface {
+            _ if draft.worktree => Ok(false),
             chat::Interface::Terminal => image::ensure_for(&draft.toolchains),
             chat::Interface::Chat => image::ensure_chat(&draft.toolchains),
         };

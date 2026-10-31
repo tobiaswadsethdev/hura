@@ -71,8 +71,28 @@ pub fn refresh_with(
     // the records nobody has changed since this read.
     let read: Vec<Session> = Store::load()?.list().into_iter().cloned().collect();
     let mut out = Refreshed::default();
-    let backend = backends.sandboxed();
-    let rec = backend.live(read.clone())?;
+    // Each backend judges its own sessions: a worktree session has no
+    // sandbox, and the runtime's list would call every one of them dead.
+    let (worktrees, sandboxes): (Vec<Session>, Vec<Session>) = read
+        .iter()
+        .cloned()
+        .partition(|s| s.backend == session::Kind::Worktree);
+    let mut rec = backends.of_kind(session::Kind::Sandbox).live(sandboxes)?;
+    let local = backends.of_kind(session::Kind::Worktree).live(worktrees)?;
+    let orphans: Vec<(String, session::Kind)> = rec
+        .orphans
+        .drain(..)
+        .map(|o| (o, session::Kind::Sandbox))
+        .chain(
+            local
+                .orphans
+                .into_iter()
+                .map(|o| (o, session::Kind::Worktree)),
+        )
+        .collect();
+    rec.sessions.extend(local.sessions);
+    rec.dead.extend(local.dead);
+    rec.lingering.extend(local.lingering);
 
     // Tombstones outlive the removal that wrote them only for as long as the
     // thing they name does: anything tombstoned and no longer reported by the
@@ -93,10 +113,10 @@ pub fn refresh_with(
             .cloned(),
     );
 
-    for orphan in &rec.orphans {
+    for (orphan, kind) in &orphans {
         // Outside the lock, because reading a record is an exec; the adopted
         // record is written on its own once it is known.
-        match backend.read_meta(orphan) {
+        match backends.of_kind(*kind).read_meta(orphan) {
             // Only into a name nobody holds: a create that wrote its record
             // after this refresh read the cache knows more than the sandbox's
             // metadata does.
@@ -134,6 +154,7 @@ pub fn refresh_with(
             // The third part is the reason a failure goes on the record with:
             // the create that launched the seeder has gone, so nobody heard it
             // stop and this is the first anyone will.
+            let backend = backends.for_session(&s);
             let (state, note, failure) = match seed::seed_state(backend, &s) {
                 seed::SeedState::Done => (State::Ready, "seeding finished".to_string(), None),
                 seed::SeedState::Failed(why) => {
@@ -252,6 +273,11 @@ pub struct NewOptions {
     /// Whether a session started here gets a chat or a terminal, when the form
     /// does not say otherwise: the config file's answer.
     pub default_interface: crate::chat::Interface,
+    /// Whether a session may be a plain worktree on the server instead of a
+    /// sandbox: `worktrees = true` in its config file. Defaults to no for a
+    /// server from before it could say.
+    #[serde(default)]
+    pub worktrees: bool,
 }
 
 /// The templates, with a configured YAML path in front of them when there is
@@ -310,6 +336,7 @@ pub fn new_options(backends: &Backends, cfg: &crate::config::Config) -> NewOptio
         skills: cfg.skills().iter().map(|s| s.name.clone()).collect(),
         mcp: cfg.mcp().iter().map(|e| e.name().to_string()).collect(),
         default_interface: cfg.interface(),
+        worktrees: cfg.worktrees,
     }
 }
 
@@ -455,6 +482,10 @@ pub struct NewSession {
     /// that has never heard of the choice gets the one this server makes.
     #[serde(default)]
     pub interface: Option<crate::chat::Interface>,
+    /// A plain worktree on the server rather than a sandbox. Refused unless
+    /// the server's config file allows it; see [`NewOptions::worktrees`].
+    #[serde(default)]
+    pub worktree: bool,
 }
 
 impl NewSession {
@@ -498,6 +529,10 @@ impl NewSession {
             None => format!("{}/{name}", cfg.branch_prefix()),
         };
         session::validate_branch(&branch).map_err(|e| e.to_string())?;
+        if self.worktree && !cfg.worktrees {
+            return Err("this server does not make worktree sessions;                         `worktrees = true` in its config file turns them on"
+                .to_string());
+        }
         Ok(Draft {
             name,
             project: self.project,
@@ -520,6 +555,7 @@ impl NewSession {
             toolchains: toolchain::resolve(&self.toolchains).map_err(|e| e.to_string())?,
             start: self.start,
             interface: self.interface.unwrap_or_else(|| cfg.interface()),
+            worktree: self.worktree,
         })
     }
 }
@@ -587,6 +623,9 @@ pub struct Draft {
     pub start: bool,
     /// Whether that agent is a terminal or a chat.
     pub interface: crate::chat::Interface,
+    /// A plain worktree on the server rather than a sandbox. Already checked
+    /// against the config file by whoever built this.
+    pub worktree: bool,
 }
 
 /// A stage of creating a session, reported as it begins.
@@ -670,14 +709,22 @@ pub fn create(
     progress: &mut dyn FnMut(Step),
 ) -> Result<Created, String> {
     let mut warnings = Vec::new();
-    let backend = backends.sandboxed();
+    let backend = backends.of_kind(if draft.worktree {
+        session::Kind::Worktree
+    } else {
+        session::Kind::Sandbox
+    });
 
     session::validate_name(&draft.name).map_err(|e| e.to_string())?;
 
     // An unusable remote fails before a sandbox exists. An unknown *host* is
     // only a warning: a public repository on any host still clones, and only
     // the credential the seeder hands git depends on knowing the forge.
+    //
+    // Not for a worktree, which never clones: it is added to a checkout that
+    // already has its remote, whatever form that takes.
     match forge::Remote::parse(&draft.repo) {
+        _ if draft.worktree => {}
         Ok(_) => {}
         Err(e @ (forge::Error::Ssh(_) | forge::Error::Incomplete { .. })) => {
             return Err(e.to_string());
@@ -873,6 +920,9 @@ fn record(draft: &Draft) -> Session {
     s.mcp = draft.mcp.clone();
     s.skills = draft.skills.clone();
     s.interface = draft.interface;
+    if draft.worktree {
+        s.backend = session::Kind::Worktree;
+    }
     s
 }
 
@@ -1367,6 +1417,11 @@ pub fn sandbox_ports(
     backend: &dyn Backend,
     session: &Session,
 ) -> Result<crate::ports::Found, String> {
+    // Not on the server: its `/proc` is every process of the server user's,
+    // and offering to stop them from a phone is not what this pane is for.
+    if backend.kind() == session::Kind::Worktree {
+        return Ok(crate::ports::Found::default());
+    }
     let script = crate::ports::sandbox_script();
     let out = backend
         .exec(session, &["sh", "-c", &script])
@@ -1548,7 +1603,12 @@ pub fn destroy(backends: &Backends, name: &str) -> Result<Destroyed, String> {
     // after the refresh it exists to stop. See [`crate::removed`].
     removed::remember(name);
 
-    let outcome = match backends.sandboxed().tear_down(name, record.as_ref()) {
+    // Through the record's own backend. With no record, the naming
+    // convention is all there is, and that is a sandbox's.
+    let backend = record
+        .as_ref()
+        .map_or_else(|| backends.sandboxed(), |r| backends.for_session(r));
+    let outcome = match backend.tear_down(name, record.as_ref()) {
         Ok(Torn::Removed) => Destroyed::Sandbox,
         Ok(Torn::RecordOnly) => Destroyed::RecordOnly,
         Err(e) => {
@@ -1685,7 +1745,11 @@ printf '
         usage_path = seed::sh_quote(&paths.usage()),
         pane_marker = seed::sh_quote(status::PANE_MARKER),
         ports_marker = seed::sh_quote(status::PORTS_MARKER),
-        ports = crate::ports::SCRIPT,
+        // A sandbox's sockets are its own; the server's are everyone's.
+        ports = match backend.kind() {
+            session::Kind::Sandbox => crate::ports::SCRIPT,
+            session::Kind::Worktree => ":",
+        },
     )
 }
 

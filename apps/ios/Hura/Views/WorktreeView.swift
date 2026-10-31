@@ -92,7 +92,9 @@ struct WorktreeView: View {
         .confirmationDialog("Delete \(name)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Worktree", role: .destructive, action: destroy)
         } message: {
-            Text("Its sandbox is deleted, with everything in it that hasn't been pushed.")
+            Text(session?.isWorktree == true
+                 ? "Its worktree on the server is deleted with its changes. A branch with commits on it is kept."
+                 : "Its sandbox is deleted, with everything in it that hasn't been pushed.")
         }
         .alert("Couldn't do that", isPresented: .constant(error != nil)) {
             Button("OK") { error = nil }
@@ -206,6 +208,11 @@ struct WorktreeView: View {
                     }
                     if let project = session.project { LabeledContent("Project", value: project) }
                     LabeledContent("Agent", value: session.isChat ? "Chat" : "Terminal")
+                    if session.isWorktree {
+                        LabeledContent("Runs") {
+                            Text("On the server, not isolated").foregroundStyle(.orange)
+                        }
+                    }
                     if let policy = session.policy { LabeledContent("Network policy", value: policy) }
                     if !session.toolchains.isEmpty {
                         LabeledContent("Toolchains", value: session.toolchains.joined(separator: ", "))

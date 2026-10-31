@@ -80,6 +80,14 @@ pub struct Config {
     /// Where the TUI's picker looks for repositories. Replaces the built-in
     /// roots rather than adding to them, like `HURA_REPO_ROOTS`, which still wins.
     pub repo_roots: Option<Vec<PathBuf>>,
+    /// Whether a new session may be a plain `git worktree` on this machine
+    /// instead of a sandbox. Off unless the file says so: a worktree session
+    /// runs with the server's own rights, and a server shared with a phone is
+    /// not one where that should be a tap away by default.
+    pub worktrees: bool,
+    /// Where worktree sessions put their working copies, one directory each.
+    /// `None` is [`crate::backend::Worktree::default_root`].
+    pub worktree_root: Option<PathBuf>,
     /// How often the terminal interface read the sandboxes. Nothing reads it
     /// since that went in v0.4.0; it is still parsed so existing config files
     /// keep loading. See:
@@ -394,6 +402,8 @@ impl Config {
             repo_roots: raw
                 .repo_roots
                 .map(|list| list.iter().map(|p| expand_tilde(p)).collect()),
+            worktrees: raw.worktrees.unwrap_or(false),
+            worktree_root: raw.worktree_root.as_deref().map(expand_tilde),
             refresh,
             auto_update: raw.auto_update,
             skills: resolved_skills,
@@ -470,9 +480,7 @@ struct Raw {
     policy: Option<String>,
     providers: Option<Vec<String>>,
     repo_roots: Option<Vec<PathBuf>>,
-    /// Where worktree sessions went. Nothing reads it since that backend was
-    /// removed; still accepted so existing config files keep loading.
-    #[allow(dead_code)]
+    worktrees: Option<bool>,
     worktree_root: Option<PathBuf>,
     refresh: Option<String>,
     auto_update: Option<bool>,
@@ -805,13 +813,14 @@ mod tests {
         assert_eq!(c.refresh, None);
     }
 
-    /// `worktree_root` configured a backend that no longer exists. A file that
-    /// still names it has to keep loading, or removing the backend would stop
-    /// every command on a machine that ever used it.
+    /// Worktree sessions are off unless asked for, and the root is a path
+    /// like the others, `~` and all.
     #[test]
-    fn a_retired_worktree_root_still_parses() {
-        parse("worktree_root = \"~/.local/share/hura/worktrees\"\n")
-            .expect("a retired key is accepted and ignored");
+    fn worktrees_are_off_until_the_file_turns_them_on() {
+        assert!(!parse("").unwrap().worktrees);
+        let c = parse("worktrees = true\nworktree_root = \"~/wt\"\n").unwrap();
+        assert!(c.worktrees);
+        assert!(!c.worktree_root.unwrap().starts_with("~"));
     }
 
     /// Every key the example mentions has to be a key the parser accepts, or the
@@ -827,6 +836,8 @@ mod tests {
             "policy",
             "providers",
             "repo_roots",
+            "worktrees",
+            "worktree_root",
             "refresh",
             "skills",
         ] {

@@ -3023,6 +3023,9 @@ main { position: relative; }
 .new-session .dialog-head .in { color: var(--dimmer); font-weight: 400; }
 .new-session .head-mark { color: var(--dim); }
 .new-session .origin { margin: 0 0 12px 21px; font-family: var(--font-mono); font-size: 11px; color: var(--dimmer); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.new-session .unsandboxed-note { display: flex; gap: 6px; align-items: flex-start; margin: 0 0 12px 0; padding: 8px 10px; border: 1px solid var(--warn); border-radius: 6px; font-size: 12px; color: var(--text); }
+.new-session .unsandboxed-note svg { flex: none; margin-top: 1px; color: var(--warn); }
+.wt-unsandboxed { display: inline-flex; color: var(--warn); }
 .new-session .from-ticket { display: flex; align-items: center; gap: 6px; margin: -4px 0 10px 21px; font-size: 12px; }
 .new-session .from-ticket .lucide { color: var(--dim); }
 .new-session .from-ticket a { color: var(--text); font-family: var(--font-mono); }

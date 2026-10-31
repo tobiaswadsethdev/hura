@@ -50,4 +50,10 @@ skills: Array<string>, mcp: Array<string>,
  * Whether a session started here gets a chat or a terminal, when the form
  * does not say otherwise: the config file's answer.
  */
-default_interface: Interface, };
+default_interface: Interface, 
+/**
+ * Whether a session may be a plain worktree on the server instead of a
+ * sandbox: `worktrees = true` in its config file. Defaults to no for a
+ * server from before it could say.
+ */
+worktrees: boolean, };

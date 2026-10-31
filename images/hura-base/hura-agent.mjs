@@ -45,6 +45,9 @@ import { fileURLToPath } from "node:url";
 /// Where clients find this process. Fixed rather than chosen, because the
 /// server dials it without asking, and kept in step with `chat::PORT`.
 export const PORT = 47681;
+/// The port this host is reached on: [`PORT`] in a sandbox, and its own on a
+/// server where several worktree sessions' hosts share one loopback.
+const LISTEN = Number(process.env.HURA_AGENT_PORT || PORT);
 /// The conversation the seeder starts with the task. The one tab a chat
 /// session always has, which is why it cannot be closed.
 export const AGENT = "agent";
@@ -824,7 +827,7 @@ class Client {
 
 function serve(args) {
   const host = new Host({ dir: HURA, cwd: args.cwd ?? "/sandbox/repo" });
-  const port = Number(args.port ?? PORT);
+  const port = Number(args.port ?? LISTEN);
 
   // The agent's own conversation, started with the task the first time
   // through. A restart finds it in the registry and leaves it be; it resumes
@@ -864,7 +867,7 @@ function readTask(file) {
 }
 
 /// A one-shot request to the running host, for the commands below `serve`.
-function request(body, port = PORT) {
+function request(body, port = LISTEN) {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, "127.0.0.1");
     socket.on("error", (e) => reject(new Error(`hura-agent is not running: ${e.message}`)));

@@ -101,9 +101,12 @@ public struct NewOptions: Codable, Equatable, Sendable {
     public var mcp: [String]
     /// `chat` or `terminal`.
     public var defaultInterface: String
+    /// Whether a session may be a worktree on the server instead of a
+    /// sandbox. nil from a server too old to say, which means no.
+    public var worktrees: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case policies, toolchains, providers, skills, mcp
+        case policies, toolchains, providers, skills, mcp, worktrees
         case providersError = "providers_error"
         case defaultPolicy = "default_policy"
         case defaultProviders = "default_providers"
@@ -135,10 +138,15 @@ public struct NewSession: Encodable, Equatable, Sendable {
     /// The pull request it was started from; `branch` is the pull request's,
     /// and `base` what it merges into.
     public var pull: PullOrigin?
+    /// A worktree on the server rather than a sandbox. Only where
+    /// `NewOptions.worktrees` says the server allows it.
+    public var worktree: Bool
 
     public init(project: String?, name: String?, repo: String, task: String, base: String?,
                 branch: String? = nil, policy: String, providers: [String], toolchains: [String],
-                start: Bool = true, interface: String?, ticket: TicketOrigin? = nil, pull: PullOrigin? = nil) {
+                start: Bool = true, interface: String?, ticket: TicketOrigin? = nil, pull: PullOrigin? = nil,
+                worktree: Bool = false) {
+        self.worktree = worktree
         self.project = project
         self.name = name
         self.repo = repo
@@ -156,7 +164,7 @@ public struct NewSession: Encodable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case project, name, repo, task, base, branch, policy, providers, toolchains, start, interface
-        case ticket, pull
+        case ticket, pull, worktree
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -177,6 +185,7 @@ public struct NewSession: Encodable, Equatable, Sendable {
         try c.encode(interface, forKey: .interface)
         try c.encode(ticket, forKey: .ticket)
         try c.encode(pull, forKey: .pull)
+        try c.encode(worktree, forKey: .worktree)
     }
 }
 

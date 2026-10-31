@@ -30,7 +30,8 @@ if [ ! -t 0 ]; then
         head -c 160)
 fi
 
-dir=/sandbox/.hura
+# A worktree session's agent runs on the server, and says where its directory is.
+dir=${HURA_DIR:-/sandbox/.hura}
 mkdir -p "$dir" 2>/dev/null
 
 # Write then rename, so a reader polling this file never sees it half-written.
