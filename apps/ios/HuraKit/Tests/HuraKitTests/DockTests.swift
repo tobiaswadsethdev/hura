@@ -111,5 +111,11 @@ struct DockWireTests {
         let p = try JSONDecoder().decode(PolicyView.self, from: Data(raw.utf8))
         #expect(p.rules.first?.hosts == ["github.com:443"])
         #expect(p.lists?.allow.first?.inPolicy == true)
+        #expect(p.watching == nil, "a server older than watching says nothing of it")
+
+        let watched = try JSONDecoder().decode(PolicyView.self, from: Data("""
+        {"template":null,"rules":[],"watching":[{"id":"w1","host":"example.com:443"}],"lists":null}
+        """.utf8))
+        #expect(watched.watching == [Watching(id: "w1", host: "example.com:443")])
     }
 }

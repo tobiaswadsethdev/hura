@@ -151,6 +151,11 @@ pub enum Request {
         endpoint: String,
         everywhere: bool,
     },
+    /// Have the runtime read each request the session makes to an endpoint,
+    /// so a refused one turns up in the feed by its method and path. Lets
+    /// nothing through. Answers with [`Reply::Policy`], whose `watching` names
+    /// the rule; [`Request::RemoveRule`] with its id stops it.
+    Watch { name: String, endpoint: String },
     /// Take an endpoint off the global lists. The session is named only so the
     /// answer can be its [`Reply::Policy`]; its sandbox is not touched.
     Unlist { name: String, endpoint: String },
@@ -399,6 +404,7 @@ impl Request {
             | Request::AllowPaths { name, .. }
             | Request::Block { name, .. }
             | Request::Unlist { name, .. }
+            | Request::Watch { name, .. }
             | Request::RemoveRule { name, .. }
             | Request::GitStatus { name }
             | Request::GitDiff { name, .. }
@@ -892,6 +898,11 @@ mod tests {
                 methods: vec!["POST".into()],
                 path: Some("/**/git-receive-pack".into()),
                 global: false,
+                watch: false,
+            }],
+            watching: vec![hura_core::policy::Watching {
+                id: "0a1b".into(),
+                host: "example.com:443".into(),
             }],
             lists: None,
         };
@@ -901,6 +912,7 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["ok"]["reply"], "policy");
         assert_eq!(v["ok"]["template"], "feature-work");
+        assert_eq!(v["ok"]["watching"][0]["host"], "example.com:443");
 
         match serde_json::from_str::<Outcome>(&json)
             .unwrap()

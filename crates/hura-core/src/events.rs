@@ -404,7 +404,26 @@ impl Event {
 /// for a request the proxy judged by its method and path, `host:port` for a
 /// connection. Name lookups are left out; every connection already has a row
 /// of its own, and the lookups are the half nobody acts on.
-pub fn from_sbx(log: &sbx_client::PolicyLog) -> Vec<Event> {
+///
+/// Since v0.50 the log no longer says which request it refused, only
+/// `HTTP request (query redacted)` against the host; the approvals waiting on
+/// the sandbox do, one per method and path. So a refused request is an event
+/// from its approval, and the host's row in the log, which counts the same
+/// refusals again, is left out once an approval stands for it. A host's only
+/// approval takes the row's count and last sighting, since then they are
+/// about the same request; of several, nothing says which was repeated.
+pub fn from_sbx(log: &sbx_client::PolicyLog, approvals: &[sbx_client::Approval]) -> Vec<Event> {
+    let requests: Vec<(&str, &str, &str, &sbx_client::Approval)> = approvals
+        .iter()
+        .filter_map(|a| {
+            let (method, rest) = a.title.split_once(' ')?;
+            let at = rest.find('/')?;
+            let (authority, path) = rest.split_at(at);
+            (request(&a.title).is_some() && host_port(authority).is_some())
+                .then_some((method, authority, path, a))
+        })
+        .collect();
+    let redacted = |e: &sbx_client::LogEntry| e.rule.starts_with("HTTP request");
     let rows = log
         .blocked_hosts
         .iter()
@@ -412,6 +431,7 @@ pub fn from_sbx(log: &sbx_client::PolicyLog) -> Vec<Event> {
         .chain(log.allowed_hosts.iter().map(|e| (e, Verdict::Allowed)));
     let mut out: Vec<Event> = rows
         .filter(|(e, _)| e.proxy_type != "network" && !e.host.ends_with(".docker.internal"))
+        .filter(|(e, _)| !(redacted(e) && requests.iter().any(|r| r.1 == e.host)))
         .filter_map(|(e, verdict)| {
             let at = epoch_of(&e.since)?;
             let request = requested(&e.rule);
@@ -435,6 +455,32 @@ pub fn from_sbx(log: &sbx_client::PolicyLog) -> Vec<Event> {
             })
         })
         .collect();
+    for (method, authority, path, a) in &requests {
+        let Some(at) = epoch_of(&a.created_at) else {
+            continue;
+        };
+        let row = log
+            .blocked_hosts
+            .iter()
+            .find(|e| e.host == *authority && redacted(e))
+            .filter(|_| requests.iter().filter(|r| r.1 == *authority).count() == 1);
+        out.push(Event {
+            at,
+            count: row.map_or(1, |e| e.count_since.max(1)),
+            last: row
+                .and_then(|e| epoch_of(&e.last_seen))
+                .unwrap_or(at)
+                .max(at),
+            class: format!("HTTP:{method}"),
+            severity: Severity::Info,
+            verdict: Verdict::Denied,
+            subject: format!("{method} {authority}{path}"),
+            policy: None,
+            reason: row
+                .and_then(|e| e.reason.clone())
+                .or_else(|| Some("No matching allow rule".to_string())),
+        });
+    }
     out.sort_by_key(|e| std::cmp::Reverse(e.at));
     out
 }
@@ -753,7 +799,7 @@ mod tests {
         ))
         .unwrap();
         let log: sbx_client::PolicyLog = serde_json::from_str(&text).unwrap();
-        let events = from_sbx(&log);
+        let events = from_sbx(&log, &[]);
         assert!(
             events
                 .iter()
@@ -789,6 +835,55 @@ mod tests {
             events.windows(2).all(|w| w[0].at >= w[1].at),
             "newest first"
         );
+    }
+
+    /// v0.50's log names no request, so a refused one is read from the
+    /// approval waiting on it, and the host's row in the log is not counted a
+    /// second time.
+    #[test]
+    fn a_refused_request_is_read_from_its_approval() {
+        let fixture = |name: &str| {
+            std::fs::read_to_string(format!(
+                "{}/../sbx-client/tests/fixtures/v0.50/{name}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap()
+        };
+        let log: sbx_client::PolicyLog =
+            serde_json::from_str(&fixture("policy-log-requests.json")).unwrap();
+        let approvals: Vec<sbx_client::Approval> =
+            serde_json::from_str(&fixture("approvals.json")).unwrap();
+        let events = from_sbx(&log, &approvals);
+
+        let same = events
+            .iter()
+            .find(|e| e.subject == "GET example.edu:443/same")
+            .expect("the refused request");
+        assert_eq!(same.class, "HTTP:GET");
+        assert_eq!(same.verdict, Verdict::Denied);
+        assert_eq!(
+            same.count, 3,
+            "the host's one request takes the row's count"
+        );
+        assert_eq!(same.target().unwrap().endpoint, "example.edu:443");
+        assert!(
+            !events.iter().any(|e| e.subject == "example.edu:443"),
+            "the row the approval stands for is not counted again"
+        );
+
+        let other = events
+            .iter()
+            .find(|e| e.subject == "GET example.net:443/x/y")
+            .expect("a request on a host with no row");
+        assert_eq!(other.count, 1);
+
+        // A connection refused outright is already the log's row.
+        let refused: Vec<_> = events
+            .iter()
+            .filter(|e| e.subject == "cli.github.com:443")
+            .collect();
+        assert_eq!(refused.len(), 1);
+        assert_eq!(refused[0].count, 3);
     }
 
     #[test]

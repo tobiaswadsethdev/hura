@@ -130,6 +130,11 @@ impl Credential {
 /// Random rather than derived, so nothing outside the sandbox can work one
 /// out, and long enough that it never turns up in a request by accident.
 pub fn placeholder(kind: Kind) -> String {
+    format!("{}{}", kind.prefix(), random_hex())
+}
+
+/// Twelve random bytes as hex, for a value nothing outside hura can guess.
+pub(crate) fn random_hex() -> String {
     let mut bytes = [0u8; 12];
     // /dev/urandom does not fail on Linux once the system is up. If it ever
     // did, a placeholder made from the clock and the pid is still unique per
@@ -146,8 +151,7 @@ pub fn placeholder(kind: Kind) -> String {
         let seed = now ^ u128::from(std::process::id());
         bytes.copy_from_slice(&seed.to_le_bytes()[..12]);
     }
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    format!("{}{hex}", kind.prefix())
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]

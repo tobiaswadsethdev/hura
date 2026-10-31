@@ -169,6 +169,7 @@ pub fn rules(servers: &[Server]) -> Vec<RuleSpec> {
         resources: hosts,
         methods: Vec::new(),
         path: None,
+        query: Vec::new(),
     }]
 }
 

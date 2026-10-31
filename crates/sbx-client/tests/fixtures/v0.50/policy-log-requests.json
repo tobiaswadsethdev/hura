@@ -1,0 +1,25 @@
+{
+  "allowed": [],
+  "blocked": [
+    {
+      "sandbox_id": "hura-pathprobe",
+      "host": "example.edu:443",
+      "proxy_type": "forward",
+      "rule": "HTTP request (query redacted)",
+      "reason": "No matching allow rule (default deny)",
+      "count": 3,
+      "first_seen": "2026-10-31T13:48:12.150783+01:00",
+      "last_seen": "2026-10-31T13:48:12.163148+01:00"
+    },
+    {
+      "sandbox_id": "hura-pathprobe",
+      "host": "cli.github.com:443",
+      "proxy_type": "forward",
+      "rule": "no applicable policies for op(action=net:connect:tcp, resource=net:domain:cli.github.com:443)",
+      "reason": "No matching allow rule (default deny)",
+      "count": 3,
+      "first_seen": "2026-10-31T13:44:13.94674+01:00",
+      "last_seen": "2026-10-31T13:48:12.12594+01:00"
+    }
+  ]
+}

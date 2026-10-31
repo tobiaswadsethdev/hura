@@ -133,6 +133,16 @@ impl Sandboxed {
                         resources: rest,
                         methods: rule.methods.clone(),
                         path: rule.http_targets.first().map(|t| t.path.clone()),
+                        query: rule
+                            .http_targets
+                            .first()
+                            .map(|t| {
+                                t.query
+                                    .iter()
+                                    .map(|q| (q.name.clone(), q.value_pattern.clone()))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                     },
                 )?;
             }
@@ -202,6 +212,10 @@ fn rule_of(r: &Rule) -> policy::Rule {
         methods: r.methods.iter().map(|m| m.to_ascii_uppercase()).collect(),
         path: r.http_targets.first().map(|t| t.path.clone()),
         global: !r.is_scoped(),
+        watch: r
+            .http_targets
+            .iter()
+            .any(|t| t.query.iter().any(|q| q.name == endpoints::WATCH)),
     }
 }
 
@@ -432,7 +446,10 @@ impl Backend for Sandboxed {
     }
 
     fn events(&self, session: &Session) -> Result<Vec<Event>> {
-        Ok(events::from_sbx(&self.client.log(&session.sandbox)?))
+        let log = self.client.log(&session.sandbox)?;
+        // Only what names the requests; the log alone is still the feed.
+        let approvals = self.client.approvals(&session.sandbox).unwrap_or_default();
+        Ok(events::from_sbx(&log, &approvals))
     }
 
     fn providers(&self) -> Result<Vec<ProviderChoice>> {
@@ -480,8 +497,8 @@ mod tests {
     use std::rc::Rc;
 
     use sbx_client::{
-        CustomSecret, HttpTarget, PolicyLog, Port, Result as SbxResult, Sandbox, SecretSpec,
-        Template, Version,
+        CustomSecret, HttpTarget, PolicyLog, Port, QueryMatch, Result as SbxResult, Sandbox,
+        SecretSpec, Template, Version,
     };
 
     use super::*;
@@ -569,6 +586,14 @@ mod tests {
                     .map(|p| HttpTarget {
                         host: spec.resources[0].clone(),
                         path: p.clone(),
+                        query: spec
+                            .query
+                            .iter()
+                            .map(|(name, value)| QueryMatch {
+                                name: name.clone(),
+                                value_pattern: value.clone(),
+                            })
+                            .collect(),
                     })
                     .collect(),
             });
@@ -662,6 +687,40 @@ mod tests {
                 .iter()
                 .all(|r| r.decision == Decision::Allow)
         );
+    }
+
+    /// A watch is an allow that opens nothing, kept apart from the rules the
+    /// pane lists, and goes once the whole host is allowed.
+    #[test]
+    fn a_watched_host_is_read_request_by_request_until_it_is_open() {
+        let (b, fake) = backend(Settings::default());
+        let s = crate::session::Session::new("a".into(), "r".into(), "t".into());
+
+        let view = crate::ops::watch(&b, &s, "example.com:443").unwrap();
+        assert_eq!(view.watching.len(), 1);
+        assert_eq!(view.watching[0].host, "example.com:443");
+        assert!(
+            !view.opens("example.com:443"),
+            "a watch lets nothing through"
+        );
+        assert!(view.rules.is_empty());
+        let rule = fake.rules.borrow()[0].clone();
+        let query = &rule.http_targets[0].query[0];
+        assert_eq!(query.name, endpoints::WATCH);
+        assert_eq!(query.value_pattern.len(), 24, "random, so nothing sends it");
+
+        // Asked twice, it is still one.
+        crate::ops::watch(&b, &s, "example.com:443").unwrap();
+        assert_eq!(fake.rules.borrow().len(), 1);
+
+        // Some paths leave it, since the rest are still refused.
+        let routes = [endpoints::Route::checked("GET", "/a/**").unwrap()];
+        let view = crate::ops::allow(&b, &s, "example.com:443", &routes, false).unwrap();
+        assert_eq!(view.watching.len(), 1);
+
+        let view = crate::ops::allow(&b, &s, "example.com:443", &[], false).unwrap();
+        assert!(view.watching.is_empty());
+        assert!(view.opens_whole("example.com:443"));
     }
 
     #[test]

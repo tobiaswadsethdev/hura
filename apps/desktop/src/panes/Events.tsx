@@ -21,9 +21,12 @@
 // the request, not the host again.
 //
 // An allow is the whole host or some of its paths. A denial of the host names
-// no path, because the connection was refused before any request was made, so
-// the paths are typed or pasted as a URL. A denial by a rule's own paths names
-// the request it refused, and the panel starts from that.
+// no path, because the connection was refused before any request was made. So
+// such a row offers to read the host's requests: the runtime then lets the
+// connection through, refuses each request instead, and names it, which is
+// what an allow of only that path, or of everything under it, starts from.
+// Until then the paths are typed or pasted as a URL. A denial by a rule's own
+// paths names the request it refused, and the panel starts from that.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -73,6 +76,8 @@ type Standing = {
   rules: string[];
   /// Which global list it is on, if either.
   listed: "allow" | "block" | null;
+  /// The rule that has the runtime read its requests one by one, if one does.
+  watch: string | null;
 };
 
 /// What the action panel under a row is doing, keyed by the row it is under.
@@ -329,6 +334,9 @@ function EndpointRow({
   const canAllow = tone === "denied" && actions.busy === null;
   // A denial by a rule's paths names the request, which is the thing to read.
   const request = g.requests.length > 0 ? g.events.find((e) => e.verdict === "Denied") : undefined;
+  // Refused before it said what it wanted: reading its requests is what makes
+  // the next try say.
+  const canWatch = canAllow && g.requests.length === 0 && !s.watch;
 
   const meta: React.ReactNode[] = [
     ...(request ? [<span key="req" className="bin">{brief(request)}</span>] : []),
@@ -339,6 +347,9 @@ function EndpointRow({
     </span>,
     ...(s.listed === "allow" ? [<span key="l">allowed everywhere</span>] : []),
     ...(s.listed === "block" ? [<span key="l">blocked everywhere</span>] : []),
+    ...(s.watch && g.requests.length === 0 && tone === "denied"
+      ? [<span key="w">its next try shows the path</span>]
+      : []),
   ];
 
   return (
@@ -361,6 +372,17 @@ function EndpointRow({
           </span>
         ) : (
           <>
+            {canWatch && (
+              <button
+                className="ep-allow"
+                title={`read each request to ${g.endpoint}, so a refused one shows its path; lets nothing through`}
+                onClick={() =>
+                  actions.apply(g.endpoint, api.watch(actions.server, actions.name, g.endpoint))
+                }
+              >
+                paths
+              </button>
+            )}
             {canAllow && (
               <button
                 className="ep-allow"
@@ -520,7 +542,21 @@ function itemsFor(
           run: () => a.setAsking({ row, kind: "allow", scope: "paths" }),
         },
       );
+      if (!s.watch) {
+        items.push({
+          label: "Show the paths it asks for",
+          hint: "from its next try",
+          run: () => a.apply(endpoint, api.watch(a.server, a.name, endpoint)),
+        });
+      }
     }
+  }
+  if (s.watch && a.busy === null) {
+    const id = s.watch;
+    items.push({
+      label: "Stop reading its requests",
+      run: () => a.apply(endpoint, api.removeRule(a.server, a.name, id)),
+    });
   }
   if (s.open && !s.denied && a.busy === null) {
     if (items.length) items.push("separator");
@@ -687,6 +723,16 @@ function ChangePanel({
                       aria-label="path"
                       aria-invalid={!!problems[i]}
                     />
+                    {pathProblem(r.path) === null && r.path.trim() !== "/**" && (
+                      <button
+                        className="quiet change-widen"
+                        disabled={busy}
+                        onClick={() => edit(i, { path: widen(r.path) })}
+                        title={`everything under it: ${widen(r.path)}`}
+                      >
+                        wider
+                      </button>
+                    )}
                     {routes.length > 1 && (
                       <button
                         className="quiet-icon"
@@ -788,6 +834,13 @@ function pathProblem(path: string): string | null {
   return null;
 }
 
+/// One level wider: `/a/b/c` is `/a/b/**`, which is `/a/**`, and then `/**`,
+/// which is every path on the host.
+function widen(path: string): string {
+  const parts = path.trim().replace(/\/\*\*$/, "").split("/").filter(Boolean);
+  return `/${[...parts.slice(0, -1), "**"].join("/")}`;
+}
+
 /// `https://host/a/b` or `host/a/b` as `/a/b`, when the host is this one.
 /// Anything else is left as typed.
 function asPath(text: string, host: string): string {
@@ -866,6 +919,8 @@ function standingOf(policy: PolicyView | null, endpoint: string): Standing {
     denied,
     rules: rules.map((r) => r.id),
     listed,
+    // Absent from a server older than watching.
+    watch: (policy?.watching ?? []).find((w) => hostMatches(w.host, endpoint))?.id ?? null,
   };
 }
 

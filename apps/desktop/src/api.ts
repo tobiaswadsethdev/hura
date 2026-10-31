@@ -124,6 +124,10 @@ export const api = {
   // Off the global lists only; no sandbox is touched.
   unlist: (server: string, name: string, endpoint: string) =>
     invoke<PolicyView>("unlist", { server, name, endpoint }),
+  // Read each request to an endpoint, so a refused one names its path. Opens
+  // nothing; removing the rule `watching` names stops it.
+  watch: (server: string, name: string, endpoint: string) =>
+    invoke<PolicyView>("watch_requests", { server, name, endpoint }),
   // One of the session's own rules, by its id: how any change here is undone.
   removeRule: (server: string, name: string, id: string) =>
     invoke<PolicyView>("remove_rule", { server, name, id }),
