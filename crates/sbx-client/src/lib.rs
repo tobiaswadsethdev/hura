@@ -18,6 +18,18 @@
 //!   or which one already covers it as `Already covered ... (by rule "ID")`
 //! * a deny naming exactly what an allow names is refused as a conflict, so
 //!   the allow has to go first
+//!
+//! And again against v0.50.1, after v0.48.0 reworked the CLI's flags and
+//! output. Both are read, because a server is upgraded when it is upgraded:
+//!
+//! * `create` lost `--quiet`, and `run` lost `--detached`; nothing reads what
+//!   `create` prints, so it goes without, and `run -d` is both versions' spelling
+//! * `ls` and `template ls` print a bare array instead of an object around one
+//! * `policy log` names its halves `blocked` and `allowed`, and a row's
+//!   `first_seen`, `count` and `sandbox_id`
+//! * a new rule is `Added rule ID to policy local (...)`, and a secret
+//!   `Saved custom secret PH for target ...`
+//! * a missing sandbox exits 125, though it says so in the same words
 
 use std::ffi::OsStr;
 use std::io::Write as _;
@@ -109,10 +121,16 @@ struct RawSandbox {
     created_at: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct Listing {
-    #[serde(default)]
-    sandboxes: Vec<RawSandbox>,
+/// A listing printed as a bare array since v0.48.0, and as an object with the
+/// array under `key` before it.
+fn listing<T: serde::de::DeserializeOwned>(said: &str, key: &str) -> serde_json::Result<Vec<T>> {
+    match serde_json::from_str::<serde_json::Value>(said)? {
+        serde_json::Value::Object(mut o) => match o.remove(key) {
+            Some(v) => serde_json::from_value(v),
+            None => Ok(Vec::new()),
+        },
+        v => serde_json::from_value(v),
+    }
 }
 
 impl From<RawSandbox> for Sandbox {
@@ -173,7 +191,6 @@ impl CreateOpts {
             "never",
             "--skills",
             "off",
-            "--quiet",
         ]
         .map(String::from)
         .to_vec();
@@ -303,7 +320,7 @@ struct RuleListing {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct LogEntry {
     pub host: String,
-    #[serde(default)]
+    #[serde(default, alias = "sandbox_id")]
     pub vm_name: String,
     /// `forward` for a client that used the proxy, `transparent` for one that
     /// did not, `network` for a DNS lookup.
@@ -313,11 +330,11 @@ pub struct LogEntry {
     /// which for an HTTP request names its method and path.
     #[serde(default)]
     pub rule: String,
-    #[serde(default)]
+    #[serde(default, alias = "first_seen")]
     pub since: String,
     #[serde(default)]
     pub last_seen: String,
-    #[serde(default)]
+    #[serde(default, alias = "count")]
     pub count_since: u64,
     #[serde(default)]
     pub reason: Option<String>,
@@ -326,9 +343,9 @@ pub struct LogEntry {
 /// The two halves of `sbx policy log NAME --json`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct PolicyLog {
-    #[serde(default)]
+    #[serde(default, alias = "blocked")]
     pub blocked_hosts: Vec<LogEntry>,
-    #[serde(default)]
+    #[serde(default, alias = "allowed")]
     pub allowed_hosts: Vec<LogEntry>,
 }
 
@@ -429,12 +446,6 @@ pub struct Template {
     pub tag: String,
     #[serde(default)]
     pub flavor: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct TemplateListing {
-    #[serde(default)]
-    images: Vec<Template>,
 }
 
 /// `sbx version --json`.
@@ -653,6 +664,19 @@ impl CliClient {
             source,
         })
     }
+
+    /// A listing, in either version's shape; see [`listing`].
+    fn list_of<T: serde::de::DeserializeOwned>(
+        &self,
+        args: &[String],
+        key: &str,
+    ) -> Result<Vec<T>> {
+        let out = self.run_checked(args, None)?;
+        listing(&out.stdout, key).map_err(|source| Error::Parse {
+            args: args.join(" "),
+            source,
+        })
+    }
 }
 
 /// What a failed call means, from what it said.
@@ -722,7 +746,8 @@ impl CliClient {
 }
 
 /// The id out of `Rule added to policy local (scope: sandbox:NAME): ID (...)`,
-/// or, for a rule an existing one already covers, out of
+/// `Added rule ID to policy local (...)` since v0.48.0, or, for a rule an
+/// existing one already covers, out of
 /// `Already covered in policy local (...): HOST [tcp] (by rule "ID")`, which is
 /// the CLI's answer to adding it again, with exit status 0.
 fn rule_id(said: &str) -> Option<String> {
@@ -731,19 +756,30 @@ fn rule_id(said: &str) -> Option<String> {
         let id = rest.split_whitespace().next()?;
         return Some(id.to_string());
     }
+    if let Some(line) = said.lines().find(|l| l.starts_with("Added rule ")) {
+        let id = line.split_whitespace().nth(2)?;
+        return Some(id.to_string());
+    }
     let line = said.lines().find(|l| l.starts_with("Already covered"))?;
     let quoted = line.split("by rule \"").nth(1)?;
     Some(quoted.split('"').next()?.to_string())
 }
 
-/// The placeholder out of `Saved custom secret placeholder "PH" for ...`.
+/// The placeholder out of `Saved custom secret placeholder "PH" for ...`, or
+/// `Saved custom secret PH for ...` since v0.48.0.
 fn placeholder(said: &str) -> Option<String> {
+    if let Some(line) = said
+        .lines()
+        .find(|l| l.starts_with("Saved custom secret placeholder"))
+    {
+        let start = line.find('"')? + 1;
+        let len = line[start..].find('"')?;
+        return Some(line[start..start + len].to_string());
+    }
     let line = said
         .lines()
-        .find(|l| l.starts_with("Saved custom secret placeholder"))?;
-    let start = line.find('"')? + 1;
-    let len = line[start..].find('"')?;
-    Some(line[start..start + len].to_string())
+        .find(|l| l.starts_with("Saved custom secret "))?;
+    Some(line.split_whitespace().nth(3)?.to_string())
 }
 
 /// The host port out of `Published 127.0.0.1:44620 -> 8080/tcp4`.
@@ -779,13 +815,13 @@ impl Sbx for CliClient {
     }
 
     fn detach(&self, name: &str) -> Result<()> {
-        self.run_checked(&strings(&["run", "--detached", "--name", name]), Some(name))?;
+        self.run_checked(&strings(&["run", "-d", "--name", name]), Some(name))?;
         Ok(())
     }
 
     fn list(&self) -> Result<Vec<Sandbox>> {
-        let listing: Listing = self.json(&strings(&["ls", "--json"]), None)?;
-        Ok(listing.sandboxes.into_iter().map(Sandbox::from).collect())
+        let all: Vec<RawSandbox> = self.list_of(&strings(&["ls", "--json"]), "sandboxes")?;
+        Ok(all.into_iter().map(Sandbox::from).collect())
     }
 
     fn exec(&self, name: &str, argv: &[&str]) -> Result<ExecOutput> {
@@ -912,8 +948,7 @@ impl Sbx for CliClient {
     }
 
     fn templates(&self) -> Result<Vec<Template>> {
-        let listing: TemplateListing = self.json(&strings(&["template", "ls", "--json"]), None)?;
-        Ok(listing.images)
+        self.list_of(&strings(&["template", "ls", "--json"]), "images")
     }
 
     fn load_template(&self, archive: &Path) -> Result<()> {
@@ -937,11 +972,13 @@ mod tests {
 
     #[test]
     fn reads_the_sandbox_listing() {
-        let listing: Listing = serde_json::from_str(&fixture("ls.json")).unwrap();
-        let all: Vec<Sandbox> = listing.sandboxes.into_iter().map(Sandbox::from).collect();
-        assert_eq!(all.len(), 2);
-        assert!(all.iter().all(|s| s.name.starts_with("hura-spike-")));
-        assert!(all.iter().all(|s| !s.id.is_empty()));
+        for (file, n) in [("ls.json", 2), ("v0.50/ls.json", 1)] {
+            let all: Vec<RawSandbox> = listing(&fixture(file), "sandboxes").unwrap();
+            let all: Vec<Sandbox> = all.into_iter().map(Sandbox::from).collect();
+            assert_eq!(all.len(), n, "{file}");
+            assert!(all.iter().all(|s| s.name.starts_with("hura-")));
+            assert!(all.iter().all(|s| !s.id.is_empty()));
+        }
     }
 
     #[test]
@@ -991,6 +1028,22 @@ mod tests {
         assert_eq!(refused.proxy_type, "forward");
         assert!(refused.count_since >= 1);
         assert!(refused.reason.as_deref().unwrap().contains("default deny"));
+
+        let log: PolicyLog = serde_json::from_str(&fixture("v0.50/policy-log.json")).unwrap();
+        let refused = log
+            .blocked_hosts
+            .iter()
+            .find(|e| e.host == "github.com:443")
+            .unwrap();
+        assert_eq!(refused.vm_name, "hura-probe");
+        assert_eq!(refused.count_since, 1);
+        assert!(refused.since.starts_with("2026-"));
+        assert!(refused.reason.as_deref().unwrap().contains("default deny"));
+        assert!(
+            log.allowed_hosts
+                .iter()
+                .any(|e| e.host == "example.com:443")
+        );
     }
 
     #[test]
@@ -1001,14 +1054,19 @@ mod tests {
         let secrets: SecretListing = serde_json::from_str(&fixture("secret-ls.json")).unwrap();
         assert!(secrets.custom_secrets[0].placeholder.starts_with("sbx-cs-"));
 
-        let templates: TemplateListing =
-            serde_json::from_str(&fixture("template-ls.json")).unwrap();
-        assert!(templates.images.iter().any(|t| t.tag == "shell-docker"));
-        assert!(templates.images.iter().all(|t| t.id.len() == 12));
+        let templates: Vec<Template> = listing(&fixture("template-ls.json"), "images").unwrap();
+        assert!(templates.iter().any(|t| t.tag == "shell-docker"));
+        assert!(templates.iter().all(|t| t.id.len() == 12));
+        let templates: Vec<Template> =
+            listing(&fixture("v0.50/template-ls.json"), "images").unwrap();
+        assert!(templates.iter().any(|t| t.tag == "latest"));
+        assert!(templates.iter().all(|t| t.id.len() == 12));
 
         let version: Version = serde_json::from_str(&fixture("version.json")).unwrap();
         assert_eq!(version.client.version, "v0.47.0");
         assert_eq!(version.server.unwrap().state, "running");
+        let version: Version = serde_json::from_str(&fixture("v0.50/version.json")).unwrap();
+        assert_eq!(version.client.version, "v0.50.1");
     }
 
     #[test]
@@ -1053,6 +1111,14 @@ mod tests {
             .as_deref(),
             Some("1a7788f6-913b-4458-8943-166d7a81575f")
         );
+        assert_eq!(
+            rule_id(
+                "Added rule c774f1f4-20dd-4a30-a806-0d67b4baa1fc to policy local \
+                 (scope: sandbox:hura-probe): example.com [tcp]\n"
+            )
+            .as_deref(),
+            Some("c774f1f4-20dd-4a30-a806-0d67b4baa1fc")
+        );
 
         assert_eq!(
             placeholder(
@@ -1062,6 +1128,15 @@ mod tests {
             )
             .as_deref(),
             Some("sbx-cs-TCmF6pXIfgZAPSQP")
+        );
+        assert_eq!(
+            placeholder(
+                "Applied secret updates to sandbox hura-probe\n\
+                 Saved custom secret hura-cs-Igz6mplfW5dTRoZK for target httpbin.org env \
+                 HURA_PROBE (hura-probe)\n"
+            )
+            .as_deref(),
+            Some("hura-cs-Igz6mplfW5dTRoZK")
         );
 
         assert_eq!(
@@ -1091,7 +1166,7 @@ mod tests {
         assert_eq!(
             create.args().join(" "),
             "create shell --name hura-a --template hura-sandbox:latest --pull never \
-             --skills off --quiet --cpus 4 --memory 8g --env GITHUB_TOKEN=hura-cs-x"
+             --skills off --cpus 4 --memory 8g --env GITHUB_TOKEN=hura-cs-x"
         );
 
         let rule = RuleSpec {

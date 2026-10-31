@@ -1,0 +1,18 @@
+[
+  {
+    "id": "b9ad95793049",
+    "repository": "docker.io/library/hura-sandbox",
+    "tag": "latest",
+    "flavor": "shell-docker",
+    "created_at": "2026-10-31T08:10:42Z",
+    "size": 842402083
+  },
+  {
+    "id": "c9ab012ecf80",
+    "repository": "docker.io/library/hura-sandbox",
+    "tag": "node",
+    "flavor": "shell-docker",
+    "created_at": "2026-10-31T08:22:23Z",
+    "size": 842403737
+  }
+]
