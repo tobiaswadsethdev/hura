@@ -12,7 +12,6 @@ struct ChatView: View {
     @State private var answering: String?
     @State private var atBottom = true
     @State private var items: [ChatItem] = []
-    @State private var scrolledToLatest = false
     @FocusState private var composing: Bool
 
     /// hura clones every session's repository here.
@@ -47,12 +46,16 @@ struct ChatView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
                     }
+                    // Made again once the history is in, so it opens at the
+                    // bottom by its default anchor. Scrolling a lazy stack
+                    // there instead lands by guessed row heights, short of
+                    // or past the rows it has drawn, and it shows nothing
+                    // until it is scrolled by hand.
+                    .id(items.isEmpty)
                     .onChange(of: chat.entries.count, initial: true) {
+                        let had = !items.isEmpty
                         items = ChatItem.fold(chat.entries)
-                        if !scrolledToLatest, !items.isEmpty {
-                            scrolledToLatest = true
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        } else if atBottom {
+                        if had, atBottom {
                             withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                         }
                     }
