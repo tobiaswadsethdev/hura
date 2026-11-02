@@ -196,7 +196,14 @@ COPY hura-status /usr/local/bin/hura-status
 COPY hura-usage /usr/local/bin/hura-usage
 COPY claude-settings.json /home/agent/.claude/settings.json
 
-RUN chmod 0755 /usr/local/bin/hura-status /usr/local/bin/hura-usage \
+# `az` is not the Azure CLI. It answers `az account get-access-token`, and
+# only that, with the placeholder of a session's `azure-cli` credential, so
+# Azure.Identity's AzureCliCredential works in here with no login and no
+# token: the proxy swaps the placeholder for a token the host's own `az`
+# minted. The script says the rest; `image::supports` checks the label below.
+COPY az /usr/local/bin/az
+
+RUN chmod 0755 /usr/local/bin/hura-status /usr/local/bin/hura-usage /usr/local/bin/az \
     && chmod 0644 /home/agent/.claude/settings.json \
     && chown -R agent:agent /home/agent/.claude
 
@@ -228,8 +235,8 @@ RUN set -eu; \
     printf '%s\n' "$sdk" > /usr/local/lib/hura-agent/sdk-version; \
     node --input-type=module -e "await import('@anthropic-ai/claude-agent-sdk')"
 
-# What `image::supports_chat` asks the image, without starting a container. A
-# variant inherits it, so a variant built from an older base says so too.
-LABEL hura.chat="1"
+# What `image::supports` asks the image, without starting a container. A
+# variant inherits them, so a variant built from an older base says so too.
+LABEL hura.chat="1" hura.azure="1"
 
 USER agent

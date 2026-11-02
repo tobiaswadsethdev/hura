@@ -441,6 +441,11 @@ pub struct SecretSpec {
     /// The placeholder's shape, with `{rand}` for its random part. `None`
     /// leaves the runtime's own, `sbx-cs-` and twenty characters.
     pub placeholder: Option<String>,
+    /// How long the runtime keeps a resolved value before running the source
+    /// again, as a duration it reads (`30m`). `None` leaves its default,
+    /// `on-demand`. A value that expires on its own, like an Entra access
+    /// token, needs one shorter than its lifetime.
+    pub refresh: Option<String>,
 }
 
 impl SecretSpec {
@@ -472,6 +477,10 @@ impl SecretSpec {
         if let Some(p) = &self.placeholder {
             out.push("--placeholder".into());
             out.push(p.clone());
+        }
+        if let Some(r) = &self.refresh {
+            out.push("--refresh".into());
+            out.push(r.clone());
         }
         out
     }
@@ -1268,12 +1277,22 @@ mod tests {
             env: "CLAUDE_CODE_OAUTH_TOKEN".into(),
             source: SecretSource::Command("cat /home/u/.config/hura/tokens/claude".into()),
             placeholder: Some("sk-ant-oat01-{rand}".into()),
+            refresh: None,
         };
         assert_eq!(
             secret.args().join(" "),
             "secret set-custom --sandbox hura-a --env CLAUDE_CODE_OAUTH_TOKEN \
              --host api.anthropic.com --host platform.claude.com \
              --command cat /home/u/.config/hura/tokens/claude --placeholder sk-ant-oat01-{rand}"
+        );
+        let refreshed = SecretSpec {
+            refresh: Some("30m".into()),
+            ..secret
+        };
+        assert!(
+            refreshed.args().join(" ").ends_with("--refresh 30m"),
+            "{:?}",
+            refreshed.args()
         );
 
         let client = CliClient::new().with_bin("/opt/sbx");

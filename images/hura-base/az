@@ -1,0 +1,60 @@
+#!/bin/sh
+# hura's stand-in for the Azure CLI. Not the Azure CLI: the only thing it does
+# is answer `az account get-access-token`, which is what Azure.Identity's
+# AzureCliCredential asks, and what code written for a developer's laptop
+# reaches Key Vault, Storage and the rest through.
+#
+# There is no Azure login in a sandbox and no token. A session given an
+# `azure-cli` credential has, for each resource the credential lists, a
+# placeholder in HURA_AZURE_TOKEN_<resource>; this prints it where the token
+# goes. The sandbox runtime's proxy swaps it for a real token, minted by `az`
+# on the host, on requests to that resource's hosts and nowhere else. A
+# resource with no placeholder is refused rather than answered with another
+# resource's, so a feature that needs it fails saying which one.
+#
+# The variable's tail is the resource with its scheme and any `/.default`
+# scope suffix taken off, upper-cased, and `_` for the rest:
+# https://vault.azure.net is HURA_AZURE_TOKEN_VAULT_AZURE_NET. It has to match
+# credentials::resource_slug in hura-core, and a test there runs this script.
+set -eu
+
+if [ "${1:-} ${2:-}" != "account get-access-token" ]; then
+  echo "az: the Azure CLI is not installed in this sandbox. This is hura's stand-in, which only answers 'az account get-access-token' for the resources the session's azure-cli credential lists." >&2
+  exit 1
+fi
+shift 2
+
+resource=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --resource|--scope)
+      [ $# -ge 2 ] || { echo "az: $1 needs a value" >&2; exit 2; }
+      resource="$2"
+      shift 2
+      ;;
+    --resource=*|--scope=*) resource="${1#*=}"; shift ;;
+    *) shift ;;
+  esac
+done
+[ -n "$resource" ] || { echo "az: say which resource, with --resource or --scope" >&2; exit 2; }
+
+slug=$(printf '%s' "$resource" \
+  | sed -e 's#^[A-Za-z][A-Za-z0-9+.-]*://##' -e 's#/\.default$##' -e 's#/*$##' \
+  | tr '[:lower:]' '[:upper:]' \
+  | tr -c 'A-Z0-9' '_')
+# The slug is letters, digits and `_` by construction, so the eval reads one
+# variable and nothing else.
+eval "token=\${HURA_AZURE_TOKEN_${slug}:-}"
+if [ -z "$token" ]; then
+  echo "az: this session has no token for '$resource'. Add it to the resources of an azure-cli credential in the hura config file, and tick that credential when creating the session." >&2
+  exit 1
+fi
+
+# An hour, as az says of a fresh token. The real one behind the placeholder is
+# refreshed on the host well inside that, so nothing here ever goes stale.
+expires=$(( $(date +%s) + 3600 ))
+# GNU date in the image; BSD date's -r too, for running this anywhere else.
+local_time=$(date -d "@$expires" '+%Y-%m-%d %H:%M:%S.000000' 2>/dev/null \
+  || date -r "$expires" '+%Y-%m-%d %H:%M:%S.000000')
+printf '{"accessToken":"%s","expiresOn":"%s","expires_on":%s,"tokenType":"Bearer"}\n' \
+  "$token" "$local_time" "$expires"
