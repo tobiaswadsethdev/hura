@@ -209,13 +209,15 @@ struct PullView: View {
                         .font(.callout).foregroundStyle(.orange)
                 }
                 HStack {
+                    // Text, not a Label: in a list row the label's icon is
+                    // laid out but not drawn, which pushes the title off centre.
                     Button { merging = .now } label: {
-                        Label(words.now, systemImage: "arrow.triangle.merge").frame(maxWidth: .infinity)
+                        Text(words.now).frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     if m.auto == nil, m.canAuto {
                         Button { merging = .auto } label: {
-                            Label(words.autoShort, systemImage: "clock.arrow.circlepath").frame(maxWidth: .infinity)
+                            Text(words.autoShort).frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
                     }

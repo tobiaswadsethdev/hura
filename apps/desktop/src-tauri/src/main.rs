@@ -40,8 +40,8 @@ use hura_client::trackers::Trackers;
 use hura_client::{Incoming, Remote, Remotes, Sink};
 use hura_core::chat::ChatCommand;
 use hura_core::comments::{Comment, NewComment};
-use hura_core::endpoints::Route;
 use hura_core::events::FeedEvent;
+use hura_core::endpoints::Route;
 use hura_core::files::{Dir, FileText};
 use hura_core::git::{Against, FileDiff, Status as GitStatus};
 use hura_core::integrations::View as IntegrationsView;
@@ -457,20 +457,12 @@ fn chats_of(reply: Reply) -> Result<Chats, Failed> {
 
 #[tauri::command(async)]
 fn chats(server: String, name: String) -> Result<Chats, Failed> {
-    chats_of(
-        remote(&server)?
-            .call(Request::Chats { name })
-            .map_err(to_message)?,
-    )
+    chats_of(remote(&server)?.call(Request::Chats { name }).map_err(to_message)?)
 }
 
 #[tauri::command(async)]
 fn new_chat(server: String, name: String) -> Result<Chats, Failed> {
-    chats_of(
-        remote(&server)?
-            .call(Request::NewChat { name })
-            .map_err(to_message)?,
-    )
+    chats_of(remote(&server)?.call(Request::NewChat { name }).map_err(to_message)?)
 }
 
 #[tauri::command(async)]
@@ -858,11 +850,7 @@ fn users(
 
 /// One pull request: its checks, its reviewers and its conversation.
 #[tauri::command(async)]
-fn pull(
-    tracker: String,
-    repo: String,
-    id: String,
-) -> Result<hura_core::tracker::PullDetail, Failed> {
+fn pull(tracker: String, repo: String, id: String) -> Result<hura_core::tracker::PullDetail, Failed> {
     let stored = tracker_named(&load_trackers()?, &tracker)?;
     hura_core::tracker::pull(&stored, &repo, &id).map_err(failed)
 }
@@ -930,15 +918,8 @@ fn pull_merge(
     delete_branch: bool,
 ) -> Result<(), Failed> {
     let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::pull_merge(
-        &stored,
-        &repo,
-        &id,
-        how,
-        head.as_deref().unwrap_or_default(),
-        delete_branch,
-    )
-    .map_err(failed)
+    hura_core::tracker::pull_merge(&stored, &repo, &id, how, head.as_deref().unwrap_or_default(), delete_branch)
+        .map_err(failed)
 }
 
 /// Set it to merge itself once it can, or with `how` null, take that back:
