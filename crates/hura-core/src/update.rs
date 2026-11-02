@@ -367,7 +367,24 @@ fn version_of(bin: &Path) -> Option<String> {
     if !bin.is_file() {
         return None;
     }
-    let out = Command::new(bin).arg("--version").output().ok()?;
+    // A file written a moment ago can refuse to run with ETXTBSY: a thread that
+    // forked while it was still open for writing holds that descriptor until
+    // its child execs. A download is asked its version straight after it is
+    // written, in a server whose other threads are spawning sbx and docker, and
+    // the tests here run in threads too; measured, one test run in thirteen
+    // failed this way. It clears in milliseconds, so it is waited out rather
+    // than taken to mean the binary will not run.
+    let mut busy = 0;
+    let out = loop {
+        match Command::new(bin).arg("--version").output() {
+            Ok(out) => break out,
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && busy < 50 => {
+                busy += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(_) => return None,
+        }
+    };
     if !out.status.success() {
         return None;
     }
