@@ -52,6 +52,15 @@ RUN sh /usr/local/lib/hura/dotnet-sdk $DOTNET_SDKS
 # worth reading. Signature verification itself is untouched; only the online
 # revocation lookup is.
 #
+# `SSL_CERT_DIR` is for the HTTPS development certificate, also measured: an
+# ASP.NET Core project's frontend commonly runs `dotnet dev-certs https --trust`
+# before its dev server starts, and on Linux that trusts the certificate for
+# OpenSSL by writing it to ~/.aspnet/dev-certs/trust -- then exits 4, failing
+# the dev server's start, unless that directory is in SSL_CERT_DIR. Listed in
+# front of the system's own directory, which SSL_CERT_DIR replaces rather than
+# adds to; the sandbox runtime's proxy CA is in the system bundle that
+# SSL_CERT_FILE names, so outbound HTTPS is unaffected (measured too).
+#
 # Set twice, for the reason the base image sets its locale twice: `ENV` covers a
 # shell someone opens by hand, and `set-environment` in tmux.conf is what reaches
 # the agent, whose environment comes from the tmux server the seeder starts.
@@ -60,7 +69,8 @@ ENV DOTNET_ROOT=/usr/local/dotnet \
     NUGET_PACKAGES=/home/agent/.nuget/packages \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1 \
-    NUGET_CERT_REVOCATION_MODE=offline
+    NUGET_CERT_REVOCATION_MODE=offline \
+    SSL_CERT_DIR=/home/agent/.aspnet/dev-certs/trust:/usr/lib/ssl/certs
 
 RUN printf '%s\n' \
         'set-environment -g DOTNET_ROOT /usr/local/dotnet' \
@@ -69,4 +79,5 @@ RUN printf '%s\n' \
         'set-environment -g DOTNET_CLI_TELEMETRY_OPTOUT 1' \
         'set-environment -g DOTNET_NOLOGO 1' \
         'set-environment -g NUGET_CERT_REVOCATION_MODE offline' \
+        'set-environment -g SSL_CERT_DIR /home/agent/.aspnet/dev-certs/trust:/usr/lib/ssl/certs' \
     >> /etc/tmux.conf

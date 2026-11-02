@@ -156,7 +156,16 @@ The toolchains themselves are in `/usr/local`, owned by root. Everything a build
 | `DOTNET_CLI_HOME` | `/home/agent/.dotnet` |
 
 and the three the SDK is quietened with: `DOTNET_CLI_TELEMETRY_OPTOUT`,
-`DOTNET_NOLOGO` and `NUGET_CERT_REVOCATION_MODE=offline`.
+`DOTNET_NOLOGO` and `NUGET_CERT_REVOCATION_MODE=offline`. `SSL_CERT_DIR` is
+`/home/agent/.aspnet/dev-certs/trust:/usr/lib/ssl/certs`, for the HTTPS
+development certificate: an ASP.NET Core frontend commonly runs `dotnet
+dev-certs https --trust` before its dev server starts, and on Linux that writes
+the certificate to `~/.aspnet/dev-certs/trust` for OpenSSL and then exits 4,
+failing the dev server, unless the directory is in `SSL_CERT_DIR` (measured, on
+a webpack config that does exactly that). The system's own directory is listed
+after it because `SSL_CERT_DIR` replaces the default rather than adding to it;
+the runtime's proxy CA is in the bundle `SSL_CERT_FILE` names, so outbound HTTPS
+is unaffected.
 
 These are set twice, as `ENV` in the image and as `set-environment` in
 `/etc/tmux.conf`, the way the base image says its locale in both places. The
