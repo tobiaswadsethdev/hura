@@ -435,9 +435,16 @@ pub fn ensure(entries: &[Entry]) -> Vec<String> {
 /// network with nothing published, and reads as the second.
 fn inspect(container: &str, port: u16) -> Inspected {
     let plain = |state| Inspected { state, restarts: 0 };
+    // `--type container`, because a bare `inspect` takes the first object of
+    // any kind with that name. An image called `hura-mcp-<name>`, which is what
+    // `docker compose` names one it builds for a service of that name, matched
+    // whenever the container was absent, failed the format on `.State`, and
+    // read as "docker could not be asked".
     let Ok(out) = Command::new("docker")
         .args([
             "inspect",
+            "--type",
+            "container",
             container,
             "--format",
             "{{.State.Running}} {{.RestartCount}} \

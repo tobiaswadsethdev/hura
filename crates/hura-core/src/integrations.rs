@@ -123,13 +123,17 @@ mod tests {
             entry("wiki", &["ATLASSIAN_TOKEN"]),
         ];
         let named = named_secrets(&entries);
+        // The store is the real one, so on a machine with secrets of its own
+        // they are listed too, used by nothing here. Only the catalog's rows
+        // are this test's to count.
+        let asked: Vec<_> = named.iter().filter(|n| !n.used_by.is_empty()).collect();
 
-        assert_eq!(named.len(), 1, "{named:?}");
-        assert_eq!(named[0].name, "ATLASSIAN_TOKEN");
-        assert_eq!(named[0].used_by, ["jira", "wiki"]);
-        // Nothing is stored in this test's environment, so it is asked for and
-        // missing -- which is the state that explains a container exiting.
-        assert!(!named[0].set || secrets::names().contains(&named[0].name));
+        assert_eq!(asked.len(), 1, "{named:?}");
+        assert_eq!(asked[0].name, "ATLASSIAN_TOKEN");
+        assert_eq!(asked[0].used_by, ["jira", "wiki"]);
+        // Usually nothing is stored under it, so it is asked for and missing,
+        // which is the state that explains a container exiting.
+        assert!(!asked[0].set || secrets::names().contains(&asked[0].name));
     }
 
     /// An external entry has no secrets of its own here: whoever runs it gave it
