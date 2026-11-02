@@ -314,7 +314,24 @@ pub fn stage() -> Result<Option<String>, String> {
 /// gets, which is the whole point of staging rather than installing.
 pub fn apply_staged() -> Option<PathBuf> {
     let at = std::env::current_exe().ok()?;
-    let staged = staged_at(&at);
+    apply_staged_at(&at, current())
+}
+
+/// [`apply_staged`] for a binary at `at` that is version `running`, so the
+/// decision can be tested without being the process that makes it.
+fn apply_staged_at(at: &Path, running: &str) -> Option<PathBuf> {
+    let staged = staged_at(at);
+    // This *is* the staged binary, run by `version_of` below to say what it
+    // is. It gets here before it parses `--version`, like every start does,
+    // and from where it sits the staged file is itself. Without this it asked
+    // itself, which spawned it again, and so on until a spawn failed; then the
+    // innermost one found a staged file no newer than itself and deleted it,
+    // and every process above it failed its copy. Measured: no staged update
+    // was ever applied, and an unbounded chain reached 13,000 processes in two
+    // minutes before it was killed.
+    if staged.file_name() == at.file_name() {
+        return None;
+    }
     if !staged.is_file() {
         return None;
     }
@@ -325,7 +342,7 @@ pub fn apply_staged() -> Option<PathBuf> {
     let staged_version = version_of(&staged);
     let newer = staged_version
         .as_deref()
-        .is_some_and(|v| is_older(current(), v));
+        .is_some_and(|v| is_older(running, v));
     if !newer {
         // Stale, damaged, or a downgrade -- and in every one of those cases the
         // right move is to stop carrying it around. A staged binary that is not
@@ -334,7 +351,7 @@ pub fn apply_staged() -> Option<PathBuf> {
         return None;
     }
 
-    if let Err(e) = swap(&staged, &at) {
+    if let Err(e) = swap(&staged, at) {
         // Not fatal, and deliberately not loud: the binary that is running is
         // fine, and a server that refuses to start because it could not update
         // itself would be a worse failure than the one it is reporting.
@@ -342,7 +359,7 @@ pub fn apply_staged() -> Option<PathBuf> {
         return None;
     }
     let _ = std::fs::remove_file(&staged);
-    Some(at)
+    Some(at.to_path_buf())
 }
 
 /// What a binary on disk says its version is, or `None` if it will not run.
@@ -803,9 +820,56 @@ bbbb *hurad-v0.2.0-aarch64-unknown-linux-musl.tar.gz
         let bin = scratch("apply-none");
         fake_binary(&bin.join(BIN), "0.4.0");
         assert!(!staged_at(&bin.join(BIN)).exists());
-        // `apply_staged` reads `current_exe`, so the unit under test here is
-        // the decision, driven directly.
-        assert_eq!(version_of(&staged_at(&bin.join(BIN))), None);
+        assert_eq!(apply_staged_at(&bin.join(BIN), "0.4.0"), None);
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    /// A fake binary answers `--version` and nothing else, which is why no test
+    /// here ever saw this: a real one runs `apply_staged` first, including when
+    /// it is the staged file being asked its version, and from there the staged
+    /// file is itself. It has to leave itself alone, and above all not delete
+    /// itself.
+    #[test]
+    #[cfg(unix)]
+    fn the_staged_binary_does_not_apply_itself() {
+        let bin = scratch("apply-self");
+        let staged = staged_at(&bin.join(BIN));
+        fake_binary(&staged, "9.9.9");
+
+        assert_eq!(apply_staged_at(&staged, "0.1.0"), None);
+        assert_eq!(
+            version_of(&staged).as_deref(),
+            Some("9.9.9"),
+            "the staged file must still be there to be applied"
+        );
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_newer_staged_release_takes_the_binarys_place() {
+        let bin = scratch("apply-newer");
+        let at = bin.join(BIN);
+        fake_binary(&at, "0.4.0");
+        fake_binary(&staged_at(&at), "0.5.0");
+
+        assert_eq!(apply_staged_at(&at, "0.4.0"), Some(at.clone()));
+        assert_eq!(version_of(&at).as_deref(), Some("0.5.0"));
+        assert!(!staged_at(&at).exists(), "applied, so no longer staged");
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_staged_release_that_is_not_newer_is_thrown_away() {
+        let bin = scratch("apply-stale");
+        let at = bin.join(BIN);
+        fake_binary(&at, "0.5.0");
+        fake_binary(&staged_at(&at), "0.5.0");
+
+        assert_eq!(apply_staged_at(&at, "0.5.0"), None);
+        assert_eq!(version_of(&at).as_deref(), Some("0.5.0"));
+        assert!(!staged_at(&at).exists(), "it will never become newer");
         let _ = std::fs::remove_dir_all(&bin);
     }
 
