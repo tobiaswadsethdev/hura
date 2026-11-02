@@ -19,7 +19,7 @@ use std::sync::Once;
 use std::time::Duration;
 
 use hura_core::tracker::{
-    self, FieldChange, HttpRequest, PullFile, PullVerdict, Source, Stored, Transport,
+    self, FieldChange, HttpRequest, PullFile, PullMerge, PullVerdict, Source, Stored, Transport,
 };
 
 use serde::de::DeserializeOwned;
@@ -147,6 +147,28 @@ pub fn handle(request: &str) -> Result<Value, String> {
                 arg("id")?,
                 verdict,
                 arg("body")?,
+            ))
+        }
+        "pull_merge" => {
+            let how: PullMerge = field(&request, "how")?;
+            done(tracker::pull_merge(
+                &stored()?,
+                arg("repo")?,
+                arg("id")?,
+                how,
+                request["head"].as_str().unwrap_or_default(),
+                request["delete_branch"].as_bool().unwrap_or(false),
+            ))
+        }
+        // `how` null takes it back.
+        "pull_auto_merge" => {
+            let how: Option<PullMerge> = field(&request, "how")?;
+            done(tracker::pull_auto_merge(
+                &stored()?,
+                arg("repo")?,
+                arg("id")?,
+                how,
+                request["delete_branch"].as_bool().unwrap_or(false),
             ))
         }
         other => Err(format!("no such request: `{other}`")),

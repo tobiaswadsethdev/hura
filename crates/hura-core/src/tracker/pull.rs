@@ -3,8 +3,9 @@
 //! The sidebar's row says where a pull request stands. This says what it is:
 //! the description, every check by name, who has reviewed it and how, the
 //! conversation, and the files it changes with both sides of each. It also
-//! does the four things a reviewer does without needing the forge's page:
-//! comment, reply to a thread, approve, and ask for changes.
+//! does what a reviewer does without needing the forge's page: comment,
+//! reply to a thread, approve, ask for changes, and merge it, now or once it
+//! can (GitHub's auto-merge, Azure DevOps' auto-complete).
 //!
 //! Read and written with the tracker's own token, like the rest of this
 //! module. GitHub is one GraphQL request for the pull request and REST for the
@@ -63,6 +64,9 @@ pub struct PullDetail {
     pub my_vote: Option<PullVerdict>,
     /// Whether you opened it.
     pub mine: bool,
+    /// How it can be merged from here, and whether it is set to merge itself.
+    /// `None` once it is no longer open.
+    pub merging: Option<PullMerging>,
     /// Parts that could not be read, in words. The checks on Azure DevOps are
     /// two requests of their own, and a pull request without them is still
     /// worth showing.
@@ -205,6 +209,56 @@ pub struct PullFile {
     /// count them.
     pub additions: Option<u32>,
     pub deletions: Option<u32>,
+}
+
+/// How an open pull request can go into its base from here.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullMerging {
+    /// The ways it can be merged, in the order the forge's own page offers
+    /// them. Empty when this token cannot merge it: on GitHub, without write
+    /// access. Azure DevOps says who may complete only by refusing, so there
+    /// it is what the branch's merge strategy policy allows.
+    pub methods: Vec<PullMerge>,
+    /// Set to merge itself once its checks and reviews allow.
+    pub auto: Option<PullAutoMerge>,
+    /// Whether it can be set to merge itself. GitHub refuses on a repository
+    /// that has auto-merge turned off, and on a pull request that could merge
+    /// already; Azure DevOps on a draft.
+    pub can_auto: bool,
+    /// Whether the branch is deleted once merged, when the repository
+    /// decides it (GitHub's "Automatically delete head branches"). `None`
+    /// when it is yours to choose with each merge, as on Azure DevOps.
+    pub deletes_branch: Option<bool>,
+    /// The commit that would be merged. A merge names it, so that something
+    /// pushed after you looked does not go in unseen.
+    pub head: Option<String>,
+}
+
+/// One way of putting a branch into its base.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PullMerge {
+    /// A merge commit (Azure DevOps: "merge (no fast forward)").
+    Merge,
+    Squash,
+    /// Each commit rebased onto the base (Azure DevOps: "rebase and fast
+    /// forward").
+    Rebase,
+    /// Azure DevOps: rebased and then merged with a merge commit
+    /// ("semi-linear merge").
+    RebaseMerge,
+}
+
+/// A pull request set to merge itself.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullAutoMerge {
+    pub by: Option<Person>,
+    pub method: Option<PullMerge>,
+    /// Azure DevOps: the branch goes once it has merged.
+    pub delete_branch: bool,
 }
 
 /// Read one pull request.
@@ -550,6 +604,129 @@ pub fn pull_vote(
     Ok(())
 }
 
+/// Merge it now (Azure DevOps: complete it).
+///
+/// `head` is [`PullMerging::head`]: when the branch has moved since, both
+/// forges refuse rather than merge what was not looked at. `delete_branch`
+/// is Azure DevOps' to act on; GitHub deletes the branch or not as the
+/// repository says ([`PullMerging::deletes_branch`]).
+pub fn pull_merge(
+    stored: &Stored,
+    repo: &str,
+    id: &str,
+    how: PullMerge,
+    head: &str,
+    delete_branch: bool,
+) -> Result<(), String> {
+    let (source, token) = connect(stored, id)?;
+    if !head.is_empty() && !is_sha(head) {
+        return Err(format!("`{head}` is not a commit"));
+    }
+    match source.kind {
+        Kind::GitHub => {
+            let (owner, name) = github_repo(repo)?;
+            let mut body = json!({ "merge_method": github_merge_word(how)? });
+            if !head.is_empty() {
+                body["sha"] = json!(head);
+            }
+            send(
+                "PUT",
+                &format!(
+                    "https://api.github.com/repos/{owner}/{name}/pulls/{}/merge",
+                    number(id)?
+                ),
+                &format!("Bearer {token}"),
+                Some(&body),
+            )?;
+        }
+        Kind::AzureDevOps => {
+            let auth = azure_auth(token);
+            let pr = azure_pull(source, &auth, id)?;
+            let at = AzureAt::of(source, &pr)?;
+            let last =
+                azure_head(&pr).ok_or("azure devops has not merged the branch to test it yet")?;
+            if !head.is_empty() && !last.eq_ignore_ascii_case(head) {
+                return Err(
+                    "the branch has moved since this was read: look again before completing it"
+                        .into(),
+                );
+            }
+            send(
+                "PATCH",
+                &at.record_url(id),
+                &auth,
+                Some(&json!({
+                    "status": "completed",
+                    "lastMergeSourceCommit": { "commitId": last },
+                    "completionOptions": azure_completion(how, delete_branch),
+                })),
+            )?;
+        }
+        Kind::Jira => unreachable!("connect refuses Jira"),
+    }
+    Ok(())
+}
+
+/// Set it to merge itself once its checks and reviews allow, or with `how`
+/// as `None`, take that back. GitHub's auto-merge, Azure DevOps'
+/// auto-complete.
+pub fn pull_auto_merge(
+    stored: &Stored,
+    repo: &str,
+    id: &str,
+    how: Option<PullMerge>,
+    delete_branch: bool,
+) -> Result<(), String> {
+    let (source, token) = connect(stored, id)?;
+    match source.kind {
+        Kind::GitHub => {
+            let (owner, name) = github_repo(repo)?;
+            // The mutations want the pull request's node id, which nothing
+            // else here has needed.
+            let data = graphql(
+                token,
+                GITHUB_PULL_ID,
+                json!({ "owner": owner, "name": name, "number": number(id)? }),
+            )?;
+            let node = data
+                .get("repository")
+                .and_then(|r| r.get("pullRequest"))
+                .map(|p| string(p, "id"))
+                .filter(|n| !n.is_empty())
+                .ok_or("github has no such pull request, or this token cannot see it")?;
+            match how {
+                Some(how) => graphql(
+                    token,
+                    GITHUB_AUTO_MERGE_ON,
+                    json!({ "id": node, "method": github_merge_word(how)?.to_ascii_uppercase() }),
+                )?,
+                None => graphql(token, GITHUB_AUTO_MERGE_OFF, json!({ "id": node }))?,
+            };
+        }
+        Kind::AzureDevOps => {
+            let auth = azure_auth(token);
+            let pr = azure_pull(source, &auth, id)?;
+            let at = AzureAt::of(source, &pr)?;
+            let body = match how {
+                Some(how) => {
+                    let me = azure_me(source, token)?;
+                    json!({
+                        "autoCompleteSetBy": { "id": me.id },
+                        "completionOptions": azure_completion(how, delete_branch),
+                    })
+                }
+                // The empty id is how Azure DevOps' own page takes it back.
+                None => {
+                    json!({ "autoCompleteSetBy": { "id": "00000000-0000-0000-0000-000000000000" } })
+                }
+            };
+            send("PATCH", &at.record_url(id), &auth, Some(&body))?;
+        }
+        Kind::Jira => unreachable!("connect refuses Jira"),
+    }
+    Ok(())
+}
+
 // ------------------------------------------------------------------ shared
 
 /// The tracker and its token, for a pull request numbered `id`.
@@ -629,6 +806,15 @@ fn verdict_word(v: PullVerdict) -> &'static str {
     }
 }
 
+fn merge_word(m: PullMerge) -> &'static str {
+    match m {
+        PullMerge::Merge => "merge",
+        PullMerge::Squash => "squash",
+        PullMerge::Rebase => "rebase",
+        PullMerge::RebaseMerge => "semi-linear merge",
+    }
+}
+
 fn u32_of(v: &Value, key: &str) -> Option<u32> {
     v.get(key).and_then(Value::as_u64).map(|n| n as u32)
 }
@@ -648,9 +834,11 @@ const GITHUB_PULL: &str = r#"query($owner: String!, $name: String!, $number: Int
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       number title url body state isDraft mergeable
-      createdAt updatedAt headRefName baseRefName isCrossRepository viewerDidAuthor
+      createdAt updatedAt headRefName baseRefName headRefOid isCrossRepository viewerDidAuthor
       additions deletions changedFiles
-      repository { nameWithOwner }
+      viewerCanEnableAutoMerge
+      autoMergeRequest { mergeMethod enabledBy { login ... on User { name } } }
+      repository { nameWithOwner viewerPermission mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed deleteBranchOnMerge }
       author { login ... on User { name } }
       reviewRequests(first: 30) { nodes { asCodeOwner requestedReviewer { __typename ... on User { login name } ... on Team { name } ... on Bot { login } ... on Mannequin { login } } } }
       latestReviews(first: 30) { nodes { state author { login ... on User { name } } } }
@@ -666,6 +854,72 @@ const GITHUB_PULL: &str = r#"query($owner: String!, $name: String!, $number: Int
     }
   }
 }"#;
+
+/// The pull request's node id, which the auto-merge mutations address it by.
+const GITHUB_PULL_ID: &str = r#"query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) { id } }
+}"#;
+
+const GITHUB_AUTO_MERGE_ON: &str = r#"mutation($id: ID!, $method: PullRequestMergeMethod!) {
+  enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method }) { clientMutationId }
+}"#;
+
+const GITHUB_AUTO_MERGE_OFF: &str = r#"mutation($id: ID!) {
+  disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId }
+}"#;
+
+/// The REST API's `merge_method`; GraphQL's is the same in capitals.
+fn github_merge_word(how: PullMerge) -> Result<&'static str, String> {
+    match how {
+        PullMerge::Merge => Ok("merge"),
+        PullMerge::Squash => Ok("squash"),
+        PullMerge::Rebase => Ok("rebase"),
+        other => Err(format!("GitHub has no `{}`", merge_word(other))),
+    }
+}
+
+/// How an open pull request can merge, from what GitHub says of it and of
+/// its repository.
+fn github_merging(p: &Value, viewer: &str) -> PullMerging {
+    let r = p.get("repository").unwrap_or(&Value::Null);
+    let allowed = |key: &str| r.get(key).and_then(Value::as_bool).unwrap_or(false);
+    let writes = matches!(
+        string(r, "viewerPermission").as_str(),
+        "ADMIN" | "MAINTAIN" | "WRITE"
+    );
+    let methods = [
+        (PullMerge::Merge, "mergeCommitAllowed"),
+        (PullMerge::Squash, "squashMergeAllowed"),
+        (PullMerge::Rebase, "rebaseMergeAllowed"),
+    ]
+    .into_iter()
+    .filter(|(_, key)| writes && allowed(key))
+    .map(|(m, _)| m)
+    .collect();
+    let auto = p
+        .get("autoMergeRequest")
+        .filter(|a| !a.is_null())
+        .map(|a| PullAutoMerge {
+            by: a.get("enabledBy").and_then(|b| github_person(b, viewer)),
+            method: match string(a, "mergeMethod").as_str() {
+                "MERGE" => Some(PullMerge::Merge),
+                "SQUASH" => Some(PullMerge::Squash),
+                "REBASE" => Some(PullMerge::Rebase),
+                _ => None,
+            },
+            delete_branch: allowed("deleteBranchOnMerge"),
+        });
+    PullMerging {
+        methods,
+        auto,
+        can_auto: p
+            .get("viewerCanEnableAutoMerge")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        deletes_branch: Some(allowed("deleteBranchOnMerge")),
+        head: text_of(p, "headRefOid").filter(|h| is_sha(h)),
+    }
+}
 
 /// Both sides of one file. `isTruncated` is a file too large for GraphQL to
 /// hand over whole, which is shown the way a binary one is.
@@ -969,6 +1223,7 @@ fn parse_github(data: &Value, source: &Source) -> Result<PullDetail, String> {
         },
         my_vote,
         mine,
+        merging: open.then(|| github_merging(p, &viewer)),
         warnings: Vec::new(),
     })
 }
@@ -1124,6 +1379,15 @@ impl AzureAt {
         )
     }
 
+    /// The pull request's own record, under its repository, which is what
+    /// a change to it is sent to.
+    fn record_url(&self, id: &str) -> String {
+        format!(
+            "https://dev.azure.com/{}/{}/_apis/git/repositories/{}/pullRequests/{id}?api-version=7.1",
+            self.org, self.project, self.repo
+        )
+    }
+
     /// The branch policies' verdicts on this pull request: builds, required
     /// reviewers, linked work items. Addressed by an artifact id that names
     /// the project by its id.
@@ -1191,6 +1455,111 @@ fn azure_comment(
         )?,
     };
     Ok(())
+}
+
+/// The commit Azure DevOps last test-merged, which completing it names.
+fn azure_head(pr: &Value) -> Option<String> {
+    pr.get("lastMergeSourceCommit")
+        .map(|c| string(c, "commitId"))
+        .filter(|c| is_sha(c))
+}
+
+fn azure_completion(how: PullMerge, delete_branch: bool) -> Value {
+    json!({
+        "mergeStrategy": match how {
+            PullMerge::Merge => "noFastForward",
+            PullMerge::Squash => "squash",
+            PullMerge::Rebase => "rebase",
+            PullMerge::RebaseMerge => "rebaseMerge",
+        },
+        "deleteSourceBranch": delete_branch,
+    })
+}
+
+/// "Limit merge types", the branch policy that says which of the four a pull
+/// request into its branch may use.
+const AZURE_MERGE_POLICY: &str = "fa4e907d-c16b-4a4c-9dfa-4916e5d171ab";
+
+/// How an open pull request can complete: what the branch's merge strategy
+/// policy allows, all four when there is none, and the auto-complete set on
+/// it.
+fn azure_merging(
+    pr: &Value,
+    evaluations: Option<&Value>,
+    draft: bool,
+    me: &AzureMe,
+) -> PullMerging {
+    let all = vec![
+        PullMerge::Merge,
+        PullMerge::Squash,
+        PullMerge::Rebase,
+        PullMerge::RebaseMerge,
+    ];
+    let policy = evaluations
+        .and_then(|e| e.get("value"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.get("configuration"))
+        .filter(|c| c.get("isEnabled").and_then(Value::as_bool) != Some(false))
+        .find(|c| {
+            c.get("type")
+                .is_some_and(|t| string(t, "id").eq_ignore_ascii_case(AZURE_MERGE_POLICY))
+        })
+        .and_then(|c| c.get("settings"));
+    let methods = match policy {
+        Some(settings) => {
+            let on = |key: &str| settings.get(key).and_then(Value::as_bool).unwrap_or(false);
+            let allowed: Vec<PullMerge> = [
+                (PullMerge::Merge, "allowNoFastForward"),
+                (PullMerge::Squash, "allowSquash"),
+                (PullMerge::Rebase, "allowRebase"),
+                (PullMerge::RebaseMerge, "allowRebaseMerge"),
+            ]
+            .into_iter()
+            .filter(|(_, key)| on(key))
+            .map(|(m, _)| m)
+            .collect();
+            if !allowed.is_empty() {
+                allowed
+            } else if on("useSquashMerge") {
+                // The policy's older shape: squash, or anything.
+                vec![PullMerge::Squash]
+            } else {
+                all
+            }
+        }
+        None => all,
+    };
+    let options = pr.get("completionOptions").unwrap_or(&Value::Null);
+    let auto = pr
+        .get("autoCompleteSetBy")
+        .filter(|by| !by.is_null())
+        .map(|by| PullAutoMerge {
+            by: azure_person(by, me),
+            method: match azure_enum(options, "mergeStrategy") {
+                (s, _) if s == "nofastforward" => Some(PullMerge::Merge),
+                (s, _) if s == "squash" => Some(PullMerge::Squash),
+                (s, _) if s == "rebase" => Some(PullMerge::Rebase),
+                (s, _) if s == "rebasemerge" => Some(PullMerge::RebaseMerge),
+                (_, Some(1)) => Some(PullMerge::Merge),
+                (_, Some(2)) => Some(PullMerge::Squash),
+                (_, Some(3)) => Some(PullMerge::Rebase),
+                (_, Some(4)) => Some(PullMerge::RebaseMerge),
+                _ => None,
+            },
+            delete_branch: options
+                .get("deleteSourceBranch")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        });
+    PullMerging {
+        methods,
+        auto,
+        can_auto: !draft,
+        deletes_branch: None,
+        head: azure_head(pr),
+    }
 }
 
 fn azure_verdict(vote: i64) -> PullVerdict {
@@ -1317,6 +1686,7 @@ fn parse_azure(
     }
 
     let open = state == PullState::Open;
+    let draft = pr.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
     Ok(PullDetail {
         tracker: source.name.clone(),
         kind: Kind::AzureDevOps,
@@ -1326,7 +1696,7 @@ fn parse_azure(
         repo,
         title: string(pr, "title"),
         state,
-        draft: pr.get("isDraft").and_then(Value::as_bool).unwrap_or(false),
+        draft,
         conflicts,
         fork: pr.get("forkSource").is_some_and(|f| !f.is_null()),
         author,
@@ -1355,6 +1725,7 @@ fn parse_azure(
         },
         my_vote,
         mine,
+        merging: open.then(|| azure_merging(pr, evaluations, draft, me)),
         warnings: Vec::new(),
     })
 }
@@ -1834,6 +2205,52 @@ mod tests {
         let d = parse_github(&v, &github_source()).unwrap();
         assert_eq!(d.state, PullState::Merged);
         assert!(d.offers.is_empty());
+        assert!(d.merging.is_none());
+    }
+
+    #[test]
+    fn github_merges_the_ways_the_repository_allows_and_only_with_write_access() {
+        let mut v: Value = serde_json::from_str(GITHUB_DETAIL).unwrap();
+        let p = &mut v["repository"]["pullRequest"];
+        p["headRefOid"] = json!("cccccccccccccccccccccccccccccccccccccccc");
+        p["viewerCanEnableAutoMerge"] = json!(true);
+        p["repository"] = json!({
+            "nameWithOwner": "o/r", "viewerPermission": "WRITE", "mergeCommitAllowed": false,
+            "squashMergeAllowed": true, "rebaseMergeAllowed": true, "deleteBranchOnMerge": true
+        });
+        let m = parse_github(&v, &github_source()).unwrap().merging.unwrap();
+        assert_eq!(m.methods, [PullMerge::Squash, PullMerge::Rebase]);
+        assert!(m.can_auto);
+        assert!(m.auto.is_none());
+        assert_eq!(m.deletes_branch, Some(true));
+        assert_eq!(
+            m.head.as_deref(),
+            Some("cccccccccccccccccccccccccccccccccccccccc")
+        );
+
+        v["repository"]["pullRequest"]["repository"]["viewerPermission"] = json!("READ");
+        let m = parse_github(&v, &github_source()).unwrap().merging.unwrap();
+        assert!(m.methods.is_empty(), "reading is not merging");
+    }
+
+    #[test]
+    fn github_says_who_set_a_pull_request_to_merge_itself() {
+        let mut v: Value = serde_json::from_str(GITHUB_DETAIL).unwrap();
+        v["repository"]["pullRequest"]["autoMergeRequest"] = json!({ "mergeMethod": "SQUASH", "enabledBy": { "login": "tobias", "name": "Tobias" } });
+        let auto = parse_github(&v, &github_source())
+            .unwrap()
+            .merging
+            .unwrap()
+            .auto
+            .unwrap();
+        assert_eq!(auto.method, Some(PullMerge::Squash));
+        assert!(auto.by.unwrap().me);
+    }
+
+    #[test]
+    fn github_has_no_semi_linear_merge() {
+        assert!(github_merge_word(PullMerge::RebaseMerge).is_err());
+        assert_eq!(github_merge_word(PullMerge::Squash), Ok("squash"));
     }
 
     #[test]
@@ -1959,6 +2376,85 @@ mod tests {
             &me(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn azure_completes_any_of_four_ways_without_a_merge_policy() {
+        let m = azure_detail().merging.unwrap();
+        assert_eq!(
+            m.methods,
+            [
+                PullMerge::Merge,
+                PullMerge::Squash,
+                PullMerge::Rebase,
+                PullMerge::RebaseMerge
+            ]
+        );
+        assert!(m.can_auto);
+        assert!(m.auto.is_none());
+        assert_eq!(m.deletes_branch, None, "chosen with each completion");
+    }
+
+    #[test]
+    fn azure_completes_only_the_ways_the_merge_policy_allows() {
+        let evaluations = json!({ "value": [
+            { "status": "approved",
+              "configuration": { "isEnabled": true, "isBlocking": true,
+                  "type": { "id": AZURE_MERGE_POLICY, "displayName": "Require a merge strategy" },
+                  "settings": { "allowSquash": true, "allowRebaseMerge": true, "allowNoFastForward": false } } }
+        ] });
+        let mut pr = azure_pr();
+        pr["lastMergeSourceCommit"] =
+            json!({ "commitId": "dddddddddddddddddddddddddddddddddddddddd" });
+        pr["autoCompleteSetBy"] = json!({ "displayName": "Tobias Wadseth", "id": "me-1" });
+        pr["completionOptions"] = json!({ "mergeStrategy": "squash", "deleteSourceBranch": true });
+        let d = parse_azure(
+            &pr,
+            &json!({ "value": [] }),
+            None,
+            Some(&evaluations),
+            &azure_source(),
+            &me(),
+        )
+        .unwrap();
+        let m = d.merging.unwrap();
+        assert_eq!(m.methods, [PullMerge::Squash, PullMerge::RebaseMerge]);
+        assert_eq!(
+            m.head.as_deref(),
+            Some("dddddddddddddddddddddddddddddddddddddddd")
+        );
+        let auto = m.auto.unwrap();
+        assert_eq!(auto.method, Some(PullMerge::Squash));
+        assert!(auto.delete_branch);
+        assert!(auto.by.unwrap().me);
+    }
+
+    #[test]
+    fn an_azure_draft_cannot_be_set_to_complete_itself() {
+        let mut pr = azure_pr();
+        pr["isDraft"] = json!(true);
+        let d = parse_azure(
+            &pr,
+            &json!({ "value": [] }),
+            None,
+            None,
+            &azure_source(),
+            &me(),
+        )
+        .unwrap();
+        assert!(!d.merging.unwrap().can_auto);
+    }
+
+    #[test]
+    fn an_azure_completion_names_its_strategy() {
+        assert_eq!(
+            azure_completion(PullMerge::Merge, true),
+            json!({ "mergeStrategy": "noFastForward", "deleteSourceBranch": true })
+        );
+        assert_eq!(
+            azure_completion(PullMerge::RebaseMerge, false)["mergeStrategy"],
+            "rebaseMerge"
+        );
     }
 
     #[test]

@@ -3591,3 +3591,10 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   cursor: pointer;
 }
 .chat-commands button:hover { background: var(--hover); }
+
+/* Merging: a way, whether the branch goes, and the buttons at the end. */
+.pull-merge-auto { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0 0 8px; font-size: 12px; }
+.pull-merge-auto .ok { color: var(--ok); }
+.pull-merge-auto button { margin-left: auto; }
+.pull-merge-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; }
+.pull-merge-go { display: flex; gap: 8px; margin-left: auto; }

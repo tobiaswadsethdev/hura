@@ -80,6 +80,36 @@ HURA_TEAM_ID = ABCDE12345
 The APNs topic is the bundle ID, so a different bundle ID also needs a relay
 of its own whose `APNS_TOPIC` matches it.
 
+## TestFlight
+
+Builds go to TestFlight's internal group from a Mac, not from CI:
+
+```sh
+git switch main && git pull
+apps/ios/Tools/testflight.sh
+```
+
+The script rebuilds the Rust core, regenerates the project, archives a
+Release build and uploads it with `Config/ExportOptions.plist`. It refuses a
+branch other than `main` or a checkout with uncommitted changes
+(`HURA_TESTFLIGHT_ANY_BRANCH=1` overrides both).
+
+- **Signing** is automatic, with the team in `Config/Hura.xcconfig`. Xcode has
+  to be signed in to an account on that team (Xcode > Settings > Accounts);
+  the archive and the upload both use it.
+- **The build number** is App Store Connect's to give
+  (`manageAppVersionAndBuildNumber`), so `CURRENT_PROJECT_VERSION` in
+  `project.yml` stays as it is. The version testers see is
+  `MARKETING_VERSION`, bumped by hand when it should change. It is the app's
+  own, separate from the server's release numbers.
+- **After the upload** App Store Connect takes a few minutes to process the
+  build and mails when it is done; internal testers get it then, with nothing
+  more to do. A build that never appears was usually rejected in processing,
+  which App Store Connect also says by mail.
+- Builds from Xcode register with APNs as `sandbox` and TestFlight builds as
+  `production` (see Notifications below), so notifications are worth checking
+  on a TestFlight build rather than only a debug one.
+
 ## Pairing
 
 On the machine running `hurad`, mint a token whose address the phone can

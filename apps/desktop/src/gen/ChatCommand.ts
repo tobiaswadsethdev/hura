@@ -4,4 +4,4 @@ import type { ChatDecision } from "./ChatDecision";
 /**
  * Something a person does in a conversation.
  */
-export type ChatCommand = { "op": "send", text: string, } | { "op": "interrupt" } | { "op": "answer", id: string, decision: ChatDecision, } | { "op": "mode", mode: string, } | { "op": "model", model: string | null, };
+export type ChatCommand = { "op": "send", text: string, } | { "op": "interrupt" } | { "op": "answer", id: string, decision: ChatDecision, } | { "op": "mode", mode: string, } | { "op": "model", model: string | null, } | { "op": "effort", effort: string | null, };

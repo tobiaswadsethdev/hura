@@ -179,6 +179,11 @@ export function modelName(id: string): string {
   return wide ? `${name} (1M)` : name;
 }
 
+/// A reasoning effort as Claude Code's `/effort` says it.
+function effortName(e: string): string {
+  return e === "xhigh" ? "extra high" : e;
+}
+
 function Composer({
   state,
   onCommand,
@@ -213,6 +218,11 @@ function Composer({
 
   const models = state?.models ?? [];
   const model = state?.model ?? null;
+  // The efforts the model in use takes, found by its alias or the id the
+  // alias stands for; the default's while nothing has been chosen.
+  const efforts =
+    (model ? models.find((m) => m.value === model || m.resolved === model) : models[0])?.efforts ?? [];
+  const effort = state?.effort ?? null;
   return (
     <div className="chat-composer">
       {offered.length > 0 && (
@@ -282,6 +292,20 @@ function Composer({
                 hint: m.description.split(" · ")[0],
               }))}
               onChange={(next) => onCommand({ op: "model", model: next })}
+            />
+          )}
+          {efforts.length > 0 && (
+            <Select
+              className="chat-select"
+              aria-label="reasoning effort"
+              title={effort ? `reasoning effort: ${effortName(effort)}` : "reasoning effort"}
+              value={effort ?? ""}
+              shown={effort ? undefined : "effort"}
+              options={[
+                { value: "", label: "default", hint: "the model's own" },
+                ...efforts.map((e) => ({ value: e, label: effortName(e) })),
+              ]}
+              onChange={(next) => onCommand({ op: "effort", effort: next || null })}
             />
           )}
           <span className="chat-facts">

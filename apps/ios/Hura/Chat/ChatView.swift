@@ -151,6 +151,11 @@ struct ChatView: View {
         ("plan", "Plan", "Changes nothing"),
     ]
 
+    /// A reasoning effort as Claude Code's `/effort` says it.
+    static func effortName(_ e: String) -> String {
+        e == "xhigh" ? "Extra High" : e.prefix(1).uppercased() + e.dropFirst()
+    }
+
     private var settingsBar: some View {
         HStack(spacing: 12) {
             Menu {
@@ -176,6 +181,20 @@ struct ChatView: View {
                     }
                 } label: {
                     Label(chat.model.map(modelName) ?? chat.models[0].displayName, systemImage: "cpu")
+                }
+            }
+            if !chat.efforts.isEmpty {
+                Menu {
+                    Picker("Effort", selection: Binding(get: { chat.effort ?? "" }, set: { e in
+                        Task { do { try await chat.setEffort(e.isEmpty ? nil : e) } catch { chat.error = error.localizedDescription } }
+                    })) {
+                        Text("Model's Default").tag("")
+                        ForEach(chat.efforts, id: \.self) { e in
+                            Text(Self.effortName(e)).tag(e)
+                        }
+                    }
+                } label: {
+                    Label(chat.effort.map(Self.effortName) ?? "Effort", systemImage: "brain")
                 }
             }
             Spacer()

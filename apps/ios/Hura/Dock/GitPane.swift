@@ -259,19 +259,16 @@ struct FileDiffView: View {
     let path: String
     @State var against: Against
     @State private var diff: FileDiff?
-    @State private var pieces: [UnifiedDiff.Piece] = []
+    @State private var model: DiffModel?
     @State private var comments: [Comment] = []
     @State private var error: String?
     @State private var failed: String?
     @State private var writing: UnifiedDiff.Line?
     @State private var draft = ""
-    @State private var unfolded: Set<Int> = []
-    /// Every line, folded or not, worked out once per load.
-    @State private var all: [UnifiedDiff.Line] = []
-    @State private var spans: [String: Range<Int>] = [:]
     @State private var jump: String?
+    /// Counts loads, so each one starts with nothing unfolded.
+    @State private var loads = 0
     @AppStorage("diff.wrap") private var wrap = false
-    @AppStorage("diff.fontSize") private var fontSize: Double = 12
     @FocusState private var typing: Bool
 
     init(server: Server, name: String, path: String, against: Against) {
@@ -288,7 +285,7 @@ struct FileDiffView: View {
             if diff.binary {
                 ContentUnavailableView("Binary file", systemImage: "doc.questionmark",
                                        description: Text("There's no diff to show."))
-            } else {
+            } else if let model {
                 VStack(spacing: 0) {
                     Text("\(diff.originalLabel) → \(diff.modifiedLabel)")
                         .font(.caption)
@@ -296,44 +293,14 @@ struct FileDiffView: View {
                         .frame(maxWidth: .infinity)
                         .padding(6)
                         .background(.bar)
-                    GeometryReader { box in
-                        let layout = Layout(diff: all, size: fontSize, wrap: wrap, viewport: box.size.width)
-                        ScrollViewReader { reader in
-                            ScrollView(wrap ? .vertical : [.vertical, .horizontal]) {
-                                LazyVStack(alignment: .leading, spacing: 0) {
-                                    ForEach(pieces) { piece in
-                                        switch piece {
-                                        case let .lines(lines):
-                                            ForEach(lines) { line in row(line, layout) }
-                                        case let .folded(count, from):
-                                            if unfolded.contains(from) {
-                                                ForEach(all[from..<(from + count)]) { line in row(line, layout) }
-                                            } else {
-                                                Button("⋯ \(count) unchanged line\(count == 1 ? "" : "s")") { unfolded.insert(from) }
-                                                    .font(.caption)
-                                                    .padding(.vertical, 6)
-                                                    .padding(.leading, 10)
-                                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                                    .background(Color.secondary.opacity(0.08))
-                                            }
-                                        }
-                                    }
-                                }
-                                // A width the rows can fill: the longest line's
-                                // when it scrolls sideways, the screen's when it
-                                // wraps. Without one a lazy stack is as wide as
-                                // what it has drawn so far, and nothing scrolls.
-                                .frame(width: layout.width, alignment: .leading)
-                                .font(.system(size: fontSize, design: .monospaced))
-                                .padding(.vertical, 6)
-                            }
-                            .defaultScrollAnchor(.topLeading)
-                            .onChange(of: jump) { _, target in
-                                guard let target else { return }
-                                withAnimation { reader.scrollTo(target, anchor: UnitPoint(x: 0, y: 0.2)) }
-                            }
-                        }
+                    DiffLines(model: model, jump: $jump, tap: { line in
+                        guard line.new != nil else { return }
+                        draft = ""
+                        writing = line
+                    }) { line, layout in
+                        remarks(line, layout)
                     }
+                    .id(loads)
                 }
             }
         }
@@ -341,18 +308,12 @@ struct FileDiffView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                if changes.count > 1 {
-                    Button("Previous Change", systemImage: "chevron.up") { step(-1) }
-                    Button("Next Change", systemImage: "chevron.down") { step(1) }
+                if (model?.changes.count ?? 0) > 1 {
+                    Button("Previous Change", systemImage: "chevron.up") { jump = model?.step(-1, from: jump) }
+                    Button("Next Change", systemImage: "chevron.down") { jump = model?.step(1, from: jump) }
                 }
                 Menu {
-                    Toggle("Wrap Lines", isOn: $wrap)
-                    Section("Text Size") {
-                        Button("Larger", systemImage: "textformat.size.larger") { fontSize = min(fontSize + 1, 20) }
-                            .disabled(fontSize >= 20)
-                        Button("Smaller", systemImage: "textformat.size.smaller") { fontSize = max(fontSize - 1, 8) }
-                            .disabled(fontSize <= 8)
-                    }
+                    DiffStyleMenu()
                     Picker("Compare", selection: $against) {
                         Text("Staged against HEAD").tag(Against.staged)
                         Text("Working copy against the index").tag(Against.worktree)
@@ -397,64 +358,9 @@ struct FileDiffView: View {
         .failure($failed)
     }
 
-    /// The measures a diff is drawn to, in the font it is drawn in.
-    struct Layout {
-        var gutter: CGFloat
-        var width: CGFloat
-        var char: CGFloat
-
-        init(diff lines: [UnifiedDiff.Line], size: CGFloat, wrap: Bool, viewport: CGFloat) {
-            char = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: size, weight: .regular)]).width
-            let digits = String(lines.map { max($0.old ?? 0, $0.new ?? 0) }.max() ?? 0).count
-            gutter = CGFloat(max(digits, 2)) * char + 6
-            let longest = lines.map { FileDiffView.shown($0.text).count }.max() ?? 0
-            let text = CGFloat(longest + 2) * char
-            width = wrap ? viewport : max(viewport, 2 * gutter + 2 * char + text + 12)
-        }
-    }
-
-    /// Tabs as four spaces: a monospaced column is only as good as every
-    /// character being one wide.
-    static func shown(_ text: String) -> String {
-        text.replacingOccurrences(of: "\t", with: "    ")
-    }
-
-    private func attributed(_ line: UnifiedDiff.Line) -> AttributedString {
-        let text = Self.shown(line.text)
-        var out = AttributedString(text.isEmpty ? " " : text)
-        // The span is in the line's own characters; a tab before it moves it.
-        if let span = spans[line.id], !line.text.contains("\t"), span.upperBound <= text.count, !span.isEmpty {
-            let lower = out.index(out.startIndex, offsetByCharacters: span.lowerBound)
-            let upper = out.index(out.startIndex, offsetByCharacters: span.upperBound)
-            out[lower..<upper].backgroundColor = line.kind == .added ? Color.green.opacity(0.4) : Color.red.opacity(0.4)
-        }
-        return out
-    }
-
     @ViewBuilder
-    private func row(_ line: UnifiedDiff.Line, _ layout: Layout) -> some View {
+    private func remarks(_ line: UnifiedDiff.Line, _ layout: DiffLayout) -> some View {
         let remarks = line.kind != .removed ? mine.filter { $0.line == line.new } : []
-        HStack(alignment: .top, spacing: 0) {
-            Text(line.old.map(String.init) ?? "").frame(width: layout.gutter, alignment: .trailing).foregroundStyle(.tertiary)
-            Text(line.new.map(String.init) ?? "").frame(width: layout.gutter, alignment: .trailing).foregroundStyle(.tertiary)
-            Text(line.kind == .added ? "+" : line.kind == .removed ? "-" : " ")
-                .foregroundStyle(line.kind == .added ? .green : line.kind == .removed ? .red : .secondary)
-                .frame(width: layout.char * 2)
-            Text(attributed(line))
-                .fixedSize(horizontal: !wrap, vertical: true)
-                .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading)
-        }
-        .padding(.vertical, 1)
-        .padding(.trailing, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(line.kind == .added ? Color.green.opacity(0.15) : line.kind == .removed ? Color.red.opacity(0.15) : .clear)
-        .contentShape(Rectangle())
-        .id(line.id)
-        .onTapGesture {
-            guard line.new != nil else { return }
-            draft = ""
-            writing = line
-        }
         ForEach(remarks) { c in
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "text.bubble.fill").foregroundStyle(.blue)
@@ -475,42 +381,18 @@ struct FileDiffView: View {
             }
             .padding(6)
             .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-            .padding(.leading, 2 * layout.gutter + 2 * layout.char)
+            .padding(.leading, layout.indent)
             .padding(.trailing, 8)
             .padding(.vertical, 2)
         }
-    }
-
-    /// The first line of each run of changes on screen, to step between.
-    private var changes: [String] {
-        var out: [String] = []
-        var previous: UnifiedDiff.Line.Kind = .same
-        for piece in pieces {
-            guard case let .lines(lines) = piece else { previous = .same; continue }
-            for line in lines {
-                if line.kind != .same, previous == .same { out.append(line.id) }
-                previous = line.kind
-            }
-        }
-        return out
-    }
-
-    private func step(_ by: Int) {
-        let all = changes
-        guard !all.isEmpty else { return }
-        let at = jump.flatMap { all.firstIndex(of: $0) } ?? (by > 0 ? -1 : all.count)
-        jump = all[min(max(at + by, 0), all.count - 1)]
     }
 
     private func load() async {
         do {
             async let c = server.api.comments(name)
             let d = try await server.api.gitDiff(name, path: path, against: against)
-            let lines = UnifiedDiff.lines(original: d.original, modified: d.modified)
-            all = lines
-            pieces = UnifiedDiff.pieces(lines)
-            spans = UnifiedDiff.changedSpans(lines)
-            unfolded = []
+            model = DiffModel(original: d.original, modified: d.modified)
+            loads += 1
             jump = nil
             diff = d
             comments = (try? await c) ?? comments

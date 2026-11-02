@@ -53,6 +53,11 @@ public struct ChatModel: Equatable, Identifiable, Sendable {
     public var value: String
     public var displayName: String
     public var description: String
+    /// The model id an alias such as `opus` stands for.
+    public var resolved: String?
+    /// The reasoning efforts it takes, lowest first; empty for none, or a
+    /// host too old to say.
+    public var efforts: [String]
 
     public var id: String { value }
 
@@ -61,6 +66,8 @@ public struct ChatModel: Equatable, Identifiable, Sendable {
         self.value = value
         displayName = v["display_name"]?.string ?? value
         description = v["description"]?.string ?? ""
+        resolved = v["resolved"]?.string
+        if case let .array(list)? = v["efforts"] { efforts = list.compactMap(\.string) } else { efforts = [] }
     }
 }
 
@@ -220,6 +227,8 @@ public final class Chat {
     /// Claude Code's permission mode: `auto`, `default`, `acceptEdits`, `plan`.
     public private(set) var mode: String?
     public private(set) var model: String?
+    /// The reasoning effort, `low` to `max`; nil for the model's default.
+    public private(set) var effort: String?
     /// The models this account can switch to, once Claude Code has said.
     public private(set) var models: [ChatModel] = []
     /// Slash commands on offer, without the slash.
@@ -318,6 +327,26 @@ public final class Chat {
         try await command(Op(op: "model", body: Body(model: model)))
     }
 
+    /// The efforts the model in use takes: found by its alias or by the id
+    /// it stands for, and the default's when nothing has been chosen.
+    public var efforts: [String] {
+        guard let model else { return models.first?.efforts ?? [] }
+        return models.first { $0.value == model || $0.resolved == model }?.efforts ?? []
+    }
+
+    /// Sets the reasoning effort; nil for the model's default.
+    public func setEffort(_ effort: String?) async throws {
+        struct Body: Encodable {
+            var effort: String?
+            enum CodingKeys: String, CodingKey { case effort }
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(effort, forKey: .effort)
+            }
+        }
+        try await command(Op(op: "effort", body: Body(effort: effort)))
+    }
+
     private func command<C: Encodable>(_ command: C) async throws {
         guard let socket, phase == .live else { throw ServerError.malformed("not connected") }
         try await socket.send(.text(JSONEncoder().encode(CommandFrame(id: Self.channel, command: command))))
@@ -379,6 +408,7 @@ public final class Chat {
             if case let .array(list)? = s["pending"] { pending = list.compactMap(Ask.init) } else { pending = [] }
             mode = s["mode"]?.string
             model = s["model"]?.string
+            effort = s["effort"]?.string
             if case let .array(list)? = s["models"] { models = list.compactMap(ChatModel.init) } else { models = [] }
             if case let .array(list)? = s["commands"] { commands = list.compactMap(\.string) } else { commands = [] }
             status = s["status"]?.string

@@ -906,6 +906,36 @@ fn pull_vote(
     hura_core::tracker::pull_vote(&stored, &repo, &id, verdict, &body).map_err(failed)
 }
 
+/// Merge it now (Azure DevOps: complete it). `head` is the commit the window
+/// showed, so that something pushed since is refused rather than merged.
+#[tauri::command(async)]
+fn pull_merge(
+    tracker: String,
+    repo: String,
+    id: String,
+    how: hura_core::tracker::PullMerge,
+    head: Option<String>,
+    delete_branch: bool,
+) -> Result<(), Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::pull_merge(&stored, &repo, &id, how, head.as_deref().unwrap_or_default(), delete_branch)
+        .map_err(failed)
+}
+
+/// Set it to merge itself once it can, or with `how` null, take that back:
+/// GitHub's auto-merge, Azure DevOps' auto-complete.
+#[tauri::command(async)]
+fn pull_auto_merge(
+    tracker: String,
+    repo: String,
+    id: String,
+    how: Option<hura_core::tracker::PullMerge>,
+    delete_branch: bool,
+) -> Result<(), Failed> {
+    let stored = tracker_named(&load_trackers()?, &tracker)?;
+    hura_core::tracker::pull_auto_merge(&stored, &repo, &id, how, delete_branch).map_err(failed)
+}
+
 /// One ticket in full (description, comments, the people on it), read from
 /// this machine with the tracker's stored token, like the sidebar.
 #[tauri::command(async)]
@@ -1186,6 +1216,8 @@ fn main() {
             pull_file,
             pull_comment,
             pull_vote,
+            pull_merge,
+            pull_auto_merge,
             edit_form,
             save_ticket,
             transitions,

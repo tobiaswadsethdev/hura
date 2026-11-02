@@ -456,13 +456,49 @@ public struct PullDetail: Decodable, Equatable, Sendable {
     public var myVote: String?
     /// The pull request is this account's own.
     public var mine: Bool
+    /// How it can be merged from here; nil once it is no longer open.
+    public var merging: PullMerging?
     public var warnings: [String]
 
     enum CodingKeys: String, CodingKey {
         case tracker, kind, id, key, repo, title, url, state, draft, conflicts, fork, author, branch, base, created,
-             updated, body, additions, deletions, checks, reviewers, conversation, older, offers, mine, warnings
+             updated, body, additions, deletions, checks, reviewers, conversation, older, offers, mine, merging, warnings
         case changedFiles = "changed_files"
         case myVote = "my_vote"
+    }
+}
+
+/// How an open pull request can go into its base (`PullMerging` in
+/// hura-core's tracker module).
+public struct PullMerging: Decodable, Equatable, Sendable {
+    /// `merge`, `squash`, `rebase` or `rebase-merge`, in the forge's order.
+    /// Empty when this account cannot merge it.
+    public var methods: [String]
+    /// Set to merge itself once its checks and reviews allow.
+    public var auto: PullAutoMerge?
+    /// Whether it can be set to merge itself.
+    public var canAuto: Bool
+    /// Whether the repository deletes the branch once merged (GitHub); nil
+    /// when that is chosen with each merge (Azure DevOps).
+    public var deletesBranch: Bool?
+    /// The commit that would be merged, which the merge is checked against.
+    public var head: String?
+
+    enum CodingKeys: String, CodingKey {
+        case methods, auto, head
+        case canAuto = "can_auto"
+        case deletesBranch = "deletes_branch"
+    }
+}
+
+public struct PullAutoMerge: Decodable, Equatable, Sendable {
+    public var by: IssuePerson?
+    public var method: String?
+    public var deleteBranch: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case by, method
+        case deleteBranch = "delete_branch"
     }
 }
 
@@ -567,6 +603,25 @@ extension TrackerCore {
     public static func pullVote(_ t: StoredTracker, repo: String, id: String, verdict: String, body: String) async throws {
         _ = try await call("pull_vote", ["tracker": json(t), "repo": .string(repo), "id": .string(id), "verdict": .string(verdict),
                                          "body": .string(body)])
+    }
+
+    /// Merge it now (Azure DevOps: complete it) with one of
+    /// `PullMerging.methods`. `head` is `PullMerging.head`: the forge refuses
+    /// when the branch has moved since. `deleteBranch` is Azure DevOps' to
+    /// act on; GitHub does as the repository says.
+    public static func pullMerge(_ t: StoredTracker, repo: String, id: String, how: String, head: String?,
+                                 deleteBranch: Bool) async throws {
+        _ = try await call("pull_merge", ["tracker": json(t), "repo": .string(repo), "id": .string(id), "how": .string(how),
+                                          "head": .string(head ?? ""), "delete_branch": .bool(deleteBranch)])
+    }
+
+    /// Set it to merge itself once it can (GitHub's auto-merge, Azure DevOps'
+    /// auto-complete), or with `how` nil, take that back.
+    public static func pullAutoMerge(_ t: StoredTracker, repo: String, id: String, how: String?,
+                                     deleteBranch: Bool) async throws {
+        _ = try await call("pull_auto_merge", ["tracker": json(t), "repo": .string(repo), "id": .string(id),
+                                               "how": how.map(JSONValue.string) ?? .null,
+                                               "delete_branch": .bool(deleteBranch)])
     }
 }
 

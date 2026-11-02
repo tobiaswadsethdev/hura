@@ -3,10 +3,10 @@
 // The row says where a pull request stands; this says what it is: its
 // description, every check by name, who has reviewed it and how, the
 // conversation, and the files it changes with both sides of each. It also
-// does the four things a reviewer does without needing the forge's page:
-// comment, reply to a thread, approve, and ask for changes. Merging,
-// resolving a thread and suggesting a change stay on the forge, one click
-// away in the header.
+// does what a reviewer does without needing the forge's page: comment, reply
+// to a thread, approve, ask for changes, and merge it, now or once it can
+// (GitHub's auto-merge, Azure DevOps' auto-complete). Resolving a thread and
+// suggesting a change stay on the forge, one click away in the header.
 //
 // Three tabs rather than one long page, because a pull request with a hundred
 // threads and forty files is three different things to read, and the
@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as monaco from "monaco-editor/editor/editor.api";
 
 import { api, messageOf } from "./api";
+import { useConfirm } from "./Confirm";
 import { Empty, Waiting } from "./Empty";
 import type { FileDiff } from "./gen/FileDiff";
 import type { Project } from "./gen/Project";
@@ -23,6 +24,7 @@ import type { PullCheck } from "./gen/PullCheck";
 import type { PullDetail } from "./gen/PullDetail";
 import type { PullFile } from "./gen/PullFile";
 import type { PullFiles } from "./gen/PullFiles";
+import type { PullMerge } from "./gen/PullMerge";
 import type { PullRequest as Pull } from "./gen/PullRequest";
 import type { PullThread } from "./gen/PullThread";
 import type { PullVerdict } from "./gen/PullVerdict";
@@ -134,6 +136,7 @@ export function PullPanel({
   const fork = d?.fork ?? pull.fork;
   const comment = (body: string, thread: string | null) =>
     change(thread ?? "comment", () => api.pullComment(pull.tracker, pull.repo, pull.id, body, thread));
+  const { ask, dialog } = useConfirm();
 
   return (
     <aside
@@ -232,6 +235,32 @@ export function PullPanel({
           onVote={(verdict, body) =>
             change("vote", () => api.pullVote(pull.tracker, pull.repo, pull.id, verdict, body))
           }
+          onMerge={(how, deleteBranch) =>
+            ask({
+              title: `${d.kind === "azure-dev-ops" ? "Complete" : "Merge"} ${pullName(pull)}?`,
+              body: (
+                <>
+                  {mergeWords(d.kind).method(how)}: <code>{d.branch}</code> into <code>{d.base}</code>
+                  {d.merging?.head && (
+                    <>
+                      {" "}
+                      at <code>{d.merging.head.slice(0, 7)}</code>
+                    </>
+                  )}
+                  {deleteBranch && d.merging?.deletes_branch == null && ", and the branch deleted"}. If
+                  anything was pushed since this was read, it is refused.
+                </>
+              ),
+              confirm: d.kind === "azure-dev-ops" ? "complete" : "merge",
+              onConfirm: () =>
+                void change("merge", () =>
+                  api.pullMerge(pull.tracker, pull.repo, pull.id, how, d.merging?.head ?? null, deleteBranch),
+                ),
+            })
+          }
+          onAutoMerge={(how, deleteBranch) =>
+            change("merge", () => api.pullAutoMerge(pull.tracker, pull.repo, pull.id, how, deleteBranch))
+          }
         />
       )}
       {d && tab === "conversation" && (
@@ -291,6 +320,7 @@ export function PullPanel({
           </>
         )}
       </footer>
+      {dialog}
     </aside>
   );
 }
@@ -301,10 +331,15 @@ function Overview({
   detail: d,
   working,
   onVote,
+  onMerge,
+  onAutoMerge,
 }: {
   detail: PullDetail;
   working: string | null;
   onVote: (verdict: PullVerdict, body: string) => Promise<boolean>;
+  onMerge: (how: PullMerge, deleteBranch: boolean) => void;
+  /// `how` null takes it back.
+  onAutoMerge: (how: PullMerge | null, deleteBranch: boolean) => Promise<boolean>;
 }) {
   return (
     <>
@@ -355,7 +390,134 @@ function Overview({
       {d.offers.length > 0 && (
         <ReviewBox detail={d} working={working !== null} onVote={onVote} />
       )}
+
+      {d.merging && (
+        <MergeBox
+          detail={d}
+          working={working}
+          onMerge={onMerge}
+          onAutoMerge={onAutoMerge}
+        />
+      )}
     </>
+  );
+}
+
+/// What each forge calls merging: GitHub merges and auto-merges, Azure
+/// DevOps completes and auto-completes.
+function mergeWords(kind: PullDetail["kind"]) {
+  const azure = kind === "azure-dev-ops";
+  return {
+    section: azure ? "complete" : "merge",
+    now: azure ? "complete" : "merge",
+    auto: azure ? "set auto-complete" : "enable auto-merge",
+    isSet: azure ? "auto-complete is set" : "auto-merge is on",
+    cancel: azure ? "cancel auto-complete" : "disable auto-merge",
+    method: (m: PullMerge): string =>
+      ({
+        merge: azure ? "merge (no fast forward)" : "create a merge commit",
+        squash: azure ? "squash commit" : "squash and merge",
+        rebase: azure ? "rebase and fast-forward" : "rebase and merge",
+        "rebase-merge": "semi-linear merge",
+      })[m],
+  };
+}
+
+/// Merging it now, or once its checks and reviews allow: which way, and on
+/// Azure DevOps whether the branch goes with it.
+function MergeBox({
+  detail: d,
+  working,
+  onMerge,
+  onAutoMerge,
+}: {
+  detail: PullDetail;
+  working: string | null;
+  onMerge: (how: PullMerge, deleteBranch: boolean) => void;
+  onAutoMerge: (how: PullMerge | null, deleteBranch: boolean) => Promise<boolean>;
+}) {
+  const m = d.merging!;
+  const words = mergeWords(d.kind);
+  const [how, setHow] = useState<PullMerge>(m.auto?.method ?? m.methods[0] ?? "merge");
+  const [deleteBranch, setDeleteBranch] = useState(true);
+  const busy = working !== null;
+  const auto = m.auto;
+
+  return (
+    <section className="ticket-section pull-merge">
+      <h3>{words.section}</h3>
+      {auto && (
+        <p className="pull-merge-auto">
+          <span className="ok">{words.isSet}</span>
+          {[
+            auto.by && `by ${auto.by.me ? "you" : auto.by.name}`,
+            auto.method && words.method(auto.method),
+            auto.delete_branch && "deletes the branch",
+          ]
+            .filter(Boolean)
+            .map((part) => (
+              <span key={String(part)} className="hint">
+                · {part}
+              </span>
+            ))}
+          <button className="quiet" disabled={busy} onClick={() => void onAutoMerge(null, false)}>
+            {words.cancel}
+          </button>
+        </p>
+      )}
+      {d.draft ? (
+        <Nobody>a draft can't be merged until it's published</Nobody>
+      ) : m.methods.length === 0 ? (
+        <Nobody>this account can't merge it</Nobody>
+      ) : (
+        <div className="pull-merge-actions">
+          {m.methods.length > 1 ? (
+            <Select
+              aria-label="merge type"
+              value={how}
+              onChange={(v) => setHow(v as PullMerge)}
+              options={m.methods.map((v) => ({ value: v, label: words.method(v) }))}
+            />
+          ) : (
+            <span className="hint">{words.method(m.methods[0])}</span>
+          )}
+          {m.deletes_branch == null ? (
+            <label className="tick">
+              <input
+                type="checkbox"
+                checked={deleteBranch}
+                onChange={(e) => setDeleteBranch(e.target.checked)}
+              />
+              <span>delete the branch</span>
+            </label>
+          ) : (
+            <span className="hint" title="the repository's own setting">
+              {m.deletes_branch ? "the branch is deleted after" : "the branch is kept"}
+            </span>
+          )}
+          <span className="pull-merge-go">
+            {!auto && m.can_auto && (
+              <button
+                className="quiet"
+                disabled={busy}
+                title="merges by itself once its checks and required reviews pass"
+                onClick={() => void onAutoMerge(how, deleteBranch)}
+              >
+                {words.auto}
+              </button>
+            )}
+            <button
+              className="go"
+              disabled={busy}
+              title={d.conflicts ? "it conflicts with its base, so the forge will refuse" : undefined}
+              onClick={() => onMerge(how, deleteBranch)}
+            >
+              {working === "merge" ? "…" : words.now}
+            </button>
+          </span>
+        </div>
+      )}
+    </section>
   );
 }
 
