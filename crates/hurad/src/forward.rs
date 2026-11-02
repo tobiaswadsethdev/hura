@@ -108,6 +108,27 @@ impl Drop for Lease {
     }
 }
 
+/// A connection to a forward's local port.
+///
+/// Made through `lo` by name on Linux. Docker Sandboxes v0.50.1 binds a
+/// published port to that device as well as to `127.0.0.1`, and WSL's mirrored
+/// networking routes `127.0.0.1` by way of an interface of its own,
+/// `loopback0`, so a connection left to the routing table arrives on the other
+/// device and is refused: os error 111 on every session's chat. Measured on
+/// WSL, where binding the connecting socket to `lo` gets through, as an
+/// ordinary user. Everywhere else loopback traffic takes `lo` anyway, and a
+/// listener bound to no device accepts it either way.
+pub async fn connect(local: u16) -> std::io::Result<tokio::net::TcpStream> {
+    let socket = tokio::net::TcpSocket::new_v4()?;
+    // A kernel older than 5.7 refuses this to an unprivileged process. There
+    // the routing table decides, as it did before this existed.
+    #[cfg(target_os = "linux")]
+    let _ = socket.bind_device(Some(b"lo"));
+    socket
+        .connect((std::net::Ipv4Addr::LOCALHOST, local).into())
+        .await
+}
+
 /// A local port that reaches `port` in the session's sandbox, started if
 /// nothing is forwarding there yet.
 pub async fn acquire(session: &Session, port: u16, host: Loopback) -> Result<Lease, String> {
@@ -357,6 +378,26 @@ mod tests {
         "a reload after reading should not restart it"
     );
 
+    /// A listener bound to `lo`, as Docker Sandboxes v0.50.1 binds a published
+    /// port, is reached. On WSL with mirrored networking a connection left to
+    /// the routing table is refused here.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_port_bound_to_lo_is_reached() {
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind_device(Some(b"lo")).unwrap();
+        socket
+            .bind((std::net::Ipv4Addr::LOCALHOST, 0).into())
+            .unwrap();
+        let listener = socket.listen(1).unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // The backlog completes the handshake, so a refusal is an error here
+        // rather than an accept that never returns.
+        connect(port).await.unwrap();
+        listener.accept().await.unwrap();
+    }
+
     /// Against a real sandbox: one with something listening, reached
     /// through a forward, by several connections at once that share it.
     ///
@@ -388,9 +429,7 @@ mod tests {
             "one forward, shared"
         );
 
-        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", local))
-            .await
-            .unwrap();
+        let mut stream = connect(local).await.unwrap();
         stream
             .write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
             .await
