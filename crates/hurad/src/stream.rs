@@ -318,7 +318,7 @@ async fn chat(
                     Ok(lease) => lease,
                     Err(reason) => return Some(reason),
                 };
-            match tokio::net::TcpStream::connect(("127.0.0.1", lease.local)).await {
+            match crate::forward::connect(lease.local).await {
                 Ok(stream) => {
                     match converse(id, stream, conv, &mut since, &mut held, out, input).await {
                         Conversed::ClientGone => return None,
@@ -498,7 +498,7 @@ async fn pipe(
 ) -> Option<String> {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-    let stream = match tokio::net::TcpStream::connect(("127.0.0.1", local)).await {
+    let stream = match crate::forward::connect(local).await {
         Ok(stream) => stream,
         Err(e) => return Some(format!("could not reach the forward: {e}")),
     };
