@@ -108,6 +108,9 @@ pub enum ChatCommand {
     Mode { mode: String },
     /// The model, or `None` for Claude Code's default.
     Model { model: Option<String> },
+    /// The reasoning effort, `low` to `max`, or `None` for the model's
+    /// default.
+    Effort { effort: Option<String> },
 }
 
 /// The answer to one [`ChatAsk`].
@@ -228,6 +231,10 @@ pub struct ChatState {
     /// The permission mode, by Claude Code's name for it.
     pub mode: Option<String>,
     pub model: Option<String>,
+    /// The reasoning effort chosen, or the one Claude Code says it runs at.
+    /// `None` for the model's default, or a model without one.
+    #[serde(default)]
+    pub effort: Option<String>,
     /// The models this account can switch to, once Claude Code has said.
     #[serde(default)]
     pub models: Vec<ChatModel>,
@@ -277,6 +284,14 @@ pub struct ChatModel {
     pub value: String,
     pub display_name: String,
     pub description: String,
+    /// The model id an alias such as `opus` stands for, which is what
+    /// [`ChatState::model`] says once Claude Code is running it.
+    #[serde(default)]
+    pub resolved: Option<String>,
+    /// The reasoning efforts it takes, lowest first. Empty for a model that
+    /// takes none.
+    #[serde(default)]
+    pub efforts: Vec<String>,
 }
 
 /// The script that starts the host, for the seeder's agent step.
@@ -580,5 +595,32 @@ mod tests {
             serde_json::to_value(Attach::new("chat-1", 7)).unwrap(),
             serde_json::json!({"op": "attach", "conv": "chat-1", "since": 7})
         );
+        assert_eq!(
+            serde_json::to_value(ChatCommand::Effort {
+                effort: Some("xhigh".into())
+            })
+            .unwrap(),
+            serde_json::json!({"op": "effort", "effort": "xhigh"})
+        );
+        let back: ChatCommand = serde_json::from_str(r#"{"op":"effort","effort":null}"#).unwrap();
+        assert_eq!(back, ChatCommand::Effort { effort: None });
+    }
+
+    #[test]
+    fn the_effort_and_each_models_efforts_come_through() {
+        let state = r#"{"activity":"idle","mode":null,"model":"opus","effort":"high",
+            "models":[{"value":"opus","display_name":"Opus","description":"","efforts":["low","high","max"]},
+                      {"value":"haiku","display_name":"Haiku","description":""}],
+            "commands":[],"status":null,"cost_usd":null,"context_percentage":null}"#;
+        let state: ChatState = serde_json::from_str(state).unwrap();
+        assert_eq!(state.effort.as_deref(), Some("high"));
+        assert_eq!(state.models[0].efforts, ["low", "high", "max"]);
+        assert!(
+            state.models[1].efforts.is_empty(),
+            "an older host says nothing"
+        );
+        let v = serde_json::to_value(&state).unwrap();
+        assert_eq!(v["effort"], "high");
+        assert_eq!(v["models"][0]["efforts"][2], "max");
     }
 }

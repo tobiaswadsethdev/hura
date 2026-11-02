@@ -135,6 +135,27 @@ struct ChatTests {
         #expect(answer?["command"]?["decision"]?["allow"] == .bool(false))
     }
 
+    @Test func offersTheEffortsOfTheModelInUseAndSetsOne() async throws {
+        let socket = ScriptedSocket()
+        socket.dropWhenDone = false
+        socket.say(#"{"is":"opened","id":1}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"replay","seq":0,"entries":[]}}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle","model":"claude-opus-5-5","effort":"high","models":[{"value":"default","display_name":"Default","description":"","resolved":"claude-sonnet-5-5","efforts":["low","medium","high"]},{"value":"opus","display_name":"Opus","description":"","resolved":"claude-opus-5-5","efforts":["low","medium","high","xhigh","max"]}]}}}"#)
+        let chat = Chat(record: Self.record, session: "fix-tests", transport: { _ in socket })
+        chat.start()
+        defer { chat.stop() }
+        try await until { chat.loaded && chat.effort != nil }
+
+        #expect(chat.effort == "high")
+        #expect(chat.efforts == ["low", "medium", "high", "xhigh", "max"], "Opus, by the id the alias stands for")
+
+        try await chat.setEffort("max")
+        #expect(socket.sent.last?["command"]?["op"]?.string == "effort")
+        #expect(socket.sent.last?["command"]?["effort"]?.string == "max")
+        try await chat.setEffort(nil)
+        #expect(socket.sent.last?["command"]?["effort"] == .null, "nil is sent, as the model's default")
+    }
+
     private func until(_ condition: () -> Bool) async throws {
         for _ in 0..<200 {
             if condition() { return }

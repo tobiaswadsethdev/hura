@@ -387,6 +387,7 @@ class Conversation {
     // undo a choice made before the host restarted.
     this.mode = record.mode ?? null;
     this.model = record.model ?? null;
+    this.effort = record.effort ?? null;
     this.modelName = null;
     this.version = null;
     this.models = [];
@@ -440,6 +441,7 @@ class Conversation {
       pending: [...this.pending.values()].map((p) => p.request),
       mode: this.mode,
       model: this.model,
+      effort: this.effort,
       models: this.models,
       commands: this.commands,
       status: this.status,
@@ -490,6 +492,7 @@ class Conversation {
     };
     if (this.mode) options.permissionMode = this.mode;
     if (this.model) options.model = this.model;
+    if (this.effort) options.effort = this.effort;
     if (this.record.resumable) options.resume = this.record.session;
     else options.sessionId = this.record.session;
 
@@ -499,7 +502,13 @@ class Conversation {
     this.changed();
     q.supportedModels()
       .then((models) => {
-        this.models = models.map((m) => ({ value: m.value, display_name: m.displayName, description: m.description }));
+        this.models = models.map((m) => ({
+          value: m.value,
+          display_name: m.displayName,
+          description: m.description,
+          resolved: m.resolvedModel ?? null,
+          efforts: m.supportsEffort === false ? [] : (m.supportedEffortLevels ?? []),
+        }));
         this.changed();
       })
       .catch(() => {});
@@ -622,6 +631,9 @@ class Conversation {
         // agree unless Claude Code refused one.
         this.model = msg.model;
         this.mode = msg.permissionMode;
+        // The effort it runs at, after the model's own limits: only a newer
+        // Claude Code says, and a choice stands until it does.
+        if (msg.effort !== undefined) this.effort = msg.effort;
         this.version = msg.claude_code_version;
         this.commands = msg.slash_commands ?? [];
         this.changed();
@@ -733,6 +745,16 @@ class Conversation {
     this.changed();
   }
 
+  /// `null` goes back to the model's default effort, which is what
+  /// `applyFlagSettings` does with a cleared `effortLevel`.
+  async setEffort(effort) {
+    this.effort = effort ?? null;
+    this.record.effort = this.effort;
+    this.host.saveRegistry();
+    if (this.query) await this.query.applyFlagSettings({ effortLevel: this.effort });
+    this.changed();
+  }
+
   end() {
     for (const w of this.watchers) w.end();
     this.inbox?.close();
@@ -814,6 +836,8 @@ class Client {
         return c.setMode(String(req.mode));
       case "model":
         return c.setModel(req.model ?? null);
+      case "effort":
+        return c.setEffort(req.effort ?? null);
       default:
         throw new Error(`unknown op ${req.op}`);
     }

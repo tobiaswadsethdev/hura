@@ -13,6 +13,11 @@ pending: Array<ChatAsk>,
  */
 mode: string | null, model: string | null, 
 /**
+ * The reasoning effort chosen, or the one Claude Code says it runs at.
+ * `None` for the model's default, or a model without one.
+ */
+effort: string | null, 
+/**
  * The models this account can switch to, once Claude Code has said.
  */
 models: Array<ChatModel>, 
