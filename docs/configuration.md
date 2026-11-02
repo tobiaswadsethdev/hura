@@ -134,8 +134,9 @@ git side uses them.
 
 ## Other keys
 
-`policy` is a template name, or a path to a template file of your own in the
-same TOML shape as the built-in ones (`hurad policies` lists those). An
+`policy` is a template name (shipped, or one of your own in
+`~/.config/hura/policies`), or a path to a template file in the same TOML
+shape as the built-in ones (`hurad policies` lists them). An
 OpenShell policy (`.yaml`) is refused with an explanation, because its shape
 does not carry over; [policy.md](policy.md) has the rules.
 

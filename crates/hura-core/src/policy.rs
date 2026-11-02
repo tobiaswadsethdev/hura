@@ -6,6 +6,12 @@
 //!
 //! Templates are hura's own: a list of network rules in TOML, embedded in the
 //! binary and parsed here, which each become one rule on the session's sandbox.
+//!
+//! Your own templates sit beside the config file, one `NAME.toml` each in
+//! `policies/`, and are chosen by name like the shipped ones: a policy for
+//! one repository's work is somebody's own business, and a path typed into a
+//! phone's create form is not a way to pick one. A shipped name always means
+//! the shipped template, so a file cannot quietly redefine `feature-work`.
 
 use std::path::Path;
 
@@ -49,11 +55,89 @@ pub fn find(name: &str) -> Option<&'static Template> {
     TEMPLATES.iter().find(|t| t.name == name)
 }
 
-/// Template names and summaries, for help text.
+/// A template of your own: `NAME.toml` in [`user_dir`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserTemplate {
+    pub name: String,
+    /// The file's first comment line, as the shipped templates are written.
+    pub summary: String,
+    pub path: std::path::PathBuf,
+}
+
+/// Where your own templates go: `$XDG_CONFIG_HOME/hura/policies`, beside the
+/// config file.
+pub fn user_dir() -> std::path::PathBuf {
+    crate::config::Config::default_path().with_file_name("policies")
+}
+
+/// Your own templates, by name. Read each time rather than once, so a file
+/// dropped in while `hurad` runs is offered by the next create form.
+pub fn user_templates() -> Vec<UserTemplate> {
+    user_templates_in(&user_dir())
+}
+
+fn user_templates_in(dir: &Path) -> Vec<UserTemplate> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<UserTemplate> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let path = e.path();
+            if path.extension()? != "toml" || !path.is_file() {
+                return None;
+            }
+            let name = path.file_stem()?.to_str()?.to_string();
+            if name.is_empty() || name.starts_with('.') || find(&name).is_some() {
+                return None;
+            }
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            Some(UserTemplate {
+                summary: summary_of(&name, &text, &path),
+                name,
+                path,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// A template's first comment line, without the `NAME:` the shipped files
+/// open with.
+fn summary_of(name: &str, text: &str, path: &Path) -> String {
+    text.lines()
+        .map(str::trim)
+        .find_map(|l| l.strip_prefix('#'))
+        .map(|l| {
+            let l = l.trim();
+            l.strip_prefix(&format!("{name}:"))
+                .unwrap_or(l)
+                .trim()
+                .to_string()
+        })
+        .filter(|l| !l.is_empty())
+        .unwrap_or_else(|| format!("from {}", path.display()))
+}
+
+/// Whether `name` is a template, shipped or your own.
+pub fn is_template(name: &str) -> bool {
+    find(name).is_some() || user_templates().iter().any(|t| t.name == name)
+}
+
+/// Template names and summaries, for help text: the shipped ones, then yours.
 pub fn help() -> String {
+    help_with(&user_templates())
+}
+
+fn help_with(user: &[UserTemplate]) -> String {
     TEMPLATES
         .iter()
         .map(|t| format!("{:<17}{}", t.name, t.summary))
+        .chain(
+            user.iter()
+                .map(|t| format!("{:<17}{} (yours)", t.name, t.summary)),
+        )
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -102,19 +186,34 @@ pub fn looks_like_path(spec: &str) -> bool {
 /// that looks like a path (`./net-open`, `policies/net-open.toml`) is never
 /// matched against a template, so the checked-in files stay usable directly.
 pub fn resolve(spec: &str) -> Result<Resolved, Error> {
-    if !looks_like_path(spec)
-        && let Some(t) = find(spec)
-    {
-        return Ok(Resolved {
-            label: t.name.to_string(),
-            rules: parse(t.name, t.toml)?,
-        });
+    resolve_in(spec, &user_dir())
+}
+
+/// [`resolve`], with your own templates read from `dir`.
+fn resolve_in(spec: &str, dir: &Path) -> Result<Resolved, Error> {
+    if !looks_like_path(spec) {
+        if let Some(t) = find(spec) {
+            return Ok(Resolved {
+                label: t.name.to_string(),
+                rules: parse(t.name, t.toml)?,
+            });
+        }
+        if let Some(t) = user_templates_in(dir).into_iter().find(|t| t.name == spec) {
+            let text = std::fs::read_to_string(&t.path).map_err(|source| Error::Read {
+                path: t.path.display().to_string(),
+                source,
+            })?;
+            return Ok(Resolved {
+                label: t.name.clone(),
+                rules: parse(&t.name, &text)?,
+            });
+        }
     }
     let path = Path::new(spec);
     if !path.is_file() {
         return Err(Error::Unknown {
             spec: spec.to_string(),
-            available: help(),
+            available: help_with(&user_templates_in(dir)),
         });
     }
     if spec.ends_with(".yaml") || spec.ends_with(".yml") {
@@ -970,5 +1069,89 @@ mod tests {
         for t in &TEMPLATES {
             assert!(e.contains(t.name), "{e}");
         }
+    }
+
+    /// A directory of templates for one test, removed when it is dropped.
+    struct Dir(std::path::PathBuf);
+    impl Dir {
+        fn new(files: &[(&str, &str)]) -> Dir {
+            let dir = std::env::temp_dir().join(format!(
+                "hura-policies-{}",
+                crate::credentials::random_hex()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            for (name, text) in files {
+                std::fs::write(dir.join(name), text).unwrap();
+            }
+            Dir(dir)
+        }
+    }
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    const WEBAPP: &str = "# webapp: feature-work plus what the web app needs\n\
+        \n[[rule]]\nhosts = [\"pkgs.dev.azure.com:443\"]\nmethods = [\"GET\"]\npath = \"/contoso/**\"\n";
+
+    #[test]
+    fn your_own_template_is_chosen_by_name() {
+        let dir = Dir::new(&[("webapp.toml", WEBAPP), ("notes.txt", "not a template")]);
+        let found = user_templates_in(&dir.0);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].name, "webapp");
+        assert_eq!(found[0].summary, "feature-work plus what the web app needs");
+
+        let r = resolve_in("webapp", &dir.0).unwrap();
+        assert_eq!(r.label, "webapp");
+        assert_eq!(r.rules.len(), 1);
+        assert_eq!(r.rules[0].resources, ["pkgs.dev.azure.com:443"]);
+    }
+
+    /// A file named like a shipped template is not offered, and the name keeps
+    /// meaning the shipped one: a policy is not something to redefine quietly.
+    #[test]
+    fn a_shipped_name_cannot_be_redefined() {
+        let dir = Dir::new(&[("feature-work.toml", WEBAPP)]);
+        assert!(user_templates_in(&dir.0).is_empty());
+        let r = resolve_in("feature-work", &dir.0).unwrap();
+        assert_eq!(
+            r.rules.len(),
+            parse("feature-work", find("feature-work").unwrap().toml)
+                .unwrap()
+                .len()
+        );
+    }
+
+    #[test]
+    fn a_template_with_no_comment_is_summarised_by_its_path() {
+        let dir = Dir::new(&[("bare.toml", "[[rule]]\nhosts = [\"example.com:443\"]\n")]);
+        let found = user_templates_in(&dir.0);
+        assert!(
+            found[0].summary.starts_with("from "),
+            "{}",
+            found[0].summary
+        );
+        assert!(
+            found[0].summary.ends_with("bare.toml"),
+            "{}",
+            found[0].summary
+        );
+    }
+
+    /// An unknown name lists your templates beside the shipped ones, and a
+    /// broken file of yours is reported as itself rather than as unknown.
+    #[test]
+    fn your_templates_are_named_in_errors() {
+        let dir = Dir::new(&[
+            ("webapp.toml", WEBAPP),
+            ("broken.toml", "[[rule]]\nhost = 1\n"),
+        ]);
+        let e = resolve_in("nope", &dir.0).unwrap_err().to_string();
+        assert!(e.contains("webapp"), "{e}");
+        assert!(e.contains("(yours)"), "{e}");
+        let e = resolve_in("broken", &dir.0).unwrap_err().to_string();
+        assert!(e.contains("broken is not a valid policy"), "{e}");
     }
 }
