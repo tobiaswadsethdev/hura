@@ -183,7 +183,7 @@ impl Config {
         // out at create time -- after a sandbox exists -- is finding out late.
         if let Some(spec) = &raw.policy
             && !policy::looks_like_path(spec)
-            && policy::find(spec).is_none()
+            && !policy::is_template(spec)
         {
             return Err(invalid(
                 "policy",
@@ -762,7 +762,8 @@ impl std::error::Error for Error {
 fn names() -> String {
     policy::TEMPLATES
         .iter()
-        .map(|t| t.name)
+        .map(|t| t.name.to_string())
+        .chain(policy::user_templates().into_iter().map(|t| t.name))
         .collect::<Vec<_>>()
         .join(", ")
 }

@@ -58,6 +58,46 @@ path = "/**/git-receive-pack"
 An OpenShell YAML policy is refused by name: its binaries and filesystem
 sections have nothing to apply to.
 
+### Templates of your own
+
+A policy for one repository's work belongs to whoever does it, not to hura.
+Put it in `~/.config/hura/policies/NAME.toml` and it is a template like the
+shipped ones: `--policy NAME`, `policy = "NAME"` in the config file, and an
+entry in every create form, the iOS app's included, after the shipped ones.
+Its first comment line is its summary, as in the shipped files
+(`# webapp: feature-work plus what the web app needs`). The directory is read each
+time, so a file added while `hurad` runs is offered by the next form. A file
+named like a shipped template is ignored, and the name keeps meaning the
+shipped one: a policy is not something to redefine without anyone seeing.
+
+A file of your own usually starts from `feature-work`'s rules, copied in, and
+adds what the repository reaches. Two shapes come up for anything Azure:
+
+```toml
+# A private NuGet feed on Azure Artifacts, read-only. Its index hands out
+# project and feed IDs rather than names, so the path is a glob.
+[[rule]]
+hosts = ["pkgs.dev.azure.com:443"]
+methods = ["GET", "HEAD"]
+path = "/my-org/**/_packaging/**"
+
+# Its packages: every download is a redirect to a different storage account
+# (measured: fifteen packages, fifteen accounts), always the same container.
+# A rule narrowed to paths takes no glob in the middle of a host name, so the
+# container is what narrows it.
+[[rule]]
+hosts = ["*.blob.core.windows.net:443"]
+methods = ["GET"]
+path = "/b-<the container your feed redirects to>/**"
+```
+
+A database on a private network is a host and a port opened to any request,
+since its protocol is not HTTP; the runtime resolves the name on this machine
+once a rule allows it, so an internal name reachable from here (over a VPN, say)
+works in the sandbox too. The credentials such a policy's hosts take are not
+rules: see [configuration.md](configuration.md#credentials) for `azure-cli` and
+`nuget-feed`.
+
 A host with method rules is only reachable through the proxy, which every tool in
 the image uses by its `HTTPS_PROXY` variable. A client that ignores the variable
 is still proxied, transparently, for a host opened to any request, but refused

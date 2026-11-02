@@ -288,8 +288,14 @@ pub struct NewOptions {
 /// built-in templates would quietly create sessions under a different policy
 /// from `hura new`.
 pub fn policy_choices(configured: &str) -> Vec<PolicyChoice> {
+    policy_choices_with(configured, &policy::user_templates())
+}
+
+/// [`policy_choices`], with your own templates given rather than read, and
+/// offered after the shipped ones.
+fn policy_choices_with(configured: &str, user: &[policy::UserTemplate]) -> Vec<PolicyChoice> {
     let mut out = Vec::new();
-    if policy::find(configured).is_none() {
+    if policy::find(configured).is_none() && !user.iter().any(|t| t.name == configured) {
         out.push(PolicyChoice {
             spec: configured.to_string(),
             summary: "from your config file".to_string(),
@@ -298,6 +304,10 @@ pub fn policy_choices(configured: &str) -> Vec<PolicyChoice> {
     out.extend(policy::TEMPLATES.iter().map(|t| PolicyChoice {
         spec: t.name.to_string(),
         summary: t.summary.to_string(),
+    }));
+    out.extend(user.iter().map(|t| PolicyChoice {
+        spec: t.name.clone(),
+        summary: t.summary.clone(),
     }));
     out
 }
@@ -2259,13 +2269,30 @@ mod tests {
     /// and first, because it is what `hura new` would have used.
     #[test]
     fn a_configured_policy_path_is_offered_ahead_of_the_templates() {
-        let choices = policy_choices("/etc/hura/mine.yaml");
+        let choices = policy_choices_with("/etc/hura/mine.yaml", &[]);
         assert_eq!(choices[0].spec, "/etc/hura/mine.yaml");
         assert_eq!(choices.len(), policy::TEMPLATES.len() + 1);
 
         // A configured *template* is already in the list, so it is not repeated.
-        let named = policy_choices(policy::TEMPLATES[0].name);
+        let named = policy_choices_with(policy::TEMPLATES[0].name, &[]);
         assert_eq!(named.len(), policy::TEMPLATES.len());
+    }
+
+    /// Your own templates are offered by name after the shipped ones, and a
+    /// configured one is not repeated as "from your config file".
+    #[test]
+    fn your_own_templates_are_offered_after_the_shipped_ones() {
+        let mine = policy::UserTemplate {
+            name: "webapp".into(),
+            summary: "feature-work plus a web app".into(),
+            path: "/home/me/.config/hura/policies/webapp.toml".into(),
+        };
+        let choices = policy_choices_with("webapp", std::slice::from_ref(&mine));
+        assert_eq!(choices.len(), policy::TEMPLATES.len() + 1);
+        let last = choices.last().unwrap();
+        assert_eq!(last.spec, "webapp");
+        assert_eq!(last.summary, "feature-work plus a web app");
+        assert_eq!(choices[0].spec, policy::TEMPLATES[0].name);
     }
 
     /// Every toolchain is offered, not only the ones a checkout points at: a

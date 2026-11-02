@@ -200,7 +200,7 @@ enum Command {
         forget: Option<String>,
     },
 
-    /// List the policy templates shipped with this binary.
+    /// List the policy templates: the ones shipped with this binary, then your own in ~/.config/hura/policies.
     Policies,
 
     /// List the toolchains a sandbox image can be built with.
