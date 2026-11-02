@@ -12,7 +12,7 @@ and socat, and a Docker Engine of its own. The workload runs as the template's
 microVM around the sandbox, not the file permissions inside it.
 
 hura adds tmux, Claude Code at a pinned version, `hura-status` and `hura-usage`,
-`hura-agent` with the Agent SDK beside it, a stand-in `az`, and Claude Code's settings in
+`hura-agent` with the Agent SDK beside it, a stand-in `az`, fonts, and Claude Code's settings in
 `/home/agent/.claude/settings.json` and `/home/agent/.claude.json`. It makes
 `/sandbox` and gives it to `agent`; everything hura puts in a session is under
 it, with the clone at `/sandbox/repo`. The whole image is 718 MB, where the one
@@ -152,6 +152,18 @@ fractions, with the documented `utilization` absent. And `hura-status` stands
 aside when `HURA_CHAT` is set, because the hooks in `settings.json` still fire
 under the SDK and would otherwise write over the host's own, better informed
 status.
+
+## Fonts
+
+The template has no fonts and no fontconfig, so a headless browser an agent
+starts to check a web UI renders pages with no text at all (measured: every
+screenshot blank). The image installs fontconfig with DejaVu, which covers most
+scripts, and Liberation, which is metric-compatible with Arial, Times and
+Courier so text takes the room a page was laid out for. A browser that bundles
+its own fontconfig, like the serverless Chromium builds on npm that start here
+without any system libraries, still reads `/etc/fonts/fonts.conf`, so it finds
+them too. Playwright's own Chromium needs more system libraries than the image
+has, which this does not change.
 
 ## The stand-in `az`
 

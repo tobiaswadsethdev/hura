@@ -846,6 +846,21 @@ mod tests {
     /// takes a build arg, defaults it to `latest`, and verifies what it
     /// installed. Any one of them missing makes the image quietly ship an
     /// unexpected agent.
+    /// A headless browser in a session renders no text without fonts and a
+    /// fontconfig to find them, and an agent checking a web UI by screenshot
+    /// cannot see what it built. Measured: every page came out blank.
+    #[test]
+    fn the_image_carries_fonts_for_a_headless_browser() {
+        let apt = DOCKERFILE
+            .split("RUN apt-get update")
+            .nth(1)
+            .and_then(|rest| rest.split("rm -rf /var/lib/apt/lists").next())
+            .expect("the image's apt-get layer");
+        for package in ["fontconfig", "fonts-dejavu-core", "fonts-liberation"] {
+            assert!(apt.contains(package), "{package} is not installed: {apt}");
+        }
+    }
+
     #[test]
     fn the_dockerfile_installs_a_claude_version_it_was_given() {
         assert!(

@@ -27,11 +27,26 @@ USER root
 # less    - git's pager; without it git paging misbehaves under a pty
 # jq      - reading agent JSON output
 # ripgrep - agents reach for it constantly
+# fontconfig, fonts-dejavu-core, fonts-liberation - so a headless browser
+#           renders text. An agent checking a web UI takes screenshots, and the
+#           template has no fonts and no fontconfig at all: measured, every page
+#           came out with no text, and Swedish or any other non-ASCII text could
+#           not be checked either. fontconfig's /etc/fonts/fonts.conf is what a
+#           browser that bundles its own fontconfig (a serverless Chromium from
+#           npm, the one that starts here without apt) falls back on, so it
+#           finds these too. DejaVu covers most scripts; Liberation is
+#           metric-compatible with Arial, Times and Courier, so text takes the
+#           space a page was laid out for. About 15 MB, against an agent
+#           that cannot see what it built. Playwright's own Chromium needs more
+#           system libraries than this; that is not what this is for.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         tmux \
         less \
         jq \
         ripgrep \
+        fontconfig \
+        fonts-dejavu-core \
+        fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code, at the newest release rather than whatever the base image froze.
