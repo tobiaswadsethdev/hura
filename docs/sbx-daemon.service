@@ -1,7 +1,6 @@
 [Unit]
 Description=Docker Sandboxes daemon, where hura's sessions run
 Documentation=https://docs.docker.com/ai/sandboxes/
-After=default.target
 
 # Its own unit so that restarting hurad, which `hurad update` asks for, does
 # not take the daemon and every sandbox with it: a daemon started by the first
