@@ -137,6 +137,11 @@ jobs:
       # and on a variant it would go looking for hura-sandbox:latest on Docker
       # Hub. The source label is what links the package on ghcr.io to this
       # repository.
+      #
+      # A push is retried. Some layers are the same bytes on both architectures
+      # (the files a layer copies in), so the two jobs push the same blob to the
+      # same repository at about the same time, and ghcr.io has answered one of
+      # them `unknown blob`. Pushing again finds the blob there and succeeds.
       - name: Build and push
         env:
           LABELS: ${{ needs.context.outputs.labels }}
@@ -145,6 +150,14 @@ jobs:
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/hura-sandbox"
           source="org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"
+          push() {
+            for attempt in 1 2 3; do
+              docker push "$1" && return 0
+              echo "::warning::pushing $1 failed (attempt $attempt of 3)"
+              sleep $((attempt * 20))
+            done
+            return 1
+          }
           for label in $LABELS; do
             echo "::group::$label"
             if [ "$label" = latest ]; then
@@ -155,7 +168,7 @@ jobs:
               docker run --rm --entrypoint cat "hura-sandbox:$label" /usr/local/share/hura/toolchains
             fi
             docker tag "hura-sandbox:$label" "$image:$label-$ARCH"
-            docker push "$image:$label-$ARCH"
+            push "$image:$label-$ARCH"
             echo "::endgroup::"
           done
           df -h /
