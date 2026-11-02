@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- How Tools/testflight.sh exports an archive: straight to App Store Connect,
+     for the internal TestFlight group, signed with the team the archive was
+     built for (Config/Hura.xcconfig). App Store Connect numbers the build, so
+     CURRENT_PROJECT_VERSION never needs bumping by hand. -->
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>app-store-connect</string>
+    <key>destination</key>
+    <string>upload</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+    <key>testFlightInternalTestingOnly</key>
+    <true/>
+    <key>manageAppVersionAndBuildNumber</key>
+    <true/>
+    <key>uploadSymbols</key>
+    <true/>
+</dict>
+</plist>
