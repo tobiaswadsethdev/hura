@@ -12,6 +12,7 @@ import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
 import type { Issue } from "./gen/Issue";
 import type { PullDetail } from "./gen/PullDetail";
+import type { PullMerge } from "./gen/PullMerge";
 import type { PullFile } from "./gen/PullFile";
 import type { PullFiles } from "./gen/PullFiles";
 import type { PullVerdict } from "./gen/PullVerdict";
@@ -262,6 +263,10 @@ export const api = {
     invoke<void>("pull_comment", { tracker, repo, id, body, thread }),
   pullVote: (tracker: string, repo: string, id: string, verdict: PullVerdict, body: string) =>
     invoke<void>("pull_vote", { tracker, repo, id, verdict, body }),
+  pullMerge: (tracker: string, repo: string, id: string, how: PullMerge, head: string | null, deleteBranch: boolean) =>
+    invoke<void>("pull_merge", { tracker, repo, id, how, head, deleteBranch }),
+  pullAutoMerge: (tracker: string, repo: string, id: string, how: PullMerge | null, deleteBranch: boolean) =>
+    invoke<void>("pull_auto_merge", { tracker, repo, id, how, deleteBranch }),
 
   // The editable defaults in the server's config file. The server's, because
   // `branch_prefix` names the branch of every session on that machine and a

@@ -47,8 +47,9 @@ pub use issue::{
     Issue, IssueComment, Parent as IssueParent, Person as IssuePerson, Stage as IssueStage, issue,
 };
 pub use pull::{
-    PullCheck, PullCheckState, PullComment, PullDetail, PullFile, PullFiles, PullReviewer,
-    PullState, PullThread, PullVerdict, pull, pull_comment, pull_file, pull_files, pull_vote,
+    PullAutoMerge, PullCheck, PullCheckState, PullComment, PullDetail, PullFile, PullFiles,
+    PullMerge, PullMerging, PullReviewer, PullState, PullThread, PullVerdict, pull,
+    pull_auto_merge, pull_comment, pull_file, pull_files, pull_merge, pull_vote,
 };
 pub use pulls::{Checks, PullRequest, Review};
 

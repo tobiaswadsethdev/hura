@@ -2,7 +2,8 @@ import HuraKit
 import SwiftUI
 
 /// A pull request in full: what it is, its checks and reviewers, its
-/// conversation (with replies), a review to give, and its files. Read with
+/// conversation (with replies), a review to give, merging it now or once it
+/// can, and its files. Read with
 /// the tracker's own token, as the desktop reads it.
 struct PullView: View {
     let pull: PullRequestSummary
@@ -17,6 +18,8 @@ struct PullView: View {
     @State private var draft = ""
     @State private var replying: PullThread?
     @State private var voting = false
+    @State private var merging: MergeSheet.Mode?
+    @State private var cancelling = false
 
     private var stored: StoredTracker? { trackers.tracker(named: pull.tracker) }
 
@@ -65,6 +68,13 @@ struct PullView: View {
                     if let d = detail, !d.offers.isEmpty {
                         Button("Give a Review…", systemImage: "checkmark.seal") { voting = true }
                     }
+                    if let d = detail, let m = d.merging, !m.methods.isEmpty, !d.draft {
+                        let words = MergeWords(kind: d.kind)
+                        Button("\(words.now)…", systemImage: "arrow.triangle.merge") { merging = .now }
+                        if m.auto == nil, m.canAuto {
+                            Button("\(words.auto)…", systemImage: "clock.arrow.circlepath") { merging = .auto }
+                        }
+                    }
                     Button("Open in the Browser", systemImage: "safari") { openURL(URL(string: pull.url)!) }
                     Button("Copy Branch", systemImage: "doc.on.doc") { UIPasteboard.general.string = pull.branch }
                     Button("Copy Link", systemImage: "link") { UIPasteboard.general.string = pull.url }
@@ -79,6 +89,32 @@ struct PullView: View {
             CommentEditor(title: "Reply", text: "", lost: []) { text in
                 change(t.id) { try await TrackerCore.pullComment($0, repo: pull.repo, id: pull.id, body: text, thread: t.id) }
             }
+        }
+        .sheet(item: $merging) { mode in
+            if let d = detail, let m = d.merging {
+                MergeSheet(mode: mode, kind: d.kind, base: d.base, merging: m) { how, deleteBranch in
+                    change("merge") {
+                        switch mode {
+                        case .now:
+                            try await TrackerCore.pullMerge($0, repo: pull.repo, id: pull.id, how: how, head: m.head,
+                                                            deleteBranch: deleteBranch)
+                        case .auto:
+                            try await TrackerCore.pullAutoMerge($0, repo: pull.repo, id: pull.id, how: how,
+                                                                deleteBranch: deleteBranch)
+                        }
+                    }
+                }
+            }
+        }
+        .confirmationDialog(detail.map { "\(MergeWords(kind: $0.kind).cancel)?" } ?? "", isPresented: $cancelling,
+                            titleVisibility: .visible) {
+            Button(detail.map { MergeWords(kind: $0.kind).cancel } ?? "Cancel", role: .destructive) {
+                change("merge") {
+                    try await TrackerCore.pullAutoMerge($0, repo: pull.repo, id: pull.id, how: nil, deleteBranch: false)
+                }
+            }
+        } message: {
+            Text("It stays open, and merges only when someone merges it.")
         }
         .sheet(isPresented: $voting) {
             if let d = detail {
@@ -121,6 +157,7 @@ struct PullView: View {
                 }
             }
         }
+        if let m = d.merging { mergeSection(d, m) }
         Section {
             if d.older > 0 {
                 Text("\(d.older) older thread\(d.older == 1 ? "" : "s") not shown").font(.caption).foregroundStyle(.secondary)
@@ -142,6 +179,55 @@ struct PullView: View {
             }
         } header: {
             Text("Conversation")
+        }
+    }
+
+    @ViewBuilder
+    private func mergeSection(_ d: PullDetail, _ m: PullMerging) -> some View {
+        let words = MergeWords(kind: d.kind)
+        Section {
+            if let auto = m.auto {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label(words.isSet, systemImage: "clock.arrow.circlepath").foregroundStyle(.green)
+                    let parts = [auto.by.map { "by \($0.me ? "you" : $0.name)" },
+                                 auto.method.map(words.method),
+                                 auto.deleteBranch ? "deletes the branch" : nil].compactMap { $0 }
+                    if !parts.isEmpty {
+                        Text(parts.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Button(words.cancel, systemImage: "xmark.circle", role: .destructive) { cancelling = true }
+                    .disabled(busy != nil)
+            }
+            if d.draft {
+                Text("A draft can't be merged until it's published.").font(.callout).foregroundStyle(.secondary)
+            } else if m.methods.isEmpty {
+                Text("This account can't merge it.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                if d.conflicts {
+                    Label("It conflicts with \(d.base), so it can't merge as it stands.", systemImage: "exclamationmark.triangle")
+                        .font(.callout).foregroundStyle(.orange)
+                }
+                HStack {
+                    Button { merging = .now } label: {
+                        Label(words.now, systemImage: "arrow.triangle.merge").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    if m.auto == nil, m.canAuto {
+                        Button { merging = .auto } label: {
+                            Label(words.autoShort, systemImage: "clock.arrow.circlepath").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .disabled(busy != nil)
+            }
+        } header: {
+            HStack {
+                Text(words.section)
+                Spacer()
+                if busy == "merge" { ProgressView() }
+            }
         }
     }
 
@@ -245,6 +331,88 @@ func verdictGive(_ v: String) -> String {
     }
 }
 
+/// What each forge calls merging: GitHub merges and auto-merges, Azure DevOps
+/// completes and auto-completes.
+private struct MergeWords {
+    let azure: Bool
+
+    init(kind: String) { azure = kind == "azure-dev-ops" }
+
+    var section: String { azure ? "Complete" : "Merge" }
+    var now: String { azure ? "Complete" : "Merge" }
+    var auto: String { azure ? "Set Auto-Complete" : "Enable Auto-Merge" }
+    var autoShort: String { azure ? "Auto-Complete" : "Auto-Merge" }
+    var isSet: String { azure ? "Auto-complete is set" : "Auto-merge is on" }
+    var cancel: String { azure ? "Cancel Auto-Complete" : "Disable Auto-Merge" }
+
+    func method(_ m: String) -> String {
+        switch m {
+        case "merge": azure ? "Merge (no fast forward)" : "Create a merge commit"
+        case "squash": azure ? "Squash commit" : "Squash and merge"
+        case "rebase": azure ? "Rebase and fast-forward" : "Rebase and merge"
+        case "rebase-merge": "Semi-linear merge"
+        default: m
+        }
+    }
+}
+
+/// Merging now, or once it can: which way, and whether the branch goes.
+private struct MergeSheet: View {
+    enum Mode: String, Identifiable {
+        case now, auto
+        var id: String { rawValue }
+    }
+
+    let mode: Mode
+    let kind: String
+    let base: String
+    let merging: PullMerging
+    let go: (String, Bool) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var how = ""
+    @State private var deleteBranch = true
+
+    private var words: MergeWords { MergeWords(kind: kind) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Picker("Merge type", selection: $how) {
+                    ForEach(merging.methods, id: \.self) { Text(words.method($0)).tag($0) }
+                }
+                .pickerStyle(.inline)
+                Section {
+                    if let deletes = merging.deletesBranch {
+                        LabeledContent("Branch", value: deletes ? "deleted after merging" : "kept")
+                    } else {
+                        Toggle("Delete the branch after merging", isOn: $deleteBranch)
+                    }
+                } footer: {
+                    if mode == .auto {
+                        Text("It merges into \(base) by itself once its checks and required reviews pass.")
+                    } else if let head = merging.head {
+                        Text("Merges \(head.prefix(7)) into \(base). If anything was pushed since, it is refused: refresh and look again.")
+                    }
+                }
+            }
+            .navigationTitle(mode == .now ? words.now : words.autoShort)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(mode == .now ? words.now : "Set") {
+                        go(how, deleteBranch)
+                        dismiss()
+                    }
+                    .disabled(how.isEmpty)
+                }
+            }
+            .onAppear { how = merging.methods.first ?? "" }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
 /// A review: a verdict from what the tracker offers, and what to say with it.
 private struct VoteSheet: View {
     let offers: [String]
@@ -321,55 +489,57 @@ private struct PullFilesSection: View {
     }
 }
 
-/// One file of a pull request, both sides as one column.
+/// One file of a pull request, both sides as one column, drawn as the
+/// session's diff is.
 private struct PullFileDiffView: View {
     let tracker: StoredTracker
     let files: PullFiles
     let file: PullFile
-    @State private var pieces: [UnifiedDiff.Piece]?
-    @State private var binary = false
+    @State private var diff: FileDiff?
+    @State private var model: DiffModel?
     @State private var error: String?
+    @State private var jump: String?
 
     var body: some View {
-        Group {
-            if binary {
-                ContentUnavailableView("Binary file", systemImage: "doc.questionmark")
-            } else {
-                Loaded(value: pieces, error: error) { pieces in
-                    ScrollView([.vertical, .horizontal]) {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(pieces) { piece in
-                                switch piece {
-                                case let .lines(lines):
-                                    ForEach(lines) { line in
-                                        HStack(spacing: 6) {
-                                            Text(line.old.map(String.init) ?? "").frame(width: 34, alignment: .trailing).foregroundStyle(.tertiary)
-                                            Text(line.new.map(String.init) ?? "").frame(width: 34, alignment: .trailing).foregroundStyle(.tertiary)
-                                            Text(line.kind == .added ? "+" : line.kind == .removed ? "-" : " ")
-                                            Text(line.text.isEmpty ? " " : line.text).fixedSize()
-                                        }
-                                        .background(line.kind == .added ? Color.green.opacity(0.15)
-                                                    : line.kind == .removed ? Color.red.opacity(0.15) : .clear)
-                                    }
-                                case let .folded(count, _):
-                                    Text("⋯ \(count) unchanged").foregroundStyle(.secondary).padding(.vertical, 4)
-                                }
-                            }
-                        }
-                        .font(.system(size: 12, design: .monospaced))
-                        .padding(.vertical, 6)
-                    }
-                    .defaultScrollAnchor(.topLeading)
+        Loaded(value: diff, error: error) { diff in
+            if diff.binary {
+                ContentUnavailableView("Binary file", systemImage: "doc.questionmark",
+                                       description: Text("There's no diff to show."))
+            } else if let model {
+                VStack(spacing: 0) {
+                    Text(file.oldPath.map { "\($0) → \(file.path)" } ?? "\(diff.originalLabel) → \(diff.modifiedLabel)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                        .frame(maxWidth: .infinity)
+                        .padding(6)
+                        .background(.bar)
+                    DiffLines(model: model, jump: $jump)
                 }
             }
         }
         .navigationTitle((file.path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if (model?.changes.count ?? 0) > 1 {
+                    Button("Previous Change", systemImage: "chevron.up") { jump = model?.step(-1, from: jump) }
+                    Button("Next Change", systemImage: "chevron.down") { jump = model?.step(1, from: jump) }
+                }
+                Menu {
+                    DiffStyleMenu()
+                    Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = file.path }
+                } label: {
+                    Label("View", systemImage: "textformat.size")
+                }
+            }
+        }
         .task {
             do {
                 let d = try await TrackerCore.pullFile(tracker, files: files, file: file)
-                binary = d.binary
-                pieces = UnifiedDiff.pieces(UnifiedDiff.lines(original: d.original, modified: d.modified))
+                model = DiffModel(original: d.original, modified: d.modified)
+                diff = d
             } catch {
                 self.error = error.localizedDescription
             }

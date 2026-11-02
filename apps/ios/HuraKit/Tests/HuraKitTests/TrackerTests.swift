@@ -41,6 +41,29 @@ struct TrackerCoreTests {
         let back = try TrackerCore.decode(.object(["kind": .string("read-only"), "value": .string("x")]), as: Editable.self)
         #expect(back == .readOnly("x"))
     }
+
+    @Test func readsHowAPullRequestMergesAsHuraCoreWritesIt() throws {
+        let v: JSONValue = .object([
+            "methods": .array([.string("squash"), .string("rebase-merge")]),
+            "auto": .object(["by": .object(["name": .string("Ann"), "me": .bool(false)]),
+                             "method": .string("squash"), "delete_branch": .bool(true)]),
+            "can_auto": .bool(true), "deletes_branch": .null, "head": .string("abc1234"),
+        ])
+        let m = try TrackerCore.decode(v, as: PullMerging.self)
+        #expect(m.methods == ["squash", "rebase-merge"])
+        #expect(m.auto?.deleteBranch == true && m.auto?.by?.name == "Ann")
+        #expect(m.canAuto && m.deletesBranch == nil && m.head == "abc1234")
+    }
+
+    @Test func aMergeWithNoTokenSaysSo() async throws {
+        let tracker = StoredTracker(source: TrackerSource(kind: "git-hub", name: "gh"), token: nil)
+        await #expect(throws: TrackerError.self) {
+            try await TrackerCore.pullMerge(tracker, repo: "o/r", id: "1", how: "squash", head: nil, deleteBranch: false)
+        }
+        await #expect(throws: TrackerError.self) {
+            try await TrackerCore.pullAutoMerge(tracker, repo: "o/r", id: "1", how: nil, deleteBranch: false)
+        }
+    }
 }
 
 /// Against GitHub itself, read-only:
@@ -58,6 +81,7 @@ struct LiveGitHubTests {
         let pull = try await TrackerCore.pull(tracker, repo: "tobiaswadsethdev/hura", id: "66")
         #expect(pull.state == "merged")
         #expect(pull.title.contains("iOS"))
+        #expect(pull.merging == nil, "a merged pull request has nothing left to merge")
         let files = try await TrackerCore.pullFiles(tracker, repo: "tobiaswadsethdev/hura", id: "66")
         #expect(files.files.contains { $0.path.hasSuffix("WorktreeView.swift") })
         let file = try #require(files.files.first { $0.path.hasSuffix("TerminalChannel.swift") })
