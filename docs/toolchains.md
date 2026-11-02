@@ -2,8 +2,8 @@
 
 A sandbox that can only clone and read is a sandbox that can only write code
 nobody has compiled. The base image carries node and python, because the
-template it is built on does. Anything else (the .NET SDK, a Rust toolchain) is
-asked for per session:
+template it is built on does, at whatever versions its Ubuntu froze. Anything
+else (the .NET SDK, a Rust toolchain, a current node) is asked for per session:
 
 ```sh
 hurad new --repo <url> --task "fix the failing test" --toolchain dotnet
@@ -18,9 +18,14 @@ toggles, and an answer you change by hand stays changed.
 
 | Toolchain | What it installs | What it may reach |
 | --- | --- | --- |
-| `dotnet` | the .NET SDK, current LTS channel, in `/usr/local/dotnet` | `api.nuget.org`, read-only |
+| `dotnet` | the newest .NET SDK, plus any SDK the checkout's `global.json` pins, in `/usr/local/dotnet` | `api.nuget.org`, read-only |
 | `rust` | rustc, cargo, rustfmt and clippy, in `/usr/local/rust` | `index.crates.io` and `static.crates.io`, read-only |
-| `node` | nothing; the base image already has it | `registry.npmjs.org`, read-only |
+| `node` | the newest node LTS release and its npm, in `/usr/local/node` | `registry.npmjs.org`, read-only |
+
+"Newest" is resolved when the image is built: for .NET the newest SDK of the
+newest channel in active support (10.0.403 when this was written), for node the
+newest LTS (26.13.0). The base image's own node, Ubuntu's 22, stays at
+`/usr/bin/node`; the node toolchain's goes ahead of it on `PATH`.
 
 ## Why the image, and not the sandbox
 
@@ -36,6 +41,31 @@ is, and for reproducibility as much as for the policy: every session asking for
 `dotnet` gets the same SDK. It is resolved from the publisher's release manifest
 at build time, checked against the checksum published beside it, and the build
 fails rather than shipping something that did not verify.
+
+## SDKs a checkout pins
+
+A `global.json` can pin the SDK a repository builds with, and with
+`"rollForward": "disable"` it accepts that exact version and no other: on an
+image whose SDK is one patch newer, every `dotnet` command in the repository
+fails, `dotnet --version` included. So a session asking for `dotnet` reads the
+`global.json` files of the checkout it names (its root and one level down, the
+same places the create form looks for project files), and when the SDKs in the
+image do not satisfy a pin, the exact version pinned is added to the variant as
+one more layer before the sandbox is made:
+
+```
+adding .NET SDK 10.0.301 to hura-sandbox:dotnet-node, pinned by the checkout's global.json ...
+```
+
+`rollForward` is honoured, so a pin of `10.0.400` with the default
+(`latestPatch`) is met by 10.0.403 and adds nothing. The SDKs install side by
+side and the `dotnet` host picks the one each repository asks for. An SDK added
+this way stays in the variant for every later session, until the variant is
+pulled or built again; the next session needing it adds it back.
+
+The checkout is found by its `origin`: every repository under the configured
+roots whose remote is the session's is read. That is the local working copy, so
+a pin changed but not yet pushed is read the same as one that has been.
 
 ## One image per set of toolchains
 
@@ -53,17 +83,20 @@ carries the .NET SDK, and its policy never mentions nuget.
 
 The tag is a pure function of the *set*, so `--toolchain rust --toolchain dotnet`
 and `--toolchain dotnet,rust` name one image rather than building two identical
-ones. It is built on first use, or ahead of time:
+ones. Every set is published nightly beside the base (see
+[sandbox-image.md](sandbox-image.md#published-images)), so the first session
+asking for one pulls it, or it can be fetched ahead of time:
 
 ```sh
-hurad image build --toolchain dotnet,rust
+hurad image pull --toolchain dotnet,node
+hurad image build --toolchain dotnet,rust    # or build it here
 ```
 
-Like the base, a variant is built with Docker and then loaded into the sandbox
-runtime's own image store, which is what a sandbox is made from. A create from
-the window builds and loads whatever variant it needs on the server, so the
-first session asking for a new set of toolchains takes as long as that build;
-building ahead of time is what makes it quick.
+Either way it is then loaded into the sandbox runtime's own image store, which
+is what a sandbox is made from. A create from the window pulls (or, failing
+that, builds) and loads whatever variant it needs on the server, so the first
+session asking for a new set of toolchains takes as long as that download;
+fetching ahead of time is what makes it quick.
 
 A variant is `FROM hura-sandbox:latest`, which means rebuilding the base for a
 newer agent leaves the variants behind on the old one. Nothing about that looks
@@ -80,7 +113,7 @@ When they are current it reports what each one actually carries, read from a
 manifest the layers write inside the image rather than inferred from the tag:
 
 ```
-[  ok  ] toolchains   hura-sandbox:dotnet (dotnet 9.0.317); hura-sandbox:rust (rust 1.98.0)
+[  ok  ] toolchains   hura-sandbox:dotnet-node (dotnet 10.0.403, dotnet 10.0.401, node 26.13.0); hura-sandbox:rust (rust 1.98.0)
 ```
 
 ## The registries a toolchain may read
@@ -148,6 +181,14 @@ latter. Signature verification itself is untouched.
 The dotnet layer installs no packages of its own: the base already has what the
 SDK needs, and the layer checks that some `libicu` is there, by any version
 (Ubuntu 26.04 has 78), rather than naming one that a newer base would not have.
+
+Its install is a script, `images/hura-base/toolchains/dotnet-sdk`, copied into
+the image rather than inlined in the layer, because the layer that adds a
+checkout's pinned SDKs runs it too. It installs the newest SDK first and never
+overwrites a file already there, so the `dotnet` host is always the newest one's
+and an older SDK added later only adds its own directories. An older 10.0 SDK
+does print "An issue was encountered verifying workloads" during a build, since
+it finds the newer SDK's workload manifests; the build itself is unaffected.
 
 ## Adding one
 

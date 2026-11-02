@@ -125,7 +125,7 @@ credentials.
 curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/install.sh | sh
 
 hurad doctor                           # every prerequisite, and what to do about the missing ones
-hurad image build                      # the sandbox image (also happens on first `hurad new`)
+hurad image pull                       # the sandbox image (also happens on first `hurad new`)
 hurad new --repo <url> --task "fix the readme typo"
 ```
 
@@ -170,8 +170,9 @@ servers your config names and the toolchain variants you have built:
 
 ```sh
 hurad doctor                                    # check the sandbox runtime, docker, tmux, image
-hurad image build                               # build the sandbox image (automatic on first use)
-hurad image build --toolchain dotnet,rust       # ... plus toolchains, as their own image variant
+hurad image pull                                # fetch the published sandbox image (automatic on first use)
+hurad image pull --toolchain dotnet,node        # ... plus toolchains, as their own image variant
+hurad image build --toolchain dotnet,rust       # build one here instead, from this binary's Dockerfiles
 hurad new --repo <url> --task "what to do"      # sandbox + clone + branch + agent
 hurad ls                                        # sessions, reconciled with their sandboxes
 hurad attach <name>                             # attach to the agent; Ctrl-b d to detach

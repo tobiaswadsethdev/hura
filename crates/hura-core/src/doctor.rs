@@ -324,10 +324,10 @@ fn check_image() -> Check {
         Check::warn(
             "image",
             format!(
-                "{} missing: it will be built on first use",
+                "{} missing: the first session pulls it, or builds it if it cannot",
                 crate::session::IMAGE
             ),
-            "hurad image build",
+            "hurad image pull; or hurad image build to build it here",
         )
     }
 }

@@ -368,6 +368,28 @@ enum ImageAction {
         #[arg(long = "toolchain", value_delimiter = ',')]
         toolchains: Vec<String>,
     },
+    /// Pull the published sandbox image, built nightly, instead of building it.
+    ///
+    /// From `image_registry` in the config file, ghcr.io unless it says
+    /// otherwise. Replaces the local tag, so this is also how to pick up the
+    /// newest agent and toolchains without building anything.
+    Pull {
+        /// Toolchain the image carries. Repeatable, or comma-separated.
+        #[arg(long = "toolchain", value_delimiter = ',')]
+        toolchains: Vec<String>,
+    },
+    /// Write the build context for an image to a directory, to build it
+    /// somewhere else.
+    ///
+    /// The Dockerfile and every file it copies, exactly as `image build` would
+    /// build them. The nightly publishing workflow builds from this.
+    Context {
+        /// Toolchain to layer in. Repeatable, or comma-separated.
+        #[arg(long = "toolchain", value_delimiter = ',')]
+        toolchains: Vec<String>,
+        /// Where to write it. Created if missing.
+        dir: std::path::PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -508,6 +530,22 @@ fn main() -> ExitCode {
         Some(Command::Image { action }) => match action {
             ImageAction::Build { toolchains } => match toolchain::resolve(&toolchains) {
                 Ok(chains) => image::build_variant(&chains).map_err(Into::into),
+                Err(e) => Err(e.into()),
+            },
+            ImageAction::Pull { toolchains } => match (
+                toolchain::resolve(&toolchains),
+                cfg.image_registry(),
+            ) {
+                (Ok(chains), Some(registry)) => image::pull(&chains, registry).map_err(Into::into),
+                (Ok(_), None) => Err(format!(
+                    "`image_registry` is empty in {}, so images are only built here: try `hurad image build`",
+                    cfg.path.display()
+                )
+                .into()),
+                (Err(e), _) => Err(e.into()),
+            },
+            ImageAction::Context { toolchains, dir } => match toolchain::resolve(&toolchains) {
+                Ok(chains) => image::write_build_context(&chains, &dir).map_err(Into::into),
                 Err(e) => Err(e.into()),
             },
         },
@@ -811,11 +849,7 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     // caller can afford. The first session wanting a toolchain pays for the
     // variant; every one after it starts as fast as any other. A chat session
     // also needs an image new enough to carry its host.
-    match draft.interface {
-        _ if draft.worktree => false,
-        chat::Interface::Terminal => image::ensure_for(&draft.toolchains)?,
-        chat::Interface::Chat => image::ensure_chat(&draft.toolchains)?,
-    };
+    image::ensure_session(&draft, cfg)?;
     // The managed MCP containers, before the seeder points the agent at them.
     // Here rather than in `ops::create` for the reason the image build is here:
     // it is a side effect on this machine, with output of its own, and `ops` is

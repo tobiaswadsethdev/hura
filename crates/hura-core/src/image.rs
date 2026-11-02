@@ -24,6 +24,19 @@
 //! counts as ready only when the runtime holds the same one Docker does. A
 //! rebuild that was never loaded would otherwise leave every new session on
 //! the previous build, with nothing to say so.
+//!
+//! **Two sources.** Every image is also published, built nightly from `main`
+//! by `.github/workflows/image.yml` and pushed to [`REGISTRY`], so the first
+//! session wanting one pulls it instead of building it, which takes as long as
+//! the download rather than as long as every install in it. A pull that fails
+//! falls back to building here, and `image_registry = ""` in the config file
+//! builds everything here and pulls nothing. `hurad image build` always builds,
+//! which is what to run after changing the Dockerfile in a checkout.
+//!
+//! **A layer of its own for pinned SDKs.** A checkout whose `global.json` pins
+//! a .NET SDK the dotnet variant does not satisfy gets that SDK added to the
+//! variant, as one more layer on top of whichever way the variant arrived; see
+//! [`crate::dotnet`].
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -54,6 +67,10 @@ const CONTEXT: [(&str, &str); 5] = [
     ("claude-settings.json", CLAUDE_SETTINGS),
     ("hura-agent.mjs", HURA_AGENT),
 ];
+
+/// Where the images are published: `hura-sandbox:dotnet-node` is
+/// `REGISTRY:dotnet-node`. Built nightly from `main`, for amd64 and arm64.
+pub const REGISTRY: &str = "ghcr.io/tobiaswadsethdev/hura-sandbox";
 
 /// The label an image able to run a chat session carries.
 const CHAT_LABEL: &str = "hura.chat";
@@ -146,27 +163,67 @@ pub fn ensure_loaded(tag: &str) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Write the embedded context to a fresh directory and return its path.
-fn write_context() -> Result<PathBuf, String> {
-    // The pid keeps concurrent builds from sharing a directory. Not a security
-    // boundary: everything written here is a compile-time constant.
-    let dir = std::env::temp_dir().join(format!("hura-image-{}", std::process::id()));
-    // Remove any leftovers from a previous run that died before cleaning up, so
-    // a stale file can never end up in the image.
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+/// The files an image is built from, as (name in the context, content): the
+/// base's when `chains` is empty, a variant's otherwise.
+fn context(chains: &[&'static Toolchain]) -> Vec<(&'static str, String)> {
+    if chains.is_empty() {
+        return CONTEXT
+            .iter()
+            .map(|(name, content)| (*name, content.to_string()))
+            .collect();
+    }
+    std::iter::once(("Dockerfile", toolchain::dockerfile(chains)))
+        .chain(
+            toolchain::files(chains)
+                .into_iter()
+                .map(|(name, content)| (name, content.to_string())),
+        )
+        .collect()
+}
 
-    for (name, content) in CONTEXT {
+/// Write the context an image is built from into `dir`, for building it
+/// somewhere else: `hurad image context`, which is how the nightly workflow
+/// gets the same Dockerfiles this binary would build.
+pub fn write_build_context(chains: &[&'static Toolchain], dir: &Path) -> Result<(), String> {
+    write_files(dir, context(chains))
+}
+
+fn write_files(dir: &Path, files: Vec<(&'static str, String)>) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    for (name, content) in files {
         let path = dir.join(name);
         fs::write(&path, content)
             .map_err(|e| format!("could not write {}: {e}", path.display()))?;
     }
+    Ok(())
+}
+
+/// A fresh temporary directory holding `files`, for one build.
+fn temp_context(kind: &str, files: Vec<(&'static str, String)>) -> Result<PathBuf, String> {
+    // The pid keeps concurrent builds from sharing a directory. Not a security
+    // boundary: everything written here is a compile-time constant, or an SDK
+    // version that [`crate::dotnet`] has checked is one.
+    let dir = std::env::temp_dir().join(format!("hura-{kind}-{}", std::process::id()));
+    // Remove any leftovers from a previous run that died before cleaning up, so
+    // a stale file can never end up in the image.
+    let _ = fs::remove_dir_all(&dir);
+    write_files(&dir, files)?;
     Ok(dir)
 }
 
-/// Build the image, streaming docker's output so a slow first build shows
-/// progress instead of looking hung.
+/// Write the embedded context to a fresh directory and return its path.
+fn write_context() -> Result<PathBuf, String> {
+    temp_context("image", context(&[]))
+}
+
+/// Build the image and load it, streaming docker's output so a slow first
+/// build shows progress instead of looking hung.
 pub fn build() -> Result<(), String> {
+    build_base()?;
+    load(IMAGE)
+}
+
+fn build_base() -> Result<(), String> {
     let dir = write_context()?;
     // The agent's version is resolved here rather than left to the Dockerfile's
     // own `latest` branch, because docker would answer a rebuild from the cached
@@ -190,8 +247,7 @@ pub fn build() -> Result<(), String> {
     // Clean up whether or not the build worked; a failed build's context is not
     // worth keeping, since it is regenerated from constants every time.
     let _ = fs::remove_dir_all(&dir);
-    result?;
-    load(IMAGE)
+    result
 }
 
 /// The `docker build` argv. Split out so the build-arg wiring is testable
@@ -234,32 +290,26 @@ pub fn build_variant(chains: &[&'static Toolchain]) -> Result<(), String> {
     if chains.is_empty() {
         return build();
     }
-    let tag = toolchain::tag(chains);
-    ensure()?;
+    if !exists() {
+        build_base()?;
+    }
+    build_variant_image(chains)?;
+    load(&toolchain::tag(chains))
+}
 
+fn build_variant_image(chains: &[&'static Toolchain]) -> Result<(), String> {
+    let tag = toolchain::tag(chains);
     let dir = write_variant_context(chains)?;
     println!("building {tag} ({})", toolchain::labels(chains).join(", "));
     let result = run_variant_build(&dir, &tag);
     let _ = fs::remove_dir_all(&dir);
-    result?;
-    load(&tag)
+    result
 }
 
-/// The variant's context: one generated Dockerfile and nothing else.
-///
-/// A directory rather than stdin for the reason the base build uses one -- and
-/// unlike the base there is nothing to `COPY`, so this is the one case where
-/// piping would work. It writes a file anyway, because a build that fails is
-/// worth being able to read, and because the two builds then differ in their
-/// content rather than in their mechanism.
+/// The variant's context: the generated Dockerfile, and whatever its layers
+/// `COPY` (the .NET SDK installer, for one).
 fn write_variant_context(chains: &[&'static Toolchain]) -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join(format!("hura-variant-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
-    let path = dir.join("Dockerfile");
-    fs::write(&path, toolchain::dockerfile(chains))
-        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
-    Ok(dir)
+    temp_context("variant", context(chains))
 }
 
 /// The variant `docker build` argv. Split out for the same reason as
@@ -486,56 +536,172 @@ pub fn supports_chat(tag: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Build what a chat session on these toolchains needs, when the image there
-/// predates chat sessions. Returns whether a build happened.
+/// What a session needs of its image.
+pub struct Need<'a> {
+    pub chains: &'a [&'static Toolchain],
+    /// Whether the session is a chat, whose host the image has to carry.
+    pub chat: bool,
+    /// The .NET SDKs its checkout pins; see [`crate::dotnet`].
+    pub pins: &'a [crate::dotnet::Pin],
+}
+
+/// Make the image a session needs ready: there, able to run it, carrying the
+/// SDKs its checkout pins, and loaded into the sandbox runtime. Returns whether
+/// anything had to happen.
 ///
-/// The base first, because a variant inherits its label from the base it was
-/// built on: rebuilding only the variant over an old base would still answer no.
-pub fn ensure_chat(chains: &[&'static Toolchain]) -> Result<bool, String> {
-    let mut built = ensure_for(chains)?;
-    if !supports_chat(IMAGE) {
-        println!("rebuilding {IMAGE}: it predates chat sessions ...");
-        build()?;
-        built = true;
+/// A command line or a server thread, never the TUI, because a pull or a build
+/// streams docker's output. The first session wanting a set of toolchains pays
+/// for its image once, and every one after it starts as fast as any other.
+pub fn ensure(need: &Need, registry: Option<&str>) -> Result<bool, String> {
+    let tag = toolchain::tag(need.chains);
+    let mut changed = false;
+    if !exists_tag(&tag) {
+        println!("{tag} is not on this machine yet ...");
+        fetch(need, registry)?;
+        changed = true;
+    } else if need.chat && !supports_chat(&tag) {
+        println!("{tag} predates chat sessions, replacing it ...");
+        fetch(need, registry)?;
+        changed = true;
     }
-    if !chains.is_empty() {
-        let tag = toolchain::tag(chains);
-        if !supports_chat(&tag) {
-            println!("rebuilding {tag}: it predates chat sessions ...");
-            build_variant(chains)?;
-            built = true;
+    if need.chains.iter().any(|t| t.name == "dotnet") {
+        changed |= add_pinned_sdks(&tag, need.pins)?;
+    }
+    Ok(ensure_loaded(&tag)? || changed)
+}
+
+/// [`ensure`] for a session about to be created, which is how both front ends
+/// call it. A worktree needs no image at all, and the pins are read from the
+/// checkouts of the draft's remote only when it asked for dotnet.
+pub fn ensure_session(
+    draft: &crate::ops::Draft,
+    cfg: &crate::config::Config,
+) -> Result<bool, String> {
+    if draft.worktree {
+        return Ok(false);
+    }
+    let pins = if draft.toolchains.iter().any(|t| t.name == "dotnet") {
+        let roots = crate::repos::roots(cfg.repo_roots.as_deref());
+        crate::dotnet::pins_for(&draft.repo, &roots)
+    } else {
+        Vec::new()
+    };
+    let need = Need {
+        chains: &draft.toolchains,
+        chat: matches!(draft.interface, crate::chat::Interface::Chat),
+        pins: &pins,
+    };
+    ensure(&need, cfg.image_registry())
+}
+
+/// Come by the image `need` names: pulled when there is a registry and the
+/// pull works, built here otherwise.
+fn fetch(need: &Need, registry: Option<&str>) -> Result<(), String> {
+    let tag = toolchain::tag(need.chains);
+    if let Some(registry) = registry {
+        match pull_image(&tag, registry) {
+            Ok(()) if !need.chat || supports_chat(&tag) => return Ok(()),
+            Ok(()) => {
+                eprintln!("hura: the published {tag} cannot run a chat session; building it here")
+            }
+            Err(e) => eprintln!("hura: {e}; building {tag} here instead"),
         }
     }
-    Ok(built)
-}
-
-/// Build the image if it is missing, and load it if the runtime does not have
-/// this build of it. Returns whether either happened.
-pub fn ensure() -> Result<bool, String> {
-    if exists() {
-        return ensure_loaded(IMAGE);
+    if need.chains.is_empty() {
+        return build_base();
     }
-    println!("building {IMAGE} (first run, this takes a minute) ...");
-    build()?;
-    Ok(true)
+    // A variant inherits the chat host's label from the base it is built on,
+    // so a base too old for the session is rebuilt before the variant is.
+    if !exists() || (need.chat && !supports_chat(IMAGE)) {
+        build_base()?;
+    }
+    build_variant_image(need.chains)
 }
 
-/// Build the image a session with these toolchains needs, if it is missing.
+/// A tag's published name: the same label, under the registry.
+fn published(tag: &str, registry: &str) -> String {
+    let label = tag.split_once(':').map_or("latest", |(_, label)| label);
+    format!("{registry}:{label}")
+}
+
+/// Pull a tag's published build and give it the local name.
 ///
-/// The same contract as [`ensure`] and the same caller: a command line, never the
-/// TUI, because the build streams docker's output. A first `--toolchain dotnet`
-/// pays for the SDK once and every session after it starts as fast as any other.
-pub fn ensure_for(chains: &[&'static Toolchain]) -> Result<bool, String> {
-    if chains.is_empty() {
-        return ensure();
+/// Docker picks the platform this machine runs. Only the local name is kept
+/// afterwards: [`variants`] lists `hura-sandbox` tags, and a second name for
+/// one image is a second line in `docker image ls` with nothing to add. The
+/// layers stay either way, so the next pull fetches only what changed.
+fn pull_image(tag: &str, registry: &str) -> Result<(), String> {
+    let remote = published(tag, registry);
+    println!("pulling {remote} ...");
+    let docker = |args: &[&str]| {
+        Command::new("docker")
+            .args(args)
+            .status()
+            .map_err(|e| format!("could not run docker: {e}"))
+    };
+    let pulled = docker(&["pull", &remote])?;
+    if !pulled.success() {
+        return Err(format!(
+            "could not pull {remote}: docker pull exited with {pulled}"
+        ));
     }
+    let tagged = docker(&["tag", &remote, tag])?;
+    if !tagged.success() {
+        return Err(format!("docker tag {remote} {tag} exited with {tagged}"));
+    }
+    let _ = Command::new("docker")
+        .args(["image", "rm", &remote])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    Ok(())
+}
+
+/// Pull the published image carrying `chains` and load it: `hurad image pull`.
+///
+/// A pull replaces the tag, so a dotnet variant loses any SDK a checkout's
+/// pin added to it, and the next session needing one adds it back.
+pub fn pull(chains: &[&'static Toolchain], registry: &str) -> Result<(), String> {
     let tag = toolchain::tag(chains);
-    if exists_tag(&tag) {
-        return ensure_loaded(&tag);
+    pull_image(&tag, registry)?;
+    load(&tag)
+}
+
+/// Add the SDKs a checkout pins to `tag`, as one more layer, when the ones it
+/// carries do not meet them. Returns whether it had to.
+///
+/// What the image carries is read from its manifest, which costs a container
+/// start, so only a dotnet session whose checkout pins something pays for it.
+fn add_pinned_sdks(tag: &str, pins: &[crate::dotnet::Pin]) -> Result<bool, String> {
+    if pins.is_empty() {
+        return Ok(false);
     }
-    println!("building {tag} (first use of these toolchains, this takes a while) ...");
-    build_variant(chains)?;
-    Ok(true)
+    let installed: Vec<String> = toolchains_in(tag)
+        .into_iter()
+        .filter(|(name, _)| name == "dotnet")
+        .map(|(_, version)| version)
+        .collect();
+    let missing = crate::dotnet::missing(pins, &installed);
+    if missing.is_empty() {
+        return Ok(false);
+    }
+    println!(
+        "adding .NET SDK {} to {tag}, pinned by the checkout's global.json ...",
+        missing.join(", ")
+    );
+    let dir = temp_context(
+        "pins",
+        vec![
+            ("Dockerfile", crate::dotnet::layer(tag, &missing)),
+            (
+                toolchain::DOTNET_SDK_SCRIPT,
+                toolchain::DOTNET_SDK.to_string(),
+            ),
+        ],
+    )?;
+    let result = run_variant_build(&dir, tag);
+    let _ = fs::remove_dir_all(&dir);
+    result.map(|()| true)
 }
 
 #[cfg(test)]
@@ -740,8 +906,14 @@ mod tests {
         assert_eq!(
             fs::read_dir(&dir).unwrap().count(),
             1,
-            "a variant needs nothing to COPY"
+            "a rust variant needs nothing to COPY"
         );
+        fs::remove_dir_all(&dir).expect("cleanup");
+
+        // The dotnet layer copies its installer in, so it has to be there.
+        let dotnet = toolchain::resolve(&["dotnet".to_string()]).expect("dotnet");
+        let dir = write_variant_context(&dotnet).expect("write context");
+        assert!(dir.join(toolchain::DOTNET_SDK_SCRIPT).is_file());
         fs::remove_dir_all(&dir).expect("cleanup");
 
         let argv = variant_build_argv(Path::new("/tmp/ctx"), "hura-sandbox:rust");

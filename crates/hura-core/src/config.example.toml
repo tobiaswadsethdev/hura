@@ -90,6 +90,13 @@
 # not reach github at all.
 # auto_update = true
 
+# Where a sandbox image is pulled from when this machine does not have it yet.
+# The images are built every night from hura's main branch and published here,
+# so the first session wanting one downloads it instead of building it, and
+# `hurad image pull` fetches the newest. A pull that fails falls back to
+# building it here. Empty builds every image on this machine and never pulls.
+# image_registry = "ghcr.io/tobiaswadsethdev/hura-sandbox"
+
 # MCP servers the agent gets, one table each. They run on the host, in their own
 # containers holding their own credentials, and the session is granted one
 # endpoint each. No token ever lands on the sandbox filesystem.
