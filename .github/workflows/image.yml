@@ -1,0 +1,182 @@
+name: Sandbox images
+
+# Every image a session runs in, built from main and published to
+# ghcr.io/<owner>/hura-sandbox: the base (`latest`) and one variant per set of
+# toolchains (`dotnet`, `dotnet-node`, ...), each for amd64 and arm64. A machine
+# missing one pulls it instead of building it, and `hurad image pull` fetches
+# the newest (see crates/hura-core/src/image.rs).
+#
+# Nightly, because what goes into them moves without a commit here: Claude Code
+# releases most days, and .NET, node, rust and Docker's sandbox template each on
+# their own schedule. Every build resolves the newest of each, from nothing
+# cached, so a published image is never older than the night before.
+#
+# The Dockerfiles are not read from the tree directly. `hurad image context`
+# writes them, so what is published is exactly what `hurad image build` on a
+# machine would build, variants and their generated Dockerfiles included.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - images/hura-base/**
+      - crates/hura-core/src/toolchain.rs
+      - crates/hura-core/src/image.rs
+      - .github/workflows/image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+# A second run waits rather than racing the first to the same tags.
+concurrency:
+  group: sandbox-images
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  context:
+    name: build contexts
+    runs-on: ubuntu-latest
+    outputs:
+      labels: ${{ steps.contexts.outputs.labels }}
+      claude: ${{ steps.claude.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build hurad
+        run: cargo build --locked --bin hurad
+
+      # One context per tag: the base, and every non-empty set of toolchains
+      # `hurad toolchains` lists, joined in the order it lists them, which is
+      # the order a tag is spelled in.
+      - name: Write contexts
+        id: contexts
+        run: |
+          hurad=target/debug/hurad
+          mapfile -t names < <("$hurad" toolchains | awk '{print $1}')
+          "$hurad" image context contexts/latest
+          labels=latest
+          n=${#names[@]}
+          for ((mask = 1; mask < 1 << n; mask++)); do
+            set=()
+            for ((i = 0; i < n; i++)); do
+              if (( mask >> i & 1 )); then set+=("${names[i]}"); fi
+            done
+            label="$(IFS=-; echo "${set[*]}")"
+            "$hurad" image context --toolchain "$(IFS=,; echo "${set[*]}")" "contexts/$label"
+            labels="$labels $label"
+          done
+          echo "labels=$labels" >> "$GITHUB_OUTPUT"
+          ls -R contexts
+
+      # Resolved once, so both architectures install the same agent. Passing it
+      # in is also what `hurad image build` does on a machine.
+      - name: Newest Claude Code
+        id: claude
+        run: |
+          version="$(curl -fsSL https://downloads.claude.ai/claude-code-releases/latest)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::not a version: $version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: contexts
+          path: contexts/
+          retention-days: 1
+
+  build:
+    name: ${{ matrix.arch }}
+    needs: context
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          # arm64 for Apple silicon, where Docker Sandboxes runs an arm64 VM,
+          # and for arm64 Linux. Native, since emulating every install in the
+          # image would turn minutes into an hour.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      # The base alone is several gigabytes and every variant adds its own
+      # toolchains, so the SDKs the runner comes with, which nothing here uses,
+      # make way for them.
+      - name: Make room
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: contexts
+          path: contexts
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Each image is built under the local name hura gives it, because every
+      # variant's Dockerfile is `FROM hura-sandbox:latest` and that has to
+      # resolve to the base built a step earlier. Then it is pushed under the
+      # registry name with the architecture on the end; the next job joins the
+      # two architectures under the plain tag.
+      #
+      # `--pull` on the base only: it is what fetches Docker's newest template,
+      # and on a variant it would go looking for hura-sandbox:latest on Docker
+      # Hub. The source label is what links the package on ghcr.io to this
+      # repository.
+      - name: Build and push
+        env:
+          LABELS: ${{ needs.context.outputs.labels }}
+          CLAUDE_VERSION: ${{ needs.context.outputs.claude }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/hura-sandbox"
+          source="org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"
+          for label in $LABELS; do
+            echo "::group::$label"
+            if [ "$label" = latest ]; then
+              docker build --pull --build-arg "CLAUDE_VERSION=$CLAUDE_VERSION" \
+                --label "$source" -t hura-sandbox:latest contexts/latest
+            else
+              docker build --label "$source" -t "hura-sandbox:$label" "contexts/$label"
+              docker run --rm --entrypoint cat "hura-sandbox:$label" /usr/local/share/hura/toolchains
+            fi
+            docker tag "hura-sandbox:$label" "$image:$label-$ARCH"
+            docker push "$image:$label-$ARCH"
+            echo "::endgroup::"
+          done
+          df -h /
+
+  publish:
+    name: publish
+    needs: [context, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # One tag per image, holding both architectures, so `docker pull` takes
+      # the one the machine runs.
+      - name: Join the architectures
+        env:
+          LABELS: ${{ needs.context.outputs.labels }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/hura-sandbox"
+          for label in $LABELS; do
+            docker buildx imagetools create -t "$image:$label" \
+              "$image:$label-amd64" "$image:$label-arm64"
+            docker buildx imagetools inspect "$image:$label" | head -n 20
+          done

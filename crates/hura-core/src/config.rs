@@ -103,6 +103,10 @@ pub struct Config {
     /// happens at the next process start. `false` turns the check off
     /// altogether, for a machine that would rather not reach github at all.
     pub auto_update: Option<bool>,
+    /// Where a missing sandbox image is pulled from. `None` is
+    /// [`crate::image::REGISTRY`], and an empty string is nowhere: every image
+    /// is built on this machine, as before images were published.
+    pub image_registry: Option<String>,
     /// Skills copied into every new session, already resolved to host paths.
     ///
     /// Global for the same reason as [`Self::mcp`]: this is what an agent of
@@ -406,6 +410,7 @@ impl Config {
             worktree_root: raw.worktree_root.as_deref().map(expand_tilde),
             refresh,
             auto_update: raw.auto_update,
+            image_registry: raw.image_registry,
             skills: resolved_skills,
             mcp,
             branch_prefix: raw.branch_prefix,
@@ -437,6 +442,15 @@ impl Config {
 
     pub fn credential(&self, name: &str) -> Option<&crate::credentials::Credential> {
         self.credentials.iter().find(|c| c.name == name)
+    }
+
+    /// Where a missing sandbox image is pulled from, or `None` to build it here.
+    pub fn image_registry(&self) -> Option<&str> {
+        match self.image_registry.as_deref().map(str::trim) {
+            None => Some(crate::image::REGISTRY),
+            Some("") => None,
+            Some(registry) => Some(registry),
+        }
     }
 
     /// What a work branch is named under.
@@ -484,6 +498,7 @@ struct Raw {
     worktree_root: Option<PathBuf>,
     refresh: Option<String>,
     auto_update: Option<bool>,
+    image_registry: Option<String>,
     skills: Option<Vec<String>>,
     /// `[[mcp]]` tables. An `Option` so `deny_unknown_fields` still rejects a
     /// misspelled `[[mcps]]` rather than reading it as none configured.
@@ -840,6 +855,7 @@ mod tests {
             "worktree_root",
             "refresh",
             "skills",
+            "image_registry",
         ] {
             assert!(
                 EXAMPLE.contains(&format!("# {key} =")),

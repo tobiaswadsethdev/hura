@@ -34,6 +34,28 @@ otherwise, so a rebuild cannot leave sessions starting from the previous one. A
 create builds or loads it when it has to. `hurad doctor` checks both halves:
 `image` for what Docker built, `templates` for what the runtime holds.
 
+## Published images
+
+Every image is also built every night from `main`, by
+`.github/workflows/image.yml`, and published as
+`ghcr.io/tobiaswadsethdev/hura-sandbox`: the base as `latest`, each set of
+toolchains under its own tag (`dotnet`, `dotnet-node`, `dotnet-node-rust`, ...),
+for amd64 and arm64. Nightly because what goes into them moves without a commit
+here: Claude Code releases most days, and .NET, node, rust and Docker's template
+each on their own schedule. Every run builds from nothing cached and resolves
+the newest of each.
+
+A create that finds an image missing pulls it from there, which takes as long as
+the download rather than as long as every install in it, and builds it here only
+when the pull fails. `hurad image pull` fetches the newest on demand, which is
+also the quick way to a newer agent. `hurad image build` still builds from the
+binary's own Dockerfiles, which is what to run after changing them, and
+`image_registry = ""` in the config file turns pulling off altogether.
+
+The workflow builds from what `hurad image context` writes, the Dockerfile and
+every file it copies, so a published variant is byte for byte the one this
+binary would build.
+
 ## Claude Code's settings
 
 The image bakes a `settings.json` for the agent, because a fresh sandbox has a

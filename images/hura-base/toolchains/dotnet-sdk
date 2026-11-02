@@ -1,0 +1,114 @@
+#!/bin/sh
+# dotnet-sdk: installs .NET SDKs side by side in /usr/local/dotnet.
+#
+#   dotnet-sdk latest      the newest SDK of the newest channel in active support
+#   dotnet-sdk 10.0        the newest SDK of that channel
+#   dotnet-sdk 10.0.401    exactly that SDK
+#
+# Any number of them, in one call. The dotnet layer runs it with `latest`; the
+# layer hura adds for a checkout whose global.json pins an SDK runs it with the
+# exact versions pinned, because a pin with `"rollForward": "disable"` accepts
+# that version and no other.
+#
+# From the release manifest rather than a package feed: an apt feed pins
+# nothing, needs a key and a source list added to the image, and answers
+# `apt-get install dotnet-sdk-10.0` with whatever it happens to serve that day.
+# The manifest is indexed by channel and lists every SDK ever released in it,
+# each with the sha512 its publisher published, which is what makes an exact pin
+# installable at all and a rebuild honest about what it installed.
+#
+# Newest first, and never overwriting a file already there. The tarballs share
+# their unversioned files, the `dotnet` host above all, and the newest SDK's
+# copy is the one that should win; an older SDK added later by a pin layer
+# leaves it alone. Everything versioned (sdk/, shared/, host/fxr/) lands in a
+# directory of its own, so nothing a second SDK brings is lost.
+#
+# Each SDK installed is appended to the toolchain manifest, one line each, which
+# is what `hurad doctor` shows and what hura reads to decide whether a pin is
+# already met. An SDK already in /usr/local/dotnet is skipped, not reinstalled.
+set -eu
+
+root=/usr/local/dotnet
+manifest=/usr/local/share/hura/toolchains
+meta=https://builds.dotnet.microsoft.com/dotnet/release-metadata
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+[ "$#" -gt 0 ] || { echo "usage: dotnet-sdk latest|CHANNEL|VERSION..." >&2; exit 2; }
+
+arch="$(dpkg --print-architecture)"
+case "$arch" in
+    amd64) rid=linux-x64 ;;
+    arm64) rid=linux-arm64 ;;
+    *) echo "no dotnet sdk for architecture $arch" >&2; exit 1 ;;
+esac
+
+# Checked rather than assumed, by any version, since each Ubuntu release moves
+# it (74 on 24.04, 78 on 26.04): without it the SDK starts and then fails on the
+# first culture-aware call, which is a bad way to find out.
+dpkg -l 'libicu[0-9]*' 2>/dev/null | grep -q '^ii' \
+    || { echo "libicu is gone from the base image; the sdk needs it" >&2; exit 1; }
+
+# A channel's manifest, fetched once however many SDKs come from it.
+releases() {
+    file="$work/releases-$1.json"
+    [ -f "$file" ] || curl -fsSL --retry 3 -o "$file" "$meta/$1/releases.json"
+    printf '%s\n' "$file"
+}
+
+# Every spec to a concrete version.
+: > "$work/versions"
+for spec in "$@"; do
+    case "$spec" in
+        latest)
+            curl -fsSL --retry 3 -o "$work/index.json" "$meta/releases-index.json"
+            channel="$(jq -re '
+                [."releases-index"[] | select(."support-phase" == "active")]
+                | sort_by(."channel-version" | split(".") | map(tonumber))
+                | last | ."channel-version"' "$work/index.json")"
+            version="$(jq -re '."latest-sdk"' "$(releases "$channel")")"
+            ;;
+        [0-9]*.[0-9]*.[0-9]*)
+            version="$spec"
+            ;;
+        [0-9]*.[0-9]*)
+            version="$(jq -re '."latest-sdk"' "$(releases "$spec")")"
+            ;;
+        *)
+            echo "not a dotnet sdk, channel or \`latest\`: $spec" >&2
+            exit 1
+            ;;
+    esac
+    printf '%s\n' "$version" >> "$work/versions"
+done
+
+mkdir -p "$root" "${manifest%/*}"
+sort -Vru "$work/versions" > "$work/order"
+while read -r version; do
+    if [ -d "$root/sdk/$version" ]; then
+        echo "dotnet sdk $version already installed"
+        continue
+    fi
+    channel="$(printf '%s\n' "$version" | cut -d. -f1-2)"
+    file="$(jq -re --arg v "$version" --arg rid "$rid" '
+        [.releases[] | .sdk, (.sdks[]?)]
+        | map(select(.version == $v)) | .[0]
+        | .files[] | select(.rid == $rid and (.name | endswith(".tar.gz")))
+        | "\(.url) \(.hash)"' "$(releases "$channel")")" \
+        || { echo "no dotnet sdk $version for $rid in the $channel release manifest" >&2; exit 1; }
+    url="${file%% *}"
+    hash="${file#* }"
+    echo "dotnet sdk $version ($rid)"
+    curl -fsSL --retry 3 -o "$work/sdk.tar.gz" "$url"
+    echo "$hash  $work/sdk.tar.gz" | sha512sum -c -
+    tar -xzf "$work/sdk.tar.gz" -C "$root" --skip-old-files --no-same-owner
+    rm -f "$work/sdk.tar.gz"
+    "$root/dotnet" --list-sdks | grep -q "^$version " \
+        || { echo "dotnet sdk $version did not install" >&2; exit 1; }
+    printf 'dotnet %s\n' "$version" >> "$manifest"
+done < "$work/order"
+
+# On the PATH the base image already has, rather than adding a directory to
+# PATH: a symlink works however the environment arrives, with nothing in
+# tmux.conf to keep in step.
+ln -sf "$root/dotnet" /usr/local/bin/dotnet

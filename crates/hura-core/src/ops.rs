@@ -699,10 +699,9 @@ pub struct Created {
 /// [`Backend::fetch_script`].
 ///
 /// The sandbox image is deliberately *not* built here. `image::build` streams
-/// docker's output to the terminal, which would tear a TUI apart; the CLI calls
-/// [`crate::image::ensure_for`] before this, and the TUI refuses to create until
-/// the image the draft's toolchains name is there. See the doc comment on
-/// [`crate::image::ensure`].
+/// docker's output to the terminal, which would tear a TUI apart; both front
+/// ends call [`crate::image::ensure_session`] before this. See the doc comment
+/// on [`crate::image::ensure`].
 pub fn create(
     backends: &Backends,
     draft: &Draft,

@@ -43,6 +43,8 @@ pub struct Toolchain {
     pub summary: &'static str,
     /// The Dockerfile fragment layered onto the base image.
     pub layer: &'static str,
+    /// Files the layer `COPY`s, as (name in the build context, content).
+    pub files: &'static [(&'static str, &'static str)],
     /// What this toolchain has to reach to fetch dependencies.
     pub registries: &'static [Registry],
     /// Files whose presence in a checkout means this toolchain is wanted.
@@ -61,8 +63,9 @@ pub struct Toolchain {
 pub const TOOLCHAINS: [Toolchain; 3] = [
     Toolchain {
         name: "dotnet",
-        summary: "the .NET SDK, and nuget",
+        summary: "the newest .NET SDK, any SDK the checkout's global.json pins, and nuget",
         layer: include_str!("../../../images/hura-base/toolchains/dotnet.dockerfile"),
+        files: &[(DOTNET_SDK_SCRIPT, DOTNET_SDK)],
         registries: &[Registry {
             host: "api.nuget.org",
             port: 443,
@@ -80,8 +83,9 @@ pub const TOOLCHAINS: [Toolchain; 3] = [
     },
     Toolchain {
         name: "node",
-        summary: "node and npm (already in the base image), and the npm registry",
+        summary: "the newest node LTS and npm, and the npm registry",
         layer: include_str!("../../../images/hura-base/toolchains/node.dockerfile"),
+        files: &[],
         registries: &[Registry {
             host: "registry.npmjs.org",
             port: 443,
@@ -92,6 +96,7 @@ pub const TOOLCHAINS: [Toolchain; 3] = [
         name: "rust",
         summary: "rustc, cargo, fmt and clippy, and crates.io",
         layer: include_str!("../../../images/hura-base/toolchains/rust.dockerfile"),
+        files: &[],
         registries: &[
             // The sparse index and the crate downloads are two hosts, and cargo
             // needs both: the index alone resolves versions and then fails to
@@ -108,6 +113,12 @@ pub const TOOLCHAINS: [Toolchain; 3] = [
         markers: &["Cargo.toml"],
     },
 ];
+
+/// The .NET SDK installer, by its name in a build context. The dotnet layer
+/// copies it into the image, and so does the layer that adds a checkout's
+/// pinned SDKs; see [`crate::dotnet`].
+pub const DOTNET_SDK_SCRIPT: &str = "dotnet-sdk";
+pub(crate) const DOTNET_SDK: &str = include_str!("../../../images/hura-base/toolchains/dotnet-sdk");
 
 /// Where a built image records what it carries, one `name version` per line.
 ///
@@ -190,6 +201,14 @@ pub fn tag(chains: &[&'static Toolchain]) -> String {
     )
 }
 
+/// The files a variant's build context needs beside its Dockerfile.
+pub fn files(chains: &[&'static Toolchain]) -> Vec<(&'static str, &'static str)> {
+    chains
+        .iter()
+        .flat_map(|t| t.files.iter().copied())
+        .collect()
+}
+
 /// The Dockerfile for a variant image: the base, plus one layer per toolchain.
 ///
 /// `FROM hura-sandbox:latest` rather than a longer base Dockerfile with conditional
@@ -263,38 +282,43 @@ const SKIP_DIRS: &[&str] = &[
 /// reaches -- and the wrong direction is one keystroke to fix.
 pub fn detect(root: &Path) -> Vec<&'static Toolchain> {
     let mut found: Vec<&'static Toolchain> = Vec::new();
-    let look = |dir: &Path, found: &mut Vec<&'static Toolchain>| -> Vec<std::path::PathBuf> {
-        let mut subdirs = Vec::new();
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return subdirs;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                if !name.starts_with('.') && !SKIP_DIRS.contains(&name.as_str()) {
-                    subdirs.push(entry.path());
-                }
-                continue;
-            }
-            for chain in TOOLCHAINS.iter() {
-                if chain.markers.iter().any(|m| matches(m, &name)) && !found.contains(&chain) {
-                    found.push(chain);
-                }
+    walk(root, |_, name| {
+        for chain in TOOLCHAINS.iter() {
+            if chain.markers.iter().any(|m| matches(m, name)) && !found.contains(&chain) {
+                found.push(chain);
             }
         }
-        subdirs
-    };
+    });
+    TOOLCHAINS.iter().filter(|t| found.contains(t)).collect()
+}
 
+/// Every file in the root of a checkout and one level under it, as (path,
+/// name), skipping hidden directories and [`SKIP_DIRS`].
+///
+/// What [`detect`] reads, and what [`crate::dotnet::pins`] reads for the same
+/// reasons: a `global.json` lives beside the solution, and the solution lives
+/// where the project files are looked for.
+pub(crate) fn walk(root: &Path, mut visit: impl FnMut(&Path, &str)) {
     let mut level = vec![root.to_path_buf()];
     for _ in 0..=DETECT_DEPTH {
         let mut next = Vec::new();
         for dir in &level {
-            next.extend(look(dir, &mut found));
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    if !name.starts_with('.') && !SKIP_DIRS.contains(&name.as_str()) {
+                        next.push(entry.path());
+                    }
+                    continue;
+                }
+                visit(&entry.path(), &name);
+            }
         }
         level = next;
     }
-
-    TOOLCHAINS.iter().filter(|t| found.contains(t)).collect()
 }
 
 /// Whether a file name satisfies a marker: an exact name, or `*.ext`.
@@ -411,13 +435,13 @@ mod tests {
         // The manifest's directory is not in the base image, and no layer owns
         // it, so the wrapper has to make it before any layer appends.
         let dir = df.find("mkdir -p /usr/local/share/hura").expect("mkdir");
-        let first_layer = df.find("ARG DOTNET_CHANNEL").expect("the dotnet layer");
+        let first_layer = df.find("ARG DOTNET_SDKS").expect("the dotnet layer");
         assert!(dir < first_layer, "the manifest dir comes first");
 
         // Both layers, and only the ones asked for.
         assert!(df.contains("ARG RUST_CHANNEL"), "the rust layer is missing");
         assert!(
-            !df.contains("/usr/bin/npm"),
+            !df.contains("NODE_CHANNEL"),
             "node was not asked for:\n{df}"
         );
     }
@@ -427,18 +451,42 @@ mod tests {
     #[test]
     fn every_layer_writes_the_manifest_the_doctor_reads() {
         for chain in TOOLCHAINS {
+            // The layer, or a script it copies in: the dotnet layer's install
+            // is a file of its own, because the pin layer runs it too.
+            let install = std::iter::once(chain.layer)
+                .chain(chain.files.iter().map(|(_, content)| *content))
+                .collect::<Vec<_>>()
+                .join("\n");
             assert!(
-                chain.layer.contains(MANIFEST_PATH),
+                install.contains(MANIFEST_PATH),
                 "the {} layer must append to {MANIFEST_PATH}",
                 chain.name
             );
             assert!(
-                chain
-                    .layer
-                    .contains(&format!("printf '{} %s\\n'", chain.name)),
+                install.contains(&format!("printf '{} %s\\n'", chain.name)),
                 "the {} layer must record its own name and version",
                 chain.name
             );
+        }
+    }
+
+    /// Every file a layer copies has to be in the context it is built from, or
+    /// the build fails on a file that is not there.
+    #[test]
+    fn every_copied_file_is_in_the_variant_context() {
+        for chain in TOOLCHAINS.iter() {
+            let provided = files(&[chain]);
+            for line in chain.layer.lines() {
+                let Some(rest) = line.trim().strip_prefix("COPY ") else {
+                    continue;
+                };
+                let source = rest.split_whitespace().next().unwrap();
+                assert!(
+                    provided.iter().any(|(name, _)| *name == source),
+                    "the {} layer copies `{source}`, which its files do not provide",
+                    chain.name
+                );
+            }
         }
     }
 

@@ -160,13 +160,15 @@ cargo install --git https://github.com/tobiaswadsethdev/hura hurad --locked   # 
 Then:
 
 ```sh
-hurad image build                      # also happens on the first `hurad new`
+hurad image pull                       # also happens on the first `hurad new`
 hurad doctor
 ```
 
-`hurad image build` builds `hura-sandbox:latest` with Docker and then loads it
-into the sandbox runtime's own image store, which is where a sandbox is made
-from; [sandbox-image.md](sandbox-image.md) is what is in it.
+`hurad image pull` fetches `hura-sandbox:latest`, built every night and
+published on ghcr.io, and then loads it into the sandbox runtime's own image
+store, which is where a sandbox is made from. `hurad image build` builds the
+same image here instead, with Docker. [sandbox-image.md](sandbox-image.md) is
+what is in it.
 
 Start something: `hurad new --repo <url> --task "..." --provider claude`. For a
 picker and a form instead of flags, that is [the desktop
