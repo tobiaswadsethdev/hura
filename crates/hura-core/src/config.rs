@@ -352,26 +352,7 @@ impl Config {
         let mut credentials = Vec::new();
         for (name, c) in raw.credentials.unwrap_or_default() {
             let named = |message: String| invalid("credentials", format!("`{name}`: {message}"));
-            let kind = crate::credentials::Kind::parse(&c.kind).ok_or_else(|| {
-                named(format!(
-                    "`{}` is not a kind of credential; expected one of {}",
-                    c.kind,
-                    crate::credentials::Kind::ALL.map(|k| k.name()).join(", ")
-                ))
-            })?;
-            let source = match (blank_to_none(c.command), blank_to_none(c.reference)) {
-                (Some(cmd), None) => crate::credentials::Source::Command(cmd),
-                (None, Some(r)) => crate::credentials::Source::Ref(r),
-                (Some(_), Some(_)) => {
-                    return Err(named("has both `command` and `ref`; say which".into()));
-                }
-                (None, None) => {
-                    return Err(named(
-                        "says nowhere to get the value from; give it a `command` or a `ref`".into(),
-                    ));
-                }
-            };
-            credentials.push(crate::credentials::Credential { name, kind, source });
+            credentials.push(credential(&name, c).map_err(named)?);
         }
 
         if raw.sandbox_cpus == Some(0) {
@@ -518,7 +499,8 @@ struct Raw {
     sbx: Option<PathBuf>,
 }
 
-/// One `[credentials.NAME]` table.
+/// One `[credentials.NAME]` table. Every key any kind takes; [`credential`]
+/// refuses the ones a kind does not, rather than ignoring them.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawCredential {
@@ -526,6 +508,185 @@ struct RawCredential {
     command: Option<String>,
     #[serde(rename = "ref")]
     reference: Option<String>,
+    refresh: Option<String>,
+    /// `nuget-feed`: the source's key in `NuGet.config`.
+    feed: Option<String>,
+    /// `nuget-feed`: where the feed is served from.
+    hosts: Option<Vec<String>>,
+    /// `azure-cli`: the Azure CLI on this machine, when `az` is not enough.
+    az: Option<String>,
+    /// `azure-cli`: each Entra resource, and the hosts its token is sent to.
+    resources: Option<std::collections::BTreeMap<String, Vec<String>>>,
+}
+
+/// Check one `[credentials.NAME]` table against what its kind takes.
+fn credential(name: &str, c: RawCredential) -> Result<crate::credentials::Credential, String> {
+    use crate::credentials::{Credential, Delivery, Kind, Resource, Source};
+
+    let kind = Kind::parse(&c.kind).ok_or_else(|| {
+        format!(
+            "`{}` is not a kind of credential; expected one of {}",
+            c.kind,
+            Kind::ALL.map(|k| k.name()).join(", ")
+        )
+    })?;
+    let refuse = |key: &str, present: bool| -> Result<(), String> {
+        if present {
+            Err(format!(
+                "`{key}` is not something a {} credential takes",
+                kind.name()
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    let refresh = match blank_to_none(c.refresh) {
+        None => None,
+        Some(r) if runtime_duration(&r) => Some(r),
+        Some(r) => {
+            return Err(format!(
+                "`refresh = \"{r}\"` is not a duration the sandbox runtime reads; write it \
+                 like \"30m\" or \"1h\", or \"on-demand\""
+            ));
+        }
+    };
+    let source = || match (
+        blank_to_none(c.command.clone()),
+        blank_to_none(c.reference.clone()),
+    ) {
+        (Some(cmd), None) => Ok(Source::Command(cmd)),
+        (None, Some(r)) => Ok(Source::Ref(r)),
+        (Some(_), Some(_)) => Err("has both `command` and `ref`; say which".to_string()),
+        (None, None) => {
+            Err("says nowhere to get the value from; give it a `command` or a `ref`".to_string())
+        }
+    };
+
+    let delivery = match kind {
+        Kind::ClaudeOauth | Kind::AzureDevOpsPat | Kind::GitHub => {
+            refuse("feed", c.feed.is_some())?;
+            refuse("hosts", c.hosts.is_some())?;
+            refuse("az", c.az.is_some())?;
+            refuse("resources", c.resources.is_some())?;
+            Delivery::Value(source()?)
+        }
+        Kind::NugetFeed => {
+            refuse("az", c.az.is_some())?;
+            refuse("resources", c.resources.is_some())?;
+            let feed = blank_to_none(c.feed.clone()).ok_or(
+                "needs `feed`, the source's key in the repository's NuGet.config \
+                 (`<add key=\"...\"`)",
+            )?;
+            // NuGet reads the credentials from a variable named after the key,
+            // and a variable name cannot hold a dot, a dash or a space.
+            if !feed
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            {
+                return Err(format!(
+                    "`feed = \"{feed}\"`: NuGet reads a feed's credentials from a variable \
+                     named after its key, so the key can only be letters, digits and `_`"
+                ));
+            }
+            let hosts = hosts_of(c.hosts.clone().unwrap_or_default())
+                .map_err(|m| format!("`hosts`: {m}"))?;
+            if hosts.is_empty() {
+                return Err("needs `hosts`, where the feed is served from, such as \
+                     [\"pkgs.dev.azure.com\"]"
+                    .into());
+            }
+            Delivery::Feed {
+                source: source()?,
+                feed,
+                hosts,
+            }
+        }
+        Kind::AzureCli => {
+            refuse("feed", c.feed.is_some())?;
+            refuse("hosts", c.hosts.is_some())?;
+            if c.command.is_some() || c.reference.is_some() {
+                return Err(
+                    "takes no `command` or `ref`: its tokens come from `az` on this \
+                     machine, and `az = \"/path/to/az\"` says where that is"
+                        .into(),
+                );
+            }
+            let mut resources = Vec::new();
+            for (resource, hosts) in c.resources.unwrap_or_default() {
+                let resource = resource.trim().to_string();
+                if resource.is_empty() {
+                    return Err("`resources` has an empty resource name".into());
+                }
+                let hosts =
+                    hosts_of(hosts).map_err(|m| format!("`resources.\"{resource}\"`: {m}"))?;
+                if hosts.is_empty() {
+                    return Err(format!(
+                        "`resources.\"{resource}\"` names no hosts, so its token would be sent \
+                         nowhere; list the hosts that take it"
+                    ));
+                }
+                resources.push(Resource { resource, hosts });
+            }
+            if resources.is_empty() {
+                return Err(
+                    "needs `resources`: each Entra resource a session may get a token \
+                     for, and the hosts it is sent to, such as \
+                     \"https://vault.azure.net\" = [\"my-vault.vault.azure.net\"]"
+                        .into(),
+                );
+            }
+            Delivery::Azure {
+                az: blank_to_none(c.az).unwrap_or_else(|| "az".to_string()),
+                resources,
+            }
+        }
+    };
+    Ok(Credential {
+        name: name.to_string(),
+        kind,
+        delivery,
+        refresh,
+    })
+}
+
+/// Hosts as a secret names them: a host or a glob, with no scheme or path.
+fn hosts_of(hosts: Vec<String>) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for h in hosts {
+        let h = h.trim().to_string();
+        if h.is_empty() {
+            return Err("has an empty host".into());
+        }
+        if h.contains("://") || h.contains('/') || h.contains(char::is_whitespace) {
+            return Err(format!(
+                "`{h}` is not a host; give the name alone, such as example.com"
+            ));
+        }
+        out.push(h);
+    }
+    Ok(out)
+}
+
+/// Whether the sandbox runtime reads `s` as a refresh: `on-demand`, or a
+/// duration in its own notation, whole numbers each with `h`, `m` or `s`
+/// (`30m`, `1h30m`).
+fn runtime_duration(s: &str) -> bool {
+    if s == "on-demand" {
+        return true;
+    }
+    let mut digits = false;
+    let mut any = false;
+    for ch in s.chars() {
+        if ch.is_ascii_digit() {
+            digits = true;
+        } else if matches!(ch, 'h' | 'm' | 's') && digits {
+            digits = false;
+            any = true;
+        } else {
+            return false;
+        }
+    }
+    any && !digits
 }
 
 /// One `[[mcp]]` table, before it is checked. Its own struct so a misspelled key
@@ -884,10 +1045,141 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let c = parse(&text).unwrap();
-        assert_eq!(c.credentials().len(), 2);
+        assert_eq!(c.credentials().len(), 4);
         assert_eq!(
             c.credential("azure-devops").unwrap().kind,
             crate::credentials::Kind::AzureDevOpsPat
+        );
+        assert_eq!(
+            c.credential("azure").unwrap().kind,
+            crate::credentials::Kind::AzureCli
+        );
+        assert_eq!(
+            c.credential("feed").unwrap().kind,
+            crate::credentials::Kind::NugetFeed
+        );
+    }
+
+    #[test]
+    fn an_azure_cli_credential_names_its_resources_and_their_hosts() {
+        use crate::credentials::{Delivery, Resource};
+        let c = parse(
+            r#"
+            [credentials.azure]
+            kind = "azure-cli"
+            [credentials.azure.resources]
+            "https://vault.azure.net" = ["kv.vault.azure.net", "other.vault.azure.net"]
+            "https://storage.azure.com" = ["acct.blob.core.windows.net"]
+            "#,
+        )
+        .unwrap();
+        let azure = c.credential("azure").unwrap();
+        assert_eq!(azure.refresh, None, "left to the grant's own default");
+        let Delivery::Azure { az, resources } = &azure.delivery else {
+            panic!("{azure:?}");
+        };
+        assert_eq!(az, "az");
+        assert_eq!(
+            resources[1],
+            Resource {
+                resource: "https://vault.azure.net".into(),
+                hosts: vec!["kv.vault.azure.net".into(), "other.vault.azure.net".into()],
+            },
+            "ordered by resource, like every table here"
+        );
+    }
+
+    #[test]
+    fn an_azure_cli_credential_refuses_what_it_cannot_use() {
+        let e = parse("[credentials.a]\nkind = \"azure-cli\"\n")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("needs `resources`"), "{e}");
+
+        let e = parse(
+            "[credentials.a]\nkind = \"azure-cli\"\ncommand = \"az\"\n\
+             [credentials.a.resources]\n\"https://vault.azure.net\" = [\"kv.vault.azure.net\"]\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("takes no `command`"), "{e}");
+
+        let e = parse(
+            "[credentials.a]\nkind = \"azure-cli\"\n\
+             [credentials.a.resources]\n\"https://vault.azure.net\" = []\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("names no hosts"), "{e}");
+
+        let e = parse(
+            "[credentials.a]\nkind = \"azure-cli\"\n\
+             [credentials.a.resources]\n\"https://vault.azure.net\" = [\"https://kv.vault.azure.net/\"]\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("is not a host"), "{e}");
+    }
+
+    #[test]
+    fn a_nuget_feed_needs_a_key_nuget_can_name_and_its_hosts() {
+        let ok = r#"
+            [credentials.feed]
+            kind = "nuget-feed"
+            feed = "MyPackages"
+            hosts = ["pkgs.dev.azure.com"]
+            command = "cat /tokens/feed"
+            refresh = "30m"
+        "#;
+        let c = parse(ok).unwrap();
+        assert_eq!(
+            c.credential("feed").unwrap().refresh.as_deref(),
+            Some("30m")
+        );
+
+        let e = parse(&ok.replace("MyPackages", "my-packages"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("letters, digits and `_`"), "{e}");
+        let e = parse(&ok.replace("hosts = [\"pkgs.dev.azure.com\"]", ""))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("needs `hosts`"), "{e}");
+        let e = parse(&ok.replace("command = \"cat /tokens/feed\"", ""))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("give it a `command` or a `ref`"), "{e}");
+    }
+
+    /// A key that belongs to another kind is named back, not ignored: a
+    /// `hosts` on a GitHub token would otherwise look like it did something.
+    #[test]
+    fn a_credential_refuses_keys_its_kind_does_not_take() {
+        let e = parse(
+            "[credentials.gh]\nkind = \"github\"\ncommand = \"gh auth token\"\nhosts = [\"x.com\"]\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("`hosts` is not something a github credential takes"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn refresh_is_a_duration_the_runtime_reads() {
+        for good in ["30m", "1h", "1h30m", "90s", "on-demand"] {
+            assert!(runtime_duration(good), "{good}");
+        }
+        for bad in ["", "30", "m", "30x", "1.5h", "-1h", "h30"] {
+            assert!(!runtime_duration(bad), "{bad}");
+        }
+        let e = parse("[credentials.c]\nkind = \"github\"\ncommand = \"x\"\nrefresh = \"soon\"\n")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("not a duration the sandbox runtime reads"),
+            "{e}"
         );
     }
 

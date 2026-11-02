@@ -202,6 +202,7 @@ fn removing_a_sandbox_takes_its_rules_and_secrets() {
                 env: "HURA_TEST_SECRET".into(),
                 source: SecretSource::Command("echo not-a-secret".into()),
                 placeholder: None,
+                refresh: None,
             })
             .unwrap();
     }

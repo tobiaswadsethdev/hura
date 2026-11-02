@@ -58,14 +58,18 @@ const CLAUDE_SETTINGS: &str = include_str!("../../../images/hura-base/claude-set
 /// The chat agent's host: the Agent SDK, run from inside the sandbox. See
 /// [`crate::chat`].
 const HURA_AGENT: &str = include_str!("../../../images/hura-base/hura-agent.mjs");
+/// The stand-in Azure CLI, which answers token requests with a session's
+/// placeholders. See [`crate::credentials`].
+const AZ: &str = include_str!("../../../images/hura-base/az");
 
 /// Files making up the build context, as (name in the context, content).
-const CONTEXT: [(&str, &str); 5] = [
+const CONTEXT: [(&str, &str); 6] = [
     ("Dockerfile", DOCKERFILE),
     ("hura-status", HURA_STATUS),
     ("hura-usage", HURA_USAGE),
     ("claude-settings.json", CLAUDE_SETTINGS),
     ("hura-agent.mjs", HURA_AGENT),
+    ("az", AZ),
 ];
 
 /// Where the images are published: `hura-sandbox:dotnet-node` is
@@ -74,6 +78,9 @@ pub const REGISTRY: &str = "ghcr.io/tobiaswadsethdev/hura-sandbox";
 
 /// The label an image able to run a chat session carries.
 const CHAT_LABEL: &str = "hura.chat";
+/// The label an image carrying the stand-in `az` carries, which a session
+/// with an `azure-cli` credential needs; see `images/hura-base/az`.
+const AZURE_LABEL: &str = "hura.azure";
 
 pub fn exists() -> bool {
     exists_tag(IMAGE)
@@ -528,7 +535,13 @@ pub fn is_older(built: &str, available: &str) -> bool {
 /// runs a terminal agent perfectly well, and a chat session on it would sit
 /// waiting for a host that is not there.
 pub fn supports_chat(tag: &str) -> bool {
-    let format = format!("{{{{index .Config.Labels \"{CHAT_LABEL}\"}}}}");
+    has_label(tag, CHAT_LABEL)
+}
+
+/// Whether a built image says `label="1"`. One label per thing a session can
+/// need of an image that older images do not have.
+fn has_label(tag: &str, label: &str) -> bool {
+    let format = format!("{{{{index .Config.Labels \"{label}\"}}}}");
     Command::new("docker")
         .args(["image", "inspect", "--format", &format, tag])
         .output()
@@ -541,6 +554,9 @@ pub struct Need<'a> {
     pub chains: &'a [&'static Toolchain],
     /// Whether the session is a chat, whose host the image has to carry.
     pub chat: bool,
+    /// Whether the session has an `azure-cli` credential, whose stand-in
+    /// `az` the image has to carry.
+    pub azure: bool,
     /// The .NET SDKs its checkout pins; see [`crate::dotnet`].
     pub pins: &'a [crate::dotnet::Pin],
 }
@@ -559,8 +575,8 @@ pub fn ensure(need: &Need, registry: Option<&str>) -> Result<bool, String> {
         println!("{tag} is not on this machine yet ...");
         fetch(need, registry)?;
         changed = true;
-    } else if need.chat && !supports_chat(&tag) {
-        println!("{tag} predates chat sessions, replacing it ...");
+    } else if let Some(older) = lacking(need, &tag) {
+        println!("{tag} predates {older}, replacing it ...");
         fetch(need, registry)?;
         changed = true;
     }
@@ -568,6 +584,18 @@ pub fn ensure(need: &Need, registry: Option<&str>) -> Result<bool, String> {
         changed |= add_pinned_sdks(&tag, need.pins)?;
     }
     Ok(ensure_loaded(&tag)? || changed)
+}
+
+/// What `need` asks of an image that the built `tag` is too old to carry, in
+/// words that finish "predates ...". `None` when it carries everything.
+fn lacking(need: &Need, tag: &str) -> Option<&'static str> {
+    if need.chat && !has_label(tag, CHAT_LABEL) {
+        Some("chat sessions")
+    } else if need.azure && !has_label(tag, AZURE_LABEL) {
+        Some("azure-cli credentials")
+    } else {
+        None
+    }
 }
 
 /// [`ensure`] for a session about to be created, which is how both front ends
@@ -586,9 +614,14 @@ pub fn ensure_session(
     } else {
         Vec::new()
     };
+    let azure = draft.providers.iter().any(|name| {
+        cfg.credential(name)
+            .is_some_and(|c| c.kind == crate::credentials::Kind::AzureCli)
+    });
     let need = Need {
         chains: &draft.toolchains,
         chat: matches!(draft.interface, crate::chat::Interface::Chat),
+        azure,
         pins: &pins,
     };
     ensure(&need, cfg.image_registry())
@@ -600,19 +633,21 @@ fn fetch(need: &Need, registry: Option<&str>) -> Result<(), String> {
     let tag = toolchain::tag(need.chains);
     if let Some(registry) = registry {
         match pull_image(&tag, registry) {
-            Ok(()) if !need.chat || supports_chat(&tag) => return Ok(()),
-            Ok(()) => {
-                eprintln!("hura: the published {tag} cannot run a chat session; building it here")
-            }
+            Ok(()) => match lacking(need, &tag) {
+                None => return Ok(()),
+                Some(older) => {
+                    eprintln!("hura: the published {tag} predates {older}; building it here")
+                }
+            },
             Err(e) => eprintln!("hura: {e}; building {tag} here instead"),
         }
     }
     if need.chains.is_empty() {
         return build_base();
     }
-    // A variant inherits the chat host's label from the base it is built on,
-    // so a base too old for the session is rebuilt before the variant is.
-    if !exists() || (need.chat && !supports_chat(IMAGE)) {
+    // A variant inherits the base's labels, so a base too old for the session
+    // is rebuilt before the variant is.
+    if !exists() || lacking(need, IMAGE).is_some() {
         build_base()?;
     }
     build_variant_image(need.chains)

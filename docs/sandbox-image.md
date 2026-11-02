@@ -12,7 +12,7 @@ and socat, and a Docker Engine of its own. The workload runs as the template's
 microVM around the sandbox, not the file permissions inside it.
 
 hura adds tmux, Claude Code at a pinned version, `hura-status` and `hura-usage`,
-`hura-agent` with the Agent SDK beside it, and Claude Code's settings in
+`hura-agent` with the Agent SDK beside it, a stand-in `az`, and Claude Code's settings in
 `/home/agent/.claude/settings.json` and `/home/agent/.claude.json`. It makes
 `/sandbox` and gives it to `agent`; everything hura puts in a session is under
 it, with the clone at `/sandbox/repo`. The whole image is 718 MB, where the one
@@ -152,6 +152,24 @@ fractions, with the documented `utilization` absent. And `hura-status` stands
 aside when `HURA_CHAT` is set, because the hooks in `settings.json` still fire
 under the SDK and would otherwise write over the host's own, better informed
 status.
+
+## The stand-in `az`
+
+`/usr/local/bin/az` is not the Azure CLI, and a sandbox has no Azure login. It
+answers `az account get-access-token`, and nothing else, so that
+Azure.Identity's `AzureCliCredential` -- how code written for a laptop reaches
+Key Vault or Storage -- works unchanged. What it prints in place of a token is
+the placeholder a session's `azure-cli` credential put in
+`HURA_AZURE_TOKEN_<resource>` for the resource asked about; the runtime's proxy
+swaps it for a token the host's own `az` minted, on requests to that
+resource's hosts only. A resource the credential does not list is refused,
+saying which, rather than answered with another resource's placeholder. Any
+other `az` command says the CLI is not here. [configuration.md](configuration.md#azure-azure-cli)
+has the credential's side.
+
+The image is labelled `hura.azure` for it, the way it is labelled `hura.chat`:
+the first session with an `azure-cli` credential on an older image rebuilds or
+pulls it.
 
 ## Docker inside a session
 

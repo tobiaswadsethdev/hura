@@ -666,7 +666,66 @@ pub fn run(backend: &dyn Backend, config: &Result<Config, config::Error>) -> Vec
     {
         checks.push(check_skills(cfg.skills()));
     }
+    if let Ok(cfg) = config {
+        checks.extend(check_azure(cfg.credentials()));
+    }
     checks
+}
+
+/// Whether each `azure-cli` credential's `az` can mint a token here.
+///
+/// The sandbox runtime runs it, so a signed-out `az` is not a failure until a
+/// session asks for a token, and then it is every Azure call in the session
+/// failing at once with an error from inside the sandbox. Asked for the
+/// token's expiry rather than the token, so nothing secret is printed.
+fn check_azure(credentials: &[crate::credentials::Credential]) -> Vec<Check> {
+    use crate::credentials::Delivery;
+    credentials
+        .iter()
+        .filter_map(|c| match &c.delivery {
+            Delivery::Azure { az, resources } => Some((c, az, resources)),
+            _ => None,
+        })
+        .map(|(c, az, resources)| {
+            let first = &resources[0].resource;
+            let out = Command::new("sh")
+                .arg("-c")
+                .arg(format!(
+                    "{az} account get-access-token --resource {} --query expiresOn -o tsv",
+                    crate::seed::sh_quote(first)
+                ))
+                .output();
+            match out {
+                Ok(o) if o.status.success() => Check::ok(
+                    "azure",
+                    format!(
+                        "`{}`: {az} is signed in; {} resource{}",
+                        c.name,
+                        resources.len(),
+                        if resources.len() == 1 { "" } else { "s" }
+                    ),
+                ),
+                Ok(o) => Check::fail(
+                    "azure",
+                    format!(
+                        "`{}`: {az} could not mint a token for {first}: {}",
+                        c.name,
+                        String::from_utf8_lossy(&o.stderr)
+                            .lines()
+                            .find(|l| !l.trim().is_empty())
+                            .unwrap_or("no reason given")
+                            .trim()
+                    ),
+                    "az login, as the user hurad runs as",
+                ),
+                Err(e) => Check::fail(
+                    "azure",
+                    format!("`{}`: could not run {az}: {e}", c.name),
+                    "install the Azure CLI, or set `az = \"/path/to/az\"` in the credential",
+                ),
+            }
+        })
+        .collect()
 }
 
 fn check_config(config: &Result<Config, config::Error>) -> Check {

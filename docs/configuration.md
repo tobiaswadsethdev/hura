@@ -98,13 +98,16 @@ several steps later.
 
 One `[credentials.NAME]` table per credential a session may be given. The name
 is yours, and it is what `providers`, `--provider` and the create form's boxes
-use. Each table has a `kind`, and exactly one of `command` or `ref`:
+use. Each table has a `kind`, and (but for `azure-cli`) exactly one of
+`command` or `ref`:
 
 | `kind` | what it is | sent to | the sandbox sees |
 | --- | --- | --- | --- |
 | `claude-code-oauth` | the token `claude setup-token` prints | `api.anthropic.com`, `platform.claude.com` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `azure-devops-pat` | an Azure DevOps personal access token | `dev.azure.com` | `AZURE_DEVOPS_PAT` |
 | `github` | a GitHub token | `github.com`, `api.github.com` | `GITHUB_TOKEN` |
+| `azure-cli` | Entra tokens, minted by this machine's `az` | the hosts listed per resource | an `az` that answers with them |
+| `nuget-feed` | a private NuGet feed's password | the `hosts` you list | NuGet's own credential variable |
 
 `command` is run on this machine, in a shell, and what it prints is the value.
 `ref` is a 1Password `op://` reference or an AWS Secrets Manager ARN, which the
@@ -127,10 +130,77 @@ header is `base64(":" + PAT)`. A `command` prints the PAT itself and hura wraps
 it so the runtime stores the encoded form. A `ref` cannot be wrapped, so for
 Azure DevOps it has to name a secret that already holds the encoded form.
 
-A session gets at most one credential of each kind, because each kind has one
-variable for its placeholder; a create naming two is refused. Removing the
-session's sandbox removes its secrets. [git-hosts.md](git-hosts.md) is how the
-git side uses them.
+A session cannot be given two credentials that set the same variable: two of
+the first three kinds, two feeds with one key, or one Azure resource twice. A
+create naming them is refused. Removing the session's sandbox removes its
+secrets. [git-hosts.md](git-hosts.md) is how the git side uses them.
+
+`refresh`, on any kind, is how long the runtime keeps a resolved value before
+running the `command` again, in its own notation (`"30m"`, `"1h"`). Unset, it
+resolves the value when a request needs it. A value that expires on its own,
+like a token from `az`, wants one well inside its lifetime.
+
+### Azure: `azure-cli`
+
+Code written for a developer's laptop reaches Key Vault, Storage and the rest
+of Azure through `AzureCliCredential`, which runs `az account get-access-token`.
+A sandbox has no Azure CLI and no login, and should not have either: a login is
+your whole Entra identity. An `azure-cli` credential instead names each
+*resource* a session may have a token for, and the hosts that token may be
+sent to:
+
+```toml
+[credentials.azure]
+kind = "azure-cli"
+# az = "/usr/bin/az"       # if the runtime would not find it on PATH
+
+[credentials.azure.resources]
+"https://vault.azure.net" = ["my-vault.vault.azure.net"]
+"https://storage.azure.com" = ["myaccount.blob.core.windows.net"]
+```
+
+Each resource becomes a secret of its own, whose value is
+`az account get-access-token --resource <resource>` run on this machine (so
+`az` has to be signed in here), refreshed every 30 minutes unless `refresh`
+says otherwise. Inside, the image's `az` is a stand-in that answers only
+`az account get-access-token`, with the placeholder for the resource it is
+asked about, and refuses any resource the credential does not list. The proxy
+swaps the placeholder for the real token on requests to that resource's hosts.
+A token for `vault.azure.net` sent to a vault the list does not name is the
+placeholder, and the vault refuses it (measured: `MalformedToken`).
+
+What this does not hide is the *answers*. A secret read from Key Vault, or a
+blob downloaded from Storage, is in the sandbox like anything else the code
+fetched, so list the vaults and accounts whose contents the session may have,
+not every one your login can reach. A session needs an image carrying the
+stand-in, which images built since it was added do; an older one is rebuilt,
+or pulled, the first time a session with an `azure-cli` credential is created.
+
+### A private NuGet feed: `nuget-feed`
+
+```toml
+[credentials.feed]
+kind = "nuget-feed"
+feed = "MyPackages"                 # the source's key in the repository's NuGet.config
+hosts = ["pkgs.dev.azure.com"]
+command = "tr -d '\r\n' < /home/me/.config/hura/tokens/feed-pat"
+```
+
+NuGet builds `Authorization: Basic base64(user:password)` itself, so a
+placeholder in a variable would be encoded before the proxy could see it.
+Instead the sandbox's NuGet is given, in `NuGetPackageSourceCredentials_MyPackages`,
+a user and a random password whose Basic encoding *is* the placeholder, and the
+secret behind it stores `base64(":" + value)`, the same form as an Azure DevOps
+PAT. Nothing in the repository changes: its `NuGet.config` still names the
+feed, and NuGet finds the credentials by the source's key. The key can only be
+letters, digits and `_`, because NuGet reads it from a variable name.
+
+Azure Artifacts takes an Entra token as the password as well as a PAT, so the
+`command` can be `az account get-access-token --resource
+499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv` (Azure DevOps'
+own resource) with `refresh = "30m"`, and there is no PAT to keep. A feed's
+packages are downloaded from blob storage it redirects to, which the policy
+has to allow; see [policy.md](policy.md).
 
 ## Other keys
 

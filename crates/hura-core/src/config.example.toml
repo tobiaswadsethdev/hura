@@ -38,13 +38,23 @@
 # providers = ["claude", "azure-devops"]
 
 # The credentials a session may be given, one table each. `kind` is
-# "claude-code-oauth" (a `claude setup-token` token), "azure-devops-pat" or
-# "github". The value comes from `command`, run on this machine in a shell, or
+# "claude-code-oauth" (a `claude setup-token` token), "azure-devops-pat",
+# "github", "azure-cli" or "nuget-feed". The value comes from `command`, run on this machine in a shell, or
 # from `ref`, a 1Password op:// reference or an AWS Secrets Manager ARN. hura
 # never reads it: a session the credential is ticked for gets a secret of its
 # own from the sandbox runtime, which runs the command itself and swaps the
 # value into requests to the kind's hosts. Inside the sandbox there is only a
 # placeholder. An Azure DevOps command prints the PAT itself; hura encodes it.
+#
+# Two kinds send to hosts you name, for what a repository reaches beyond its
+# forge. "azure-cli" gives code in the sandbox Entra tokens minted by this
+# machine's own `az` (it has to be signed in), one per resource and each sent
+# only to the hosts listed for it; Azure.Identity's AzureCliCredential finds
+# them through the image's stand-in `az`, so nothing logs in inside. "nuget-feed"
+# is a private NuGet feed: `feed` is the source's key in the repository's
+# NuGet.config, and the command prints its password (a PAT, or a token: Azure
+# Artifacts takes `az`'s). `refresh` re-runs the source on a timer, which a
+# token that expires needs; "azure-cli" refreshes every 30m unless told.
 # [credentials.claude]
 # kind = "claude-code-oauth"
 # command = "tr -d '\r\n' < /home/me/.config/hura/tokens/claude"
@@ -52,6 +62,19 @@
 # [credentials.azure-devops]
 # kind = "azure-devops-pat"
 # command = "tr -d '\r\n' < /home/me/.config/hura/tokens/azure-devops"
+#
+# [credentials.azure]
+# kind = "azure-cli"
+# [credentials.azure.resources]
+# "https://vault.azure.net" = ["my-vault.vault.azure.net"]
+# "https://storage.azure.com" = ["myaccount.blob.core.windows.net"]
+#
+# [credentials.feed]
+# kind = "nuget-feed"
+# feed = "MyPackages"
+# hosts = ["pkgs.dev.azure.com"]
+# command = "az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv"
+# refresh = "30m"
 
 # Where the create form's picker looks for repositories, replacing the usual
 # places (the working directory and its parent, ~/dev, ~/src, ~/code, ~/projects,

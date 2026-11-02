@@ -8,7 +8,7 @@
 use sbx_client::{CreateOpts, Decision, Error as SbxError, Rule, RuleSpec, Sbx, Status};
 
 use super::{Backend, Error, ExecOutput, Paths, Result, Torn};
-use crate::credentials::{self, Credential};
+use crate::credentials::{Credential, Grant};
 use crate::doctor::Check;
 use crate::endpoints;
 use crate::events::{self, Event};
@@ -66,14 +66,14 @@ impl Sandboxed {
         Sandboxed { client, settings }
     }
 
-    /// The credentials a draft asks for, each with the placeholder it will
-    /// have in the sandbox.
+    /// The credentials a draft asks for, each with what its sandbox will be
+    /// given for it.
     ///
     /// Refused rather than skipped when a name is not configured: a session
     /// created without the credential it was asked for comes up to a login
     /// prompt or a failed clone, several steps from the cause.
-    fn chosen(&self, draft: &Draft) -> Result<Vec<(&Credential, String)>> {
-        let mut out: Vec<(&Credential, String)> = Vec::new();
+    fn chosen(&self, draft: &Draft, sandbox: &str) -> Result<Vec<(&Credential, Grant)>> {
+        let mut out: Vec<(&Credential, Grant)> = Vec::new();
         for name in &draft.providers {
             let c = self
                 .settings
@@ -86,16 +86,23 @@ impl Sandboxed {
                          in the config file"
                     ))
                 })?;
-            // One variable per kind, so two of a kind would leave the second
-            // overwriting the first's placeholder.
-            if let Some((other, _)) = out.iter().find(|(o, _)| o.kind == c.kind) {
-                return Err(Error::Local(format!(
-                    "`{}` and `{name}` are both {} credentials; a session can have one",
-                    other.name,
-                    c.kind.name()
-                )));
+            let grant = c.grant(sandbox);
+            // Two credentials setting one variable would leave the second
+            // overwriting the first's placeholder: two of the single-value
+            // kinds, two feeds with one key, or one Azure resource twice.
+            for (other, theirs) in &out {
+                if let Some((var, _)) = grant
+                    .env
+                    .iter()
+                    .find(|(var, _)| theirs.env.iter().any(|(v, _)| v == var))
+                {
+                    return Err(Error::Local(format!(
+                        "`{}` and `{name}` both set {var}; a session can have one of them",
+                        other.name
+                    )));
+                }
             }
-            out.push((c, credentials::placeholder(c.kind)));
+            out.push((c, grant));
         }
         Ok(out)
     }
@@ -295,7 +302,7 @@ impl Backend for Sandboxed {
         // before a sandbox exists rather than after.
         let resolved = policy::resolve(&draft.policy).map_err(Error::local)?;
         session.policy = Some(resolved.label);
-        let chosen = self.chosen(draft)?;
+        let chosen = self.chosen(draft, &session.sandbox)?;
 
         self.client.create(&CreateOpts {
             name: session.sandbox.clone(),
@@ -308,21 +315,21 @@ impl Backend for Sandboxed {
             memory: self.settings.memory.clone(),
             env: chosen
                 .iter()
-                .map(|(c, ph)| (c.kind.env().to_string(), ph.clone()))
+                .flat_map(|(_, grant)| grant.env.iter().cloned())
                 .collect(),
         })?;
         // Without this the runtime stops the sandbox thirty seconds after the
         // last exec disconnects, and the agent in it with it.
         self.client.detach(&session.sandbox)?;
-        for (c, ph) in &chosen {
-            self.client
-                .add_secret(&c.secret(&session.sandbox, ph))
-                .map_err(|e| {
+        for (c, grant) in &chosen {
+            for secret in &grant.secrets {
+                self.client.add_secret(secret).map_err(|e| {
                     Error::Local(format!(
                         "the `{}` credential could not be given to the sandbox: {e}",
                         c.name
                     ))
                 })?;
+            }
         }
         Ok(())
     }
@@ -752,15 +759,17 @@ mod tests {
 
     #[test]
     fn a_session_is_made_detached_with_the_credentials_it_asked_for() {
-        let cred = |name: &str, kind| Credential {
-            name: name.into(),
-            kind,
-            source: credentials::Source::Command("true".into()),
+        let cred = |name: &str, kind| {
+            Credential::value(
+                name,
+                kind,
+                crate::credentials::Source::Command("true".into()),
+            )
         };
         let settings = Settings {
             credentials: vec![
-                cred("claude", credentials::Kind::ClaudeOauth),
-                cred("ado", credentials::Kind::AzureDevOpsPat),
+                cred("claude", crate::credentials::Kind::ClaudeOauth),
+                cred("ado", crate::credentials::Kind::AzureDevOpsPat),
             ],
             ..Default::default()
         };
