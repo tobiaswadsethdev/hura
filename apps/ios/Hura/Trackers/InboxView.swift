@@ -62,20 +62,22 @@ struct InboxView: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .top) {
-                if !trackers.trackers.isEmpty {
-                    Picker("Showing", selection: $showing) {
-                        Text(label("Tickets", trackers.inbox?.tasks.count)).tag(Showing.tickets)
-                        Text(label("Pull Requests", trackers.inbox?.pulls.count)).tag(Showing.pulls)
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
-                }
-            }
             .navigationTitle("Inbox")
+            // The switch is the bar's title, so the rows scroll under the
+            // bar's own material rather than showing through a control
+            // pinned beneath it; the tab still says Inbox.
+            .navigationBarTitleDisplayMode(.inline)
             .refreshable { await trackers.refresh() }
             .toolbar {
+                if !trackers.trackers.isEmpty {
+                    ToolbarItem(placement: .principal) {
+                        Picker("Showing", selection: $showing) {
+                            Text(label("Tickets", trackers.inbox?.tasks.count)).tag(Showing.tickets)
+                            Text(label("Pull Requests", trackers.inbox?.pulls.count)).tag(Showing.pulls)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { settings = true } label: { Label("Trackers", systemImage: "gearshape") }
                 }
