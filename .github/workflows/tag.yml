@@ -1,8 +1,8 @@
 name: Tag a release
 
 # Cutting a release is one dispatch from the Actions tab. This works out the
-# next version, rewrites the *seven* files that carry it, commits, tags, pushes,
-# and hands the tag to `release.yml` -- which is the one that builds and
+# next version, rewrites the *seven* files that carry it, commits, tags and
+# pushes. The tag push starts `release.yml`, which is the one that builds and
 # publishes.
 #
 # It exists because doing it by hand does not survive contact with a busy
@@ -28,8 +28,7 @@ on:
         default: false
 
 permissions:
-  contents: write # the release commit and the tag
-  actions: write # dispatching release.yml
+  contents: read # the release commit and the tag are pushed with the deploy key
 
 jobs:
   tag:
@@ -39,9 +38,17 @@ jobs:
       # Every tag, so the "does this one already exist" check below can see the
       # ones cut before today. A shallow clone fetches none of them and would
       # cheerfully re-tag a version that is already published.
+      #
+      # With the release deploy key, because the push below goes straight to
+      # `main`, whose ruleset requires CI checks that a release commit has never
+      # had. The built-in `GITHUB_TOKEN` cannot be a ruleset's bypass actor and a
+      # deploy key can. The key is also why the tag push starts `release.yml` by
+      # itself: events raised with `GITHUB_TOKEN` are the only ones that start
+      # no workflows.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       # The dispatch form offers every branch, and a release cut from one would
       # tag a commit that is not on `main` -- reachable only from the tag, and
@@ -190,29 +197,15 @@ jobs:
           # author rather than just a pointer.
           git tag -a "$TAG" -m "$TAG"
           # The commit and the tag in one push: a tag pushed without the
-          # commit that bears its version is the bug at the top of this file,
-          # and one push either lands both or lands neither.
+          # commit that bears its version is the bug at the top of this file.
+          # `--atomic` so the push lands both or neither, because `main`'s
+          # ruleset can refuse the commit, and without it the tag lands anyway.
           #
           # `HEAD:refs/heads/main` and not `HEAD`, because whether checkout
           # leaves a branch checked out or a detached head is its business and
           # not something to bet a release on.
-          git push origin HEAD:refs/heads/main "refs/tags/$TAG"
-
-      # `release.yml` is not started by that push. GitHub does not run workflows
-      # on events raised with the built-in `GITHUB_TOKEN`, which is what stops a
-      # workflow that pushes from triggering itself forever -- and a tag push is
-      # exactly such an event. `workflow_dispatch` is the documented exception,
-      # so asking for the run explicitly works, and works without a personal
-      # access token that somebody would have to own and rotate.
-      - name: Hand the tag to the release workflow
-        if: ${{ !inputs.dry_run }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          set -eu
-          gh workflow run release.yml --ref main -f tag="$TAG"
-          echo "[release.yml](${{ github.server_url }}/${{ github.repository }}/actions/workflows/release.yml) dispatched for $TAG" >> "$GITHUB_STEP_SUMMARY"
+          git push --atomic origin HEAD:refs/heads/main "refs/tags/$TAG"
+          echo "pushed $TAG; [release.yml](${{ github.server_url }}/${{ github.repository }}/actions/workflows/release.yml) starts from the tag" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Say what a dry run would have done
         if: ${{ inputs.dry_run }}
