@@ -4,8 +4,8 @@ name: Release
 # download, plus the Windows desktop installer.
 #
 # The tag is normally not made by hand: `tag.yml` bumps the seven files that
-# carry the version, tags the commit that holds them, and dispatches this. Doing
-# it the short way still works --
+# carry the version, tags the commit that holds them, and pushes the tag, which
+# starts this. Doing it the short way still works --
 #
 #     git tag v0.2.0 && git push origin v0.2.0
 #
