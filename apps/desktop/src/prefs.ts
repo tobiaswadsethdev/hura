@@ -50,7 +50,12 @@ export type Prefs = {
   /// The sidebar's groups that are shut, by key: `tickets:created`, say.
   /// Remembered because the one somebody shuts is the one they never read.
   inboxShut: string[];
+  /// Which of the two the sidebar shows: your tickets or your pull requests.
+  /// One at a time, so neither is scrolled past to reach the other.
+  inboxView: InboxView;
 };
+
+export type InboxView = "tickets" | "pulls";
 
 /// The bounds, and the reasons.
 ///
@@ -87,6 +92,7 @@ export const DEFAULTS: Prefs = {
   notifyTickets: true,
   inboxOpen: true,
   inboxShut: [],
+  inboxView: "tickets",
 };
 
 function clamp(value: number, { min, max }: { min: number; max: number }): number {
@@ -118,6 +124,8 @@ export function sanitize(stored: unknown): Prefs {
     inboxShut: Array.isArray(raw.inboxShut)
       ? raw.inboxShut.filter((k): k is string => typeof k === "string")
       : DEFAULTS.inboxShut,
+    inboxView:
+      raw.inboxView === "tickets" || raw.inboxView === "pulls" ? raw.inboxView : DEFAULTS.inboxView,
   };
 }
 

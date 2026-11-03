@@ -3,12 +3,18 @@ import SwiftUI
 
 /// What is yours on every tracker: tickets assigned to you or created by you
 /// that aren't done, and open pull requests you opened or that wait on you.
-/// The desktop's tickets sidebar, as a tab.
+/// The desktop's tickets sidebar, as a tab: tickets or pull requests, one at
+/// a time, so neither is scrolled past to reach the other.
 struct InboxView: View {
     @Environment(TrackersModel.self) private var trackers
     @Environment(AppModel.self) private var model
     @State private var settings = false
     @State private var starting: WorkOrigin?
+    @AppStorage("inboxShowing") private var showing: Showing = .tickets
+
+    enum Showing: String, CaseIterable {
+        case tickets, pulls
+    }
 
     var body: some View {
         NavigationStack {
@@ -17,10 +23,14 @@ struct InboxView: View {
                     ForEach(inbox.warnings, id: \.self) { w in
                         Label(w, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                     }
-                    tickets(inbox, relation: "assigned", title: "Assigned to me")
-                    tickets(inbox, relation: "created", title: "Created by me")
-                    pulls(inbox.pulls.filter(\.reviewRequested), title: "Waiting on my review")
-                    pulls(inbox.pulls.filter { !$0.reviewRequested }, title: "My pull requests")
+                    switch showing {
+                    case .tickets:
+                        tickets(inbox, relation: "assigned", title: "Assigned to me")
+                        tickets(inbox, relation: "created", title: "Created by me")
+                    case .pulls:
+                        pulls(inbox.pulls.filter(\.reviewRequested), title: "Waiting on my review")
+                        pulls(inbox.pulls.filter { !$0.reviewRequested }, title: "My pull requests")
+                    }
                 }
                 if let e = trackers.lastError {
                     Text(e).font(.caption).foregroundStyle(.red)
@@ -37,9 +47,30 @@ struct InboxView: View {
                     }
                 } else if trackers.inbox == nil {
                     ProgressView()
-                } else if let inbox = trackers.inbox, inbox.tasks.isEmpty, inbox.pulls.isEmpty {
-                    ContentUnavailableView("Nothing waiting", systemImage: "checkmark.circle",
-                                           description: Text("Read from \(inbox.read.joined(separator: ", "))."))
+                } else if let inbox = trackers.inbox {
+                    switch showing {
+                    case .tickets where inbox.tasks.isEmpty:
+                        ContentUnavailableView("No tickets", systemImage: "checkmark.circle",
+                                               description: Text("Read from \(inbox.read.joined(separator: ", "))."))
+                    case .pulls where inbox.pulls.isEmpty:
+                        ContentUnavailableView("No pull requests", systemImage: "checkmark.circle",
+                                               description: Text(inbox.pullsRead.isEmpty
+                                                   ? "Pull requests come from GitHub and Azure DevOps trackers."
+                                                   : "Read from \(inbox.pullsRead.joined(separator: ", "))."))
+                    default:
+                        EmptyView()
+                    }
+                }
+            }
+            .safeAreaInset(edge: .top) {
+                if !trackers.trackers.isEmpty {
+                    Picker("Showing", selection: $showing) {
+                        Text(label("Tickets", trackers.inbox?.tasks.count)).tag(Showing.tickets)
+                        Text(label("Pull Requests", trackers.inbox?.pulls.count)).tag(Showing.pulls)
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
                 }
             }
             .navigationTitle("Inbox")
@@ -57,6 +88,11 @@ struct InboxView: View {
             .sheet(isPresented: $settings) { TrackersView() }
             .sheet(item: $starting) { origin in StartWorkView(origin: origin) }
         }
+    }
+
+    /// A segment's name, and how many it holds once that is known.
+    private func label(_ name: String, _ count: Int?) -> String {
+        count.map { "\(name) (\($0))" } ?? name
     }
 
     @ViewBuilder

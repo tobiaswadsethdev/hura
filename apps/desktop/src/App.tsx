@@ -597,8 +597,10 @@ export default function App() {
   };
 
   /// Read a pull request beside the sidebar, or put it away if it is the one
-  /// already open. From its row, or from a worktree's mark in the tree.
+  /// already open. From its row, or from a worktree's mark in the tree, which
+  /// turns the sidebar to pull requests so its row is there, marked.
   const showPull = (pull: PullRequest) => {
+    setPrefs({ inboxView: "pulls" });
     setShowing(null);
     setShowingPull((current) => (current && samePull(current, pull) ? null : pull));
   };
@@ -1027,6 +1029,7 @@ export default function App() {
           width={prefs.inboxWidth}
           open={inboxOpen}
           shut={prefs.inboxShut}
+          view={prefs.inboxView}
           inbox={inbox}
           reading={inboxReading}
           error={inboxError}
@@ -1039,6 +1042,7 @@ export default function App() {
           keys={TICKETS_KEYS}
           onFold={() => setPrefs({ inboxOpen: !inboxOpen })}
           onShut={(inboxShut) => setPrefs({ inboxShut })}
+          onView={(inboxView) => setPrefs({ inboxView })}
           onRefresh={readInbox}
           onSetup={() => {
             setSettingsAt("trackers");
