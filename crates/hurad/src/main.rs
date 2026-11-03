@@ -402,7 +402,14 @@ fn main() -> ExitCode {
     // `exec` replaces this process image, so nothing below runs on that path.
     // If it returns at all it failed, and carrying on as the version we already
     // are is the right answer: the update is not worth refusing to start over.
-    if let Some(at) = update::apply_staged() {
+    //
+    // Not for `relay`, which is not a start: it is the server running its own
+    // binary again for a forward, and the server reads what it prints. One that
+    // updated would swap the file under the server and then run as a version
+    // the server is not.
+    let relay = std::env::args_os().nth(1).is_some_and(|a| a == "relay");
+    let applied = if relay { None } else { update::apply_staged() };
+    if let Some(at) = applied {
         use std::os::unix::process::CommandExt;
         let err = std::process::Command::new(&at)
             .args(std::env::args_os().skip(1))

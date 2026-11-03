@@ -234,6 +234,30 @@ fn live_status(s: &Status) -> store::Status {
     }
 }
 
+/// This program, as a path a child process can run.
+///
+/// On Linux that is `/proc/<pid>/exe` rather than [`std::env::current_exe`].
+/// An update renames a new binary over the old one, and a server already
+/// running carries on as the old inode, so from then on `current_exe` reads
+/// `~/.local/bin/hurad (deleted)`, a path that does not exist. Measured: every
+/// forward started after a `hurad update` failed with `sh: line 2:
+/// .../hurad (deleted): No such file or directory`, which a chat shows as its
+/// forward having stopped, until the server was restarted. The link under
+/// `/proc` opens the inode this process is running whether or not anything
+/// still names it, so the relay is also the same version as the server that
+/// reads what it says. It is this process's pid and not `self`, because the
+/// guard shell is the process that resolves it.
+fn this_program() -> std::io::Result<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        let link = std::path::PathBuf::from(format!("/proc/{}/exe", std::process::id()));
+        if link.exists() {
+            return Ok(link);
+        }
+    }
+    std::env::current_exe()
+}
+
 impl Backend for Sandboxed {
     fn kind(&self) -> session::Kind {
         session::Kind::Sandbox
@@ -268,7 +292,7 @@ impl Backend for Sandboxed {
         port: u16,
         host: crate::ports::Loopback,
     ) -> Result<Vec<String>> {
-        let me = std::env::current_exe()
+        let me = this_program()
             .map_err(|e| Error::Local(format!("could not find this program to relay with: {e}")))?;
         Ok(vec![
             me.display().to_string(),
@@ -789,5 +813,70 @@ mod tests {
             b.place(&mut s, &draft(&["nope"])).is_err(),
             "an unknown credential is refused"
         );
+    }
+
+    /// A forward is this program run again, by a server that has usually been
+    /// up for days, and an update renames a new binary over it in that time.
+    /// So this runs a copy of the test binary that deletes its own file and
+    /// then runs what [`this_program`] names through `sh`, as the forward's
+    /// guard does. With `current_exe` that was `.../hurad (deleted)`, and `sh`
+    /// could not find it.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn this_program_still_runs_after_its_file_is_replaced() {
+        const COPY: &str = "HURA_TEST_REPLACED_COPY";
+        if std::env::var_os(COPY).is_some() {
+            std::fs::remove_file(std::env::current_exe().unwrap()).unwrap();
+            let me = this_program().unwrap();
+            let out = std::process::Command::new("sh")
+                .args(["-c", r#""$@" --list"#, "sh"])
+                .arg(&me)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{} would not run: {}",
+                me.display(),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+
+        let dir = std::env::temp_dir().join(format!("hura-replaced-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let copy = dir.join("hurad");
+        std::fs::copy(std::env::current_exe().unwrap(), &copy).unwrap();
+        let name = concat!(
+            module_path!(),
+            "::this_program_still_runs_after_its_file_is_replaced"
+        );
+        let name = name.split_once("::").unwrap().1;
+        // Just written, so another test's fork can still hold it open for
+        // writing for a moment: ETXTBSY, as `update::version_of` waits out.
+        let mut busy = 0;
+        let out = loop {
+            match std::process::Command::new(&copy)
+                .args(["--exact", name, "--nocapture"])
+                .env(COPY, "1")
+                .output()
+            {
+                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && busy < 50 => {
+                    busy += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                other => break other.unwrap(),
+            }
+        };
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{said}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // A filter that matches nothing passes too.
+        assert!(said.contains("1 passed"), "the copy ran no test: {said}");
     }
 }

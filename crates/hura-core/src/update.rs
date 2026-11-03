@@ -332,6 +332,14 @@ fn apply_staged_at(at: &Path, running: &str) -> Option<PathBuf> {
     if staged.file_name() == at.file_name() {
         return None;
     }
+    // Replaced since this process started, so it is an old binary and the file
+    // where it was is something newer: on Linux `at` then reads
+    // `.../hurad (deleted)`. A relay run by a server that outlived an update is
+    // exactly this, and the swap below would have written a new file by that
+    // name. The next start of whatever is installed there decides instead.
+    if !at.is_file() {
+        return None;
+    }
     if !staged.is_file() {
         return None;
     }
@@ -858,6 +866,29 @@ bbbb *hurad-v0.2.0-aarch64-unknown-linux-musl.tar.gz
             version_of(&staged).as_deref(),
             Some("9.9.9"),
             "the staged file must still be there to be applied"
+        );
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    /// A process whose file was renamed over by an update, as a relay run by a
+    /// server that outlived one is: `current_exe` names a path with
+    /// ` (deleted)` on the end, and nothing is there. A newer staged release
+    /// must not be swapped in under that name, and is left for a start of the
+    /// binary that is installed.
+    #[test]
+    #[cfg(unix)]
+    fn a_binary_that_has_been_replaced_applies_nothing() {
+        let bin = scratch("apply-replaced");
+        fake_binary(&bin.join(BIN), "0.5.0");
+        let gone = bin.join(format!("{BIN} (deleted)"));
+        fake_binary(&staged_at(&gone), "0.5.0");
+
+        assert_eq!(apply_staged_at(&gone, "0.4.0"), None);
+        assert!(!gone.exists(), "a file was written under the deleted name");
+        assert_eq!(
+            version_of(&staged_at(&gone)).as_deref(),
+            Some("0.5.0"),
+            "the staged file is for the installed binary to decide on"
         );
         let _ = std::fs::remove_dir_all(&bin);
     }
