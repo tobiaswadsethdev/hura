@@ -7,10 +7,12 @@
 // every tracker is asked the same thing, what is assigned to you or created by
 // you, so the sidebar means the same thing whichever tracker it reads.
 //
-// **Two headings, two groups each.** Tickets assigned to you and tickets you
+// **Two views, two groups each.** Tickets assigned to you and tickets you
 // created; pull requests waiting on you (a review asked of you, or assigned
 // to you) and pull requests you opened. A row in both groups is in the first,
-// because that is the half that asks something of you.
+// because that is the half that asks something of you. The header switches
+// between tickets and pull requests rather than stacking them, so neither is
+// scrolled past to reach the other.
 //
 // **A row knows its worktree.** A ticket a session was started from, or a pull
 // request whose branch a worktree is working on, shows that worktree and its
@@ -21,7 +23,7 @@
 //
 // **Folded, it is a rail of two counts**, because four columns do not fit a
 // laptop: tree, middle, dock and this leave little of the middle at 1280
-// pixels. The shortcut that used to open the tickets screen folds and unfolds
+// pixels. Each count unfolds it to its own view. The shortcut that used to open the tickets screen folds and unfolds
 // it.
 
 import { useMemo } from "react";
@@ -35,6 +37,7 @@ import type { PullRequest as Pull } from "./gen/PullRequest";
 import type { Relation } from "./gen/Relation";
 import type { Session } from "./gen/Session";
 import type { Task } from "./gen/Task";
+import type { InboxView } from "./prefs";
 import type { PullStart } from "./Pull";
 import {
   Chevron,
@@ -69,6 +72,7 @@ export function InboxBar({
   width,
   open,
   shut,
+  view,
   inbox,
   reading,
   error,
@@ -81,6 +85,7 @@ export function InboxBar({
   keys,
   onFold,
   onShut,
+  onView,
   onRefresh,
   onSetup,
   onSelect,
@@ -96,6 +101,8 @@ export function InboxBar({
   open: boolean;
   /// The groups that are shut, by `tickets:assigned`-style key.
   shut: string[];
+  /// Tickets or pull requests: the one being shown.
+  view: InboxView;
   /// The last read. `null` before the first one has answered.
   inbox: Inbox | null;
   /// A read is in flight.
@@ -117,6 +124,9 @@ export function InboxBar({
   keys: { label: string; aria: string };
   onFold: () => void;
   onShut: (shut: string[]) => void;
+  /// Show the other one. Also what a count on the folded rail calls, before
+  /// unfolding.
+  onView: (view: InboxView) => void;
   onRefresh: () => void;
   onSetup: () => void;
   onSelect: (session: string) => void;
@@ -133,18 +143,22 @@ export function InboxBar({
   if (!open) {
     return (
       <Rail
+        view={view}
         tasks={tasks}
         pulls={pulls}
         warned={(inbox?.warnings.length ?? 0) > 0 || error !== null}
         keys={keys}
-        onUnfold={onFold}
+        onUnfold={(to) => {
+          onView(to);
+          onFold();
+        }}
       />
     );
   }
 
   const none = trackers !== null && trackers.length === 0;
   // Pull requests come from GitHub and Azure DevOps. With only Jira set up,
-  // the heading says where they would come from rather than sitting empty.
+  // their view says where they would come from rather than sitting empty.
   const forges = trackers?.some((t) => t.source.kind !== "jira") ?? false;
   const isShut = (key: string) => shut.includes(key);
   const toggle = (key: string) =>
@@ -153,7 +167,30 @@ export function InboxBar({
   return (
     <aside className="inbox" style={{ width }} aria-label="your tickets and pull requests">
       <header className="inbox-head">
-        <span className="inbox-title">mine</span>
+        <div className="segmented inbox-views" role="tablist" aria-label="mine">
+          {(
+            [
+              ["tickets", Tracker, "tickets", tasks.length],
+              ["pulls", PullRequest, "pull requests", pulls.length],
+            ] as const
+          ).map(([v, Mark, label, count]) => (
+            <button
+              key={v}
+              role="tab"
+              aria-selected={view === v}
+              aria-label={inbox === null ? label : `${label}, ${count}`}
+              title={label}
+              className={view === v ? "on" : ""}
+              onClick={() => onView(v)}
+            >
+              <Mark />
+              {/* The word on the one shown; the other is its mark and its
+                  count, which is what fits beside the tools at 240 pixels. */}
+              {view === v && <span>{label}</span>}
+              {inbox !== null && <span className="inbox-views-count">{count}</span>}
+            </button>
+          ))}
+        </div>
         {reading && <Working className="inbox-reading" />}
         <span className="inbox-tools">
           <button
@@ -196,76 +233,70 @@ export function InboxBar({
               add a tracker
             </button>
           </Empty>
+        ) : view === "tickets" ? (
+          GROUPS.map((g) => {
+            const key = `tickets:${g.key}`;
+            const rows = tasks.filter((t) => t.relation === g.relation);
+            return (
+              <Group
+                key={key}
+                label={g.label}
+                count={rows.length}
+                open={!isShut(key)}
+                loading={inbox === null}
+                onToggle={() => toggle(key)}
+              >
+                {rows.map((t) => (
+                  <TicketRow
+                    key={`${t.tracker}:${t.id}`}
+                    task={t}
+                    session={ticketSession(t, sessions)}
+                    projects={projects}
+                    currentProject={currentProject}
+                    on={showing?.tracker === t.tracker && showing.key === t.key}
+                    onSelect={onSelect}
+                    onShow={onShow}
+                    onStart={onStart}
+                  />
+                ))}
+              </Group>
+            );
+          })
+        ) : !forges && trackers !== null ? (
+          <p className="inbox-hint">
+            Pull requests come from GitHub and Azure DevOps trackers.{" "}
+            <button className="link" onClick={onSetup}>
+              add one
+            </button>
+          </p>
         ) : (
-          <>
-            <Heading icon={Tracker} label="tickets" count={tasks.length} />
-            {GROUPS.map((g) => {
-              const key = `tickets:${g.key}`;
-              const rows = tasks.filter((t) => t.relation === g.relation);
-              return (
-                <Group
-                  key={key}
-                  label={g.label}
-                  count={rows.length}
-                  open={!isShut(key)}
-                  loading={inbox === null}
-                  onToggle={() => toggle(key)}
-                >
-                  {rows.map((t) => (
-                    <TicketRow
-                      key={`${t.tracker}:${t.id}`}
-                      task={t}
-                      session={ticketSession(t, sessions)}
-                      projects={projects}
-                      currentProject={currentProject}
-                      on={showing?.tracker === t.tracker && showing.key === t.key}
-                      onSelect={onSelect}
-                      onShow={onShow}
-                      onStart={onStart}
-                    />
-                  ))}
-                </Group>
-              );
-            })}
-
-            <Heading icon={PullRequest} label="pull requests" count={pulls.length} />
-            {!forges && trackers !== null ? (
-              <p className="inbox-hint">
-                Pull requests come from GitHub and Azure DevOps trackers.{" "}
-                <button className="link" onClick={onSetup}>
-                  add one
-                </button>
-              </p>
-            ) : (
-              GROUPS.map((g) => {
-                const key = `pulls:${g.key}`;
-                const rows = pulls.filter((p) => p.relation === g.relation);
-                return (
-                  <Group
-                    key={key}
-                    label={g.relation === "assigned" ? "waiting on me" : g.label}
-                    count={rows.length}
-                    open={!isShut(key)}
-                    loading={inbox === null}
-                    onToggle={() => toggle(key)}
-                  >
-                    {rows.map((p) => (
-                      <PullRow
-                        key={`${p.tracker}:${p.repo}:${p.id}`}
-                        pull={p}
-                        session={pullSession(p, sessions)}
-                        projects={pullProjects(p, projects)}
-                        on={samePull(showingPull, p)}
-                        onSelect={onSelect}
-                        onShow={onShowPull}
-                        onStart={onStartPull}
-                      />
-                    ))}
-                  </Group>
-                );
-              })
-            )}
-          </>
+          GROUPS.map((g) => {
+            const key = `pulls:${g.key}`;
+            const rows = pulls.filter((p) => p.relation === g.relation);
+            return (
+              <Group
+                key={key}
+                label={g.relation === "assigned" ? "waiting on me" : g.label}
+                count={rows.length}
+                open={!isShut(key)}
+                loading={inbox === null}
+                onToggle={() => toggle(key)}
+              >
+                {rows.map((p) => (
+                  <PullRow
+                    key={`${p.tracker}:${p.repo}:${p.id}`}
+                    pull={p}
+                    session={pullSession(p, sessions)}
+                    projects={pullProjects(p, projects)}
+                    on={samePull(showingPull, p)}
+                    onSelect={onSelect}
+                    onShow={onShowPull}
+                    onStart={onStartPull}
+                  />
+                ))}
+              </Group>
+            );
+          })
         )}
       </div>
     </aside>
@@ -274,17 +305,19 @@ export function InboxBar({
 
 /// Folded: the two counts, and the way back.
 function Rail({
+  view,
   tasks,
   pulls,
   warned,
   keys,
   onUnfold,
 }: {
+  view: InboxView;
   tasks: Task[];
   pulls: Pull[];
   warned: boolean;
   keys: { label: string; aria: string };
-  onUnfold: () => void;
+  onUnfold: (view: InboxView) => void;
 }) {
   const split = <T extends { relation: Relation }>(rows: T[], mine: string, theirs: string) => {
     const assigned = rows.filter((r) => r.relation === "assigned").length;
@@ -296,14 +329,14 @@ function Rail({
         className="quiet-icon"
         title={`open this sidebar (${keys.label})`}
         aria-keyshortcuts={keys.aria}
-        onClick={onUnfold}
+        onClick={() => onUnfold(view)}
       >
         <Unfold aria-label="open" />
       </button>
       <button
         className="inbox-rail-count"
         title={`tickets: ${split(tasks, "created by you", "assigned to you")}`}
-        onClick={onUnfold}
+        onClick={() => onUnfold("tickets")}
       >
         <Tracker />
         <span>{tasks.length}</span>
@@ -311,7 +344,7 @@ function Rail({
       <button
         className="inbox-rail-count"
         title={`pull requests: ${split(pulls, "yours", "waiting on you")}`}
-        onClick={onUnfold}
+        onClick={() => onUnfold("pulls")}
       >
         <PullRequest />
         <span>{pulls.length}</span>
@@ -323,25 +356,7 @@ function Rail({
   );
 }
 
-function Heading({
-  icon: Mark,
-  label,
-  count,
-}: {
-  icon: React.ComponentType;
-  label: string;
-  count: number;
-}) {
-  return (
-    <h3 className="inbox-heading">
-      <Mark />
-      <span>{label}</span>
-      <span className="inbox-count">{count}</span>
-    </h3>
-  );
-}
-
-/// One group under a heading, shut by a click on its name.
+/// One group, shut by a click on its name.
 function Group({
   label,
   count,
