@@ -108,6 +108,7 @@ use. Each table has a `kind`, and (but for `azure-cli`) exactly one of
 | `github` | a GitHub token | `github.com`, `api.github.com` | `GITHUB_TOKEN` |
 | `azure-cli` | Entra tokens, minted by this machine's `az` | the hosts listed per resource | an `az` that answers with them |
 | `nuget-feed` | a private NuGet feed's password | the `hosts` you list | NuGet's own credential variable |
+| `docker-registry` | a private container registry's password | the `registry`, or the `hosts` you list | `DOCKER_AUTH_CONFIG` |
 
 `command` is run on this machine, in a shell, and what it prints is the value.
 `ref` is a 1Password `op://` reference or an AWS Secrets Manager ARN, which the
@@ -131,8 +132,8 @@ it so the runtime stores the encoded form. A `ref` cannot be wrapped, so for
 Azure DevOps it has to name a secret that already holds the encoded form.
 
 A session cannot be given two credentials that set the same variable: two of
-the first three kinds, two feeds with one key, or one Azure resource twice. A
-create naming them is refused. Removing the session's sandbox removes its
+the first three kinds, two feeds with one key, one Azure resource twice, or
+two logins to one registry. A create naming them is refused. Removing the session's sandbox removes its
 secrets. [git-hosts.md](git-hosts.md) is how the git side uses them.
 
 `refresh`, on any kind, is how long the runtime keeps a resolved value before
@@ -201,6 +202,52 @@ Azure Artifacts takes an Entra token as the password as well as a PAT, so the
 own resource) with `refresh = "30m"`, and there is no PAT to keep. A feed's
 packages are downloaded from blob storage it redirects to, which the policy
 has to allow; see [policy.md](policy.md).
+
+### A private container registry: `docker-registry`
+
+```toml
+[credentials.registry]
+kind = "docker-registry"
+registry = "myregistry.azurecr.io"     # as an image reference names it
+username = "00000000-0000-0000-0000-000000000000"
+command = "az acr login --name myregistry --expose-token --query accessToken -o tsv"
+refresh = "1h"
+# hosts = ["auth.example.com"]         # the token service, if not the registry
+```
+
+For the sandbox's own Docker Engine: `docker pull`, a `FROM` in a build, and
+test containers started through the Docker API, from a registry that wants a
+login. Docker builds `Authorization: Basic base64(user:password)` itself, so
+this is the feed's trick again: the sandbox's Docker CLI is given a login in
+`DOCKER_AUTH_CONFIG`, which it reads in place of `~/.docker/config.json`
+(measured: with only the variable set a pull of a private image works, without
+it the registry refuses), whose Basic encoding is the placeholder, and the
+secret behind it stores `base64(username:password)`. The same placeholder is
+in `HURA_DOCKER_REGISTRY_<REGISTRY>`, for a `curl` to the registry's API.
+Every registry a session has goes in the one variable.
+
+The login goes to `hosts`, which is the registry itself unless the config
+names others: what receives it is the registry's *token service*, which for
+Azure Container Registry is the registry (`/oauth2/token`); a registry whose
+token service is another host names that host. `registry` is a host, so Docker
+Hub, whose logins Docker keys by a URL, is not one this takes, and only Azure
+Container Registry has been measured. It takes a refresh token from
+`az acr login --expose-token`, which Microsoft documents as lasting three
+hours, as the password of the all-zero user that command prints, so a
+`refresh` under that keeps it current with no service principal or admin user
+to manage.
+
+The engine asks for its token with a `POST` first, the password in the body,
+where the proxy writes nothing; the registry refuses that, and the engine
+asks again with a `GET` and the Basic header, which is the request the
+placeholder is swapped in. So the policy has to allow both, and the storage
+the registry redirects layer downloads to; see [policy.md](policy.md).
+
+What this does not hide is the registry's answer, as with `azure-cli`: the
+token service hands back a token for pulling, and Azure Container Registry a
+refresh token beside it (measured), and those are in the sandbox for as long
+as they live. They are good for that one registry, which is the reason to
+give a session a login only to the registries it needs.
 
 ## Other keys
 

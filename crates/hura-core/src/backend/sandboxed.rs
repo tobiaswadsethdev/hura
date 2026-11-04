@@ -91,6 +91,20 @@ impl Sandboxed {
             // overwriting the first's placeholder: two of the single-value
             // kinds, two feeds with one key, or one Azure resource twice.
             for (other, theirs) in &out {
+                // Docker keeps one login per registry, so the second would
+                // replace the first in `DOCKER_AUTH_CONFIG`. Said before the
+                // variable they would also share, which names it less plainly.
+                if let Some((registry, _)) = grant
+                    .registries
+                    .iter()
+                    .find(|(r, _)| theirs.registries.iter().any(|(t, _)| t == r))
+                {
+                    return Err(Error::Local(format!(
+                        "`{}` and `{name}` both log in to {registry}; a session can have one \
+                         of them",
+                        other.name
+                    )));
+                }
                 if let Some((var, _)) = grant
                     .env
                     .iter()
@@ -340,6 +354,9 @@ impl Backend for Sandboxed {
             env: chosen
                 .iter()
                 .flat_map(|(_, grant)| grant.env.iter().cloned())
+                .chain(crate::credentials::docker_auth_config(
+                    chosen.iter().map(|(_, grant)| grant),
+                ))
                 .collect(),
         })?;
         // Without this the runtime stops the sandbox thirty seconds after the
@@ -545,6 +562,8 @@ mod tests {
         rules: RefCell<Vec<Rule>>,
         next: RefCell<u32>,
         calls: RefCell<Vec<String>>,
+        /// The variables the last sandbox was made with.
+        env: RefCell<Vec<(String, String)>>,
     }
 
     impl Fake {
@@ -576,6 +595,7 @@ mod tests {
                 .calls
                 .borrow_mut()
                 .push(format!("create {}", opts.name));
+            *self.0.env.borrow_mut() = opts.env.clone();
             Ok(())
         }
         fn detach(&self, name: &str) -> SbxResult<()> {
@@ -813,6 +833,55 @@ mod tests {
             b.place(&mut s, &draft(&["nope"])).is_err(),
             "an unknown credential is refused"
         );
+    }
+
+    /// Every registry login goes in one `DOCKER_AUTH_CONFIG`, beside each
+    /// registry's own placeholder; two logins to one registry are refused,
+    /// since Docker would keep only one of them.
+    #[test]
+    fn registry_logins_are_one_variable_and_one_per_registry() {
+        use crate::credentials::{Delivery, Kind, Source};
+        let registry = |name: &str, registry: &str| Credential {
+            name: name.into(),
+            kind: Kind::DockerRegistry,
+            delivery: Delivery::Registry {
+                source: Source::Command("true".into()),
+                registry: registry.into(),
+                username: "u".into(),
+                hosts: vec![registry.into()],
+            },
+            refresh: None,
+        };
+        let settings = Settings {
+            credentials: vec![
+                registry("one", "one.example.io"),
+                registry("two", "two.example.io"),
+                registry("again", "one.example.io"),
+            ],
+            ..Default::default()
+        };
+        let (b, fake) = backend(settings);
+        let mut s = Session::new("a".into(), "https://example.com/r.git".into(), "t".into());
+        b.place(&mut s, &draft(&["one", "two"])).unwrap();
+        let env = fake.env.borrow().clone();
+        let names: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "HURA_DOCKER_REGISTRY_ONE_EXAMPLE_IO",
+                "HURA_DOCKER_REGISTRY_TWO_EXAMPLE_IO",
+                "DOCKER_AUTH_CONFIG",
+            ]
+        );
+        let json: serde_json::Value = serde_json::from_str(&env[2].1).unwrap();
+        assert_eq!(json["auths"]["one.example.io"]["auth"], env[0].1.as_str());
+        assert_eq!(json["auths"]["two.example.io"]["auth"], env[1].1.as_str());
+
+        let e = b
+            .place(&mut s, &draft(&["one", "again"]))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("both log in to one.example.io"), "{e}");
     }
 
     /// A forward is this program run again, by a server that has usually been

@@ -14,7 +14,7 @@
 //! created without the credential has neither the placeholder nor a secret
 //! behind it, so ticking the box per session still decides something.
 //!
-//! Two kinds have no fixed hosts, because what they reach is the repository's
+//! Three kinds have no fixed hosts, because what they reach is the repository's
 //! business rather than hura's, and the config file names it:
 //!
 //! * **`azure-cli`** mints Entra access tokens with the host's own `az`, one
@@ -29,6 +29,12 @@
 //!   be encoded before the proxy could see it. Instead the sandbox's NuGet is
 //!   given a user and a random password whose encoding *is* the placeholder,
 //!   and the value stored behind it is the encoding of the real password.
+//! * **`docker-registry`** is a login to a private container registry, for the
+//!   sandbox's own Docker Engine. The same trick as a feed, since Docker also
+//!   builds `Basic base64(user:password)` itself: the sandbox's Docker CLI is
+//!   given, in `DOCKER_AUTH_CONFIG`, a login whose encoding is the placeholder,
+//!   and the value behind it is `base64(username:password)` of the real one.
+//!   Every registry a session logs in to goes in that one variable.
 //!
 //! A token from `az` lives about an hour, so those secrets are re-resolved on
 //! a timer (`refresh`), which the runtime does without the sandbox noticing.
@@ -53,15 +59,18 @@ pub enum Kind {
     AzureCli,
     /// The password of a private NuGet feed.
     NugetFeed,
+    /// A login to a private container registry, for `docker pull`.
+    DockerRegistry,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [
+    pub const ALL: [Kind; 6] = [
         Kind::ClaudeOauth,
         Kind::AzureDevOpsPat,
         Kind::GitHub,
         Kind::AzureCli,
         Kind::NugetFeed,
+        Kind::DockerRegistry,
     ];
 
     /// The name the config file and the create form use. The same names the
@@ -74,6 +83,7 @@ impl Kind {
             Kind::GitHub => "github",
             Kind::AzureCli => "azure-cli",
             Kind::NugetFeed => "nuget-feed",
+            Kind::DockerRegistry => "docker-registry",
         }
     }
 
@@ -88,12 +98,13 @@ impl Kind {
             Kind::ClaudeOauth => &["api.anthropic.com", "platform.claude.com"],
             Kind::AzureDevOpsPat => &["dev.azure.com"],
             Kind::GitHub => &["github.com", "api.github.com"],
-            Kind::AzureCli | Kind::NugetFeed => &[],
+            Kind::AzureCli | Kind::NugetFeed | Kind::DockerRegistry => &[],
         }
     }
 
     /// The variable the placeholder is put in: the one the tool reads. For
-    /// the two kinds that set one per resource or feed, what each starts with.
+    /// the two kinds that set one per resource or feed, what each starts
+    /// with; for a registry, the one variable every login shares.
     pub fn env(self) -> &'static str {
         match self {
             Kind::ClaudeOauth => "CLAUDE_CODE_OAUTH_TOKEN",
@@ -101,6 +112,7 @@ impl Kind {
             Kind::GitHub => "GITHUB_TOKEN",
             Kind::AzureCli => AZURE_TOKEN_ENV,
             Kind::NugetFeed => NUGET_CREDENTIALS_ENV,
+            Kind::DockerRegistry => DOCKER_AUTH_CONFIG_ENV,
         }
     }
 
@@ -110,7 +122,9 @@ impl Kind {
     fn prefix(self) -> &'static str {
         match self {
             Kind::ClaudeOauth => "sk-ant-oat01-hura",
-            Kind::AzureDevOpsPat | Kind::GitHub | Kind::NugetFeed => "hura-cred-",
+            Kind::AzureDevOpsPat | Kind::GitHub | Kind::NugetFeed | Kind::DockerRegistry => {
+                "hura-cred-"
+            }
             Kind::AzureCli => "hura-az-",
         }
     }
@@ -128,6 +142,22 @@ const NUGET_CREDENTIALS_ENV: &str = "NuGetPackageSourceCredentials_";
 /// The user the sandbox's NuGet is given for a feed. Azure DevOps ignores the
 /// user of a PAT or a token; it only has to be the same on both sides.
 const NUGET_USER: &str = "hura";
+
+/// The variable the Docker CLI reads logins from when it is set, in the shape
+/// of `~/.docker/config.json`: `{"auths": {"<registry>": {"auth": "..."}}}`.
+/// A variable rather than the file, so a registry login is given to a sandbox
+/// the way every other credential is, at create, with nothing to seed.
+/// Measured: Docker 29's CLI pulls with it set and is refused without it.
+const DOCKER_AUTH_CONFIG_ENV: &str = "DOCKER_AUTH_CONFIG";
+
+/// What a registry's placeholder is also put in, followed by the registry
+/// as [`slug`] spells it: the whole Basic credential, for a `curl` to the
+/// registry's API, and the variable the runtime's secret is named by.
+const DOCKER_REGISTRY_ENV: &str = "HURA_DOCKER_REGISTRY_";
+
+/// The user the sandbox's Docker is given for a registry. Only the encoding
+/// of `user:password` reaches the proxy, so it only has to agree with itself.
+const DOCKER_USER: &str = "hura";
 
 /// How long an `az` token secret is kept before `az` is asked again. Entra
 /// access tokens live an hour or more, so half an hour never sends a stale one.
@@ -171,6 +201,19 @@ pub enum Delivery {
         az: String,
         resources: Vec<Resource>,
     },
+    /// A password for a container registry, logged in as `username`.
+    Registry {
+        source: Source,
+        /// As Docker names it in an image reference and in its config:
+        /// `myregistry.azurecr.io`.
+        registry: String,
+        /// The user the registry takes this password with. For a token from
+        /// `az acr login --expose-token`, the all-zero GUID it prints.
+        username: String,
+        /// Where Docker sends the login: the registry's token service, which
+        /// is the registry itself unless the config says otherwise.
+        hosts: Vec<String>,
+    },
 }
 
 /// One `[credentials.NAME]` table.
@@ -197,6 +240,31 @@ pub struct Credential {
 pub struct Grant {
     pub env: Vec<(String, String)>,
     pub secrets: Vec<SecretSpec>,
+    /// Container registries Docker is given a login for, as (registry,
+    /// placeholder). Not in `env`, because every credential's logins go in
+    /// one variable; [`docker_auth_config`] writes it.
+    pub registries: Vec<(String, String)>,
+}
+
+/// The `DOCKER_AUTH_CONFIG` variable carrying every registry login in
+/// `grants`, or `None` when there are none.
+pub fn docker_auth_config<'a>(
+    grants: impl IntoIterator<Item = &'a Grant>,
+) -> Option<(String, String)> {
+    let auths: serde_json::Map<String, serde_json::Value> = grants
+        .into_iter()
+        .flat_map(|g| g.registries.iter())
+        .map(|(registry, placeholder)| {
+            (registry.clone(), serde_json::json!({ "auth": placeholder }))
+        })
+        .collect();
+    if auths.is_empty() {
+        return None;
+    }
+    Some((
+        DOCKER_AUTH_CONFIG_ENV.to_string(),
+        serde_json::json!({ "auths": auths }).to_string(),
+    ))
 }
 
 impl Credential {
@@ -226,6 +294,7 @@ impl Credential {
                 Grant {
                     env: vec![(self.kind.env().to_string(), placeholder.clone())],
                     secrets: vec![self.value_secret(sandbox, source, &placeholder)],
+                    registries: Vec::new(),
                 }
             }
             Delivery::Feed {
@@ -255,6 +324,33 @@ impl Credential {
                         placeholder: Some(placeholder),
                         refresh: self.refresh.clone(),
                     }],
+                    registries: Vec::new(),
+                }
+            }
+            Delivery::Registry {
+                source,
+                registry,
+                username,
+                hosts,
+            } => {
+                // Docker hands the user and password to its engine, which
+                // builds `Basic base64(user:password)` for the registry's
+                // token service: a placeholder in the password alone would be
+                // encoded before the proxy saw it, so the whole encoding is.
+                let password = fresh();
+                let placeholder = base64(format!("{DOCKER_USER}:{password}").as_bytes());
+                let header_env = format!("{DOCKER_REGISTRY_ENV}{}", slug(registry));
+                Grant {
+                    env: vec![(header_env.clone(), placeholder.clone())],
+                    secrets: vec![SecretSpec {
+                        sandbox: sandbox.to_string(),
+                        hosts: hosts.clone(),
+                        env: header_env,
+                        source: login_source(source, username),
+                        placeholder: Some(placeholder.clone()),
+                        refresh: self.refresh.clone(),
+                    }],
+                    registries: vec![(registry.clone(), placeholder)],
                 }
             }
             Delivery::Azure { az, resources } => {
@@ -319,6 +415,21 @@ fn basic_source(source: &Source) -> SecretSource {
     match source {
         Source::Command(cmd) => SecretSource::Command(format!(
             "printf ':%s' \"$(sh -c {})\" | base64 -w0",
+            sh_quote(cmd)
+        )),
+        Source::Ref(r) => SecretSource::Ref(r.clone()),
+    }
+}
+
+/// A registry password's source, made to store `base64(username:password)`:
+/// the Basic credential Docker's engine sends the registry's token service.
+/// A reference cannot be wrapped, so it has to name a secret that already
+/// holds the encoded form.
+fn login_source(source: &Source, username: &str) -> SecretSource {
+    match source {
+        Source::Command(cmd) => SecretSource::Command(format!(
+            "printf '%s:%s' {} \"$(sh -c {})\" | base64 -w0",
+            sh_quote(username),
             sh_quote(cmd)
         )),
         Source::Ref(r) => SecretSource::Ref(r.clone()),
@@ -556,6 +667,91 @@ mod tests {
             panic!("a command stays a command");
         };
         assert!(wrapped.starts_with("printf ':%s'"), "{wrapped}");
+    }
+
+    fn registry(name: &str, registry: &str, cmd: &str) -> Credential {
+        Credential {
+            name: name.into(),
+            kind: Kind::DockerRegistry,
+            delivery: Delivery::Registry {
+                source: Source::Command(cmd.into()),
+                registry: registry.into(),
+                username: "00000000-0000-0000-0000-000000000000".into(),
+                hosts: vec![registry.into()],
+            },
+            refresh: Some("1h".into()),
+        }
+    }
+
+    /// Docker is handed a login whose Basic encoding is exactly the
+    /// placeholder, and the secret behind it is the real user and password,
+    /// encoded the same way, for the registry's hosts alone.
+    #[test]
+    fn a_registry_is_given_a_login_whose_encoding_is_the_placeholder() {
+        let c = registry("acr", "myregistry.azurecr.io", "cat /tokens/acr");
+        let grant = c.grant_with("hura-a", &mut counter());
+        assert_eq!(
+            grant.env,
+            [(
+                "HURA_DOCKER_REGISTRY_MYREGISTRY_AZURECR_IO".to_string(),
+                base64(b"hura:r1")
+            )]
+        );
+        assert_eq!(
+            grant.registries,
+            [("myregistry.azurecr.io".to_string(), base64(b"hura:r1"))]
+        );
+        let [spec] = grant.secrets.as_slice() else {
+            panic!("one secret: {grant:?}");
+        };
+        assert_eq!(
+            spec.placeholder.as_deref(),
+            Some(base64(b"hura:r1").as_str())
+        );
+        assert_eq!(spec.hosts, ["myregistry.azurecr.io"]);
+        assert_eq!(spec.env, "HURA_DOCKER_REGISTRY_MYREGISTRY_AZURECR_IO");
+        assert_eq!(spec.refresh.as_deref(), Some("1h"));
+    }
+
+    /// The wrapper puts the configured user in front of what the command
+    /// printed and encodes both, which is what the engine's header carries.
+    #[test]
+    fn the_wrapped_registry_command_produces_the_login() {
+        let c = registry(
+            "acr",
+            "myregistry.azurecr.io",
+            "echo 'a-refresh-token' | tr -d '\\n'",
+        );
+        let SecretSource::Command(wrapped) = c.grant("s").secrets[0].source.clone() else {
+            panic!("a command stays a command");
+        };
+        let encoded = sh(&wrapped);
+        let decoded = sh(&format!("printf %s {} | base64 -d", sh_quote(&encoded)));
+        assert_eq!(
+            decoded,
+            "00000000-0000-0000-0000-000000000000:a-refresh-token"
+        );
+    }
+
+    /// Every registry login a session has goes in one `DOCKER_AUTH_CONFIG`,
+    /// in the shape of Docker's own config file.
+    #[test]
+    fn registry_logins_share_one_docker_auth_config() {
+        let a = registry("a", "a.example.io", "true").grant_with("s", &mut counter());
+        let b = registry("b", "b.example.io", "true").grant_with("s", &mut || "x".into());
+        let none = Credential::value("gh", Kind::GitHub, Source::Command("true".into()))
+            .grant_with("s", &mut counter());
+        assert_eq!(docker_auth_config([&none]), None);
+        let (var, value) = docker_auth_config([&a, &none, &b]).unwrap();
+        assert_eq!(var, "DOCKER_AUTH_CONFIG");
+        let json: serde_json::Value = serde_json::from_str(&value).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "auths": {
+                "a.example.io": { "auth": base64(b"hura:r1") },
+                "b.example.io": { "auth": base64(b"hura:x") },
+            }})
+        );
     }
 
     /// One secret per resource, each to its own hosts, each minted by `az` on
