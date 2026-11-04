@@ -72,6 +72,34 @@ const LIVE_SYSTEM = new Set([
   "commands_changed",
 ]);
 
+/// The most a replay frame carries, about. A client takes a frame as one
+/// WebSocket message and caps those (the phone at 64 MiB), and a session that
+/// screenshots a lot outgrows that: the transcript is mostly images.
+const REPLAY_BYTES = 4 << 20;
+
+/// The transcript after `since`, as replay frames of about `limit` bytes each.
+/// Each says the seq of its own last entry rather than the transcript's, so a
+/// connection that drops between them asks again from there. The last carries
+/// `seq`, and there is always one, even with nothing to replay.
+export function replayFrames(entries, since, seq, limit = REPLAY_BYTES) {
+  const frames = [];
+  let chunk = [];
+  let size = 0;
+  for (const e of entries) {
+    if (e.seq <= since) continue;
+    const n = JSON.stringify(e).length;
+    if (chunk.length && size + n > limit) {
+      frames.push({ t: "replay", seq: chunk.at(-1).seq, entries: chunk });
+      chunk = [];
+      size = 0;
+    }
+    chunk.push(e);
+    size += n;
+  }
+  frames.push({ t: "replay", seq, entries: chunk });
+  return frames;
+}
+
 /// Whether a message belongs in the transcript.
 export function kept(msg) {
   if (LIVE.has(msg.type)) return false;
@@ -458,7 +486,7 @@ class Conversation {
 
   attach(client, since) {
     this.watchers.add(client);
-    client.send({ t: "replay", seq: this.seq, entries: this.entries.filter((e) => e.seq > since) });
+    for (const frame of replayFrames(this.entries, since, this.seq)) client.send(frame);
     client.send({ t: "state", state: this.snapshot() });
   }
 

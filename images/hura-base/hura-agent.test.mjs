@@ -12,6 +12,7 @@ import {
   nextName,
   permissionResult,
   rateLimits,
+  replayFrames,
   sessionStatus,
   usagePayload,
 } from "./hura-agent.mjs";
@@ -198,4 +199,29 @@ test("rate limits come from the plan's rows or from the API's event", () => {
 test("a new conversation takes the first free number", () => {
   assert.equal(nextName(["agent"]), "chat-1");
   assert.equal(nextName(["agent", "chat-1", "chat-3"]), "chat-2");
+});
+
+test("a long replay goes in frames a client can take, each saying where it ends", () => {
+  const entry = (seq) => ({ seq, at: 0, ev: { kind: "prompt", text: "x".repeat(100) } });
+  const entries = [1, 2, 3, 4, 5, 6].map(entry);
+  const one = JSON.stringify(entry(1)).length;
+
+  const frames = replayFrames(entries, 1, 6, one * 2);
+  assert.deepEqual(
+    frames.map((f) => [f.seq, f.entries.map((e) => e.seq)]),
+    [
+      [3, [2, 3]],
+      [5, [4, 5]],
+      [6, [6]],
+    ],
+  );
+
+  // An entry bigger than a frame still goes, alone.
+  assert.deepEqual(
+    replayFrames(entries, 4, 6, 1).map((f) => f.entries.length),
+    [1, 1],
+  );
+
+  // Nothing new is still a frame, which tells the client the seq.
+  assert.deepEqual(replayFrames(entries, 6, 6), [{ t: "replay", seq: 6, entries: [] }]);
 });
