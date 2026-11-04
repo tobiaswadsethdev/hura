@@ -162,8 +162,8 @@ scripts, and Liberation, which is metric-compatible with Arial, Times and
 Courier so text takes the room a page was laid out for. A browser that bundles
 its own fontconfig, like the serverless Chromium builds on npm that start here
 without any system libraries, still reads `/etc/fonts/fonts.conf`, so it finds
-them too. Playwright's own Chromium needs more system libraries than the image
-has, which this does not change.
+them too. Playwright's own Chromium needs more system libraries than the base
+has; the `playwright` toolchain adds them (see [toolchains.md](toolchains.md)).
 
 ## The stand-in `az`
 
