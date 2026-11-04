@@ -32,6 +32,10 @@ use crate::session::IMAGE_REPO;
 pub struct Registry {
     pub host: &'static str,
     pub port: u16,
+    /// What on it is read: `/**` for a host that is the registry, a
+    /// narrower glob for one shared with everything else, where `/**` would
+    /// open far more than the toolchain fetches.
+    pub path: &'static str,
 }
 
 /// A toolchain installable into a sandbox image.
@@ -60,7 +64,7 @@ pub struct Toolchain {
 /// order, so `--toolchain rust --toolchain dotnet` and `--toolchain
 /// dotnet,rust` name one image rather than building two identical ones under
 /// different tags.
-pub const TOOLCHAINS: [Toolchain; 3] = [
+pub const TOOLCHAINS: [Toolchain; 4] = [
     Toolchain {
         name: "dotnet",
         summary: "the newest .NET SDK, any SDK the checkout's global.json pins, and nuget",
@@ -69,6 +73,7 @@ pub const TOOLCHAINS: [Toolchain; 3] = [
         registries: &[Registry {
             host: "api.nuget.org",
             port: 443,
+            path: ANY_PATH,
         }],
         // A solution or any project file. `global.json` catches the repository
         // that pins an SDK version without a project at its root.
@@ -89,8 +94,43 @@ pub const TOOLCHAINS: [Toolchain; 3] = [
         registries: &[Registry {
             host: "registry.npmjs.org",
             port: 443,
+            path: ANY_PATH,
         }],
         markers: &["package.json"],
+    },
+    Toolchain {
+        name: "playwright",
+        summary: "the system libraries Playwright's Chromium needs, and its browser downloads",
+        layer: include_str!("../../../images/hura-base/toolchains/playwright.dockerfile"),
+        files: &[],
+        // Where `npx playwright install` fetches a browser from, measured
+        // with Playwright 1.64: its CDN, which sends Chromium on to the
+        // Chrome for Testing bucket on Google's storage, and the mirror it
+        // falls back to. The bucket is the only path opened on a host every
+        // public bucket shares.
+        registries: &[
+            Registry {
+                host: "cdn.playwright.dev",
+                port: 443,
+                path: ANY_PATH,
+            },
+            Registry {
+                host: "playwright.download.prss.microsoft.com",
+                port: 443,
+                path: ANY_PATH,
+            },
+            Registry {
+                host: "storage.googleapis.com",
+                port: 443,
+                path: "/chrome-for-testing-public/**",
+            },
+        ],
+        markers: &[
+            "playwright.config.ts",
+            "playwright.config.js",
+            "playwright.config.mjs",
+            "playwright.config.cjs",
+        ],
     },
     Toolchain {
         name: "rust",
@@ -104,15 +144,21 @@ pub const TOOLCHAINS: [Toolchain; 3] = [
             Registry {
                 host: "index.crates.io",
                 port: 443,
+                path: ANY_PATH,
             },
             Registry {
                 host: "static.crates.io",
                 port: 443,
+                path: ANY_PATH,
             },
         ],
         markers: &["Cargo.toml"],
     },
 ];
+
+/// A registry read whole, which is what a host that is nothing but the
+/// registry wants.
+const ANY_PATH: &str = "/**";
 
 /// The .NET SDK installer, by its name in a build context. The dotnet layer
 /// copies it into the image, and so does the layer that adds a checkout's
@@ -133,9 +179,10 @@ pub fn find(name: &str) -> Option<&'static Toolchain> {
 
 /// Names and summaries, for help text.
 pub fn help() -> String {
+    let width = TOOLCHAINS.iter().map(|t| t.name.len()).max().unwrap_or(0) + 2;
     TOOLCHAINS
         .iter()
-        .map(|t| format!("{:<9}{}", t.name, t.summary))
+        .map(|t| format!("{:<width$}{}", t.name, t.summary))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -329,26 +376,33 @@ fn matches(marker: &str, name: &str) -> bool {
     }
 }
 
-/// The rule opening these toolchains' registries, for reading.
+/// The rules opening these toolchains' registries, for reading.
 ///
 /// Read-only rather than an allow-list of paths, and rather than open: a
 /// registry fetch is thousands of unpredictable paths, so an allow-list would
 /// either be wrong or be `/**`, and "read anything here, write nothing" is
 /// what is actually meant. Publishing a package is not something a sandboxed
-/// agent should be able to do by accident. One rule for all of them, since a
-/// rule is for the whole sandbox and not for one toolchain's program.
+/// agent should be able to do by accident. One rule for every registry read
+/// whole, since a rule is for the whole sandbox and not for one toolchain's
+/// program, and one more for each narrower path, since a rule has one path.
 pub fn rules(chains: &[&'static Toolchain]) -> Vec<RuleSpec> {
-    let mut hosts: Vec<String> = Vec::new();
+    let mut by_path: Vec<(&'static str, Vec<String>)> = Vec::new();
     for r in chains.iter().flat_map(|t| t.registries) {
         let endpoint = format!("{}:{}", r.host, r.port);
-        if !hosts.contains(&endpoint) {
-            hosts.push(endpoint);
+        match by_path.iter_mut().find(|(p, _)| *p == r.path) {
+            Some((_, hosts)) if hosts.contains(&endpoint) => {}
+            Some((_, hosts)) => hosts.push(endpoint),
+            None => by_path.push((r.path, vec![endpoint])),
         }
     }
-    if hosts.is_empty() {
-        return Vec::new();
-    }
-    vec![crate::policy::read_only(hosts)]
+    by_path
+        .into_iter()
+        .map(|(path, hosts)| {
+            let mut rule = crate::policy::read_only(hosts);
+            rule.path = Some(path.to_string());
+            rule
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -507,6 +561,31 @@ mod tests {
         );
         assert_eq!(rules[0].methods, crate::policy::READ_METHODS);
         assert_eq!(rules[0].path.as_deref(), Some("/**"));
+    }
+
+    /// Playwright's browser downloads are read like any registry, but the
+    /// Chrome for Testing bucket is a path on a host every public bucket
+    /// shares, so it is a rule of its own rather than the whole host.
+    #[test]
+    fn a_registry_on_a_shared_host_is_opened_for_its_path_alone() {
+        let chains = resolve(&["node".to_string(), "playwright".to_string()]).unwrap();
+        let rules = rules(&chains);
+        assert_eq!(rules.len(), 2, "{rules:#?}");
+        assert_eq!(
+            rules[0].resources,
+            [
+                "registry.npmjs.org:443",
+                "cdn.playwright.dev:443",
+                "playwright.download.prss.microsoft.com:443"
+            ]
+        );
+        assert_eq!(rules[0].path.as_deref(), Some("/**"));
+        assert_eq!(rules[1].resources, ["storage.googleapis.com:443"]);
+        assert_eq!(
+            rules[1].path.as_deref(),
+            Some("/chrome-for-testing-public/**")
+        );
+        assert_eq!(rules[1].methods, crate::policy::READ_METHODS);
     }
 
     /// The other half of "one set, one image": asking for nothing must cost

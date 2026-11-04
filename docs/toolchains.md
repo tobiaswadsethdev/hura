@@ -21,11 +21,27 @@ toggles, and an answer you change by hand stays changed.
 | `dotnet` | the newest .NET SDK, plus any SDK the checkout's `global.json` pins, in `/usr/local/dotnet` | `api.nuget.org`, read-only |
 | `rust` | rustc, cargo, rustfmt and clippy, in `/usr/local/rust` | `index.crates.io` and `static.crates.io`, read-only |
 | `node` | the newest node LTS release and its npm, in `/usr/local/node` | `registry.npmjs.org`, read-only |
+| `playwright` | the system libraries Playwright's Chromium links, and no browser | `cdn.playwright.dev`, its mirror `playwright.download.prss.microsoft.com`, and the Chrome for Testing bucket on `storage.googleapis.com`, read-only |
 
 "Newest" is resolved when the image is built: for .NET the newest SDK of the
 newest channel in active support (10.0.403 when this was written), for node the
 newest LTS (26.13.0). The base image's own node, Ubuntu's 22, stays at
 `/usr/bin/node`; the node toolchain's goes ahead of it on `PATH`.
+
+`playwright` is the odd one out: it installs no Playwright and no browser. The
+browser build Playwright wants is pinned by the Playwright version a project
+depends on, so `npx playwright install chromium` in the session fetches the
+right one into the agent's home, from the hosts the toolchain opens. What a
+session cannot fetch is the twenty-odd system libraries that browser links
+(glib, the X11 client libraries, gbm and so on; measured, without them it
+does not start), because installing them is `apt` from a host no session
+reaches. The layer installs Playwright's own list for the base image's Ubuntu
+release, so with it a page renders, with the base's fonts. It is about 200 MB,
+most of it Mesa behind `libgbm1`, which is why it is a toolchain to ask for
+and not part of the base. Firefox and WebKit need other libraries and are not
+covered. The create form ticks it for a checkout with a `playwright.config.*`
+at its root or a level down; Playwright tests deeper in a repository are ticked
+by hand.
 
 ## Why the image, and not the sandbox
 
@@ -206,7 +222,8 @@ plus a Dockerfile fragment under `images/hura-base/toolchains/`. The entry names
 the registries it reads and the markers that make the create form tick it. The
 tests in that module check the halves against each other: every layer records
 itself in the manifest `doctor` reads, and no toolchain ships without a registry
-it could fetch from.
+it could fetch from. A registry is a host read whole, or, on a host shared with
+everything else (Google's storage, for Playwright), one path on it.
 
 ---
 

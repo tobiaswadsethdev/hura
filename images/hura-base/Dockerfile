@@ -38,7 +38,7 @@ USER root
 #           metric-compatible with Arial, Times and Courier, so text takes the
 #           space a page was laid out for. About 15 MB, against an agent
 #           that cannot see what it built. Playwright's own Chromium needs more
-#           system libraries than this; that is not what this is for.
+#           system libraries than this, which the playwright toolchain adds.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         tmux \
         less \
