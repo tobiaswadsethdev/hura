@@ -511,8 +511,13 @@ struct RawCredential {
     refresh: Option<String>,
     /// `nuget-feed`: the source's key in `NuGet.config`.
     feed: Option<String>,
-    /// `nuget-feed`: where the feed is served from.
+    /// `nuget-feed`: where the feed is served from. `docker-registry`: where
+    /// the registry's token service is, when it is not the registry itself.
     hosts: Option<Vec<String>>,
+    /// `docker-registry`: the registry, as an image reference names it.
+    registry: Option<String>,
+    /// `docker-registry`: the user the registry takes the password with.
+    username: Option<String>,
     /// `azure-cli`: the Azure CLI on this machine, when `az` is not enough.
     az: Option<String>,
     /// `azure-cli`: each Entra resource, and the hosts its token is sent to.
@@ -562,6 +567,10 @@ fn credential(name: &str, c: RawCredential) -> Result<crate::credentials::Creden
         }
     };
 
+    if kind != Kind::DockerRegistry {
+        refuse("registry", c.registry.is_some())?;
+        refuse("username", c.username.is_some())?;
+    }
     let delivery = match kind {
         Kind::ClaudeOauth | Kind::AzureDevOpsPat | Kind::GitHub => {
             refuse("feed", c.feed.is_some())?;
@@ -569,6 +578,58 @@ fn credential(name: &str, c: RawCredential) -> Result<crate::credentials::Creden
             refuse("az", c.az.is_some())?;
             refuse("resources", c.resources.is_some())?;
             Delivery::Value(source()?)
+        }
+        Kind::DockerRegistry => {
+            refuse("feed", c.feed.is_some())?;
+            refuse("az", c.az.is_some())?;
+            refuse("resources", c.resources.is_some())?;
+            let registry = blank_to_none(c.registry.clone()).ok_or(
+                "needs `registry`, the registry as an image reference names it, such as \
+                 \"myregistry.azurecr.io\"",
+            )?;
+            // What `docker pull` writes before the image's name: a host and
+            // maybe a port, never a scheme or a path.
+            let host = hosts_of(vec![registry.clone()])
+                .map_err(|_| {
+                    format!(
+                        "`registry = \"{registry}\"` is not a registry; give it as an image \
+                         reference starts, such as myregistry.azurecr.io"
+                    )
+                })?
+                .remove(0);
+            let username = blank_to_none(c.username.clone()).ok_or(
+                "needs `username`, the user the registry takes the password with; for a \
+                 token from `az acr login --expose-token` that is \
+                 \"00000000-0000-0000-0000-000000000000\"",
+            )?;
+            if username.contains(':') {
+                return Err(format!(
+                    "`username = \"{username}\"` has a `:`, which ends a user in a Basic \
+                     login, so the registry would read it as a shorter one"
+                ));
+            }
+            let hosts = match c.hosts.clone() {
+                Some(h) => hosts_of(h).map_err(|m| format!("`hosts`: {m}"))?,
+                // The secret names hosts without a port.
+                None => vec![
+                    host.rsplit_once(':')
+                        .map_or(host.as_str(), |(h, _)| h)
+                        .to_string(),
+                ],
+            };
+            if hosts.is_empty() {
+                return Err(
+                    "`hosts` is empty, so the login would be sent nowhere; leave it \
+                     out to send it to the registry itself"
+                        .into(),
+                );
+            }
+            Delivery::Registry {
+                source: source()?,
+                registry: host,
+                username,
+                hosts,
+            }
         }
         Kind::NugetFeed => {
             refuse("az", c.az.is_some())?;
@@ -1046,7 +1107,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let c = parse(&text).unwrap();
-        assert_eq!(c.credentials().len(), 4);
+        assert_eq!(c.credentials().len(), 5);
         assert_eq!(
             c.credential("azure-devops").unwrap().kind,
             crate::credentials::Kind::AzureDevOpsPat
@@ -1058,6 +1119,98 @@ mod tests {
         assert_eq!(
             c.credential("feed").unwrap().kind,
             crate::credentials::Kind::NugetFeed
+        );
+        assert_eq!(
+            c.credential("registry").unwrap().kind,
+            crate::credentials::Kind::DockerRegistry
+        );
+    }
+
+    #[test]
+    fn a_registry_names_itself_and_a_user_and_sends_the_login_to_itself() {
+        use crate::credentials::Delivery;
+        let ok = r#"
+            [credentials.acr]
+            kind = "docker-registry"
+            registry = "myregistry.azurecr.io"
+            username = "00000000-0000-0000-0000-000000000000"
+            command = "az acr login --name myregistry --expose-token --query accessToken -o tsv"
+            refresh = "1h"
+        "#;
+        let c = parse(ok).unwrap();
+        let acr = c.credential("acr").unwrap();
+        let Delivery::Registry {
+            registry,
+            username,
+            hosts,
+            ..
+        } = &acr.delivery
+        else {
+            panic!("{acr:?}");
+        };
+        assert_eq!(registry, "myregistry.azurecr.io");
+        assert_eq!(username, "00000000-0000-0000-0000-000000000000");
+        assert_eq!(hosts, &["myregistry.azurecr.io"]);
+        assert_eq!(acr.refresh.as_deref(), Some("1h"));
+
+        // A registry on a port is still logged in to by host, and a token
+        // service elsewhere is named outright.
+        let c = parse(
+            &ok.replace("myregistry.azurecr.io\"", "registry.example.com:5000\"")
+                .replace("refresh = \"1h\"", "hosts = [\"auth.example.com\"]"),
+        )
+        .unwrap();
+        let Delivery::Registry {
+            registry, hosts, ..
+        } = &c.credential("acr").unwrap().delivery
+        else {
+            panic!();
+        };
+        assert_eq!(registry, "registry.example.com:5000");
+        assert_eq!(hosts, &["auth.example.com"]);
+        let c =
+            parse(&ok.replace("myregistry.azurecr.io\"", "registry.example.com:5000\"")).unwrap();
+        let Delivery::Registry { hosts, .. } = &c.credential("acr").unwrap().delivery else {
+            panic!();
+        };
+        assert_eq!(hosts, &["registry.example.com"]);
+
+        for (from, to, says) in [
+            (
+                "registry = \"myregistry.azurecr.io\"",
+                "",
+                "needs `registry`",
+            ),
+            (
+                "myregistry.azurecr.io\"",
+                "https://myregistry.azurecr.io\"",
+                "is not a registry",
+            ),
+            (
+                "username = \"00000000-0000-0000-0000-000000000000\"",
+                "",
+                "needs `username`",
+            ),
+            ("00000000-0000", "a:b", "has a `:`"),
+            ("refresh = \"1h\"", "hosts = []", "sent nowhere"),
+            (
+                "refresh = \"1h\"",
+                "feed = \"x\"",
+                "`feed` is not something",
+            ),
+        ] {
+            let e = parse(&ok.replace(from, to)).unwrap_err().to_string();
+            assert!(e.contains(says), "{from} -> {to}: {e}");
+        }
+
+        let e = parse(
+            "[credentials.gh]\nkind = \"github\"\ncommand = \"gh auth token\"\nusername = \"me\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("`username` is not something a github credential takes"),
+            "{e}"
         );
     }
 

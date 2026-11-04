@@ -189,7 +189,10 @@ The template's Docker Engine runs in the sandbox, so an agent can build and run
 containers: `docker run hello-world` and a Compose v5 project both worked in a
 session, once the registries were open (`hurad policy <name> --widen` opens
 Docker Hub with npm and PyPI, read-only). The inner engine's own traffic goes
-through the sandbox's proxy and policy like everything else.
+through the sandbox's proxy and policy like everything else, by name (the
+engine has the proxy configured), so a registry's paths can be ruled and a
+login swapped in: a `docker-registry` credential is how a session pulls from a
+private registry (see [configuration.md](configuration.md#a-private-container-registry-docker-registry)).
 
 Containers it starts do not get the proxy variables the sandbox has. Their
 traffic is still proxied, transparently, and held to the same rules, but a host

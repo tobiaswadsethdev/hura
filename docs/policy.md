@@ -91,12 +91,36 @@ methods = ["GET"]
 path = "/b-<the container your feed redirects to>/**"
 ```
 
+A private container registry, for the sandbox's own Docker Engine. The API
+and the token service are on the registry's own host; the token request is a
+`POST` that is refused and then a `GET` that carries the login (see
+[configuration.md](configuration.md#a-private-container-registry-docker-registry)),
+so both are allowed. Layers are redirects to blob storage, measured as one
+container named after the registry's id, whatever the account:
+
+```toml
+[[rule]]
+hosts = ["myregistry.azurecr.io:443"]
+methods = ["GET", "HEAD"]
+path = "/v2/**"
+
+[[rule]]
+hosts = ["myregistry.azurecr.io:443"]
+methods = ["GET", "POST"]
+path = "/oauth2/token"
+
+[[rule]]
+hosts = ["*.blob.core.windows.net:443"]
+methods = ["GET", "HEAD"]
+path = "/<the registry's id>-*/**"
+```
+
 A database on a private network is a host and a port opened to any request,
 since its protocol is not HTTP; the runtime resolves the name on this machine
 once a rule allows it, so an internal name reachable from here (over a VPN, say)
 works in the sandbox too. The credentials such a policy's hosts take are not
-rules: see [configuration.md](configuration.md#credentials) for `azure-cli` and
-`nuget-feed`.
+rules: see [configuration.md](configuration.md#credentials) for `azure-cli`,
+`nuget-feed` and `docker-registry`.
 
 A host with method rules is only reachable through the proxy, which every tool in
 the image uses by its `HTTPS_PROXY` variable. A client that ignores the variable
