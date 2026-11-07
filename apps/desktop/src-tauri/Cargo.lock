@@ -1721,7 +1721,7 @@ checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
 name = "hura-client"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "hura-core",
  "hura-proto",
@@ -1734,7 +1734,7 @@ dependencies = [
 
 [[package]]
 name = "hura-core"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "sbx-client",
  "serde",
@@ -1745,7 +1745,7 @@ dependencies = [
 
 [[package]]
 name = "hura-desktop"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "hura-client",
  "hura-core",
@@ -1763,7 +1763,7 @@ dependencies = [
 
 [[package]]
 name = "hura-proto"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "base64 0.23.1",
  "hura-core",
@@ -3456,7 +3456,7 @@ dependencies = [
 
 [[package]]
 name = "sbx-client"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "serde",
  "serde_json",
