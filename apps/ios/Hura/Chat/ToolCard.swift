@@ -67,11 +67,11 @@ struct ToolCard: View {
     }
 
     /// Errors, todos and small edits are worth seeing without a tap.
+    /// A call that failed stays shut, as on the desktop: its header says so.
     private var opensItself: Bool {
-        if call.failed && !call.stopped { return true }
         if call.result?.pictures?.isEmpty == false { return true }
         switch call.name {
-        case "TodoWrite": return true
+        case "TodoWrite", "SubagentHandback": return true
         case "Edit":
             // A diff has a line for each line of the longer side; skip the
             // diff itself when that alone rules it out.
@@ -107,6 +107,9 @@ struct ToolCard: View {
                 errorOutput
             case "TodoWrite":
                 TodoList(todos: call.input["todos"])
+            // A background subagent's report to the agent that started it.
+            case "SubagentHandback":
+                MarkdownText(text: call.input["message"]?.string ?? "")
             default:
                 if call.input != .object([:]) {
                     CodeBlock(text: Self.pretty(call.input))

@@ -174,3 +174,79 @@ struct MarkdownImageTests {
         #expect(MarkdownText.segments("```\n![x](a.png)\n```") == [.code("![x](a.png)")])
     }
 }
+
+/// Your messages sit where Claude read them, as on the desktop; one not yet
+/// read waits at the bottom, and one from before receipts stays where it was.
+@Test func messagesArePlacedWhereClaudeReadThem() {
+    func at(_ s: UInt64) -> Date { Date(timeIntervalSince1970: 1_790_000_000 + Double(s)) }
+    func prompt(_ seq: UInt64, _ uuid: String, _ text: String, receipt: Bool = true) -> TranscriptEntry {
+        var e = TranscriptEntry(seq: seq, uuid: uuid, kind: TranscriptEntry.Kind.prompt,
+                                blocks: [TranscriptBlock(type: "text", text: text)], at: at(seq))
+        e.receipt = receipt
+        return e
+    }
+    func read(_ seq: UInt64, _ uuid: String) -> TranscriptEntry {
+        TranscriptEntry(seq: seq, uuid: uuid, kind: TranscriptEntry.Kind.read, at: at(seq))
+    }
+    func reply(_ seq: UInt64, _ text: String) -> TranscriptEntry {
+        TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.assistant, blocks: [TranscriptBlock(type: "text", text: text)],
+                        at: at(seq))
+    }
+    func shown(_ items: [ChatItem]) -> [String] {
+        items.compactMap {
+            switch $0 {
+            case let .prompt(_, p): ">" + p.text
+            case let .text(_, t): t
+            default: nil
+            }
+        }
+    }
+
+    let sentMidTurn = [prompt(1, "a", "one"), read(2, "a"), reply(3, "part 1"), prompt(4, "b", "two"), reply(5, "part 2")]
+    var folded = ChatItem.fold(sentMidTurn)
+    #expect(shown(folded.items) == [">one", "part 1", "part 2"])
+    #expect(shown(folded.queued) == [">two"])
+
+    folded = ChatItem.fold(sentMidTurn + [read(6, "b"), reply(7, "reply two")])
+    #expect(shown(folded.items) == [">one", "part 1", "part 2", ">two", "reply two"])
+    #expect(folded.queued.isEmpty)
+
+    folded = ChatItem.fold([prompt(1, "x", "old", receipt: false), reply(2, "old reply"), prompt(3, "y", "new")])
+    #expect(shown(folded.items) == [">old", "old reply"])
+    #expect(shown(folded.queued) == [">new"])
+}
+
+/// A subagent is listed from its task events, a resumed one stays one agent,
+/// and its messages are its own thread rather than the conversation's.
+@Test func subagentsAreListedAndFollowedApart() {
+    func task(_ seq: UInt64, _ json: String) -> TranscriptEntry {
+        let v = try! JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        return TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.task, at: Date(timeIntervalSince1970: Double(seq)), task: v)
+    }
+    func said(_ seq: UInt64, _ text: String, parent: String? = nil) -> TranscriptEntry {
+        TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.assistant, blocks: [TranscriptBlock(type: "text", text: text)],
+                        parent: parent)
+    }
+    let entries = [
+        said(1, "starting one"),
+        task(2, #"{"subtype":"task_started","task_id":"a1","tool_use_id":"toolu_1","description":"Read the docs","subagent_type":"Explore","task_type":"local_agent","is_backgrounded":true,"prompt":"Read docs/"}"#),
+        task(3, #"{"subtype":"task_started","task_id":"b1","tool_use_id":"toolu_2","description":"npm test","task_type":"local_bash"}"#),
+        said(4, "reading", parent: "toolu_1"),
+        said(5, "back to you"),
+        task(6, #"{"subtype":"task_notification","task_id":"a1","status":"completed","usage":{"total_tokens":1200,"tool_uses":3,"duration_ms":4000}}"#),
+        task(7, #"{"subtype":"task_started","task_id":"a1","tool_use_id":"toolu_3","description":"Read the docs","task_type":"local_agent"}"#),
+        said(8, "more reading", parent: "toolu_1"),
+    ]
+    let agents = AgentInfo.all(entries)
+    #expect(agents.map(\.id) == ["a1"], "a shell is not an agent")
+    #expect(agents.first?.call == "toolu_1", "resumed, still under the call that started it")
+    #expect(agents.first?.running == true)
+    #expect(agents.first?.prompt == "Read docs/")
+    #expect(agents.first?.tokens == 1200)
+
+    func texts(_ items: [ChatItem]) -> [String] {
+        items.compactMap { if case let .text(_, t) = $0 { t } else { nil } }
+    }
+    #expect(texts(ChatItem.fold(entries).items) == ["starting one", "back to you"])
+    #expect(texts(ChatItem.fold(entries, thread: "toolu_1").items) == ["reading", "more reading"])
+}

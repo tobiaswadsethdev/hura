@@ -5,4 +5,4 @@ import type { ChatState } from "./ChatState";
 /**
  * What the host says on a watching connection.
  */
-export type ChatFrame = { "t": "replay", seq: number, entries: Array<ChatEntry>, } | { "t": "entry", entry: ChatEntry, } | { "t": "partial", ev: unknown, } | { "t": "progress", ev: unknown, } | { "t": "state", state: ChatState, } | { "t": "error", message: string, } | { "t": "notice", text: string, };
+export type ChatFrame = { "t": "replay", seq: number, entries: Array<ChatEntry>, } | { "t": "entry", entry: ChatEntry, } | { "t": "partial", ev: unknown, } | { "t": "progress", ev: unknown, } | { "t": "task", ev: unknown, } | { "t": "state", state: ChatState, } | { "t": "error", message: string, } | { "t": "notice", text: string, };

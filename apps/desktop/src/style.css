@@ -3256,7 +3256,102 @@ main { position: relative; }
 /* A column, as wide as reading wants rather than as wide as the pane: a reply
    set across a 1600-pixel editor is a line nobody can follow back to its
    start. The composer is pinned under it and keeps the same width. */
+/* The conversation, and beside it the subagent being followed. */
+.chat-split { display: flex; height: 100%; min-width: 0; }
+.chat-split > .chat { flex: 1; min-width: 0; }
 .chat { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
+/* Above the box: the subagents, running ones first. One row, scrolled across. */
+.chat-agents {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 6px 20px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chat-agents-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+}
+.chat-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  max-width: 240px;
+  padding: 3px 8px;
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-agent-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-agent-chip.running { color: var(--working); }
+.chat-agent-chip.running span { color: var(--text); }
+.chat-agent-chip:is(.completed, .failed, .stopped) { color: var(--dim); }
+.chat-agent-chip.failed { color: var(--bad); }
+.chat-agent-chip:hover { background: var(--hover); }
+.chat-agent-chip.on { border-color: var(--ring); }
+.chat-agent-panel {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: min(48%, 560px);
+  min-width: 300px;
+  height: 100%;
+  background: var(--bg);
+  border-left: 1px solid var(--line-strong);
+}
+.chat-agent-panel header { display: flex; align-items: center; gap: 8px; padding: 12px 14px 2px; }
+.chat-agent-panel h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-agent-close {
+  display: inline-flex;
+  padding: 4px;
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--dim);
+  cursor: pointer;
+}
+.chat-agent-close:hover { background: var(--hover); color: var(--text); }
+.chat-agent-facts { margin: 0; padding: 0 14px; color: var(--dimmer); font-family: var(--font-mono); font-size: 11px; }
+.chat-agent-now { margin: 6px 14px 0; color: var(--working); font-size: 12px; }
+.chat-agent-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: 8px; }
+.chat-agent-scroll > .chat-thinking { margin: 0 14px; }
+.chat-agent-scroll .chat-log { padding: 10px 14px 24px; }
+.chat-follow {
+  display: block;
+  margin: 0 0 8px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.chat-follow:hover { color: var(--text); }
+/* Files being dragged over the conversation: the whole pane takes them. */
+.chat.dropping { box-shadow: inset 0 0 0 2px var(--ring); }
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .chat-log {
   display: flex;
@@ -3278,6 +3373,31 @@ main { position: relative; }
   background: var(--surface-2);
   border-radius: var(--r);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Sent with a message, above it: pictures as themselves, the rest by name. */
+.chat-sent {
+  align-self: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 85%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-sent img { display: block; max-width: 240px; max-height: 180px; border-radius: var(--r); }
+.chat-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border-radius: var(--r);
+  font-family: var(--font-mono);
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 
@@ -3417,6 +3537,18 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   font-size: 11px;
 }
 .chat-turn.bad { color: var(--bad); }
+/* Under your message: when it was sent, and whether Claude has read it. */
+.chat-receipt {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: -6px 0 0;
+  color: var(--dimmer);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.chat-receipt.read { color: var(--dim); }
 .chat-divider {
   display: flex;
   align-items: center;
@@ -3553,6 +3685,40 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   cursor: pointer;
 }
 .chat-stop:hover { background: var(--hover); }
+.chat-attach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--dim);
+  cursor: pointer;
+}
+.chat-attach:hover { background: var(--hover); color: var(--text); }
+/* Waiting in the composer, in the box above what is typed. */
+.chat-attached { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 8px 10px 0; list-style: none; }
+.chat-attached li { position: relative; }
+.chat-attached img { display: block; height: 56px; max-width: 120px; object-fit: cover; border-radius: var(--r-sm); }
+.chat-attached .chat-file { height: 56px; max-width: 200px; }
+.chat-unattach {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--text);
+  cursor: pointer;
+}
 .chat-send { width: 28px; height: 26px; padding: 0; }
 .chat-commands {
   position: absolute;

@@ -23,9 +23,13 @@ struct ChatTranscriptTests {
         #expect(entries[3].durationMS == 4200)
     }
 
-    @Test func leavesOutSubagentsAndAllows() {
+    @Test func marksSubagentsAndLeavesOutAllows() {
         let sub = json(#"{"seq":5,"at":0,"ev":{"kind":"sdk","msg":{"type":"assistant","parent_tool_use_id":"toolu_9","message":{"content":[{"type":"text","text":"inner"}]}}}}"#)
-        #expect(ChatTranscript.entry(sub) == nil)
+        #expect(ChatTranscript.entry(sub)?.parent == "toolu_9")
+        #expect(ChatTranscript.entry(sub)?.blocks?.first?.text == "inner")
+        let started = json(#"{"seq":8,"at":0,"ev":{"kind":"sdk","msg":{"type":"system","subtype":"task_started","task_id":"a1","tool_use_id":"toolu_9","description":"Read the docs","task_type":"local_agent"}}}"#)
+        #expect(ChatTranscript.entry(started)?.kind == TranscriptEntry.Kind.task)
+        #expect(ChatTranscript.entry(started)?.task?["task_id"]?.string == "a1")
         let allowed = json(#"{"seq":6,"at":0,"ev":{"kind":"answer","id":"t","tool":"Bash","allow":true,"always":false,"message":null}}"#)
         #expect(ChatTranscript.entry(allowed) == nil)
         let declined = json(#"{"seq":7,"at":0,"ev":{"kind":"answer","id":"t","tool":"Bash","allow":false,"always":false,"message":"use make"}}"#)
@@ -37,6 +41,27 @@ struct ChatTranscriptTests {
         let entry = ChatTranscript.entry(e)
         #expect(entry?.kind == "notice" && entry?.level == "error")
         #expect(entry?.blocks?.first?.text == "Not logged in")
+    }
+
+    @Test func aPromptShowsThePicturesItSentAndNamesTheRest() {
+        let e = json(#"{"seq":9,"at":0,"ev":{"kind":"prompt","text":"look","uuid":"u","files":[{"name":"a.png","path":"/sandbox/.hura/uploads/agent/u/a.png","mime":"image/png","size":3,"data":"AAA="},{"name":"b.csv","path":"/sandbox/.hura/uploads/agent/u/b.csv","mime":"text/csv","size":9,"data":null}]}}"#)
+        let blocks = ChatTranscript.entry(e)?.blocks ?? []
+        #expect(blocks.map(\.type) == ["image", "file", "text"])
+        #expect(blocks[0].pictures == [Picture(mime: "image/png", data: "AAA=")])
+        #expect(blocks[1].name == "b.csv")
+        #expect(blocks[1].text == "/sandbox/.hura/uploads/agent/u/b.csv")
+        #expect(blocks[2].text == "look")
+    }
+
+    @Test func aPromptKeepsWhenItWasSentAndAReceiptNamesIt() {
+        let prompt = ChatTranscript.entry(json(#"{"seq":1,"at":1790000000000,"ev":{"kind":"prompt","text":"hi","uuid":"u1","receipt":true}}"#))
+        #expect(prompt?.uuid == "u1")
+        #expect(prompt?.receipt == true)
+        #expect(prompt?.at == Date(timeIntervalSince1970: 1_790_000_000))
+        let read = ChatTranscript.entry(json(#"{"seq":2,"at":1790000002500,"ev":{"kind":"read","uuid":"u1"}}"#))
+        #expect(read?.kind == TranscriptEntry.Kind.read)
+        #expect(read?.uuid == "u1")
+        #expect(read?.at == Date(timeIntervalSince1970: 1_790_000_002.5))
     }
 
     @Test func readsTheReplyAsItIsWritten() {
@@ -154,6 +179,31 @@ struct ChatTests {
         #expect(socket.sent.last?["command"]?["effort"]?.string == "max")
         try await chat.setEffort(nil)
         #expect(socket.sent.last?["command"]?["effort"] == .null, "nil is sent, as the model's default")
+    }
+
+    @Test func sendsFilesOnlyToAHostThatTakesThem() async throws {
+        let socket = ScriptedSocket()
+        socket.dropWhenDone = false
+        socket.say(#"{"is":"opened","id":1}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"replay","seq":0,"entries":[]}}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle","files":true}}}"#)
+        let chat = Chat(record: Self.record, session: "fix-tests", transport: { _ in socket })
+        chat.start()
+        defer { chat.stop() }
+        try await until { chat.takesFiles }
+
+        try await chat.send("plain")
+        #expect(socket.sent.last?["command"]?["files"] == nil, "a message without files is the one it always was")
+        try await chat.send("", files: [ChatUpload(name: "a.txt", mime: "text/plain", bytes: Data("hi".utf8))])
+        guard case let .array(files)? = socket.sent.last?["command"]?["files"] else {
+            Issue.record("no files sent")
+            return
+        }
+        #expect(files.first?["name"]?.string == "a.txt")
+        #expect(files.first?["data"]?.string == "aGk=")
+
+        let big = ChatUpload(name: "big", mime: "", bytes: Data(count: ChatUpload.limit + 1))
+        await #expect(throws: ServerError.self) { try await chat.send("", files: [big]) }
     }
 
     private func until(_ condition: () -> Bool) async throws {

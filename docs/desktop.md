@@ -278,6 +278,44 @@ the box, under what you write, are the permission mode (auto, ask, accept edits,
 plan) and the model, named as a person would (Opus 5.5 rather than its id), both
 kept with the conversation, and how full its context is and what it has cost.
 
+**Every message says when it was sent and whether Claude has read it.** The
+time sits under it, and each new day starts with a line naming it. One tick
+means the sandbox has the message; two mean Claude Code has taken it into a
+turn. A message sent while the agent is working says `queued` and waits at the
+bottom, under the turn in progress, until that turn ends: that is when Claude
+Code reads it, not when it arrives. Once read it takes its place in the
+conversation there, right before the reply to it, so the conversation reads
+in the order Claude saw it.
+The line at the end of each turn starts with the time it ended. A session whose
+agent started before receipts existed shows the times and no ticks. A tool call
+that failed stays folded, like the rest, with the failure in its header.
+
+**Subagents have a strip of their own.** An agent the conversation starts is
+listed above the box, running ones first, with whether it is still at it,
+finished or failed. One started in the background outlives the turn that
+started it: its call returns at once and the conversation moves on, so its
+card is folded away far above while it keeps working. Click it in the strip,
+or *follow this agent* in its card, and it opens beside the conversation: what
+it was asked, a line on what it is doing now, how long it has run, its tool
+calls and tokens, and everything it has said and done, followed as it happens.
+Its report to the agent that started it is drawn whole. A subagent resumed
+with a new message stays one agent. The host forwards a subagent's text and
+thinking as well as its tool calls, which makes a transcript with many
+subagents longer than it was. The phone has the same strip, opening a sheet.
+
+**Files go in with the message.** Drop them anywhere on the conversation, paste
+a screenshot into the box, or pick them with the paperclip; they wait above
+what you write until it is sent, a picture as itself and anything else by name.
+The host saves each one under `.hura/uploads/` in the session (the sandbox, or
+the record directory of a session on the server), outside the working copy so
+nothing sent is committed by accident, and the message tells the agent the
+paths; Claude Code may read there without asking. A PNG, JPEG, GIF or WebP
+under 5 MB goes to the model as well, as a picture pasted into Claude Code's
+terminal does, so it is seen without a tool call. A message carries up to
+10 MB of files. Closing a conversation deletes its files with its transcript.
+A session whose agent started before this existed drops files, so the
+paperclip is not offered there and a drop says so; a new session takes them.
+
 **`+` opens another conversation** beside the agent's: the same sandbox, the
 same working copy and the same policy, with a context of its own. Two agents in
 one working copy edit the same files, which is what running `claude` in a shell

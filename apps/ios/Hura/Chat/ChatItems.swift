@@ -18,42 +18,95 @@ struct ToolCall: Equatable {
     }
 }
 
+/// What you said, with the pictures you sent and the names of the other
+/// files; when it was sent, and when Claude took it into a turn.
+struct Prompt: Equatable {
+    var text: String
+    var pictures: [Picture]
+    var files: [String]
+    var sent: Date?
+    var read: Date?
+}
+
 /// What the chat shows, folded from transcript entries.
 enum ChatItem: Identifiable, Equatable {
-    case prompt(id: String, text: String, images: Int)
+    case prompt(id: String, prompt: Prompt)
+    /// The first thing said on a day, so a time is never read as the wrong one.
+    case day(id: String, date: Date)
     case text(id: String, text: String)
     case thinking(id: String, text: String)
     case tool(id: String, call: ToolCall)
-    case turnEnd(id: String, ms: Int64)
+    case turnEnd(id: String, ms: Int64, at: Date?)
     case divider(id: String, reason: String)
     case notice(id: String, text: String, isError: Bool)
 
     var id: String {
         switch self {
-        case let .prompt(id, _, _), let .text(id, _), let .thinking(id, _), let .tool(id, _),
-             let .turnEnd(id, _), let .divider(id, _), let .notice(id, _, _):
+        case let .prompt(id, _), let .day(id, _), let .text(id, _), let .thinking(id, _), let .tool(id, _),
+             let .turnEnd(id, _, _), let .divider(id, _), let .notice(id, _, _):
             id
         }
     }
 
     /// Rebuilds the list from scratch; ids are `seq.block`, so SwiftUI
-    /// diffs it cheaply.
-    static func fold(_ entries: [TranscriptEntry]) -> [ChatItem] {
+    /// diffs it cheaply. Your messages Claude hasn't read yet come back
+    /// apart, to be drawn after everything else.
+    ///
+    /// A message is placed where Claude read it rather than where it was
+    /// sent, as on the desktop (`transcript.ts`): one sent mid-turn arrives
+    /// after that turn, beside the reply to it. Only one the host promised a
+    /// receipt for waits, and not one older than the last message read, which
+    /// was dropped rather than read.
+    ///
+    /// `thread` picks whose messages: the conversation's, or with a call's id
+    /// those of the subagent it started.
+    static func fold(_ entries: [TranscriptEntry], thread: String? = nil) -> (items: [ChatItem], queued: [ChatItem]) {
         var results: [String: TranscriptBlock] = [:]
         for e in entries where e.kind == TranscriptEntry.Kind.toolResult {
             for b in e.blocks ?? [] {
                 if let id = b.toolUseID { results[id] = b }
             }
         }
+        // When each prompt was read, by its uuid: the receipt comes after it.
+        var read: [String: Date] = [:]
+        var lastRead: UInt64 = 0
+        for e in entries where e.kind == TranscriptEntry.Kind.read {
+            if let uuid = e.uuid { read[uuid] = e.at ?? .distantPast }
+            lastRead = e.seq
+        }
         var items: [ChatItem] = []
+        var day: Date?
+        var held: [(uuid: String, id: String, prompt: Prompt)] = []
+        let entries = entries.filter { $0.parent == thread }
+        func place(_ id: String, _ prompt: Prompt, at: Date?) {
+            if let at {
+                if day.map({ !Calendar.current.isDate($0, inSameDayAs: at) }) ?? true {
+                    items.append(.day(id: "\(id).day", date: at))
+                }
+                day = at
+            }
+            items.append(.prompt(id: id, prompt: prompt))
+        }
         for e in entries {
             let blocks = e.blocks ?? []
             func id(_ i: Int) -> String { "\(e.seq).\(i)" }
             switch e.kind {
             case TranscriptEntry.Kind.prompt:
                 let text = blocks.filter { $0.type == "text" }.compactMap(\.text).joined(separator: "\n\n")
-                let images = blocks.filter { $0.type == "image" }.count
-                items.append(.prompt(id: id(0), text: text, images: images))
+                let pictures = blocks.filter { $0.type == "image" }.flatMap { $0.pictures ?? [] }
+                let files = blocks.filter { $0.type == "file" }.map { $0.name ?? $0.text ?? "file" }
+                let prompt = Prompt(text: text, pictures: pictures, files: files, sent: e.at,
+                                    read: e.uuid.flatMap { read[$0] })
+                if let uuid = e.uuid, read[uuid] != nil || (e.receipt == true && e.seq > lastRead) {
+                    held.append((uuid, id(0), prompt))
+                } else {
+                    place(id(0), prompt, at: e.at)
+                }
+            case TranscriptEntry.Kind.read:
+                if let i = held.firstIndex(where: { $0.uuid == e.uuid }) {
+                    let h = held.remove(at: i)
+                    place(h.id, h.prompt, at: e.at)
+                }
             case TranscriptEntry.Kind.assistant:
                 for (i, b) in blocks.enumerated() {
                     switch b.type {
@@ -68,7 +121,7 @@ enum ChatItem: Identifiable, Equatable {
                     }
                 }
             case TranscriptEntry.Kind.turnEnd:
-                if let ms = e.durationMS { items.append(.turnEnd(id: id(0), ms: ms)) }
+                if let ms = e.durationMS { items.append(.turnEnd(id: id(0), ms: ms, at: e.at)) }
             case TranscriptEntry.Kind.divider:
                 items.append(.divider(id: id(0), reason: e.reason ?? ""))
             case TranscriptEntry.Kind.notice:
@@ -78,7 +131,7 @@ enum ChatItem: Identifiable, Equatable {
                 continue
             }
         }
-        return items
+        return (items, held.map { .prompt(id: $0.id, prompt: $0.prompt) })
     }
 }
 
@@ -103,6 +156,7 @@ struct ToolLabel: Equatable {
         case "WebFetch": return ToolLabel(icon: "globe", verb: "Fetch", subject: input["url"]?.string ?? "")
         case "WebSearch": return ToolLabel(icon: "globe", verb: "Search the web", subject: input["query"]?.string ?? "")
         case "Task", "Agent": return ToolLabel(icon: "person.2", verb: "Agent", subject: input["description"]?.string ?? "")
+        case "SubagentHandback": return ToolLabel(icon: "arrowshape.turn.up.left", verb: "Report", subject: "")
         case "TodoWrite": return ToolLabel(icon: "checklist", verb: "Update todos", subject: "")
         case "ExitPlanMode": return ToolLabel(icon: "list.bullet.clipboard", verb: "Plan", subject: "")
         case "AskUserQuestion": return ToolLabel(icon: "questionmark.bubble", verb: "Ask", subject: "")
@@ -153,5 +207,79 @@ enum LineDiff {
         }
         out += a[i...].map(Line.removed) + b[j...].map(Line.added)
         return out
+    }
+}
+
+/// A subagent the conversation started, from the task events Claude Code
+/// keeps, as the desktop window folds them (`transcript.ts`).
+struct AgentInfo: Identifiable, Equatable {
+    /// The task's id, which a resumed agent keeps.
+    var id: String
+    /// The call that started it: its messages carry this as their parent.
+    var call: String?
+    var description: String
+    /// `general-purpose`, `Explore` or a custom agent's name.
+    var type: String?
+    /// Started in the background, so it outlives the turn that started it.
+    var background: Bool
+    /// `running`, `completed`, `failed` or `stopped`.
+    var status: String
+    var started: Date?
+    var ended: Date?
+    var prompt: String
+    var tokens: Int?
+    var toolUses: Int?
+
+    var running: Bool { status == "running" }
+
+    /// Subagents only: a background shell's output is a file in the sandbox,
+    /// not a conversation, and an ambient task is housekeeping. Oldest first.
+    static func all(_ entries: [TranscriptEntry]) -> [AgentInfo] {
+        var agents: [String: AgentInfo] = [:]
+        var order: [String] = []
+        func status(_ s: String?) -> String {
+            switch s {
+            case "completed", "failed": s!
+            case "stopped", "killed": "stopped"
+            default: "running"
+            }
+        }
+        for e in entries where e.kind == TranscriptEntry.Kind.task {
+            guard let t = e.task, let id = t["task_id"]?.string else { continue }
+            switch t["subtype"]?.string {
+            case "task_started":
+                guard t["task_type"]?.string == "local_agent", t["skip_transcript"]?.bool != true,
+                      t["ambient"]?.bool != true else { continue }
+                let had = agents[id]
+                if had == nil { order.append(id) }
+                agents[id] = AgentInfo(
+                    id: id,
+                    // A resumed agent's messages stay under the call that first started it.
+                    call: had?.call ?? t["tool_use_id"]?.string,
+                    description: t["description"]?.string ?? had?.description ?? "Agent",
+                    type: t["subagent_type"]?.string,
+                    background: t["is_backgrounded"]?.bool ?? false,
+                    status: "running",
+                    started: had?.started ?? e.at,
+                    ended: nil,
+                    prompt: had?.prompt.isEmpty == false ? had!.prompt : (t["prompt"]?.string ?? ""),
+                    tokens: had?.tokens, toolUses: had?.toolUses)
+            case "task_updated":
+                guard var a = agents[id] else { continue }
+                if let s = t["patch"]?["status"]?.string { a.status = status(s) }
+                if case let .number(ms)? = t["patch"]?["end_time"] { a.ended = Date(timeIntervalSince1970: ms / 1000) }
+                agents[id] = a
+            case "task_notification":
+                guard var a = agents[id] else { continue }
+                a.status = status(t["status"]?.string)
+                a.ended = a.ended ?? e.at
+                if case let .number(n)? = t["usage"]?["total_tokens"] { a.tokens = Int(n) }
+                if case let .number(n)? = t["usage"]?["tool_uses"] { a.toolUses = Int(n) }
+                agents[id] = a
+            default:
+                continue
+            }
+        }
+        return order.compactMap { agents[$0] }
     }
 }

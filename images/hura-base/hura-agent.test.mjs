@@ -6,14 +6,18 @@ import test from "node:test";
 
 import {
   Inbox,
+  UPLOAD_BYTES,
+  attach,
   describeAsk,
   holding,
   kept,
   nextName,
   permissionResult,
   rateLimits,
+  receipt,
   replayFrames,
   sessionStatus,
+  uploadName,
   usagePayload,
 } from "./hura-agent.mjs";
 
@@ -224,4 +228,67 @@ test("a long replay goes in frames a client can take, each saying where it ends"
 
   // Nothing new is still a frame, which tells the client the seq.
   assert.deepEqual(replayFrames(entries, 6, 6), [{ t: "replay", seq: 6, entries: [] }]);
+});
+
+test("a sent file's name can only name a file in its own directory", () => {
+  assert.equal(uploadName("../../etc/passwd"), "passwd");
+  assert.equal(uploadName("C:\\Users\\me\\shot.png"), "shot.png");
+  assert.equal(uploadName(".bashrc"), "bashrc");
+  assert.equal(uploadName("a\nb.txt"), "ab.txt");
+  assert.equal(uploadName(".."), "file");
+  assert.equal(uploadName(undefined), "file");
+});
+
+test("a picture goes to the model and every file is named by where it was saved", () => {
+  const png = Buffer.from("not really a png").toString("base64");
+  const { saved, content } = attach(
+    "what is wrong here?",
+    [
+      { name: "shot.png", mime: "image/png", data: png },
+      { name: "shot.png", mime: "text/csv", data: Buffer.from("a,b").toString("base64") },
+      { name: "icon.svg", mime: "image/svg+xml", data: Buffer.from("<svg/>").toString("base64") },
+    ],
+    "/sandbox/.hura/uploads/agent/u1",
+  );
+  assert.deepEqual(
+    saved.map((f) => f.path),
+    [
+      "/sandbox/.hura/uploads/agent/u1/shot.png",
+      "/sandbox/.hura/uploads/agent/u1/shot-2.png",
+      "/sandbox/.hura/uploads/agent/u1/icon.svg",
+    ],
+  );
+  assert.equal(saved[1].bytes.toString(), "a,b");
+  assert.equal(saved[0].data, png, "a picture the API takes is kept to draw");
+  assert.equal(saved[2].data, null, "one it does not is a path");
+  assert.equal(content.length, 2);
+  assert.deepEqual(content[0], { type: "image", source: { type: "base64", media_type: "image/png", data: png } });
+  assert.match(content[1].text, /^what is wrong here\?\n\nFiles sent with this message/);
+  assert.match(content[1].text, /- \/sandbox\/\.hura\/uploads\/agent\/u1\/shot-2\.png \(text\/csv, 3 B\)/);
+});
+
+test("files without words are still a message, and too many bytes are refused", () => {
+  const { content } = attach("", [{ name: "a.txt", mime: "text/plain", data: "aGk=" }], "/u");
+  assert.match(content.at(-1).text, /^Files sent with this message/);
+  const big = Buffer.alloc(UPLOAD_BYTES + 1).toString("base64");
+  assert.throws(() => attach("", [{ name: "big.bin", mime: "", data: big }], "/u"), /a message takes 10 MiB/);
+});
+
+test("a picture too large for an image block is only saved", () => {
+  const big = Buffer.alloc(4 << 20).toString("base64");
+  const { saved, content } = attach("", [{ name: "huge.png", mime: "image/png", data: big }], "/u");
+  assert.equal(saved[0].data, null);
+  assert.equal(content.length, 1);
+});
+
+test("a message is read when Claude Code acknowledges it, once", () => {
+  const sent = new Set(["u1"]);
+  const read = new Set();
+  const ack = { type: "user", isReplay: true, uuid: "u1", message: { role: "user", content: "hi" } };
+  assert.equal(receipt(ack, sent, read), "u1");
+  read.add("u1");
+  assert.equal(receipt(ack, sent, read), null, "already read");
+  assert.equal(receipt({ ...ack, uuid: "other" }, sent, read), null, "not one of ours");
+  assert.equal(receipt({ ...ack, isReplay: undefined, uuid: "u2" }, new Set(["u2"]), read), null, "not an acknowledgement");
+  assert.equal(receipt({ type: "assistant", isReplay: true, uuid: "u1" }, sent, new Set()), null);
 });

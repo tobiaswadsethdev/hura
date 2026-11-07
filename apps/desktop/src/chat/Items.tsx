@@ -7,9 +7,10 @@
 // the point (an edit's diff, a plan, the todo list) and closed when it is a
 // file the agent read for its own benefit.
 
-import { memo, useState } from "react";
+import { createContext, memo, useContext, useState } from "react";
 
-import { Chevron, Chosen, Close, Working } from "../icons";
+import type { ChatFile } from "../gen/ChatFile";
+import { Attach, Chevron, Chosen, Close, Delivered, Read, Working } from "../icons";
 import { Markdown } from "../Markdown";
 import type { Item, ToolCall } from "./transcript";
 
@@ -163,7 +164,12 @@ function said(call: ToolCall): Record<string, string> {
   return out;
 }
 
+/// Opens the subagent a call started beside the conversation, from inside
+/// its card. Unset where there is nowhere to open one.
+export const OpenAgent = createContext<((callId: string) => void) | null>(null);
+
 function ToolBody({ call }: { call: ToolCall }) {
+  const openAgent = useContext(OpenAgent);
   const { input } = call;
   // An interrupted call has nothing worth reading in its result: Claude
   // Code's sentence about the user not wanting to proceed, which the card's
@@ -210,10 +216,18 @@ function ToolBody({ call }: { call: ToolCall }) {
         </dl>
       );
     }
+    // A background subagent's report to the agent that started it.
+    case "SubagentHandback":
+      return <Markdown text={str(input.message)} />;
     case "Task":
     case "Agent":
       return (
         <>
+          {openAgent && (
+            <button className="chat-follow" onClick={() => openAgent(call.id)}>
+              follow this agent beside the conversation
+            </button>
+          )}
           {call.children.length > 0 && (
             <div className="chat-nested">
               <Items items={call.children} />
@@ -234,12 +248,15 @@ function ToolBody({ call }: { call: ToolCall }) {
 /// Whether a call's card starts open: when what it did is the thing to read.
 ///
 /// An edit, a question and a plan only once they are done. Before that they
-/// are waiting on you, and the card asking you shows the same thing.
+/// are waiting on you, and the card asking you shows the same thing. A call
+/// that failed stays shut: its header says so, and an agent that tries a few
+/// things on its way to one that works would otherwise leave a column of
+/// error output behind it.
 function opensItself(call: ToolCall): boolean {
-  if (call.result?.isError && !call.result.stopped) return true;
   if (call.result?.images.length) return true;
   switch (call.name) {
     case "TodoWrite":
+    case "SubagentHandback":
       return true;
     case "ExitPlanMode":
     case "AskUserQuestion":
@@ -309,6 +326,29 @@ export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolC
   );
 });
 
+/// What was sent with a message: a picture the model saw as itself, and any
+/// other file as the path the agent was given.
+function SentFiles({ files }: { files: ChatFile[] }) {
+  return (
+    <ul className="chat-sent">
+      {files.map((f) =>
+        f.data ? (
+          <li key={f.path} title={f.path}>
+            <img src={`data:${f.mime};base64,${f.data}`} alt={f.name} />
+          </li>
+        ) : (
+          <li key={f.path} title={f.path}>
+            <span className="chat-file">
+              <Attach />
+              {f.name}
+            </span>
+          </li>
+        ),
+      )}
+    </ul>
+  );
+}
+
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -322,10 +362,80 @@ function Thinking({ text }: { text: string }) {
   );
 }
 
-export const ItemView = memo(function ItemView({ item, progress }: { item: Item; progress?: Map<string, number> }) {
+/// Whether receipts are drawn, and if so whether a turn is running: a message
+/// not yet read while one is, is waiting for it to end.
+export type Receipts = "off" | "idle" | "working";
+
+/// A time of day, as this window's locale says one.
+function clock(at: number): string {
+  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/// A day, relative to today while that is shorter.
+function dayName(at: number): string {
+  const d = new Date(at);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "today";
+  if (d.toDateString() === yesterday.toDateString()) return "yesterday";
+  return d.toLocaleDateString([], {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  });
+}
+
+/// When a message was sent, and what has become of it: in the sandbox, waiting
+/// behind the turn in progress, or read.
+function Receipt({ at, read, receipts }: { at: number; read: number | null; receipts: Receipts }) {
+  const full = new Date(at).toLocaleString();
+  if (receipts === "off") {
+    return (
+      <p className="chat-receipt" title={`sent ${full}`}>
+        {clock(at)}
+      </p>
+    );
+  }
+  if (read !== null) {
+    return (
+      <p className="chat-receipt read" title={`sent ${full}, read ${new Date(read).toLocaleString()}`}>
+        {clock(at)}
+        <Read aria-label="read" />
+      </p>
+    );
+  }
+  const queued = receipts === "working";
+  return (
+    <p className="chat-receipt" title={queued ? `sent ${full}; Claude takes it when this turn is done` : `sent ${full}`}>
+      {clock(at)}
+      {queued && <span>queued</span>}
+      <Delivered aria-label="sent" />
+    </p>
+  );
+}
+
+export const ItemView = memo(function ItemView({
+  item,
+  progress,
+  receipts = "off",
+}: {
+  item: Item;
+  progress?: Map<string, number>;
+  receipts?: Receipts;
+}) {
   switch (item.kind) {
     case "prompt":
-      return <div className="chat-prompt">{item.text}</div>;
+      return (
+        <>
+          {item.files.length > 0 && <SentFiles files={item.files} />}
+          {item.text && <div className="chat-prompt">{item.text}</div>}
+          <Receipt at={item.at} read={item.read} receipts={receipts} />
+        </>
+      );
+    case "day":
+      return <p className="chat-divider">{dayName(item.at)}</p>;
     case "text":
       return <Markdown text={item.text} />;
     case "thinking":
@@ -335,17 +445,29 @@ export const ItemView = memo(function ItemView({ item, progress }: { item: Item;
     case "note":
       return <p className={`chat-note ${item.tone}`}>{item.text}</p>;
     case "turn":
-      return <p className={`chat-turn${item.ok ? "" : " bad"}`}>{item.text}</p>;
+      return (
+        <p className={`chat-turn${item.ok ? "" : " bad"}`} title={new Date(item.at).toLocaleString()}>
+          {[clock(item.at), item.text].filter(Boolean).join(" · ")}
+        </p>
+      );
     case "divider":
       return <p className="chat-divider">{item.text}</p>;
   }
 });
 
-export function Items({ items, progress }: { items: Item[]; progress?: Map<string, number> }) {
+export function Items({
+  items,
+  progress,
+  receipts,
+}: {
+  items: Item[];
+  progress?: Map<string, number>;
+  receipts?: Receipts;
+}) {
   return (
     <>
       {items.map((item) => (
-        <ItemView key={item.key} item={item} progress={progress} />
+        <ItemView key={item.key} item={item} progress={progress} receipts={item.kind === "prompt" ? receipts : undefined} />
       ))}
     </>
   );
