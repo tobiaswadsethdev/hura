@@ -1,4 +1,5 @@
 import HuraKit
+import PhotosUI
 import SwiftUI
 
 /// A chat session's conversation: the transcript, the reply as it is
@@ -9,9 +10,24 @@ struct ChatView: View {
     let chat: Chat
     @State private var draft = ""
     @State private var sending = false
+    /// What was just sent, and when: the keyboard commits a pending
+    /// prediction into the field after it is emptied, which put the message
+    /// back. For a moment after a send, that is not typing.
+    @State private var justSent: (text: String, at: Date)?
     @State private var answering: String?
     @State private var atBottom = true
     @State private var items: [ChatItem] = []
+    /// Sent and not yet read: drawn after the turn in progress.
+    @State private var queued: [ChatItem] = []
+    /// Files to send with the next message.
+    @State private var attached: [ChatUpload] = []
+    @State private var choosingPhotos = false
+    @State private var choosingFiles = false
+    @State private var photos: [PhotosPickerItem] = []
+    /// The subagents, kept with the items they're folded beside.
+    @State private var agents: [AgentInfo] = []
+    /// The subagent being followed, by task id.
+    @State private var following: Following?
     @FocusState private var composing: Bool
 
     /// hura clones every session's repository here.
@@ -32,13 +48,14 @@ struct ChatView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             if chat.entries.isEmpty { emptyState }
-                            ChatRows(items: items, cwd: Self.cwd, working: working)
+                            ChatRows(items: items, cwd: Self.cwd, working: working, receipts: chat.receipts)
                             if !chat.streaming.isEmpty {
                                 MarkdownText(text: chat.streaming).opacity(0.8)
                             }
                             if working && chat.streaming.isEmpty && chat.pending.isEmpty {
                                 ProgressView().frame(maxWidth: .infinity, alignment: .leading)
                             }
+                            ChatRows(items: queued, cwd: Self.cwd, working: working, receipts: chat.receipts)
                             Color.clear.frame(height: 1).id("bottom")
                                 .onAppear { atBottom = true }
                                 .onDisappear { atBottom = false }
@@ -54,7 +71,8 @@ struct ChatView: View {
                     .id(items.isEmpty)
                     .onChange(of: chat.entries.count, initial: true) {
                         let had = !items.isEmpty
-                        items = ChatItem.fold(chat.entries)
+                        (items, queued) = ChatItem.fold(chat.entries)
+                        agents = AgentInfo.all(chat.entries)
                         if had, atBottom {
                             withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
                         }
@@ -91,6 +109,9 @@ struct ChatView: View {
                 .frame(maxHeight: 420)
                 .fixedSize(horizontal: false, vertical: true)
             }
+            if !agents.isEmpty {
+                AgentsStrip(agents: agents) { following = Following(id: $0.id) }
+            }
             if !suggestions.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
@@ -110,6 +131,7 @@ struct ChatView: View {
         // Dark whatever the system setting: the rows and tool cards are drawn
         // for a dark background.
         .environment(\.colorScheme, .dark)
+        .sheet(item: $following) { f in AgentScreen(chat: chat, id: f.id) }
         .alert("Couldn't do that", isPresented: Binding(get: { chat.error != nil }, set: { if !$0 { chat.error = nil } })) {
             Button("OK") { chat.error = nil }
         } message: {
@@ -212,14 +234,37 @@ struct ChatView: View {
     private var composer: some View {
         VStack(spacing: 0) {
         settingsBar
+        if !attached.isEmpty {
+            AttachedStrip(files: attached) { f in attached.removeAll { $0.id == f.id } }
+        }
         HStack(alignment: .bottom, spacing: 8) {
+            // Only for a host that keeps them: an older one drops them.
+            if chat.takesFiles {
+                Menu {
+                    Button("Photo Library", systemImage: "photo.on.rectangle") { choosingPhotos = true }
+                    Button("Files", systemImage: "folder") { choosingFiles = true }
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 30))
+                }
+                .tint(.secondary)
+                .accessibilityLabel("Attach")
+            }
             TextField("Message Claude", text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 .focused($composing)
+                .onChange(of: draft) {
+                    guard let just = justSent else { return }
+                    if Date.now.timeIntervalSince(just.at) < 1,
+                       draft.trimmingCharacters(in: .whitespacesAndNewlines) == just.text {
+                        draft = ""
+                    } else {
+                        justSent = nil
+                    }
+                }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
-            if working && draft.isEmpty {
+            if working && draft.isEmpty && attached.isEmpty {
                 Button {
                     Task { try? await chat.interrupt() }
                 } label: {
@@ -231,7 +276,7 @@ struct ChatView: View {
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 30))
                 }
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending)
+                .disabled((draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attached.isEmpty) || sending)
                 .accessibilityLabel("Send")
             }
         }
@@ -240,18 +285,50 @@ struct ChatView: View {
         }
         .disabled(chat.phase != .live)
         .background(.bar)
+        .photosPicker(isPresented: $choosingPhotos, selection: $photos, maxSelectionCount: 10, matching: .images)
+        .onChange(of: photos) {
+            let picked = photos
+            photos = []
+            Task {
+                for (i, item) in picked.enumerated() {
+                    guard let data = try? await item.loadTransferable(type: Data.self),
+                          let photo = Attachments.photo(data, name: "photo-\(attached.count + i + 1).jpg")
+                    else {
+                        chat.error = "That photo couldn't be read."
+                        continue
+                    }
+                    attached.append(photo)
+                }
+            }
+        }
+        .fileImporter(isPresented: $choosingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+            do {
+                attached += try result.get().map(Attachments.file)
+            } catch {
+                chat.error = error.localizedDescription
+            }
+        }
     }
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let files = attached
+        guard !text.isEmpty || !files.isEmpty else { return }
+        // Emptied now rather than once the server has it, so nothing typed
+        // during the round trip is wiped with it; put back if it fails and
+        // nothing new has been typed.
+        draft = ""
+        attached = []
+        justSent = (text, .now)
         sending = true
         Task {
             defer { sending = false }
             do {
-                try await chat.send(text)
-                draft = ""
+                try await chat.send(text, files: files)
             } catch {
+                justSent = nil
+                if draft.isEmpty { draft = text }
+                if attached.isEmpty { attached = files }
                 chat.error = error.localizedDescription
             }
         }
@@ -273,4 +350,9 @@ func modelName(_ id: String) -> String {
     let family = m.1.prefix(1).uppercased() + m.1.dropFirst()
     let name = "\(family) \(m.2)\(m.3.map { ".\($0)" } ?? "")"
     return m.4 == nil ? name : "\(name) (1M)"
+}
+
+/// A subagent to follow, as `sheet(item:)` wants one.
+private struct Following: Identifiable {
+    var id: String
 }

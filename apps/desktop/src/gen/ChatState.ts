@@ -33,4 +33,15 @@ status: string | null, cost_usd: number | null, context_percentage: number | nul
  * Whether Claude Code is running for this conversation. One that has not
  * been spoken to since the host started is not, until it is.
  */
-started: boolean, };
+started: boolean, 
+/**
+ * Whether the host takes files with a message. One built before it did
+ * drops them without a word, so a client offers them only when this says.
+ */
+files: boolean, 
+/**
+ * Whether the host says when a prompt is read. Without it every prompt
+ * would look unread for ever, so a client shows receipts only when this
+ * says.
+ */
+receipts: boolean, };

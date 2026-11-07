@@ -31,6 +31,20 @@
 //   hura-agent close NAME         ends one; `agent` cannot be closed
 //   hura-agent send NAME          stdin, as one message from you
 //
+// A message can carry files: a screenshot dropped on the window's composer, a
+// photo from the phone. Each is written under /sandbox/.hura/uploads, outside
+// the working copy so nothing sent is committed by accident, and the message
+// tells the agent where. A picture the API takes goes to the model as well, as
+// an image block, which is what Claude Code does with one pasted into its
+// terminal; the agent sees it without spending a tool call on reading it.
+//
+// Each message you send is kept as you wrote it, and once Claude Code takes it
+// into a turn a `read` entry says so. Claude Code acknowledges a message on
+// stdout when it starts the turn that carries it, not when it reads it from
+// stdin (asked for with --replay-user-messages), so a message queued behind a
+// running turn stays unread until that turn is over: which is what a receipt
+// is for.
+//
 // Nothing here is a security boundary, and nothing could be: the agent runs as
 // the same user and can reach this port, just as a terminal agent can type into
 // its own tmux pane. The sandbox policy is the boundary.
@@ -98,6 +112,80 @@ export function replayFrames(entries, since, seq, limit = REPLAY_BYTES) {
   }
   frames.push({ t: "replay", seq, entries: chunk });
   return frames;
+}
+
+/// The most a message's files may come to, decoded. A client sends them inline
+/// in one WebSocket message, and hurad takes frames of up to 16 MiB; base64 is
+/// four thirds of this.
+export const UPLOAD_BYTES = 10 << 20;
+/// Pictures the API takes as an image block, and the most it takes of one,
+/// measured as base64. A larger one is still saved, for the agent to `Read`:
+/// Claude Code scales a picture down when it reads one.
+const PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const PICTURE_BASE64 = 5 << 20;
+
+/// A file's name, reduced to something that can only name a file in the
+/// directory it is written to: the last component, with nothing that walks out
+/// of it or hides it.
+export function uploadName(name) {
+  const base = String(name ?? "")
+    .split(/[\\/]/)
+    .pop()
+    .replace(/[\u0000-\u001f]/g, "")
+    .replace(/^\.+/, "")
+    .trim();
+  return base.slice(0, 200) || "file";
+}
+
+/// What a message with files is: where each was saved, which of them go to the
+/// model as pictures, and the SDK content that says both. `files` is what a
+/// client sent, `{name, mime, data}` with the data in base64; `dir` is where
+/// this message's files go. Writes nothing: the caller does, with `bytes`.
+export function attach(text, files, dir) {
+  const taken = new Set();
+  let total = 0;
+  const saved = files.map((f) => {
+    const bytes = Buffer.from(String(f.data ?? ""), "base64");
+    total += bytes.length;
+    let name = uploadName(f.name);
+    // Two files dropped with one name are two files.
+    for (let n = 2; taken.has(name); n++) {
+      const ext = path.extname(uploadName(f.name));
+      name = `${path.basename(uploadName(f.name), ext)}-${n}${ext}`;
+    }
+    taken.add(name);
+    const mime = String(f.mime || "application/octet-stream");
+    const data = bytes.toString("base64");
+    const picture = PICTURE_TYPES.has(mime) && data.length <= PICTURE_BASE64;
+    return { name, path: path.join(dir, name), mime, size: bytes.length, bytes, data: picture ? data : null };
+  });
+  if (total > UPLOAD_BYTES) {
+    throw new Error(`the files come to ${Math.ceil(total / (1 << 20))} MiB; a message takes ${UPLOAD_BYTES >> 20} MiB`);
+  }
+  const listed = saved.map((f) => `- ${f.path} (${f.mime}, ${size(f.size)})`).join("\n");
+  const said = [text, `Files sent with this message, saved at:\n${listed}`].filter(Boolean).join("\n\n");
+  const content = [
+    ...saved
+      .filter((f) => f.data)
+      .map((f) => ({ type: "image", source: { type: "base64", media_type: f.mime, data: f.data } })),
+    { type: "text", text: said },
+  ];
+  return { saved, content };
+}
+
+function size(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1 << 20) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1 << 20)).toFixed(1)} MB`;
+}
+
+/// The message of yours that a user message from Claude Code acknowledges, by
+/// its uuid, or null for any other: a tool result, a note Claude Code adds, or
+/// an acknowledgement already recorded.
+export function receipt(msg, sent, read) {
+  if (msg.type !== "user" || !msg.isReplay || !msg.uuid) return null;
+  if (!sent.has(msg.uuid) || read.has(msg.uuid)) return null;
+  return msg.uuid;
 }
 
 /// Whether a message belongs in the transcript.
@@ -318,10 +406,14 @@ class Host {
     this.dir = path.join(dir, "chat");
     this.hura = dir;
     this.cwd = cwd;
+    /// Files sent with messages, a directory per conversation and in it one
+    /// per message. Made now, because Claude Code is told it may read here.
+    this.uploads = path.join(dir, "uploads");
     /** @type {Map<string, Conversation>} */
     this.conversations = new Map();
     this.limits = {};
     fs.mkdirSync(this.dir, { recursive: true });
+    fs.mkdirSync(this.uploads, { recursive: true });
     for (const record of this.#readRegistry()) {
       this.conversations.set(record.name, new Conversation(this, record));
     }
@@ -367,6 +459,8 @@ class Host {
     this.conversations.delete(name);
     this.saveRegistry();
     fs.rmSync(c.file, { force: true });
+    // Its files with it: the next conversation to take the name is a new one.
+    fs.rmSync(path.join(this.uploads, name), { recursive: true, force: true });
     this.report();
     log(`closed ${name}`);
   }
@@ -407,6 +501,8 @@ class Conversation {
     /** @type {Map<string, {request: object, resolve: Function, input: object, suggestions?: object[]}>} */
     this.pending = new Map();
     this.sent = new Set();
+    /// Those of `sent` that Claude Code has taken into a turn.
+    this.read = new Set();
     this.activity = "idle";
     this.tool = null;
     this.status = null;
@@ -476,6 +572,8 @@ class Conversation {
       cost_usd: this.spend.cost ?? null,
       context_percentage: this.context?.percentage ?? null,
       started: this.query !== null,
+      files: true,
+      receipts: true,
     };
   }
 
@@ -500,6 +598,11 @@ class Conversation {
       // skills and MCP servers the seeder installed, the repository's
       // CLAUDE.md. Said rather than left to the default, which has moved.
       settingSources: ["user", "project", "local"],
+      // Where files sent with a message are saved, readable without a
+      // permission prompt: they were handed to the agent to read. The whole
+      // directory rather than this conversation's, since a message can point
+      // at a file sent in another.
+      additionalDirectories: [this.host.uploads],
       systemPrompt: { type: "preset", preset: "claude_code" },
       includePartialMessages: true,
       // A summary of the reasoning, where the default sends empty blocks and
@@ -517,6 +620,14 @@ class Conversation {
         CLAUDE_AGENT_SDK_CLIENT_APP: "hura",
       },
       stderr: (text) => log(`${this.name}: ${text.trimEnd()}`),
+      // A subagent's whole conversation, not only its tool calls, so a window
+      // can show what it said and thought; and a line on what each one is
+      // doing, for the list of them.
+      forwardSubagentText: true,
+      agentProgressSummaries: true,
+      // An acknowledgement of each message as its turn starts, which is the
+      // read receipt.
+      extraArgs: { "replay-user-messages": null },
     };
     if (this.mode) options.permissionMode = this.mode;
     if (this.model) options.model = this.model;
@@ -619,11 +730,18 @@ class Conversation {
         this.#resumable();
         this.#measure();
         break;
-      case "user":
-        // Your own message, echoed back. It is in the transcript already, as
-        // you wrote it.
+      case "user": {
+        // Your own message, echoed back as Claude Code starts on it. It is in
+        // the transcript already, as you wrote it; what is new is that it has
+        // been read.
+        const uuid = receipt(msg, this.sent, this.read);
+        if (uuid) {
+          this.read.add(uuid);
+          this.append({ kind: "read", uuid });
+        }
         if (msg.isReplay || (msg.uuid && this.sent.has(msg.uuid))) return;
         break;
+      }
     }
 
     if (kept(msg)) this.append({ kind: "sdk", msg });
@@ -653,6 +771,11 @@ class Conversation {
 
   #system(msg) {
     switch (msg.subtype) {
+      case "task_progress":
+        // A moment, like a tool's progress: kept nowhere, sent to whoever is
+        // watching.
+        this.broadcast({ t: "task", ev: msg });
+        break;
       case "init":
         // What Claude Code says it is running is the truth about the session;
         // a mode or model asked for is passed to it on start, so the two
@@ -733,16 +856,28 @@ class Conversation {
     this.changed();
   }
 
-  async send(text) {
+  async send(text, files = []) {
     const uuid = randomUUID();
+    let content = text;
+    let saved = [];
+    if (files.length) {
+      const dir = path.join(this.host.uploads, this.name, uuid);
+      const message = attach(text, files, dir);
+      fs.mkdirSync(dir, { recursive: true });
+      for (const f of message.saved) fs.writeFileSync(f.path, f.bytes);
+      content = message.content;
+      saved = message.saved.map(({ bytes: _, ...f }) => f);
+    } else if (!text) {
+      throw new Error("nothing to send");
+    }
     this.sent.add(uuid);
-    this.append({ kind: "prompt", text, uuid });
+    this.append({ kind: "prompt", text, uuid, files: saved, receipt: true });
     // Shared, so a second message sent while the first is still starting the
     // conversation waits for that start rather than making another.
     if (!this.query) await (this.starting ??= this.start().finally(() => (this.starting = null)));
     this.inbox.push({
       type: "user",
-      message: { role: "user", content: text },
+      message: { role: "user", content },
       parent_tool_use_id: null,
       // Typed by a person, which an SDK host has to say: a message with no
       // origin is treated as unattributed.
@@ -855,7 +990,7 @@ class Client {
     if (!c) throw new Error("attach to a conversation first");
     switch (req.op) {
       case "send":
-        return c.send(String(req.text ?? ""));
+        return c.send(String(req.text ?? ""), Array.isArray(req.files) ? req.files : []);
       case "interrupt":
         return c.interrupt();
       case "answer":

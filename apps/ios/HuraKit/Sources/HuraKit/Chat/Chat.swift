@@ -82,10 +82,33 @@ public enum ChatTranscript {
     public static func entry(_ raw: JSONValue) -> TranscriptEntry? {
         guard case let .number(n)? = raw["seq"], let ev = raw["ev"], let kind = ev["kind"]?.string else { return nil }
         let seq = UInt64(n)
+        var entry = entryWithoutTime(seq: seq, ev: ev, kind: kind)
+        if case let .number(ms)? = raw["at"] { entry?.at = Date(timeIntervalSince1970: ms / 1000) }
+        return entry
+    }
+
+    private static func entryWithoutTime(seq: UInt64, ev: JSONValue, kind: String) -> TranscriptEntry? {
         switch kind {
         case "prompt":
-            return TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.prompt,
-                                   blocks: [TranscriptBlock(type: "text", text: ev["text"]?.string ?? "")])
+            // Each file sent with it: a picture the model saw, or the path the
+            // agent was given for anything else.
+            var blocks = [TranscriptBlock]()
+            if case let .array(files)? = ev["files"] {
+                for f in files {
+                    if let data = f["data"]?.string, let mime = f["mime"]?.string {
+                        blocks.append(TranscriptBlock(type: "image", name: f["name"]?.string,
+                                                      pictures: [Picture(mime: mime, data: data)]))
+                    } else if let path = f["path"]?.string {
+                        blocks.append(TranscriptBlock(type: "file", text: path, name: f["name"]?.string))
+                    }
+                }
+            }
+            blocks.append(TranscriptBlock(type: "text", text: ev["text"]?.string ?? ""))
+            var prompt = TranscriptEntry(seq: seq, uuid: ev["uuid"]?.string, kind: TranscriptEntry.Kind.prompt, blocks: blocks)
+            prompt.receipt = ev["receipt"]?.bool ?? false
+            return prompt
+        case "read":
+            return ev["uuid"]?.string.map { TranscriptEntry(seq: seq, uuid: $0, kind: TranscriptEntry.Kind.read) }
         case "answer":
             // An allow shows as the tool running; a refusal is worth a line.
             guard ev["allow"]?.bool == false else { return nil }
@@ -101,11 +124,19 @@ public enum ChatTranscript {
         }
     }
 
+    /// A subagent's messages are kept, marked with the call that started it,
+    /// for the screen that follows one; the conversation leaves them out.
     static func sdk(_ m: JSONValue, seq: UInt64) -> TranscriptEntry? {
+        var entry = sdkEntry(m, seq: seq)
+        entry?.parent = m["parent_tool_use_id"]?.string
+        return entry
+    }
+
+    private static func sdkEntry(_ m: JSONValue, seq: UInt64) -> TranscriptEntry? {
         let mainThread = m["parent_tool_use_id"] == nil || m["parent_tool_use_id"] == .null
         switch m["type"]?.string {
         case "assistant":
-            guard mainThread, case let .array(content)? = m["message"]?["content"] else { return nil }
+            guard case let .array(content)? = m["message"]?["content"] else { return nil }
             if let error = m["error"]?.string {
                 let said = content.compactMap { $0["type"]?.string == "text" ? $0["text"]?.string : nil }
                     .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -149,6 +180,8 @@ public enum ChatTranscript {
                 return TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.divider, reason: "compact")
             case "permission_denied":
                 return notice(seq, "\(m["tool_name"]?.string ?? "A tool") was not allowed")
+            case "task_started", "task_updated", "task_notification":
+                return TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.task, task: m)
             default:
                 return nil
             }
@@ -201,6 +234,32 @@ public enum ChatTranscript {
     }
 }
 
+/// A file sent with a message (`ChatUpload`): saved in the sandbox by the
+/// chat host, and shown to the model as well when it is a picture.
+public struct ChatUpload: Encodable, Equatable, Identifiable, Sendable {
+    public var name: String
+    public var mime: String
+    /// Base64.
+    public var data: String
+    /// Kept in step with `UPLOAD_BYTES` in `hura-agent.mjs`: the most a
+    /// message's files may come to.
+    public static let limit = 10 << 20
+
+    public init(name: String, mime: String, bytes: Data) {
+        self.name = name
+        self.mime = mime
+        data = bytes.base64EncodedString()
+        size = bytes.count
+        id = UUID()
+    }
+
+    /// Decoded, for the limit.
+    public let size: Int
+    public let id: UUID
+
+    enum CodingKeys: String, CodingKey { case name, mime, data }
+}
+
 /// Opens a websocket to a hura server.
 public typealias TransportFactory = @MainActor (_ record: ServerRecord) -> WebSocketTransport
 
@@ -239,12 +298,21 @@ public final class Chat {
     public private(set) var contextPercentage: Double?
     /// The reply so far, before its message arrives whole.
     public private(set) var streaming = ""
+    /// What each running subagent last said it was doing (an SDK
+    /// `task_progress`), by task id. Live only: never in the transcript.
+    public private(set) var tasks: [String: JSONValue] = [:]
     /// Why there is nothing yet, from hurad: a session still cloning, say.
     public private(set) var notice: String?
     /// The host refused something sent on this channel.
     public var error: String?
     /// The transcript has arrived at least once.
     public private(set) var loaded = false
+    /// The host takes files with a message. One built before it did drops
+    /// them without a word, so they're offered only when this says.
+    public private(set) var takesFiles = false
+    /// The host says when Claude has read a message. Without it every
+    /// message would look unread, so receipts show only when this says.
+    public private(set) var receipts = false
 
     @ObservationIgnored private let record: ServerRecord
     @ObservationIgnored private let transport: TransportFactory
@@ -287,9 +355,23 @@ public final class Chat {
         socket = nil
     }
 
-    public func send(_ text: String) async throws {
-        struct Body: Encodable { var text: String }
-        try await command(Op(op: "send", body: Body(text: text)))
+    public func send(_ text: String, files: [ChatUpload] = []) async throws {
+        struct Body: Encodable {
+            var text: String
+            var files: [ChatUpload]
+            enum CodingKeys: String, CodingKey { case text, files }
+            // Without the key when there are none: the message an older host
+            // has always read.
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(text, forKey: .text)
+                if !files.isEmpty { try c.encode(files, forKey: .files) }
+            }
+        }
+        if files.map(\.size).reduce(0, +) > ChatUpload.limit {
+            throw ServerError.failed(kind: "too-large", message: "A message takes \(ChatUpload.limit >> 20) MB of files.")
+        }
+        try await command(Op(op: "send", body: Body(text: text, files: files)))
     }
 
     public func interrupt() async throws {
@@ -400,6 +482,8 @@ public final class Chat {
             loaded = true
         case "entry":
             if let e = f["entry"] { append(e) }
+        case "task":
+            if let ev = f["ev"], let id = ev["task_id"]?.string { tasks[id] = ev }
         case "partial":
             if let ev = f["ev"], let text = ChatTranscript.streamedText(ev) { streaming += text }
         case "state":
@@ -414,6 +498,8 @@ public final class Chat {
             status = s["status"]?.string
             if case let .number(n)? = s["cost_usd"] { costUSD = n } else { costUSD = nil }
             if case let .number(n)? = s["context_percentage"] { contextPercentage = n } else { contextPercentage = nil }
+            takesFiles = s["files"]?.bool ?? false
+            receipts = s["receipts"]?.bool ?? false
             if activity == "idle" { streaming = "" }
         case "error":
             error = f["message"]?.string
@@ -433,7 +519,8 @@ public final class Chat {
         guard seq > lastSeq else { return }
         lastSeq = seq
         notice = nil
-        if raw["ev"]?["msg"]?["type"]?.string == "assistant" { streaming = "" }
+        if let msg = raw["ev"]?["msg"], msg["type"]?.string == "assistant",
+           msg["parent_tool_use_id"]?.string == nil { streaming = "" }
         if let entry = ChatTranscript.entry(raw) { entries.append(entry) }
     }
 }

@@ -99,7 +99,13 @@ impl Attach {
 pub enum ChatCommand {
     /// A message. Queued behind the current turn when there is one, which is
     /// what the SDK does with a message that arrives mid-turn.
-    Send { text: String },
+    Send {
+        text: String,
+        /// Files sent with it: a screenshot dropped on the composer, say.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[cfg_attr(feature = "ts", ts(optional, as = "Option<Vec<ChatUpload>>"))]
+        files: Vec<ChatUpload>,
+    },
     /// Stop the turn in progress.
     Interrupt,
     /// Answer a permission request, a question or a plan.
@@ -111,6 +117,40 @@ pub enum ChatCommand {
     /// The reasoning effort, `low` to `max`, or `None` for the model's
     /// default.
     Effort { effort: Option<String> },
+}
+
+/// A file as a client sends it, whole.
+///
+/// Inline in the command rather than uploaded beside it: the chat channel is
+/// the one way into the sandbox a client has, and a second one would need a
+/// route of its own through the forward for something a few megabytes long.
+/// The host writes it under the session's `.hura/uploads`, outside the working
+/// copy so it is never committed by accident, and tells the agent where.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatUpload {
+    /// The file's name on the machine it came from. Only the last component is
+    /// kept, so a name cannot place the file anywhere else.
+    pub name: String,
+    pub mime: String,
+    /// Base64.
+    pub data: String,
+}
+
+/// A file sent with a message, as the transcript keeps it.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatFile {
+    pub name: String,
+    /// Where the host saved it, which is what the agent was told.
+    pub path: String,
+    pub mime: String,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub size: u64,
+    /// The picture, base64, when it went to the model as one, so a window can
+    /// draw what was sent. Anything else is a path the agent reads for itself.
+    #[serde(default)]
+    pub data: Option<String>,
 }
 
 /// The answer to one [`ChatAsk`].
@@ -156,6 +196,13 @@ pub enum ChatFrame {
         #[cfg_attr(feature = "ts", ts(type = "unknown"))]
         ev: serde_json::Value,
     },
+    /// What a subagent or other background task is doing now: an SDK
+    /// `task_progress`, with its running totals and a one-line summary.
+    /// Never kept; the task's start and end are in the transcript.
+    Task {
+        #[cfg_attr(feature = "ts", ts(type = "unknown"))]
+        ev: serde_json::Value,
+    },
     /// The conversation's state, whenever it changes.
     State { state: ChatState },
     /// A request on this connection could not be done.
@@ -187,7 +234,21 @@ pub enum ChatEvent {
         msg: serde_json::Value,
     },
     /// What you said, as you said it.
-    Prompt { text: String, uuid: String },
+    Prompt {
+        text: String,
+        uuid: String,
+        #[serde(default)]
+        files: Vec<ChatFile>,
+        /// A [`ChatEvent::Read`] will say when Claude Code takes it into a
+        /// turn. A prompt kept before the host said so never gets one, and
+        /// a client places it where it was sent instead of waiting for one.
+        #[serde(default)]
+        receipt: bool,
+    },
+    /// Claude Code took the prompt with this uuid into a turn: the read
+    /// receipt. Later than the prompt by however long it waited behind the
+    /// turn before it.
+    Read { uuid: String },
     /// How a permission request was answered.
     Answer {
         id: String,
@@ -249,6 +310,15 @@ pub struct ChatState {
     /// been spoken to since the host started is not, until it is.
     #[serde(default)]
     pub started: bool,
+    /// Whether the host takes files with a message. One built before it did
+    /// drops them without a word, so a client offers them only when this says.
+    #[serde(default)]
+    pub files: bool,
+    /// Whether the host says when a prompt is read. Without it every prompt
+    /// would look unread for ever, so a client shows receipts only when this
+    /// says.
+    #[serde(default)]
+    pub receipts: bool,
 }
 
 /// A permission request, a question, or a plan to approve.
@@ -574,6 +644,21 @@ mod tests {
     }
 
     #[test]
+    fn a_tasks_progress_comes_through_whole() {
+        let frame = r#"{"t":"task","ev":{"type":"system","subtype":"task_progress","task_id":"a1",
+            "description":"Read the docs","usage":{"total_tokens":10,"tool_uses":2,"duration_ms":900},
+            "summary":"Reading policy.md"}}"#;
+        let ChatFrame::Task { ev } = serde_json::from_str(frame).unwrap() else {
+            panic!("not a task");
+        };
+        assert_eq!(ev["summary"], "Reading policy.md");
+        assert_eq!(
+            serde_json::to_value(ChatFrame::Task { ev }).unwrap()["t"],
+            "task"
+        );
+    }
+
+    #[test]
     fn commands_go_to_the_host_in_its_own_words() {
         let answer = ChatCommand::Answer {
             id: "t1".into(),
@@ -604,6 +689,62 @@ mod tests {
         );
         let back: ChatCommand = serde_json::from_str(r#"{"op":"effort","effort":null}"#).unwrap();
         assert_eq!(back, ChatCommand::Effort { effort: None });
+    }
+
+    /// Files ride on the message they were sent with. A message without any
+    /// is the shape it always was, so an older host reads it unchanged.
+    #[test]
+    fn a_message_carries_its_files_and_one_without_any_is_unchanged() {
+        let plain = ChatCommand::Send {
+            text: "go".into(),
+            files: vec![],
+        };
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            serde_json::json!({"op": "send", "text": "go"})
+        );
+        let back: ChatCommand = serde_json::from_str(r#"{"op":"send","text":"go"}"#).unwrap();
+        assert_eq!(back, plain);
+
+        let with = r#"{"op":"send","text":"","files":[{"name":"shot.png","mime":"image/png","data":"iVBORw=="}]}"#;
+        let ChatCommand::Send { files, .. } = serde_json::from_str(with).unwrap() else {
+            panic!("not a send");
+        };
+        assert_eq!(files[0].name, "shot.png");
+        assert_eq!(files[0].data, "iVBORw==");
+    }
+
+    /// The prompt says where each file went, and an older transcript, whose
+    /// prompts have no files, still reads.
+    #[test]
+    fn a_prompt_keeps_where_its_files_went() {
+        let entry = r#"{"seq":1,"at":0,"ev":{"kind":"prompt","text":"look","uuid":"u",
+            "files":[{"name":"a.png","path":"/sandbox/.hura/uploads/u/a.png","mime":"image/png","size":3,"data":"AAA="},
+                     {"name":"b.csv","path":"/sandbox/.hura/uploads/u/b.csv","mime":"text/csv","size":9,"data":null}]}}"#;
+        let entry: ChatEntry = serde_json::from_str(entry).unwrap();
+        let ChatEvent::Prompt { files, .. } = entry.ev else {
+            panic!("not a prompt");
+        };
+        assert_eq!(files[0].data.as_deref(), Some("AAA="));
+        assert_eq!(files[1].path, "/sandbox/.hura/uploads/u/b.csv");
+        assert_eq!(files[1].data, None);
+
+        let old: ChatEvent =
+            serde_json::from_str(r#"{"kind":"prompt","text":"hi","uuid":"u"}"#).unwrap();
+        assert!(
+            matches!(old, ChatEvent::Prompt { ref files, receipt, .. } if files.is_empty() && !receipt)
+        );
+        let state: ChatState = serde_json::from_str(
+            r#"{"activity":"idle","mode":null,"model":null,
+            "status":null,"cost_usd":null,"context_percentage":null}"#,
+        )
+        .unwrap();
+        assert!(!state.files, "a host that does not say takes no files");
+        assert!(!state.receipts, "nor says when a prompt is read");
+
+        let read: ChatEntry =
+            serde_json::from_str(r#"{"seq":2,"at":5,"ev":{"kind":"read","uuid":"u"}}"#).unwrap();
+        assert!(matches!(read.ev, ChatEvent::Read { ref uuid } if uuid == "u"));
     }
 
     #[test]

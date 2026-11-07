@@ -102,16 +102,26 @@ public struct TranscriptEntry: Codable, Equatable, Identifiable, Sendable {
     public var durationMS: Int64?
     public var reason: String?
     public var level: String?
+    /// When it happened, by the sandbox's clock.
+    public var at: Date?
+    /// A prompt that a `read` entry will say Claude took into a turn.
+    public var receipt: Bool?
+    /// The call that started the subagent this came from; nil on the main
+    /// thread.
+    public var parent: String?
+    /// A `task` entry: the SDK's task event, whole.
+    public var task: JSONValue?
 
     public var id: UInt64 { seq }
 
     enum CodingKeys: String, CodingKey {
-        case seq, uuid, ts, kind, blocks, reason, level
+        case seq, uuid, ts, kind, blocks, reason, level, at, receipt, parent, task
         case durationMS = "duration_ms"
     }
 
     public init(seq: UInt64, uuid: String? = nil, ts: String? = nil, kind: String, blocks: [TranscriptBlock]? = nil,
-                durationMS: Int64? = nil, reason: String? = nil, level: String? = nil) {
+                durationMS: Int64? = nil, reason: String? = nil, level: String? = nil, at: Date? = nil,
+                parent: String? = nil, task: JSONValue? = nil) {
         self.seq = seq
         self.uuid = uuid
         self.ts = ts
@@ -120,6 +130,9 @@ public struct TranscriptEntry: Codable, Equatable, Identifiable, Sendable {
         self.durationMS = durationMS
         self.reason = reason
         self.level = level
+        self.at = at
+        self.parent = parent
+        self.task = task
     }
 
     public enum Kind {
@@ -129,5 +142,10 @@ public struct TranscriptEntry: Codable, Equatable, Identifiable, Sendable {
         public static let turnEnd = "turn_end"
         public static let divider = "divider"
         public static let notice = "notice"
+        /// Claude Code took the prompt with this entry's `uuid` into a turn.
+        public static let read = "read"
+        /// A subagent started, changed or finished: `task_started`,
+        /// `task_updated` or `task_notification`.
+        public static let task = "task"
     }
 }

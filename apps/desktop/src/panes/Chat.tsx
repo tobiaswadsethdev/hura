@@ -18,15 +18,17 @@ import type { ChatCommand } from "../gen/ChatCommand";
 import type { ChatEntry } from "../gen/ChatEntry";
 import type { ChatFrame } from "../gen/ChatFrame";
 import type { ChatState } from "../gen/ChatState";
-import { Chat as ChatGlyph, Send, Stop, Working } from "../icons";
+import { Attach, Chat as ChatGlyph, Close, Send, Stop, Working } from "../icons";
 import { api } from "../api";
 import { Markdown, Pictures, type ReadPicture } from "../Markdown";
 import type { PartialMessage, ToolProgress } from "../sdk";
 import { Select } from "../Select";
 import { chat, close, nextChannelId, open } from "../stream";
 import { AskCard } from "../chat/Ask";
-import { Items } from "../chat/Items";
+import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/files";
+import { Items, OpenAgent } from "../chat/Items";
 import { arrived, build } from "../chat/transcript";
+import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
 
 /// The reply being written, from the stream events: the main thread's
 /// current message, block by block.
@@ -40,6 +42,8 @@ type View = {
   live: Live;
   /// How long each running tool has been running, by tool use id.
   progress: Map<string, number>;
+  /// What each running subagent last said it was doing, by task id.
+  tasks: Map<string, TaskProgress>;
   /// Why there is nothing yet, while the session is still being prepared.
   notice: string | null;
   /// Why the channel is down, while it is.
@@ -53,6 +57,7 @@ const EMPTY: View = {
   state: null,
   live: null,
   progress: new Map(),
+  tasks: new Map(),
   notice: null,
   down: null,
   error: null,
@@ -89,6 +94,12 @@ function reduce(v: View, a: Action): View {
       const progress = new Map(v.progress);
       progress.set(p.tool_use_id, p.elapsed_time_seconds);
       return { ...v, progress };
+    }
+    case "task": {
+      const t = f.ev as TaskProgress;
+      const tasks = new Map(v.tasks);
+      tasks.set(t.task_id, t);
+      return { ...v, tasks };
     }
     case "state": {
       const idle = f.state.activity === "idle";
@@ -184,15 +195,53 @@ function effortName(e: string): string {
   return e === "xhigh" ? "extra high" : e;
 }
 
+/// The files waiting in the composer: a picture as itself, anything else as
+/// its name, each with a way out of the message.
+function AttachedFiles({ files, onRemove }: { files: Attached[]; onRemove: (key: string) => void }) {
+  if (!files.length) return null;
+  return (
+    <ul className="chat-attached">
+      {files.map((f) => (
+        <li key={f.key} title={`${f.name}, ${size(f.size)}`}>
+          {isPicture(f.mime) ? (
+            <img src={`data:${f.mime};base64,${f.data}`} alt={f.name} />
+          ) : (
+            <span className="chat-file">
+              <Attach />
+              {f.name}
+            </span>
+          )}
+          <button className="chat-unattach" title="take it out of the message" onClick={() => onRemove(f.key)}>
+            <Close aria-label={`remove ${f.name}`} />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Composer({
   state,
   onCommand,
+  files,
+  onAttach,
+  onRemove,
+  onSent,
 }: {
   state: ChatState | null;
   onCommand: (command: ChatCommand) => void;
+  files: Attached[];
+  onAttach: (files: File[]) => void;
+  onRemove: (key: string) => void;
+  onSent: () => void;
 }) {
   const [text, setText] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  /// What was just sent, and when. WebKit commits a pending autocorrection or
+  /// inline prediction into the box after Enter has emptied it, which put the
+  /// message straight back; for a moment after a send, that is not typing.
+  const sent = useRef<{ text: string; at: number } | null>(null);
   const working = state?.activity === "running" || state?.activity === "waiting";
 
   // Grows with what is typed, up to a third of the pane, and no further.
@@ -211,9 +260,15 @@ function Composer({
 
   const send = () => {
     const t = text.trim();
-    if (!t) return;
-    onCommand({ op: "send", text: t });
+    if (!t && !files.length) return;
+    onCommand({
+      op: "send",
+      text: t,
+      files: files.length ? files.map(({ name, mime, data }) => ({ name, mime, data })) : undefined,
+    });
+    sent.current = { text: t, at: Date.now() };
     setText("");
+    onSent();
   };
 
   const models = state?.models ?? [];
@@ -247,12 +302,33 @@ function Composer({
           they are read far more often than they are changed. A click on the
           box's own padding is a click on the text. */}
       <div className="chat-box" onClick={(e) => e.target === e.currentTarget && box.current?.focus()}>
+        <AttachedFiles files={files} onRemove={onRemove} />
         <textarea
           ref={box}
           rows={1}
           value={text}
           placeholder={working ? "queue a message for when this turn is done" : "tell the agent what to do"}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            const just = sent.current;
+            if (just && Date.now() - just.at < 1000) {
+              const kind = (e.nativeEvent as InputEvent).inputType;
+              if (kind === "insertReplacementText" || e.target.value.trim() === just.text) {
+                e.target.value = "";
+                return;
+              }
+            }
+            sent.current = null;
+            setText(e.target.value);
+          }}
+          // A screenshot on the clipboard is a file to send rather than text
+          // to type. Text pastes as text, even when a file came with it, as
+          // an office suite's cells do.
+          onPaste={(e) => {
+            const pasted = [...e.clipboardData.files];
+            if (!pasted.length || e.clipboardData.getData("text/plain")) return;
+            e.preventDefault();
+            onAttach(pasted);
+          }}
           onKeyDown={(e) => {
             if (e.nativeEvent.isComposing) return;
             if (e.key === "Tab" && offered.length) {
@@ -268,6 +344,24 @@ function Composer({
           }}
         />
         <div className="chat-controls">
+          {state?.files && (
+            <>
+              <button className="chat-attach" title="send files with the message" onClick={() => picker.current?.click()}>
+                <Attach aria-label="attach files" />
+              </button>
+              <input
+                ref={picker}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  onAttach([...(e.target.files ?? [])]);
+                  // So picking the same file again is still a change.
+                  e.target.value = "";
+                }}
+              />
+            </>
+          )}
           <Select
             className="chat-select"
             aria-label="permission mode"
@@ -322,7 +416,7 @@ function Composer({
               <Stop aria-label="stop" />
             </button>
           ) : null}
-          <button className="go chat-send" title="send (Enter)" disabled={!text.trim()} onClick={send}>
+          <button className="go chat-send" title="send (Enter)" disabled={!text.trim() && !files.length} onClick={send}>
             <Send aria-label="send" />
           </button>
         </div>
@@ -383,7 +477,41 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
     chat.command(channel.current, c).catch(() => {});
   };
 
-  const items = useMemo(() => build(view.entries), [view.entries]);
+  const [files, setFiles] = useState<Attached[]>([]);
+  const [refused, setRefused] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const takesFiles = view.state?.files ?? false;
+  const attach = (picked: File[]) => {
+    if (!picked.length) return;
+    if (!takesFiles) {
+      setRefused("This session's agent was started before files could be sent; a new session takes them.");
+      return;
+    }
+    const total = [...files.map((f) => f.size), ...picked.map((f) => f.size)].reduce((a, b) => a + b, 0);
+    if (total > UPLOAD_BYTES) {
+      setRefused(`A message takes ${UPLOAD_BYTES >> 20} MB of files; these come to ${size(total)}.`);
+      return;
+    }
+    setRefused(null);
+    Promise.all(picked.map(read)).then(
+      (read) => setFiles((had) => [...had, ...read]),
+      (e) => setRefused(String(e)),
+    );
+  };
+  // Only a drag carrying files is one to take: a tab being dragged past is not.
+  const carriesFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
+
+  const receiptsOn = view.state?.receipts ?? false;
+  const { items, queued, agents } = useMemo(() => build(view.entries), [view.entries]);
+  const [following, setFollowing] = useState<string | null>(null);
+  const followed = agents.find((a) => a.id === following) ?? null;
+  const openAgent = useMemo(
+    () => (callId: string) => {
+      const a = agents.find((x) => x.call?.id === callId);
+      if (a) setFollowing(a.id);
+    },
+    [agents],
+  );
 
   // Kept at the bottom while it is at the bottom: a reply being written
   // scrolls with itself, and someone who has scrolled up to read is left
@@ -396,45 +524,89 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
   }, [view.entries, view.live, view.state?.pending.length]);
 
   const pending = view.state?.pending ?? [];
+  const receipts = !receiptsOn ? "off" : view.state?.activity === "idle" ? "idle" : "working";
   const nothing = view.entries.length === 0 && !view.live;
 
   return (
-    <div className="chat">
-      <div
-        className="chat-scroll"
-        ref={scroller}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        }}
-      >
-        <div className="chat-log">
-          {nothing &&
-            (view.notice ? (
-              <Empty icon={Working} note={view.notice} />
-            ) : view.state ? (
-              <Empty icon={ChatGlyph} />
-            ) : null)}
-          <Pictures.Provider value={readPicture}>
-            <Items items={items} progress={view.progress} />
-            <Writing live={view.live} entries={view.entries} />
-          </Pictures.Provider>
-          {/* Under whatever is being written, for the whole turn, so a reply
-              that has paused between two tool calls still says it is not
-              finished. The word only while there is nothing else to look at. */}
-          {view.state?.activity === "running" && pending.length === 0 && (
-            <p className="chat-working" role="status" aria-label="working">
-              <Working size={22} />
-              {!view.live && "working"}
-            </p>
+    <div className="chat-split">
+      <OpenAgent.Provider value={openAgent}>
+        <div
+          className={`chat${dropping ? " dropping" : ""}`}
+          onDragOver={(e) => {
+            if (!carriesFiles(e)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = takesFiles ? "copy" : "none";
+            setDropping(true);
+          }}
+          onDragLeave={(e) => {
+            // Left the pane, rather than moved from one of its children to another.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+          }}
+          onDrop={(e) => {
+            if (!carriesFiles(e)) return;
+            e.preventDefault();
+            setDropping(false);
+            attach([...e.dataTransfer.files]);
+          }}
+        >
+          <div
+            className="chat-scroll"
+            ref={scroller}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            }}
+          >
+            <div className="chat-log">
+              {nothing &&
+                (view.notice ? (
+                  <Empty icon={Working} note={view.notice} />
+                ) : view.state ? (
+                  <Empty icon={ChatGlyph} />
+                ) : null)}
+              <Pictures.Provider value={readPicture}>
+                <Items items={items} progress={view.progress} receipts={receipts} />
+                <Writing live={view.live} entries={view.entries} />
+              </Pictures.Provider>
+              {/* Under whatever is being written, for the whole turn, so a reply
+                  that has paused between two tool calls still says it is not
+                  finished. The word only while there is nothing else to look at. */}
+              {view.state?.activity === "running" && pending.length === 0 && (
+                <p className="chat-working" role="status" aria-label="working">
+                  <Working size={22} />
+                  {!view.live && "working"}
+                </p>
+              )}
+              {pending.map((ask) => (
+                <AskCard key={ask.id} ask={ask} onAnswer={(decision) => command({ op: "answer", id: ask.id, decision })} />
+              ))}
+              {/* Sent and not yet read: after everything the turn in progress is
+                  still doing, since Claude reads them when it is done. */}
+              <Items items={queued} receipts={receipts} />
+            </div>
+          </div>
+          <AgentsBar agents={agents} open={following} onOpen={setFollowing} />
+          {(view.down || view.error || refused) && (
+            <p className="error chat-banner">{view.down ?? refused ?? view.error}</p>
           )}
-          {pending.map((ask) => (
-            <AskCard key={ask.id} ask={ask} onAnswer={(decision) => command({ op: "answer", id: ask.id, decision })} />
-          ))}
+          <Composer
+            state={view.state}
+            onCommand={command}
+            files={files}
+            onAttach={attach}
+            onRemove={(key) => setFiles((had) => had.filter((f) => f.key !== key))}
+            onSent={() => {
+              setFiles([]);
+              setRefused(null);
+            }}
+          />
         </div>
-      </div>
-      {(view.down || view.error) && <p className="error chat-banner">{view.down ?? view.error}</p>}
-      <Composer state={view.state} onCommand={command} />
+      </OpenAgent.Provider>
+      {followed && (
+        <Pictures.Provider value={readPicture}>
+          <AgentPanel agent={followed} progress={view.tasks.get(followed.id)} onClose={() => setFollowing(null)} />
+        </Pictures.Provider>
+      )}
     </div>
   );
 }

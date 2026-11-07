@@ -357,7 +357,10 @@ mod tests {
         );
         let f = ClientFrame::Chat {
             id: 2,
-            command: ChatCommand::Send { text: "go".into() },
+            command: ChatCommand::Send {
+                text: "go".into(),
+                files: vec![],
+            },
         };
         let v = serde_json::to_value(&f).unwrap();
         assert_eq!(v["do"], "chat");

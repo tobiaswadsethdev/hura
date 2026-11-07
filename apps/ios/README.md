@@ -10,7 +10,9 @@ session's agent, and any shell beside it, is a terminal ([SwiftTerm](https://git
 with a key bar for esc, ctrl, tab and the arrows. A permission request can
 also be answered from its notification. Images in a chat are drawn, as on the
 desktop: a screenshot a tool answered with, and a file of the working copy a
-reply names.
+reply names. The **+** beside the message box sends photos from the library or
+files from Files with the next message; a photo goes as a JPEG of at most
+2048 pixels on its long side, which is as much as the model can use.
 
 Beside the tabs, a worktree's dock has what the desktop's has: its files,
 read-only, with images shown and zoomable; its git, to stage, commit, push and pull, with each file's diff;

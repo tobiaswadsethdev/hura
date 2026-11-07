@@ -16,6 +16,16 @@ markUntrustedMetrics();
 routeLinks();
 watchForUpdates();
 
+// The webview takes dropped files itself (`dragDropEnabled: false`), so a chat
+// can read them. A file dropped anywhere that does not take one would open it
+// in place of the window, so here it goes nowhere instead. A pane that does
+// take files handles the drop before it bubbles this far.
+for (const type of ["dragover", "drop"] as const) {
+  window.addEventListener(type, (e) => {
+    if (e.dataTransfer?.types.includes("Files")) e.preventDefault();
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     {/* The one place the icon grid is set. lucide's defaults are a 24-pixel

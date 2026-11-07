@@ -48,6 +48,7 @@ import {
   ChevronDown,
   ChevronRight,
   Check,
+  CheckCheck,
   CircleAlert,
   CircleArrowUp,
   CircleCheck,
@@ -78,6 +79,7 @@ import {
   Package,
   PanelRightClose,
   PanelRightOpen,
+  Paperclip,
   KeyRound,
   List,
   ListMinus,
@@ -252,6 +254,13 @@ export const Agent = Bot;
 export const Chat = MessagesSquare;
 /// Sending a message. An arrow up, which is where the message goes.
 export const Send = ArrowUp;
+/// A file sent with a message: the button that picks one, and the file once
+/// it is in the message.
+export const Attach = Paperclip;
+/// A message the sandbox has, and one Claude Code has taken into a turn: the
+/// receipts a messenger uses, because they are the ones already understood.
+export const Delivered = Check;
+export const Read = CheckCheck;
 /// A shell, in the menu that opens either: a prompt to type at.
 export const Shell = TerminalGlyph;
 /// This window, as opposed to the server it talks to.

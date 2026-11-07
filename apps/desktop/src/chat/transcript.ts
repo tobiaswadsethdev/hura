@@ -13,6 +13,7 @@
 // definition of the same thing to keep correct.
 
 import type { ChatEntry } from "../gen/ChatEntry";
+import type { ChatFile } from "../gen/ChatFile";
 import type {
   AssistantMessage,
   Block,
@@ -48,13 +49,23 @@ export type ToolCall = {
 };
 
 export type Item =
-  | { kind: "prompt"; key: string; text: string }
+  /// `at` is when it was sent and `read` when Claude Code took it into a turn,
+  /// both epoch milliseconds from the sandbox's clock; `read` is null until
+  /// then.
+  | { kind: "prompt"; key: string; text: string; files: ChatFile[]; at: number; read: number | null }
   | { kind: "text"; key: string; text: string }
   | { kind: "thinking"; key: string; text: string }
   | { kind: "tool"; key: string; call: ToolCall }
   | { kind: "note"; key: string; text: string; tone: "dim" | "bad" }
-  | { kind: "turn"; key: string; ok: boolean; text: string }
-  | { kind: "divider"; key: string; text: string };
+  | { kind: "turn"; key: string; ok: boolean; text: string; at: number }
+  | { kind: "divider"; key: string; text: string }
+  /// The first thing said on a day, so a time is never read as the wrong one.
+  | { kind: "day"; key: string; at: number };
+
+/// The same calendar day, where this window is.
+function sameDay(a: number, b: number): boolean {
+  return new Date(a).toDateString() === new Date(b).toDateString();
+}
 
 /// The text in a tool result, however it was sent. An image is left out:
 /// it is drawn, by `resultImages`.
@@ -98,22 +109,93 @@ const ERRORS: Record<string, string> = {
   model_not_found: "the model was not found",
 };
 
-export function build(entries: ChatEntry[]): Item[] {
+/// A subagent the conversation started, from the task events Claude Code
+/// keeps in the transcript. What it did is its call's `children`, which is
+/// where its messages are folded, so following one is reading those.
+export type Agent = {
+  /// The task's id, which a resumed agent keeps.
+  id: string;
+  /// The call that started it, or null while that call has not arrived.
+  call: ToolCall | null;
+  description: string;
+  /// `general-purpose`, `Explore` or a custom agent's name.
+  type: string | null;
+  /// Started in the background, so it outlives the turn that started it.
+  background: boolean;
+  status: "running" | "completed" | "failed" | "stopped";
+  started: number;
+  ended: number | null;
+  prompt: string;
+  usage: { total_tokens: number; tool_uses: number; duration_ms: number } | null;
+};
+
+/// The transcript as things to draw, your messages Claude has not read yet,
+/// which are drawn after everything else, the reply being written too, and
+/// the subagents, oldest first.
+export type Built = { items: Item[]; queued: Item[]; agents: Agent[] };
+
+/// A task's status in the words of one of four: `killed` is a stop, and
+/// `pending` and `paused` are still going.
+function status(s: unknown): Agent["status"] {
+  switch (s) {
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "stopped":
+    case "killed":
+      return "stopped";
+  }
+  return "running";
+}
+
+/// A message is placed where Claude read it rather than where it was sent: one
+/// sent mid-turn arrives in the transcript after that turn, beside the reply to
+/// it, and until then waits at the bottom. Only a message the host promised a
+/// receipt for waits; one kept before the host gave them stays where it was
+/// sent. So does one older than the last message read, which was dropped
+/// rather than read: a host restarted with it queued never delivered it.
+export function build(entries: ChatEntry[]): Built {
   const items: Item[] = [];
   const calls = new Map<string, ToolCall>();
+  const read = new Set<string>();
+  let lastRead = 0;
+  for (const e of entries) {
+    if (e.ev.kind === "read") {
+      read.add(e.ev.uuid);
+      lastRead = e.seq;
+    }
+  }
+  /// Waiting for their receipt, to be placed where it comes.
+  const held = new Map<string, Extract<Item, { kind: "prompt" }>>();
+  const agents = new Map<string, Agent & { callId: string | null }>();
 
   /// Where a message's items go: inside the call that started its subagent,
   /// or the transcript itself.
   const into = (parent: string | null): Item[] =>
     (parent !== null && calls.get(parent)?.children) || items;
+  /// Your messages, so their receipts can be filled in as they arrive.
+  const prompts = new Map<string, Extract<Item, { kind: "prompt" }>>();
+  let day: number | null = null;
 
   for (const entry of entries) {
     const ev = entry.ev;
     const key = String(entry.seq);
     switch (ev.kind) {
-      case "prompt":
-        items.push({ kind: "prompt", key, text: ev.text });
+      case "prompt": {
+        const prompt = { kind: "prompt" as const, key, text: ev.text, files: ev.files, at: entry.at, read: null };
+        prompts.set(ev.uuid, prompt);
+        if (read.has(ev.uuid) || (ev.receipt && entry.seq > lastRead)) held.set(ev.uuid, prompt);
+        else place(prompt, entry.at);
         break;
+      }
+      case "read": {
+        const prompt = prompts.get(ev.uuid);
+        if (!prompt) break;
+        prompt.read = entry.at;
+        if (held.delete(ev.uuid)) place(prompt, entry.at);
+        break;
+      }
       case "answer": {
         const call = calls.get(ev.id);
         const answer = { allow: ev.allow, always: ev.always, message: ev.message, answers: ev.answers };
@@ -127,13 +209,25 @@ export function build(entries: ChatEntry[]): Item[] {
         items.push({ kind: "note", key, tone: "bad", text: ev.message });
         break;
       case "sdk":
-        message(ev.msg as SdkMessage, key);
+        message(ev.msg as SdkMessage, key, entry.at);
         break;
     }
   }
-  return items;
+  return {
+    items,
+    queued: [...held.values()],
+    agents: [...agents.values()].map(({ callId, ...a }) => ({ ...a, call: (callId && calls.get(callId)) || null })),
+  };
 
-  function message(msg: SdkMessage, key: string) {
+  /// A message into the transcript at `at`, the first of its day under a line
+  /// naming the day.
+  function place(prompt: Item, at: number) {
+    if (day === null || !sameDay(day, at)) items.push({ kind: "day", key: `${prompt.key}.day`, at });
+    day = at;
+    items.push(prompt);
+  }
+
+  function message(msg: SdkMessage, key: string, at: number) {
     switch (msg.type) {
       case "assistant": {
         const m = msg as AssistantMessage;
@@ -199,18 +293,18 @@ export function build(entries: ChatEntry[]): Item[] {
         const r = msg as ResultMessage;
         const facts = [seconds(r.duration_ms), dollars(r.total_cost_usd)].filter(Boolean).join(" · ");
         if (r.subtype === "success" && !r.is_error) {
-          items.push({ kind: "turn", key, ok: true, text: facts });
+          items.push({ kind: "turn", key, ok: true, text: facts, at });
         } else if (r.subtype === "error_during_execution") {
           // What an interrupt ends with. Stopping a turn is not a failure of it.
-          items.push({ kind: "turn", key, ok: true, text: ["stopped", facts].filter(Boolean).join(" · ") });
+          items.push({ kind: "turn", key, ok: true, text: ["stopped", facts].filter(Boolean).join(" · "), at });
         } else {
           const why = r.subtype.replace(/^error_/, "").replaceAll("_", " ");
-          items.push({ kind: "turn", key, ok: false, text: [why, facts].filter(Boolean).join(" · ") });
+          items.push({ kind: "turn", key, ok: false, text: [why, facts].filter(Boolean).join(" · "), at });
         }
         break;
       }
       case "system":
-        system(msg as SystemMessage, key);
+        system(msg as SystemMessage, key, at);
         break;
       case "conversation_reset":
         items.push({ kind: "divider", key, text: "conversation cleared" });
@@ -227,9 +321,48 @@ export function build(entries: ChatEntry[]): Item[] {
     items.push({ kind: "note", key, tone: "dim", text: t.length > 400 ? `${t.slice(0, 400)}…` : t });
   }
 
-  function system(m: SystemMessage, key: string) {
+  function system(m: SystemMessage, key: string, at: number) {
     const text = (field: string) => (typeof m[field] === "string" ? (m[field] as string) : "");
     switch (m.subtype) {
+      // Subagents only: a background shell's output is a file in the sandbox,
+      // not a conversation, and an ambient task is housekeeping.
+      case "task_started": {
+        if (m.task_type !== "local_agent" || m.skip_transcript || m.ambient) break;
+        const id = text("task_id");
+        const had = agents.get(id);
+        agents.set(id, {
+          id,
+          // A resumed agent's messages stay under the call that first started it.
+          callId: had?.callId ?? (text("tool_use_id") || null),
+          call: null,
+          description: text("description") || had?.description || "agent",
+          type: text("subagent_type") || null,
+          background: Boolean(m.is_backgrounded),
+          status: "running",
+          started: had?.started ?? at,
+          ended: null,
+          prompt: had?.prompt || text("prompt"),
+          usage: had?.usage ?? null,
+        });
+        break;
+      }
+      case "task_updated": {
+        const agent = agents.get(text("task_id"));
+        const patch = (m.patch ?? {}) as { status?: string; end_time?: number; description?: string };
+        if (!agent) break;
+        if (patch.status) agent.status = status(patch.status);
+        if (patch.end_time) agent.ended = patch.end_time;
+        if (patch.description) agent.description = patch.description;
+        break;
+      }
+      case "task_notification": {
+        const agent = agents.get(text("task_id"));
+        if (!agent) break;
+        agent.status = status(m.status);
+        agent.ended ??= at;
+        if (m.usage) agent.usage = m.usage as Agent["usage"];
+        break;
+      }
       case "compact_boundary":
         items.push({ kind: "divider", key, text: "context compacted" });
         break;
