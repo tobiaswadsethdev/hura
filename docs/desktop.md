@@ -198,6 +198,17 @@ Every tab stays mounted and is hidden rather than unmounted: a terminal that
 unmounts closes its channel and detaches, so switching to the diff and back
 would lose the screen and re-attach.
 
+**A terminal behaves like one.** tmux has no status line in a pane and has the
+mouse, so the wheel scrolls its history. A drag selects in tmux and copies when
+the button comes up; Shift-drag (Option-drag on macOS) selects on the screen as
+drawn instead. Ctrl+Shift+C and Ctrl+Shift+V copy and paste (⌘C and ⌘V on
+macOS), as do Ctrl+C with something selected and Shift+Insert, and Ctrl+V on
+Windows. Ctrl-click (⌘-click) opens an address. Anything a program in the
+sandbox copies through OSC 52 lands on the clipboard; nothing can read it back.
+The status line and the mouse are set on hura's own tmux sessions when a pane
+attaches, so a worktree's sessions behave the same on the server user's tmux
+without touching their other sessions.
+
 **`+` opens another shell** in the same sandbox, under the same policy. In a
 chat session it is a menu of two, another conversation or a shell; see
 [talking to the agent](#talking-to-the-agent). It is

@@ -38,6 +38,11 @@ type View = {
   entries: ChatEntry[];
   /// The last entry this pane has, which is what a reopened channel asks from.
   seq: number;
+  /// The history is all here. A long one replays in several frames, oldest
+  /// first, and the host sends the state after the last of them -- so the
+  /// first state says so. Until then nothing is drawn: drawing each frame as
+  /// it came scrolled the whole conversation past on the way to the newest.
+  caughtUp: boolean;
   state: ChatState | null;
   live: Live;
   /// How long each running tool has been running, by tool use id.
@@ -54,6 +59,7 @@ type View = {
 const EMPTY: View = {
   entries: [],
   seq: 0,
+  caughtUp: false,
   state: null,
   live: null,
   progress: new Map(),
@@ -106,6 +112,7 @@ function reduce(v: View, a: Action): View {
       return {
         ...v,
         state: f.state,
+        caughtUp: true,
         live: idle ? null : v.live,
         progress: idle ? new Map() : v.progress,
         notice: null,
@@ -113,7 +120,7 @@ function reduce(v: View, a: Action): View {
       };
     }
     case "notice":
-      return { ...v, notice: f.text };
+      return { ...v, notice: f.text, caughtUp: true };
     case "error":
       return { ...v, error: f.message };
   }
@@ -502,7 +509,10 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
   const carriesFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
 
   const receiptsOn = view.state?.receipts ?? false;
-  const { items, queued, agents } = useMemo(() => build(view.entries), [view.entries]);
+  const { items, queued, agents } = useMemo(
+    () => (view.caughtUp ? build(view.entries) : build([])),
+    [view.caughtUp, view.entries],
+  );
   const [following, setFollowing] = useState<string | null>(null);
   const followed = agents.find((a) => a.id === following) ?? null;
   const openAgent = useMemo(
@@ -516,16 +526,32 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
   // Kept at the bottom while it is at the bottom: a reply being written
   // scrolls with itself, and someone who has scrolled up to read is left
   // where they are.
+  //
+  // On a change of size as well as of entries: a picture, a highlighted block
+  // or a diff fills in after the render that placed it, and the log grows
+  // without a scroll to say so -- the bottom was left behind by however tall
+  // it turned out to be, and the newest message was below the fold.
   const scroller = useRef<HTMLDivElement>(null);
+  const log = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [view.entries, view.live, view.state?.pending.length]);
+  }, [items, queued, view.live, view.state?.pending.length]);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !log.current) return;
+    const observer = new ResizeObserver(() => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(log.current);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const pending = view.state?.pending ?? [];
   const receipts = !receiptsOn ? "off" : view.state?.activity === "idle" ? "idle" : "working";
-  const nothing = view.entries.length === 0 && !view.live;
+  const nothing = items.length === 0 && queued.length === 0 && !view.live;
 
   return (
     <div className="chat-split">
@@ -557,10 +583,12 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
               pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
             }}
           >
-            <div className="chat-log">
+            <div className="chat-log" ref={log}>
               {nothing &&
                 (view.notice ? (
                   <Empty icon={Working} note={view.notice} />
+                ) : !view.caughtUp && view.entries.length > 0 ? (
+                  <Empty icon={Working} />
                 ) : view.state ? (
                   <Empty icon={ChatGlyph} />
                 ) : null)}
