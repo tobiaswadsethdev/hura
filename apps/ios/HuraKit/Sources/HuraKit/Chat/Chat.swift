@@ -305,7 +305,11 @@ public final class Chat {
     public private(set) var notice: String?
     /// The host refused something sent on this channel.
     public var error: String?
-    /// The transcript has arrived at least once.
+    /// The transcript has arrived whole at least once. A long one comes as
+    /// several replay frames, and the host sends the state after the last
+    /// of them, so it is the first state that says the history is all here
+    /// -- the view waits for it rather than drawing the oldest first and
+    /// scrolling through the rest as it arrives.
     public private(set) var loaded = false
     /// The host takes files with a message. One built before it did drops
     /// them without a word, so they're offered only when this says.
@@ -479,7 +483,6 @@ public final class Chat {
         switch f["t"]?.string {
         case "replay":
             if case let .array(list)? = f["entries"] { list.forEach(append) }
-            loaded = true
         case "entry":
             if let e = f["entry"] { append(e) }
         case "task":
@@ -501,6 +504,7 @@ public final class Chat {
             takesFiles = s["files"]?.bool ?? false
             receipts = s["receipts"]?.bool ?? false
             if activity == "idle" { streaming = "" }
+            loaded = true
         case "error":
             error = f["message"]?.string
         case "notice":

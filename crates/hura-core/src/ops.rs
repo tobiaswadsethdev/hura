@@ -1365,9 +1365,26 @@ fn edit_lists(f: impl FnOnce(&mut endpoints::Lists)) -> Result<(), String> {
 ///
 /// One definition, because the two paths have to leave the sandbox in the same
 /// state. `attach -d` evicts a client left behind by an earlier crash; without it
-/// a stale client makes the new attach share a resized, confusing view. Falling
-/// through to `new-session` means attaching always lands somewhere useful even if
-/// the agent was never started or has been killed.
+/// a stale client makes the new attach share a resized, confusing view. Creating
+/// the session first when it is missing means attaching always lands somewhere
+/// useful even if the agent was never started or has been killed.
+///
+/// Every target is `=`-prefixed, tmux's exact match. Without it a target that
+/// names no session is free to match one it is a prefix of, and the agent's
+/// session name is a prefix of every one of its shells'.
+///
+/// **The session is made to behave like a terminal before anything attaches**,
+/// with session options rather than the server's, because on a worktree the
+/// server is the server user's own tmux and their other sessions are theirs:
+///
+/// * `status off`: a tmux status line is a row of somebody else's chrome at the
+///   bottom of a pane that is already labelled, and the agent loses the row. The
+///   image's own config already says it; the server user's usually does not.
+/// * `mouse on`: the wheel scrolls tmux's history rather than being turned into
+///   arrow keys, which is what a terminal does with a wheel over a full-screen
+///   program and what tmux is to the terminal outside it. A drag selects in
+///   tmux, which copies on release through OSC 52 -- the clients put that on the
+///   clipboard -- and a modifier-drag is still the client's own selection.
 ///
 /// The resize afterwards is not cosmetic. tmux sizes a window to its latest
 /// client and *keeps* that size after the client leaves, and
@@ -1390,8 +1407,11 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
         String::new()
     };
     format!(
-        "{resume}{bin} attach -d -t {tmux} 2>/dev/null \
-         || {bin} new-session -s {tmux} -c {repo}; \
+        "{resume}{bin} has-session -t ={tmux} 2>/dev/null \
+         || {bin} new-session -d -s {tmux} -c {repo}; \
+         {bin} set -t ={tmux}: status off 2>/dev/null; \
+         {bin} set -t ={tmux}: mouse on 2>/dev/null; \
+         {bin} attach -d -t ={tmux}; \
          {bin} resize-window -t {tmux} -x {cols} -y {rows} 2>/dev/null; \
          {bin} set -w -t {tmux} window-size latest 2>/dev/null; \
          true",
@@ -1856,7 +1876,18 @@ mod tests {
     fn the_attach_script_attaches_falls_back_and_puts_the_size_back() {
         let s = session();
         let script = attach_script(&crate::backend::testing::sandboxed(), &s, &s.tmux);
-        assert!(script.contains("attach -d"), "{script}");
+        assert!(script.contains("attach -d -t ='agent'"), "{script}");
+        // A plain terminal: no status line, and a wheel that scrolls history.
+        for option in ["status off", "mouse on"] {
+            assert!(
+                script.contains(&format!("set -t ='agent': {option}")),
+                "the session must be set up before attaching: {script}"
+            );
+            assert!(
+                script.find(option) < script.find("attach -d"),
+                "{option} has to be set before the client draws: {script}"
+            );
+        }
         // Without these the client draws Claude Code's glyphs as underscores.
         assert!(
             script.contains("tmux -u "),

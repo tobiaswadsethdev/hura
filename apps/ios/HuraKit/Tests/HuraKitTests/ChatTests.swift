@@ -120,6 +120,25 @@ struct ChatTests {
         #"{"is":"chat","id":1,"frame":{"t":"entry","entry":{"seq":\#(seq),"at":0,"ev":{"kind":"prompt","text":"\#(text)","uuid":"u"}}}}"#
     }
 
+    /// A long transcript comes as several replay frames; the first state
+    /// after them is what says it is all here, so the view can open at the
+    /// newest rather than draw the oldest and scroll through the rest.
+    @Test func isLoadedOnlyOnceTheWholeReplayIsIn() async throws {
+        let socket = ScriptedSocket()
+        socket.dropWhenDone = false
+        socket.say(#"{"is":"opened","id":1}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"replay","seq":1,"entries":[{"seq":1,"at":0,"ev":{"kind":"prompt","text":"one","uuid":"a"}}]}}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"replay","seq":2,"entries":[{"seq":2,"at":0,"ev":{"kind":"prompt","text":"two","uuid":"b"}}]}}"#)
+        let chat = Chat(record: Self.record, session: "fix-tests", transport: { _ in socket })
+        chat.start()
+        defer { chat.stop() }
+        try await until { chat.entries.count == 2 }
+        #expect(!chat.loaded)
+
+        socket.say(#"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle"}}}"#)
+        try await until { chat.loaded }
+    }
+
     @Test func replaysThenFollowsAndResumesWhereItLeftOff() async throws {
         var sockets: [ScriptedSocket] = []
         let first = ScriptedSocket()

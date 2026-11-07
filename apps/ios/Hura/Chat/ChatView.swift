@@ -47,7 +47,7 @@ struct ChatView: View {
                 ZStack(alignment: .bottomTrailing) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
-                            if chat.entries.isEmpty { emptyState }
+                            if items.isEmpty && queued.isEmpty { emptyState }
                             ChatRows(items: items, cwd: Self.cwd, working: working, receipts: chat.receipts)
                             if !chat.streaming.isEmpty {
                                 MarkdownText(text: chat.streaming).opacity(0.8)
@@ -69,14 +69,8 @@ struct ChatView: View {
                     // or past the rows it has drawn, and it shows nothing
                     // until it is scrolled by hand.
                     .id(items.isEmpty)
-                    .onChange(of: chat.entries.count, initial: true) {
-                        let had = !items.isEmpty
-                        (items, queued) = ChatItem.fold(chat.entries)
-                        agents = AgentInfo.all(chat.entries)
-                        if had, atBottom {
-                            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-                        }
-                    }
+                    .onChange(of: chat.entries.count, initial: true) { fold(proxy) }
+                    .onChange(of: chat.loaded) { fold(proxy) }
                     .onChange(of: chat.streaming) {
                         if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
                     }
@@ -136,6 +130,22 @@ struct ChatView: View {
             Button("OK") { chat.error = nil }
         } message: {
             Text(chat.error ?? "")
+        }
+    }
+
+    /// The transcript as rows, once it is all here. A long one replays in
+    /// several frames, oldest first; drawing each as it came scrolled the
+    /// whole history past on the way to the newest. Until the chat says it
+    /// is loaded there is a spinner, and then the rows arrive at once and
+    /// the stack opens at the bottom. After that a new entry follows the
+    /// bottom only for someone already there.
+    private func fold(_ proxy: ScrollViewProxy) {
+        guard chat.loaded else { return }
+        let had = !items.isEmpty
+        (items, queued) = ChatItem.fold(chat.entries)
+        agents = AgentInfo.all(chat.entries)
+        if had, atBottom {
+            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
         }
     }
 

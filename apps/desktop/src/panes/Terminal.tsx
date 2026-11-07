@@ -5,6 +5,13 @@
 // sequences are the agent's, and the one thing this must not do is try to
 // understand them.
 //
+// Copy and paste are a terminal's, not a web page's. tmux has the mouse, so a
+// drag selects in tmux and copies on release -- which reaches here as OSC 52
+// and goes to the clipboard -- and the wheel scrolls tmux's history. Holding
+// Shift (Option on macOS) selects in the pane instead, for the screen as drawn.
+// Ctrl+Shift+C and Ctrl+Shift+V copy and paste where Ctrl+C has to stay an
+// interrupt; on macOS ⌘C and ⌘V already do, through the Edit menu.
+//
 // `xterm.open` goes through `withUsableFontMetrics` because WebKitGTK reports a
 // font's vertical metrics wrongly and xterm believes them. See charSize.ts:
 // without it the character cell is zero -- a pane that stays empty however much
@@ -12,12 +19,53 @@
 // two pixels short of the top.
 
 import { useEffect, useRef } from "react";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as Xterm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
 import { withUsableFontMetrics } from "../charSize";
+import { openExternal } from "../open";
 import { palette } from "../palette";
 import { close, decodeBytes, encodeBytes, nextChannelId, open, terminal } from "../stream";
+
+const MAC = navigator.userAgent.includes("Mac");
+const WINDOWS = /windows/i.test(navigator.userAgent);
+
+/// What a key does to the clipboard, if anything, before the terminal sees it.
+///
+/// Off macOS, where Ctrl is the terminal's: Ctrl+Shift+C and Ctrl+Shift+V as
+/// every Linux terminal has them, Shift+Insert, Ctrl+C only while something is
+/// selected -- otherwise it is the interrupt, and must stay one -- and Ctrl+V
+/// on Windows, where Windows Terminal has taught everyone it pastes.
+function clipboardKey(e: KeyboardEvent, selecting: boolean): "copy" | "paste" | null {
+  if (MAC || e.altKey || e.metaKey) return null;
+  const key = e.key.toLowerCase();
+  if (e.ctrlKey && e.shiftKey && key === "c") return "copy";
+  if (e.ctrlKey && e.shiftKey && key === "v") return "paste";
+  if (!e.ctrlKey && e.shiftKey && e.key === "Insert") return "paste";
+  if (e.ctrlKey && !e.shiftKey && key === "c" && selecting) return "copy";
+  if (e.ctrlKey && !e.shiftKey && key === "v" && WINDOWS) return "paste";
+  return null;
+}
+
+/// The text of an OSC 52, or `null` for one that is not putting text on the
+/// clipboard.
+///
+/// The payload is `<selections>;<base64>`. A `?` there asks for the clipboard
+/// to be *read* back into the stream, and is never answered: anything running
+/// in the sandbox could ask.
+function osc52Text(data: string): string | null {
+  const semi = data.indexOf(";");
+  if (semi < 0) return null;
+  const payload = data.slice(semi + 1);
+  if (!payload || payload === "?") return null;
+  try {
+    return new TextDecoder().decode(decodeBytes(payload));
+  } catch {
+    return null;
+  }
+}
 
 /// Which custom property each of xterm's colours comes from, and what to fall
 /// back to. See `palette.ts` for why this is resolved rather than written down.
@@ -105,8 +153,45 @@ export function TerminalPane({
       // The sandbox's tmux keeps the scrollback that matters; this is just what
       // the pane can scroll back through without asking for it again.
       scrollback: 5000,
+      // Shift already does this everywhere else; see the note at the top.
+      macOptionClickForcesSelection: true,
     });
     withUsableFontMetrics(element, () => xterm.open(element));
+
+    // Ctrl-click (⌘-click) on an address, as terminals do it: a plain click is
+    // tmux's, and opening a browser on every click that lands on a URL is not
+    // what anyone clicking in a terminal meant.
+    xterm.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        if (MAC ? event.metaKey : event.ctrlKey) openExternal(uri);
+      }),
+    );
+
+    const copy = () => {
+      const text = xterm.getSelection();
+      if (text) void writeText(text).catch(() => {});
+      xterm.clearSelection();
+    };
+    const paste = () => {
+      readText()
+        .then((text) => text && xterm.paste(text))
+        .catch(() => {});
+    };
+    xterm.attachCustomKeyEventHandler((e) => {
+      const action = clipboardKey(e, xterm.hasSelection());
+      if (!action) return true;
+      // Every phase of the key is swallowed, and only the press acts. The
+      // default is prevented as well: returning false keeps the key from the
+      // terminal, but not from a webview that would paste a second time.
+      e.preventDefault();
+      if (e.type === "keydown") (action === "copy" ? copy : paste)();
+      return false;
+    });
+    const clipboard = xterm.parser.registerOscHandler(52, (data) => {
+      const text = osc52Text(data);
+      if (text) void writeText(text).catch(() => {});
+      return true;
+    });
 
     const refit = () => {
       const size = gridFor(element, xterm);
@@ -165,6 +250,7 @@ export function TerminalPane({
       observer.disconnect();
       typed.dispose();
       resized.dispose();
+      clipboard.dispose();
       void close(id);
       xterm.dispose();
     };

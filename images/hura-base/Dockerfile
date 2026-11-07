@@ -113,10 +113,16 @@ RUN set -eu; \
 # is how a working agent is recognised, sits in the middle of that list and would
 # be the next thing to fall off it. 200 columns is not a display choice; it keeps
 # the markers on screen. Attaching resizes the window to the terminal as usual.
+#
+# `set-clipboard on` lets a program in a pane put text on the clipboard of the
+# terminal outside -- OSC 52, which is how Claude Code's `/copy` and an editor's
+# yank reach the window or the phone. tmux's default passes on only its own
+# copies, from a drag. Writing only: neither client answers a request to read.
 RUN printf '%s\n' \
         'set -g history-limit 50000' \
         'set -g status off' \
         'set -g mouse on' \
+        'set -s set-clipboard on' \
         'set -g escape-time 10' \
         'set -g default-size 200x50' \
         'set -g default-terminal tmux-256color' \

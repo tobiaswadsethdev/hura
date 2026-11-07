@@ -1125,7 +1125,12 @@ fn main() {
         // there is no browser behind it to hand a new tab to. This is what
         // gives one to the system's -- see `src/open.ts`, and the capability,
         // which lets it open web and mail addresses and nothing else.
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        // The terminal's copy and paste. A webview's own clipboard API wants a
+        // user gesture, and a copy made in tmux arrives as OSC 52 a round trip
+        // after the mouse let go -- too late to count as one. Reading is for
+        // Ctrl+Shift+V, which no webview treats as a paste.
+        .plugin(tauri_plugin_clipboard_manager::init());
 
     // Replacing itself, on the one platform that ships an installer to replace.
     // Checking and asking are the window's job -- see `src/Update.tsx`; these
