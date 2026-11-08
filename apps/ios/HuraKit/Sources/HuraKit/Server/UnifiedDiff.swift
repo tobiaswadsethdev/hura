@@ -122,9 +122,13 @@ public enum UnifiedDiff {
         return (start..<(a.count - end), start..<(b.count - end))
     }
 
+    /// Lines without their endings, whichever they are: a file checked in
+    /// with \n and checked out with \r\n would otherwise differ on every
+    /// line, and a stray \r draws as a second line break. The desktop's
+    /// Monaco ignores line endings the same way.
     private static func split(_ s: String) -> [String] {
         guard !s.isEmpty else { return [] }
-        var parts = s.components(separatedBy: "\n")
+        var parts = s.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         if parts.last == "" { parts.removeLast() }
         return parts
     }

@@ -186,7 +186,9 @@ enum LineDiff {
     }
 
     static func diff(_ old: String, _ new: String) -> [Line] {
-        let a = old.components(separatedBy: "\n"), b = new.components(separatedBy: "\n")
+        // \r\n as \n: a stray \r draws as a second line break.
+        let a = old.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        let b = new.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         // Large edits: show them as a replacement rather than spend time on LCS.
         guard a.count * b.count <= 250_000 else { return a.map(Line.removed) + b.map(Line.added) }
         var lcs = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
