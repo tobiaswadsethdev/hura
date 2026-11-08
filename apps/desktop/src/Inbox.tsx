@@ -2,15 +2,17 @@
 //
 // Always there, whatever worktree is selected and whatever screen is open,
 // because the question it answers ("what is mine right now?") is not about the
-// worktree in front of you. It replaced a tickets screen that hid the
-// workspace to show one column per filter, and the filters went with it:
-// every tracker is asked the same thing, what is assigned to you or created by
-// you, so the sidebar means the same thing whichever tracker it reads.
+// worktree in front of you. Every tracker is asked the same thing, what is
+// assigned to you or created by you, so that part means the same thing
+// whichever tracker it reads.
 //
 // **Two views, two groups each.** Tickets assigned to you and tickets you
 // created; pull requests waiting on you (a review asked of you, or assigned
 // to you) and pull requests you opened. A row in both groups is in the first,
-// because that is the half that asks something of you. The header switches
+// because that is the half that asks something of you. A Jira tracker's JQL
+// filters are a group each, between the two, holding every ticket they match,
+// yours included; and a tracker can leave out what you created, so with none
+// showing it the group is gone. The header switches
 // between tickets and pull requests rather than stacking them, so neither is
 // scrolled past to reach the other.
 //
@@ -67,6 +69,29 @@ const GROUPS: { key: string; relation: Relation; label: string }[] = [
   { key: "assigned", relation: "assigned", label: "assigned to me" },
   { key: "created", relation: "created", label: "created by me" },
 ];
+
+/// The tickets' groups: yours, then each JQL filter by name in the order the
+/// trackers list them (two trackers' filters of one name are one group), then
+/// what you created, when any tracker still shows it.
+function ticketGroups(
+  trackers: ConfiguredTracker[] | null,
+): { key: string; label: string; holds: (t: Task) => boolean }[] {
+  const filters = [
+    ...new Set((trackers ?? []).flatMap((t) => t.source.jql_filters.map((f) => f.name))),
+  ];
+  const created = trackers === null || trackers.some((t) => !t.source.hide_created);
+  return [
+    { key: "assigned", label: "assigned to me", holds: (t) => t.relation === "assigned" },
+    ...filters.map((name) => ({
+      key: `filter:${name}`,
+      label: name,
+      holds: (t: Task) => t.filters.includes(name),
+    })),
+    ...(created
+      ? [{ key: "created", label: "created by me", holds: (t: Task) => t.relation === "created" }]
+      : []),
+  ];
+}
 
 export function InboxBar({
   width,
@@ -234,9 +259,9 @@ export function InboxBar({
             </button>
           </Empty>
         ) : view === "tickets" ? (
-          GROUPS.map((g) => {
+          ticketGroups(trackers).map((g) => {
             const key = `tickets:${g.key}`;
-            const rows = tasks.filter((t) => t.relation === g.relation);
+            const rows = tasks.filter(g.holds);
             return (
               <Group
                 key={key}
@@ -321,7 +346,9 @@ function Rail({
 }) {
   const split = <T extends { relation: Relation }>(rows: T[], mine: string, theirs: string) => {
     const assigned = rows.filter((r) => r.relation === "assigned").length;
-    return `${assigned} ${theirs}, ${rows.length - assigned} ${mine}`;
+    const matched = rows.filter((r) => r.relation === "matched").length;
+    const rest = `${assigned} ${theirs}, ${rows.length - assigned - matched} ${mine}`;
+    return matched > 0 ? `${rest}, ${matched} more from filters` : rest;
   };
   return (
     <aside className="inbox-rail" aria-label="your tickets and pull requests, folded">

@@ -2583,6 +2583,19 @@ main { position: relative; }
 .panel .new-tracker .setting-actions .hint { margin-right: auto; }
 .setting-group .required { color: var(--warn); }
 
+/* What a tracker shows, under its row: a sentence with a box, then its JQL
+   filters as name-and-query pairs. Full width, because a query is the longest
+   thing on this screen and the one most worth reading whole. */
+.panel .tracker-shows { flex-basis: 100%; min-width: 100%; margin: 4px 0 6px; padding-left: 12px; }
+.panel .tracker-shows > label.tick { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+.panel .tracker-shows > .hint { margin: 8px 0 6px; max-width: 72ch; }
+.panel .tracker-filter { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+.panel .tracker-filter input { width: 140px; }
+.panel .tracker-filter input.jql { flex: 1; width: auto; font-family: var(--font-mono); font-size: 12px; }
+.panel .tracker-shows > button.add-filter { display: inline-flex; gap: 4px; align-items: center; margin-top: 4px; }
+.panel .tracker-shows .setting-actions { margin-top: 8px; }
+.panel .tracker-shows .setting-actions .unsaved { margin-right: auto; }
+
 .panel .problem {
   flex-basis: 100%;
   min-width: 100%;

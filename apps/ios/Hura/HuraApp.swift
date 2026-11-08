@@ -6,7 +6,7 @@ struct HuraApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
     private var model: AppModel { delegate.model }
     @State private var lock = AppLock()
-    @State private var trackers = TrackersModel()
+    private var trackers: TrackersModel { delegate.trackers }
     @State private var tab = 0
     @State private var pendingPairURL: String?
     @Environment(\.scenePhase) private var scenePhase
@@ -29,6 +29,13 @@ struct HuraApp: App {
                 // to the servers.
                 .onChange(of: model.pendingRoute) { _, route in
                     if route != nil { tab = 0 }
+                }
+                // A notification about a ticket or pull request.
+                .onChange(of: trackers.showInbox) { _, show in
+                    if show {
+                        tab = 1
+                        trackers.showInbox = false
+                    }
                 }
                 // Covers the content while locked, and whenever the app isn't
                 // active so the app switcher snapshot shows nothing.
@@ -66,6 +73,7 @@ struct HuraApp: App {
                 lock.lock()
                 model.suspendAll()
                 trackers.suspend()
+                trackers.scheduleBackgroundRead()
             default:
                 break
             }

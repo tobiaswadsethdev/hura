@@ -1,3 +1,4 @@
+import BackgroundTasks
 import HuraKit
 import UIKit
 import UserNotifications
@@ -49,15 +50,23 @@ enum NotificationCategories {
     }
 }
 
-/// Owns the model so notification callbacks, which can arrive before any view
-/// exists (an answer launches the app in the background), have it at hand.
+/// Owns the models so notification callbacks, which can arrive before any
+/// view exists (an answer launches the app in the background), have them at
+/// hand, and so does a background read of the trackers.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     let model = AppModel()
+    let trackers = TrackersModel()
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         NotificationCategories.register()
+        // Registered before launch finishes, as BGTaskScheduler requires.
+        let trackers = trackers
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: TrackersModel.backgroundTask, using: .main) { task in
+            guard let task = task as? BGAppRefreshTask else { return task.setTaskCompleted(success: false) }
+            MainActor.assumeIsolated { trackers.readInBackground(task) }
+        }
         Task { await model.registerForPushIfAllowed() }
         return true
     }
@@ -83,6 +92,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        // A change on a tracker, which the app noticed itself: to the inbox.
+        if response.notification.request.content.userInfo["inbox"] != nil {
+            await MainActor.run { trackers.showInbox = true }
+            return
+        }
         guard let target = NotificationTarget(userInfo: response.notification.request.content.userInfo) else { return }
         let action = response.actionIdentifier
         // iOS keeps the app running until this returns, so the answer is awaited.

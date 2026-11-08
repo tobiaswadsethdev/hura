@@ -640,6 +640,13 @@ fn set_tracker_token(name: String, token: String) -> Result<Vec<Configured>, Fai
     change_trackers(|t| t.set_token(&name, &token))
 }
 
+/// Change a tracker's filters, or whether it hides what you created. Its
+/// token stays where it is and is not sent back for this.
+#[tauri::command(async)]
+fn edit_tracker(name: String, tracker: TrackerSource) -> Result<Vec<Configured>, Failed> {
+    change_trackers(|t| t.edit(&name, &tracker))
+}
+
 #[tauri::command(async)]
 fn forget_tracker(name: String) -> Result<Vec<Configured>, Failed> {
     change_trackers(|t| t.forget(&name))
@@ -1210,6 +1217,7 @@ fn main() {
             trackers,
             add_tracker,
             set_tracker_token,
+            edit_tracker,
             forget_tracker,
             upload_skills,
             forget_skill,

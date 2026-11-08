@@ -12,6 +12,19 @@ struct TrackerCoreTests {
         }
     }
 
+    /// Filters go to hura-core and come back trimmed, and one it would
+    /// refuse to run is refused before it is kept.
+    @Test func checksATrackersFilters() async throws {
+        let jira = TrackerSource(kind: "jira", name: "work", site: "https://x.atlassian.net", email: "a@b.c",
+                                 hideCreated: true, jqlFilters: [JqlFilter(name: " ready ", jql: "status = Ready")])
+        let checked = try await TrackerCore.check(jira)
+        #expect(checked.hideCreated)
+        #expect(checked.jqlFilters == [JqlFilter(name: "ready", jql: "status = Ready")])
+        var github = TrackerSource(kind: "git-hub", name: "gh")
+        github.jqlFilters = [JqlFilter(name: "ready", jql: "status = Ready")]
+        await #expect(throws: TrackerError.self) { _ = try await TrackerCore.check(github) }
+    }
+
     @Test func namesATicketsBranchUnderAServersPrefix() async throws {
         let b = try await TrackerCore.branch(prefix: "tobias", key: "PROJ-12", title: "Add the changelog")
         #expect(b.hasPrefix("tobias/PROJ-12"))

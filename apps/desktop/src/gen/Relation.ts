@@ -4,6 +4,7 @@
  * Which side of "mine" a ticket or a pull request is on.
  *
  * The sidebar's two groups under each heading. Not a filter anybody wrote: it
- * is read off the ticket, the same way on every tracker.
+ * is read off the ticket, the same way on every tracker. A ticket that is
+ * there only because a filter matched it is neither, and says so.
  */
-export type Relation = "assigned" | "created";
+export type Relation = "assigned" | "created" | "matched";

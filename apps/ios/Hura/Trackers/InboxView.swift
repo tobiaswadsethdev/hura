@@ -2,7 +2,8 @@ import HuraKit
 import SwiftUI
 
 /// What is yours on every tracker: tickets assigned to you or created by you
-/// that aren't done, and open pull requests you opened or that wait on you.
+/// that aren't done, a section for each of a Jira tracker's JQL filters, and
+/// open pull requests you opened or that wait on you.
 /// The desktop's tickets sidebar, as a tab: tickets or pull requests, one at
 /// a time, so neither is scrolled past to reach the other.
 struct InboxView: View {
@@ -25,8 +26,13 @@ struct InboxView: View {
                     }
                     switch showing {
                     case .tickets:
-                        tickets(inbox, relation: "assigned", title: "Assigned to me")
-                        tickets(inbox, relation: "created", title: "Created by me")
+                        tickets(inbox, title: "Assigned to me") { $0.relation == "assigned" }
+                        ForEach(filterNames, id: \.self) { name in
+                            tickets(inbox, title: name) { $0.filters.contains(name) }
+                        }
+                        if trackers.trackers.contains(where: { !$0.source.hideCreated }) {
+                            tickets(inbox, title: "Created by me") { $0.relation == "created" }
+                        }
                     case .pulls:
                         pulls(inbox.pulls.filter(\.reviewRequested), title: "Waiting on my review")
                         pulls(inbox.pulls.filter { !$0.reviewRequested }, title: "My pull requests")
@@ -97,9 +103,16 @@ struct InboxView: View {
         count.map { "\(name) (\($0))" } ?? name
     }
 
+    /// Every tracker's filters, in the order they are listed; two of one name
+    /// are one section, as on the desktop.
+    private var filterNames: [String] {
+        var seen = Set<String>()
+        return trackers.trackers.flatMap { $0.source.jqlFilters.map(\.name) }.filter { seen.insert($0).inserted }
+    }
+
     @ViewBuilder
-    private func tickets(_ inbox: Inbox, relation: String, title: String) -> some View {
-        let rows = newestFirst(inbox.tasks.filter { $0.relation == relation })
+    private func tickets(_ inbox: Inbox, title: String, holds: (TrackerTask) -> Bool) -> some View {
+        let rows = newestFirst(inbox.tasks.filter(holds))
         if !rows.isEmpty {
             Section(title) {
                 ForEach(rows) { t in

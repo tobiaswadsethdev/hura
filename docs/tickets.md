@@ -1,8 +1,8 @@
 # Tickets and pull requests
 
 What is yours on your trackers, in a sidebar on the far right of the window:
-the tickets assigned to you or created by you, and the pull requests you opened
-or that are waiting on you. It is there whatever worktree is selected and
+the tickets assigned to you or created by you, whatever your Jira filters hold,
+and the pull requests you opened or that are waiting on you. It is there whatever worktree is selected and
 whatever screen is open, because "what is mine right now?" is not a question
 about the worktree in front of you.
 
@@ -27,7 +27,7 @@ about the worktree in front of you.
 
 Each heading has two groups. A ticket that is both assigned to you and created
 by you is in **assigned to me**, because that is the half that asks something
-of you. A pull request you opened and assigned to yourself is in **created by
+of you. A Jira tracker's [filters](#filters) are a group each, between the two. A pull request you opened and assigned to yourself is in **created by
 me**, because assigning yourself your own pull request does not make it a
 review. Within a group, the newest change is first. A group's name shuts it,
 and the window remembers which ones you shut.
@@ -80,8 +80,9 @@ reason.
 
 ## What is asked
 
-Every tracker is asked the same question. There are no filters to write: the
-sidebar means the same thing whichever tracker it reads.
+Every tracker is asked the same question, so that part of the sidebar means the
+same thing whichever tracker it reads. A tracker can leave out what you
+created (see [Filters](#filters)); the table is what it asks otherwise.
 
 | Tracker | Tickets | Pull requests |
 | --- | --- | --- |
@@ -111,6 +112,39 @@ A tracker that could not be read says so at the top of the sidebar rather than
 leaving its rows quietly missing, which would look exactly like having nothing
 assigned. An Azure DevOps token that can read work items but not code says
 that its pull requests need *Code (read)*; its tickets still show.
+
+## Filters
+
+**A Jira tracker can have JQL filters of its own**, each a name and a query, set
+under that tracker on the settings screen (on the phone, by tapping the
+tracker). Each is a group in the sidebar, named after it, between **assigned to
+me** and **created by me**, and holds every ticket the query matches, yours
+included. Two trackers' filters of the same name are one group.
+
+```
+ │ ⌄ assigned to me                2 │
+ │ ⌄ ready for review              3 │
+ │ ⌄ created by me                 1 │
+```
+
+The JQL is sent as written, to the same `/rest/api/3/search/jql` with the same
+fields, one request per filter after your own search, and the first hundred
+results are read. Nothing is added to it, so a filter that should leave done
+tickets out says `statusCategory != Done`. A filter with a query Jira refuses
+says so at the top of the sidebar, as `work · ready: <what Jira said>`, and the
+rest of the tracker is read as usual. A filter needs a name and a query, and
+two on one tracker cannot share a name; that is checked when it is saved.
+
+**Every tracker can leave out the tickets you created** that nobody has
+assigned you: *show the tickets I created*, under the tracker. On Jira that
+narrows its own search to `assignee = currentUser()`. With every tracker leaving
+them out, the **created by me** group is gone. A ticket you created that a
+filter matches is still in that filter. Pull requests you opened are not
+affected.
+
+Filters are kept with the tracker, in `trackers.json` beside its token, as
+`jql_filters`. The filters from before the sidebar (a `filters` list that
+replaced the default query) are a different thing and are still ignored.
 
 ## REST here, MCP there
 
@@ -227,6 +261,9 @@ its header, and sends an OS notification when:
 * a ticket **gets a comment from somebody else**. Your own are never announced,
   which is why Jira is asked who the token belongs to;
 * a ticket **becomes yours**: `PROJ-12 · assigned to you`;
+* a ticket **turns up in one of your filters**: `PROJ-40 · new in ready for review`.
+  A ticket that is only there for a filter is also announced when it changes
+  status or gets a comment, like your own;
 * a pull request **starts waiting on you**: `Spoon-Knife #61 · review requested`;
 * one of **your** pull requests' **checks fail**, or it is **approved**, or
   **changes are asked for**.
@@ -237,9 +274,21 @@ after a weekend) is one notification listing them.
 
 What was seen is kept in the window's own storage, so a ticket that moved while
 the window was closed is announced when it opens. The first read is the
-baseline and says nothing, and so is the first read of a tracker you have just
-added. A tracker that could not be read is not a list of things that left it,
-and it coming back is not a list of arrivals.
+baseline and says nothing, and so is the first read of a tracker or a filter
+you have just added. A tracker that could not be read is not a list of things
+that left it, and it coming back is not a list of arrivals. A filter that could
+not be read starts again from a baseline when it next answers.
+
+**The phone notifies too**, from its own reads with its own tokens: the same
+changes, in the same words, as notifications from the hura app. It is **Notify
+When They Change** on the app's trackers screen, off until you turn it on,
+because turning it on asks for permission. The app reads every three minutes
+while it is open, and in the background as often as iOS lets it (background
+app refresh, at most every fifteen minutes and often hours apart, less when
+the phone is low on battery and not at all if background refresh is off for
+hura). So a phone notification can come late, but the change is never missed:
+the next read finds it. No server and no relay is involved, and the tokens
+stay in the phone's Keychain.
 
 It is **notify when my tickets or pull requests change** on the settings
 screen. Turned off, the sidebar is still read on its timer, because it is on

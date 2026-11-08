@@ -302,11 +302,6 @@ struct NewWorktreeView: View {
     }
 }
 
-/// `repo #12`, as the desktop names a pull request.
-func pullName(_ p: PullRequestSummary) -> String {
-    "\(p.repo.split(separator: "/").last.map(String.init) ?? p.repo) \(p.key)"
-}
-
 /// The task a pull request starts with: `pullTask` in the desktop's
 /// NewWorktree.tsx.
 func pullTask(_ p: PullRequestSummary, review: Bool) -> String {

@@ -15,8 +15,8 @@ use std::sync::mpsc::{Sender, channel};
 
 use hura_core::tracker::markdown::Markdown;
 use hura_core::tracker::{
-    Editable, FieldChange, Kind, Relation, Source, Stored, comment, delete_comment, inbox, save,
-    transition,
+    Editable, FieldChange, FilterRead, JqlFilter, Kind, Relation, Source, Stored, comment,
+    delete_comment, inbox, save, transition,
 };
 
 /// One request the stand-in received.
@@ -168,6 +168,89 @@ fn a_jira_tracker_is_one_search_grouped_by_whose_it_is() {
         search.contains("assignee") && search.contains("comment"),
         "{search}"
     );
+}
+
+/// A tracker with JQL filters asks each beside its own search. A ticket of
+/// yours a filter matches is one row with the filter's name on it; one that is
+/// not yours is `Matched`; a filter with bad JQL is a warning naming it and
+/// leaves the rest read. With what you created hidden, the search asks only
+/// for what is assigned to you.
+#[test]
+fn jql_filters_are_merged_into_yours_and_fail_alone() {
+    let (tx, rx) = channel();
+    // `/myself`, your search, then the two filters.
+    let port = answering(4, tx, |_, path| {
+        if path.contains("/myself") {
+            return (200, r#"{"accountId":"me-1"}"#.to_string());
+        }
+        if path.contains("broken") {
+            return (
+                400,
+                r#"{"errorMessages":["Field 'broken' does not exist."]}"#.to_string(),
+            );
+        }
+        let mine = r#"{"key":"PROJ-12","fields":{"summary":"Mine","status":{"name":"To Do"},
+            "assignee":{"accountId":"me-1"}}}"#;
+        let theirs = r#"{"key":"PROJ-40","fields":{"summary":"Theirs","status":{"name":"Ready"},
+            "assignee":{"accountId":"them-2"}}}"#;
+        let body = if path.contains("Ready") {
+            format!(r#"{{"issues":[{mine},{theirs}]}}"#)
+        } else {
+            format!(r#"{{"issues":[{mine}]}}"#)
+        };
+        (200, body)
+    });
+    let mut stored = jira_at(port);
+    stored.source.hide_created = true;
+    stored.source.jql_filters = vec![
+        JqlFilter {
+            name: "ready".into(),
+            jql: "status = Ready".into(),
+        },
+        JqlFilter {
+            name: "typo".into(),
+            jql: "broken = 1".into(),
+        },
+    ];
+
+    let got = inbox(&[stored], "tobias");
+    let rows: Vec<(&str, Relation, Vec<String>)> = got
+        .tasks
+        .iter()
+        .map(|t| (t.key.as_str(), t.relation, t.filters.clone()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("PROJ-12", Relation::Assigned, vec!["ready".to_string()]),
+            ("PROJ-40", Relation::Matched, vec!["ready".to_string()]),
+        ]
+    );
+    assert_eq!(
+        got.read,
+        ["work"],
+        "a bad filter does not unread the tracker"
+    );
+    assert_eq!(
+        got.filters_read,
+        [FilterRead {
+            tracker: "work".into(),
+            filter: "ready".into()
+        }]
+    );
+    assert_eq!(got.warnings.len(), 1, "{:?}", got.warnings);
+    assert!(
+        got.warnings[0].starts_with("work · typo:") && got.warnings[0].contains("does not exist"),
+        "{:?}",
+        got.warnings
+    );
+
+    let paths: Vec<String> = rx.try_iter().map(|s| s.path).collect();
+    let yours = paths
+        .iter()
+        .find(|p| p.contains("currentUser"))
+        .expect("your own search");
+    assert!(!yours.contains("reporter"), "{yours}");
 }
 
 /// A tracker with no token yet is a warning naming it, and nothing is asked:

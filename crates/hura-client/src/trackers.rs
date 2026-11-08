@@ -96,6 +96,20 @@ impl Trackers {
         Ok(())
     }
 
+    /// Change one, keeping its token: its JQL filters, whether it hides what
+    /// you created, where it points. Not its name, which sessions started
+    /// from its tickets record; forget it and add it again for that.
+    pub fn edit(&mut self, name: &str, source: &Source) -> Result<(), String> {
+        let source = checked(source)?;
+        if source.name != name {
+            return Err(format!(
+                "a tracker cannot be renamed; `{name}` is still `{name}`"
+            ));
+        }
+        self.find(name)?.source = source;
+        Ok(())
+    }
+
     /// Take one away, token and all.
     pub fn forget(&mut self, name: &str) -> Result<(), String> {
         let before = self.trackers.len();
@@ -183,6 +197,41 @@ mod tests {
         assert_eq!(back.list()[0].source.name, "work");
         assert!(back.views()[0].token_set);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// Filters are added to a tracker that exists, and its token stays.
+    #[test]
+    fn a_tracker_is_edited_without_losing_its_token() {
+        use hura_core::tracker::JqlFilter;
+        let mut t = Trackers::default();
+        t.add(&jira("work"), Some("tok")).unwrap();
+        let edited = Source {
+            hide_created: true,
+            jql_filters: vec![JqlFilter {
+                name: " ready ".into(),
+                jql: "status = Ready".into(),
+            }],
+            ..jira("work")
+        };
+        t.edit("work", &edited).unwrap();
+        assert_eq!(t.list()[0].token.as_deref(), Some("tok"));
+        assert!(t.list()[0].source.hide_created);
+        assert_eq!(t.list()[0].source.jql_filters[0].name, "ready", "trimmed");
+
+        let renamed = Source {
+            name: "home".into(),
+            ..edited.clone()
+        };
+        assert!(t.edit("work", &renamed).unwrap_err().contains("renamed"));
+        assert!(t.edit("nope", &jira("nope")).is_err());
+        let empty = Source {
+            jql_filters: vec![JqlFilter {
+                name: "ready".into(),
+                jql: "  ".into(),
+            }],
+            ..jira("work")
+        };
+        assert!(t.edit("work", &empty).unwrap_err().contains("no JQL"));
     }
 
     #[test]

@@ -58,6 +58,11 @@ targets:
           - CFBundleURLName: hura-pair
             CFBundleURLSchemes: [hura]
         ITSAppUsesNonExemptEncryption: false
+        # The trackers are read now and then in the background, to notify
+        # when your tickets change (TrackersModel.scheduleBackgroundRead).
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers:
+          - $(PRODUCT_BUNDLE_IDENTIFIER).inbox
         HuraRelayHost: $(HURA_RELAY_HOST)
         HuraKeychainGroup: $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
     entitlements:
