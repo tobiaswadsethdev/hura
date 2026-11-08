@@ -1,7 +1,9 @@
 // An OS notification when something of yours on a tracker changes.
 //
-// Tickets, three ways: its status moved, somebody else commented on it, or it
-// became yours (assigned to you, where it was not). Anything else Jira counts
+// Tickets, four ways: its status moved, somebody else commented on it, it
+// became yours (assigned to you, where it was not), or it turned up in one of
+// your JQL filters. A ticket that is there only for a filter is watched for
+// the first two like your own: that is what watching a filter is for. Anything else Jira counts
 // as an update (a label, a sprint, a re-estimate) is left alone, because a
 // notification for every edit is one nobody reads by the end of the week.
 //
@@ -18,7 +20,10 @@
 // **Only trackers that were read take part.** A tracker that is down reads as
 // an empty list, and treating that as everything having left would make all
 // of it "new" when the tracker comes back. `Inbox.read` and `pulls_read` say
-// which trackers actually answered; the rest keep what they had.
+// which trackers actually answered; the rest keep what they had. A filter is
+// the same one level down, by `filters_read`, except that one which fails is
+// forgotten rather than kept: its next answer is a baseline again, because a
+// tracker that answered has already replaced the tickets the filter held.
 
 import { sendNotification } from "@tauri-apps/plugin-notification";
 
@@ -38,6 +43,9 @@ type SeenTicket = {
   status: string;
   comments: number | null;
   relation: Relation;
+  /// The JQL filters it was in. Missing from a snapshot written before
+  /// there were any.
+  filters?: string[];
 };
 
 /// What is remembered about one pull request.
@@ -59,6 +67,8 @@ type Snapshot = {
   /// first answer is a baseline, not a list of arrivals.
   read: string[];
   pullsRead: string[];
+  /// The JQL filters read at least once, keyed `tracker \0 filter`.
+  filtersRead: string[];
 };
 
 /// One change worth saying, about one ticket or pull request.
@@ -77,6 +87,7 @@ const SUMMARISE_OVER = 3;
 const ticketKey = (t: { tracker: string; id: string }) => `${t.tracker}\0${t.id}`;
 const pullKey = (p: { tracker: string; repo: string; id: string }) =>
   `${p.tracker}\0${p.repo}\0${p.id}`;
+const filterKey = (tracker: string, filter: string) => `${tracker}\0${filter}`;
 
 /// What a pull request is called in a notification: the repository's own name
 /// and its number, since a number alone is ambiguous across repositories.
@@ -120,6 +131,7 @@ function snapshot(before: Snapshot | null, inbox: Inbox): Snapshot {
       status: t.status,
       comments: t.comments,
       relation: t.relation,
+      filters: t.filters,
     };
   }
 
@@ -138,9 +150,17 @@ function snapshot(before: Snapshot | null, inbox: Inbox): Snapshot {
     };
   }
 
+  // A tracker that answered says which of its filters did; one that did not
+  // keeps what it had.
+  const filtersRead = (before?.filtersRead ?? []).filter(
+    (key) => !read.has(key.slice(0, key.indexOf("\0"))),
+  );
+  for (const f of inbox.filters_read) filtersRead.push(filterKey(f.tracker, f.filter));
+
   return {
     tickets,
     pulls,
+    filtersRead,
     read: [...new Set([...(before?.read ?? []), ...inbox.read])],
     pullsRead: [...new Set([...(before?.pullsRead ?? []), ...inbox.pulls_read])],
   };
@@ -151,12 +171,15 @@ function snapshot(before: Snapshot | null, inbox: Inbox): Snapshot {
 export function diff(before: Snapshot, inbox: Inbox): Change[] {
   const known = new Set(before.read);
   const knownPulls = new Set(before.pullsRead);
+  const knownFilters = new Set(before.filtersRead);
   const out: Change[] = [];
 
   for (const task of inbox.tasks) {
     // A tracker answering for the first time is a baseline.
     if (!known.has(task.tracker)) continue;
-    const what = ticketChanges(before.tickets[ticketKey(task)], task);
+    const what = ticketChanges(before.tickets[ticketKey(task)], task, (f) =>
+      knownFilters.has(filterKey(task.tracker, f)),
+    );
     if (what.length > 0) out.push({ key: task.key, title: task.title, what: what.join(", ") });
   }
 
@@ -169,12 +192,23 @@ export function diff(before: Snapshot, inbox: Inbox): Change[] {
   return out;
 }
 
-function ticketChanges(was: SeenTicket | undefined, task: Task): string[] {
+function ticketChanges(
+  was: SeenTicket | undefined,
+  task: Task,
+  /// Whether a filter has answered before, so that its first answer is a
+  /// baseline rather than a list of arrivals.
+  known: (filter: string) => boolean,
+): string[] {
   const what: string[] = [];
   // Yours now, and not before. One you created turning up is not news: you
   // know you made it.
   if (task.relation === "assigned" && was?.relation !== "assigned") {
     what.push("assigned to you");
+  }
+  // In a filter now, and not before. Said whatever else changed, because
+  // what a filter is waiting for is usually exactly that ticket arriving.
+  for (const f of task.filters) {
+    if (known(f) && !(was?.filters ?? []).includes(f)) what.push(`new in ${f}`);
   }
   if (!was) return what;
   if (was.status !== task.status) what.push(`${was.status} → ${task.status}`);
@@ -215,7 +249,7 @@ async function announce(changes: Change[]) {
     changes.length > SUMMARISE_OVER
       ? [
           {
-            title: `${changes.length} changes in your tickets and pull requests`,
+            title: `${changes.length} changes in your tickets, filters and pull requests`,
             body: changes.map((c) => `${c.key} · ${c.what}`).join("\n"),
           },
         ]
@@ -241,6 +275,7 @@ function load(): Snapshot | null {
       pulls: parsed.pulls ?? {},
       read: Array.isArray(parsed.read) ? parsed.read : [],
       pullsRead: Array.isArray(parsed.pullsRead) ? parsed.pullsRead : [],
+      filtersRead: Array.isArray(parsed.filtersRead) ? parsed.filtersRead : [],
     };
   } catch {
     // A snapshot that will not parse is one written by something else; the

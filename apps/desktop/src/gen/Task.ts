@@ -61,6 +61,12 @@ repo: string | null,
  */
 relation: Relation, 
 /**
+ * The tracker's JQL filters this ticket is in, by name, in the order the
+ * tracker lists them. Independent of `relation`: a filter shows every
+ * ticket it matches, yours included.
+ */
+filters: Array<string>, 
+/**
  * When the tracker last saw it change, in the tracker's own format. Only
  * ever compared with an earlier value of itself.
  */

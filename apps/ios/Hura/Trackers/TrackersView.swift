@@ -1,13 +1,14 @@
 import HuraKit
 import SwiftUI
 
-/// The trackers this phone reads: added with a token, given a new token, or
-/// forgotten. Kept in this phone's Keychain and sent nowhere but the tracker.
+/// The trackers this phone reads: added with a token, changed (its token, its
+/// filters, whether it shows what you created), or forgotten. Kept in this
+/// phone's Keychain and sent nowhere but the tracker.
 struct TrackersView: View {
     @Environment(TrackersModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var adding = false
-    @State private var tokenFor: String?
+    @State private var editing: String?
     @State private var failed: String?
 
     var body: some View {
@@ -18,11 +19,15 @@ struct TrackersView: View {
                         Text("None yet").foregroundStyle(.secondary)
                     }
                     ForEach(model.trackers, id: \.source.name) { t in
-                        Button { tokenFor = t.source.name } label: {
+                        Button { editing = t.source.name } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(t.source.name)
                                     Text(where_(t.source)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    if !t.source.jqlFilters.isEmpty {
+                                        Text(t.source.jqlFilters.map(\.name).joined(separator: " · "))
+                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
                                 }
                                 Spacer()
                                 Text(t.hasToken ? "token stored" : "NO token")
@@ -39,7 +44,16 @@ struct TrackersView: View {
                     }
                     Button("Add a Tracker", systemImage: "plus") { adding = true }
                 } footer: {
-                    Text("Tickets assigned to you or created by you, and pull requests you opened or that wait on you. Read from this phone with its own tokens, which stay in its Keychain: no server holds them.")
+                    Text("Tickets assigned to you or created by you, a Jira tracker's own JQL filters, and pull requests you opened or that wait on you. Read from this phone with its own tokens, which stay in its Keychain: no server holds them.")
+                }
+                Section {
+                    Toggle("Notify When They Change", isOn: Binding(get: { model.notify }, set: { on in
+                        Task {
+                            do { try await model.setNotify(on) } catch { failed = error.localizedDescription }
+                        }
+                    }))
+                } footer: {
+                    Text("A ticket that changes status, gets a comment from somebody else, becomes yours or turns up in a filter, and a pull request that starts waiting on you or whose checks fail or review comes back. Read every three minutes while hura is open and now and then in the background, when iOS allows; in the background, that can be hours apart.")
                 }
             }
             .navigationTitle("Trackers")
@@ -48,16 +62,17 @@ struct TrackersView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
             .sheet(isPresented: $adding) { AddTrackerView() }
-            .sheet(item: Binding(get: { tokenFor.map(Named.init) }, set: { tokenFor = $0?.name })) { n in
-                TokenSheet(name: n.name)
+            .sheet(item: Binding(get: { editing.flatMap(model.tracker(named:)).map(Named.init) },
+                                 set: { editing = $0?.tracker.source.name })) { n in
+                TrackerSheet(tracker: n.tracker)
             }
             .failure($failed)
         }
     }
 
     private struct Named: Identifiable {
-        var name: String
-        var id: String { name }
+        var tracker: StoredTracker
+        var id: String { tracker.source.name }
     }
 
     private func where_(_ s: TrackerSource) -> String {
@@ -167,22 +182,64 @@ struct AddTrackerView: View {
     }
 }
 
-/// A tracker's token, replaced.
-private struct TokenSheet: View {
-    let name: String
+/// One tracker: what it shows beside what is assigned to you, and its token.
+private struct TrackerSheet: View {
+    let tracker: StoredTracker
     @Environment(TrackersModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var showCreated: Bool
+    @State private var filters: [JqlFilter]
     @State private var token = ""
+    @State private var busy = false
     @State private var error: String?
+
+    init(tracker: StoredTracker) {
+        self.tracker = tracker
+        _showCreated = State(initialValue: !tracker.source.hideCreated)
+        _filters = State(initialValue: tracker.source.jqlFilters)
+    }
+
+    private var name: String { tracker.source.name }
+    private var trimmedToken: String { token.trimmingCharacters(in: .whitespaces) }
+    private var edited: Bool { showCreated == tracker.source.hideCreated || filters != tracker.source.jqlFilters }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    SecureField("Paste the new token", text: $token)
+                    Toggle("Tickets I Created", isOn: $showCreated)
                 } footer: {
-                    Text(error ?? "It replaces the one this phone has for \(name).")
-                        .foregroundStyle(error == nil ? Color.secondary : Color.red)
+                    Text("Off leaves out the tickets you created that nobody has assigned you.")
+                }
+                if tracker.source.kind == "jira" {
+                    Section {
+                        ForEach($filters.indices, id: \.self) { i in
+                            VStack(alignment: .leading, spacing: 6) {
+                                TextField("Name", text: $filters[i].name)
+                                TextField("JQL", text: $filters[i].jql, axis: .vertical)
+                                    .font(.callout.monospaced())
+                                    .lineLimit(1...4)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
+                        }
+                        .onDelete { filters.remove(atOffsets: $0) }
+                        Button("Add a Filter", systemImage: "plus") { filters.append(JqlFilter(name: "", jql: "")) }
+                    } header: {
+                        Text("Filters")
+                    } footer: {
+                        Text("Each is a section of its own in the inbox. The JQL is sent as written, so add statusCategory != Done if done tickets should stay out.")
+                    }
+                }
+                Section {
+                    SecureField(tracker.hasToken ? "Paste a new token" : "Paste the token", text: $token)
+                } header: {
+                    Text("Token")
+                } footer: {
+                    Text(tracker.hasToken ? "Leave it empty to keep the one this phone has." : "This tracker has no token yet.")
+                }
+                if let error {
+                    Section { Text(error).foregroundStyle(.red).font(.callout) }
                 }
             }
             .navigationTitle(name)
@@ -190,20 +247,29 @@ private struct TokenSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Store") {
-                        Task {
-                            do {
-                                try await model.setToken(name, token)
-                                dismiss()
-                            } catch {
-                                self.error = error.localizedDescription
-                            }
-                        }
+                    if busy { ProgressView() } else {
+                        Button("Save", action: save).disabled(!edited && trimmedToken.isEmpty)
                     }
-                    .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
-        .presentationDetents([.medium])
+    }
+
+    private func save() {
+        var source = tracker.source
+        source.hideCreated = !showCreated
+        source.jqlFilters = filters
+        busy = true
+        error = nil
+        Task {
+            defer { busy = false }
+            do {
+                if edited { try await model.edit(name, source) }
+                if !trimmedToken.isEmpty { try await model.setToken(name, trimmedToken) }
+                dismiss()
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 }

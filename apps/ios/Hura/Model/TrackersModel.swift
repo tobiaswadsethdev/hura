@@ -1,6 +1,8 @@
+import BackgroundTasks
 import HuraKit
 import Observation
 import SwiftUI
+import UserNotifications
 
 /// The trackers this phone reads, and what is yours on them. Set up here and
 /// kept in this phone's Keychain, as the desktop keeps its own on its
@@ -15,6 +17,11 @@ final class TrackersModel {
     /// What was waiting on you when you last looked at the inbox, by
     /// tracker and id; the badge counts only what has come since.
     private(set) var seen: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "inbox.seen") ?? [])
+    /// Notify when your tickets, filters or pull requests change, as the
+    /// desktop does. Off until turned on here, since it asks for permission.
+    private(set) var notify = UserDefaults.standard.bool(forKey: "inbox.notify")
+    /// A notification about the inbox was tapped: the app shows the Inbox tab.
+    var showInbox = false
 
     @ObservationIgnored private let store: TrackerStore
     @ObservationIgnored private var loop: Task<Void, Never>?
@@ -49,6 +56,17 @@ final class TrackersModel {
         let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { throw TrackerError(message: "That token is empty.") }
         try save(trackers.map { $0.source.name == name ? StoredTracker(source: $0.source, token: t) : $0 })
+        await refresh()
+    }
+
+    /// Its filters, or whether it hides what you created: checked by
+    /// hura-core as when it was added, and kept with its token.
+    func edit(_ name: String, _ source: TrackerSource) async throws {
+        let checked = try await TrackerCore.check(source)
+        guard checked.name == name else {
+            throw TrackerError(message: "A tracker can't be renamed; forget it and add it again.")
+        }
+        try save(trackers.map { $0.source.name == name ? StoredTracker(source: checked, token: $0.token) : $0 })
         await refresh()
     }
 
@@ -91,10 +109,86 @@ final class TrackersModel {
         reading = true
         defer { reading = false }
         do {
-            inbox = try await TrackerCore.inbox(trackers, prefix: "hura")
+            let read = try await TrackerCore.inbox(trackers, prefix: "hura")
+            inbox = read
             lastError = nil
+            await announce(read)
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    // MARK: Notifications
+
+    /// Turns tracker notifications on, asking for permission the first time,
+    /// or off.
+    func setNotify(_ on: Bool) async throws {
+        if on {
+            let allowed = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+            guard allowed else {
+                throw TrackerError(message: "Notifications are off for hura in Settings.")
+            }
+        }
+        notify = on
+        UserDefaults.standard.set(on, forKey: "inbox.notify")
+        if on { scheduleBackgroundRead() } else { BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundTask) }
+    }
+
+    /// Records a read, and says what changed since the last one. The
+    /// bookkeeping happens whether or not notifications are on, so turning
+    /// them on doesn't announce everything that happened while they were off.
+    private func announce(_ read: Inbox) async {
+        let defaults = UserDefaults.standard
+        let before = defaults.data(forKey: "inbox.snapshot").flatMap { try? JSONDecoder().decode(InboxSnapshot.self, from: $0) }
+        let (after, changes) = InboxSnapshot.record(read, after: before)
+        defaults.set(try? JSONEncoder().encode(after), forKey: "inbox.snapshot")
+        guard notify, !changes.isEmpty else { return }
+        let center = UNUserNotificationCenter.current()
+        // Past three at once, one says how many: usually the phone was away
+        // for a weekend, and ten banners would be worse than one.
+        let toasts: [(title: String, body: String, change: InboxChange?)] = changes.count > 3
+            ? [("\(changes.count) changes in your tickets, filters and pull requests",
+                changes.map { "\($0.key) · \($0.what)" }.joined(separator: "\n"), nil)]
+            : changes.map { ("\($0.key) · \($0.what)", $0.title, $0) }
+        for toast in toasts {
+            let content = UNMutableNotificationContent()
+            content.title = toast.title
+            content.body = toast.body
+            content.sound = .default
+            content.threadIdentifier = "inbox"
+            var info: [String: String] = [:]
+            if let c = toast.change {
+                info = ["tracker": c.tracker, "id": c.id]
+            }
+            content.userInfo = ["inbox": info]
+            try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
+    }
+
+    // MARK: Reading in the background
+
+    /// What the background read is registered under: listed in Info.plist's
+    /// `BGTaskSchedulerPermittedIdentifiers`.
+    nonisolated static var backgroundTask: String { "\(Bundle.main.bundleIdentifier ?? "hura").inbox" }
+
+    /// Asks iOS to wake the app to read the trackers again. When is iOS's to
+    /// decide (not before fifteen minutes, and often later); the app being
+    /// opened reads at once regardless.
+    func scheduleBackgroundRead() {
+        guard notify, !trackers.isEmpty else { return }
+        let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTask)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+        try? BGTaskScheduler.shared.submit(request)
+    }
+
+    /// One background read, then the next one asked for.
+    func readInBackground(_ task: BGAppRefreshTask) {
+        scheduleBackgroundRead()
+        let reading = Task { await refresh() }
+        task.expirationHandler = { reading.cancel() }
+        Task {
+            await reading.value
+            task.setTaskCompleted(success: !reading.isCancelled && lastError == nil)
         }
     }
 

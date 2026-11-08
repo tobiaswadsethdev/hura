@@ -61,9 +61,20 @@ public struct TrackerSource: Codable, Equatable, Hashable, Sendable {
     /// Jira site and the account the token belongs to.
     public var site: String?
     public var email: String?
+    /// Leave out the tickets you created that nobody assigned you.
+    public var hideCreated: Bool
+    /// Jira only: named JQL queries read beside your own tickets, each a
+    /// section of its own.
+    public var jqlFilters: [JqlFilter]
+
+    enum CodingKeys: String, CodingKey {
+        case kind, name, repo, org, project, site, email
+        case hideCreated = "hide_created"
+        case jqlFilters = "jql_filters"
+    }
 
     public init(kind: String, name: String = "", repo: String? = nil, org: String? = nil, project: String? = nil,
-                site: String? = nil, email: String? = nil) {
+                site: String? = nil, email: String? = nil, hideCreated: Bool = false, jqlFilters: [JqlFilter] = []) {
         self.kind = kind
         self.name = name
         self.repo = repo
@@ -71,6 +82,22 @@ public struct TrackerSource: Codable, Equatable, Hashable, Sendable {
         self.project = project
         self.site = site
         self.email = email
+        self.hideCreated = hideCreated
+        self.jqlFilters = jqlFilters
+    }
+
+    /// A tracker kept before there were filters has neither field.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(String.self, forKey: .kind)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        repo = try c.decodeIfPresent(String.self, forKey: .repo)
+        org = try c.decodeIfPresent(String.self, forKey: .org)
+        project = try c.decodeIfPresent(String.self, forKey: .project)
+        site = try c.decodeIfPresent(String.self, forKey: .site)
+        email = try c.decodeIfPresent(String.self, forKey: .email)
+        hideCreated = try c.decodeIfPresent(Bool.self, forKey: .hideCreated) ?? false
+        jqlFilters = try c.decodeIfPresent([JqlFilter].self, forKey: .jqlFilters) ?? []
     }
 
     public var kindLabel: String {
@@ -80,6 +107,17 @@ public struct TrackerSource: Codable, Equatable, Hashable, Sendable {
         case "jira": "Jira"
         default: kind
         }
+    }
+}
+
+/// One named JQL query on a Jira tracker (`JqlFilter`).
+public struct JqlFilter: Codable, Equatable, Hashable, Sendable {
+    public var name: String
+    public var jql: String
+
+    public init(name: String, jql: String) {
+        self.name = name
+        self.jql = jql
     }
 }
 
@@ -147,15 +185,17 @@ public struct TrackerTask: Codable, Equatable, Identifiable, Hashable, Sendable 
     /// The branch it suggests, under the prefix the inbox was read with.
     public var branch: String
     public var repo: String?
-    /// `assigned` or `created`.
+    /// `assigned`, `created`, or `matched`: not yours, there for a filter.
     public var relation: String
+    /// The JQL filters it is in, by name.
+    public var filters: [String]
     public var updated: String?
     public var comments: Int?
     public var lastCommenter: String?
     public var lastCommentMine: Bool
 
     enum CodingKeys: String, CodingKey {
-        case tracker, kind, id, key, title, url, status, branch, repo, relation, updated, comments
+        case tracker, kind, id, key, title, url, status, branch, repo, relation, filters, updated, comments
         case itemType = "item_type"
         case sessionName = "session_name"
         case lastCommenter = "last_commenter"
@@ -204,19 +244,34 @@ public struct Inbox: Codable, Equatable, Sendable {
     /// The trackers whose tickets were read.
     public var read: [String]
     public var pullsRead: [String]
+    /// The JQL filters that answered.
+    public var filtersRead: [FilterRead]
 
     enum CodingKeys: String, CodingKey {
         case tasks, pulls, warnings, read
         case pullsRead = "pulls_read"
+        case filtersRead = "filters_read"
     }
 
     public init(tasks: [TrackerTask] = [], pulls: [PullRequestSummary] = [], warnings: [String] = [], read: [String] = [],
-                pullsRead: [String] = []) {
+                pullsRead: [String] = [], filtersRead: [FilterRead] = []) {
         self.tasks = tasks
         self.pulls = pulls
         self.warnings = warnings
         self.read = read
         self.pullsRead = pullsRead
+        self.filtersRead = filtersRead
+    }
+}
+
+/// A JQL filter that answered: which tracker, and which of its filters.
+public struct FilterRead: Codable, Equatable, Hashable, Sendable {
+    public var tracker: String
+    public var filter: String
+
+    public init(tracker: String, filter: String) {
+        self.tracker = tracker
+        self.filter = filter
     }
 }
 
@@ -623,6 +678,11 @@ extension TrackerCore {
                                                "how": how.map(JSONValue.string) ?? .null,
                                                "delete_branch": .bool(deleteBranch)])
     }
+}
+
+/// `repo #12`, as the desktop names a pull request.
+public func pullName(_ p: PullRequestSummary) -> String {
+    "\(p.repo.split(separator: "/").last.map(String.init) ?? p.repo) \(p.key)"
 }
 
 /// A repository's address with what varies between two spellings taken off,

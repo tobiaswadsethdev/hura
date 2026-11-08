@@ -1,10 +1,14 @@
 //! Tickets and pull requests: what is yours on each tracker, read over REST.
 //!
-//! **Yours, and nothing else.** Every tracker is asked the same question: the
-//! tickets assigned to you or created by you that are not done, and on GitHub
-//! and Azure DevOps the open pull requests you opened or that wait on you. No
-//! query language is involved, so the sidebar means the same thing whichever
-//! tracker it reads.
+//! **Yours first.** Every tracker is asked the same question: the tickets
+//! assigned to you or created by you that are not done, and on GitHub and
+//! Azure DevOps the open pull requests you opened or that wait on you. That
+//! part involves no query language, so it means the same thing whichever
+//! tracker it reads. A tracker can leave out the half you created.
+//!
+//! **Then whatever a Jira tracker's own filters hold.** Each is a named JQL
+//! query, asked beside the question above, and its tickets are merged with
+//! yours: one row per ticket, carrying the names of the filters it matched.
 //!
 //! **Read by the client, with the client's own tokens.** A tracker is set up in
 //! the desktop application and stored on the machine it runs on, and the
@@ -112,6 +116,26 @@ pub struct Source {
     /// belongs to -- Jira Cloud is Basic auth with the email as the username.
     pub site: Option<String>,
     pub email: Option<String>,
+    /// Leave out the tickets you created and nobody assigned you. Pull
+    /// requests you opened are kept: those are still waiting on something.
+    pub hide_created: bool,
+    /// Jira only: named JQL queries read beside your own tickets.
+    ///
+    /// Not called `filters`, because that is what a file from before the
+    /// sidebar called something else -- a query that *replaced* the default
+    /// one, on every kind -- and reading those back would bring them to life.
+    pub jql_filters: Vec<JqlFilter>,
+}
+
+/// One named JQL query on a Jira tracker: a group of its own in the sidebar.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JqlFilter {
+    /// What its group is called. Unique on its tracker.
+    pub name: String,
+    /// Sent as written. Done tickets are not left out unless it says so,
+    /// because a filter is the place to ask for exactly that.
+    pub jql: String,
 }
 
 impl Default for Source {
@@ -128,6 +152,8 @@ impl Default for Source {
             project: None,
             site: None,
             email: None,
+            hide_created: false,
+            jql_filters: Vec::new(),
         }
     }
 }
@@ -154,6 +180,21 @@ impl Source {
             project: text(&self.project),
             site: text(&self.site),
             email: text(&self.email),
+            hide_created: self.hide_created,
+            jql_filters: self
+                .jql_filters
+                .iter()
+                .map(|f| JqlFilter {
+                    name: f.name.trim().to_string(),
+                    // A phone's keyboard, and a Mac's with smart quotes on,
+                    // types `“In Review”` for `"In Review"`; Jira refuses it.
+                    jql: f
+                        .jql
+                        .trim()
+                        .replace(['“', '”', '„'], "\"")
+                        .replace(['‘', '’'], "'"),
+                })
+                .collect(),
         }
     }
 
@@ -166,6 +207,27 @@ impl Source {
                 self.kind.label()
             ))
         };
+        if !self.jql_filters.is_empty() && self.kind != Kind::Jira {
+            return Some(format!(
+                "`{}` is a {} tracker, and only a Jira tracker has JQL filters",
+                self.name,
+                self.kind.label()
+            ));
+        }
+        for (i, f) in self.jql_filters.iter().enumerate() {
+            if f.name.is_empty() {
+                return Some(format!("`{}` has a filter with no name", self.name));
+            }
+            if f.jql.is_empty() {
+                return Some(format!("the filter `{}` has no JQL", f.name));
+            }
+            if self.jql_filters[..i].iter().any(|g| g.name == f.name) {
+                return Some(format!(
+                    "`{}` has two filters called `{}`",
+                    self.name, f.name
+                ));
+            }
+        }
         match self.kind {
             Kind::Jira => {
                 if self.site.is_none() {
@@ -232,6 +294,11 @@ pub struct Task {
     /// ticket: one that is both is assigned, because that is the part that
     /// asks something of you.
     pub relation: Relation,
+    /// The tracker's JQL filters this ticket is in, by name, in the order the
+    /// tracker lists them. Independent of `relation`: a filter shows every
+    /// ticket it matches, yours included.
+    #[serde(default)]
+    pub filters: Vec<String>,
     /// When the tracker last saw it change, in the tracker's own format. Only
     /// ever compared with an earlier value of itself.
     pub updated: Option<String>,
@@ -248,7 +315,8 @@ pub struct Task {
 /// Which side of "mine" a ticket or a pull request is on.
 ///
 /// The sidebar's two groups under each heading. Not a filter anybody wrote: it
-/// is read off the ticket, the same way on every tracker.
+/// is read off the ticket, the same way on every tracker. A ticket that is
+/// there only because a filter matched it is neither, and says so.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -259,6 +327,9 @@ pub enum Relation {
     /// A ticket you created that is not assigned to you, or a pull request
     /// you opened.
     Created,
+    /// A ticket that is not yours, read because one of the tracker's JQL
+    /// filters matched it. Never a pull request.
+    Matched,
 }
 
 /// What a session remembers about the ticket it was started from.
@@ -351,6 +422,18 @@ pub struct Inbox {
     /// of a tracker can answer while the other is refused.
     #[serde(default)]
     pub pulls_read: Vec<String>,
+    /// The same, for each JQL filter: one with bad JQL fails on its own, and
+    /// its tickets missing are not tickets that left it.
+    #[serde(default)]
+    pub filters_read: Vec<FilterRead>,
+}
+
+/// A JQL filter that answered: which tracker, and which of its filters.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FilterRead {
+    pub tracker: String,
+    pub filter: String,
 }
 
 /// How long to give a tracker before giving up on it.
@@ -412,11 +495,19 @@ pub fn inbox(trackers: &[Stored], branch_prefix: &str) -> Inbox {
             continue;
         };
         let name = &source.name;
+        let tickets = out.tasks.len();
         match source.kind {
             Kind::Jira => match jira(source, token, branch_prefix) {
-                Ok(tasks) => {
-                    out.tasks.extend(tasks);
+                Ok(read) => {
+                    out.tasks.extend(read.tasks);
                     out.read.push(name.clone());
+                    out.filters_read
+                        .extend(read.filters_read.into_iter().map(|filter| FilterRead {
+                            tracker: name.clone(),
+                            filter,
+                        }));
+                    out.warnings
+                        .extend(read.warnings.into_iter().map(|w| format!("{name} · {w}")));
                 }
                 Err(e) => out.warnings.push(format!("{name}: {e}")),
             },
@@ -462,6 +553,14 @@ pub fn inbox(trackers: &[Stored], branch_prefix: &str) -> Inbox {
                     )),
                 }
             }
+        }
+        // Here rather than in each tracker's query, so it means the same on
+        // all three. Jira also leaves them out of its JQL, which costs nothing
+        // there; a ticket of yours that a filter matched is `Matched` and stays.
+        if source.hide_created {
+            let read = out.tasks.split_off(tickets);
+            out.tasks
+                .extend(read.into_iter().filter(|t| t.relation != Relation::Created));
         }
     }
     out
@@ -658,6 +757,7 @@ fn github_issue(
         item_type: label_of(i).unwrap_or_default(),
         repo,
         relation,
+        filters: Vec::new(),
         updated: Some(string(i, "updatedAt")).filter(|s| !s.is_empty()),
         comments: comments
             .and_then(|c| c.get("totalCount"))
@@ -820,6 +920,7 @@ fn parse_azure(
                 } else {
                     Relation::Created
                 },
+                filters: Vec::new(),
                 updated: Some(string(fields, "System.ChangedDate")).filter(|s| !s.is_empty()),
                 comments: fields
                     .get("System.CommentCount")
@@ -884,8 +985,53 @@ fn jira_me(source: &Source, token: &str) -> Result<Option<String>, String> {
 const JIRA_MINE: &str = "(assignee = currentUser() OR reporter = currentUser()) \
      AND statusCategory != Done ORDER BY updated DESC";
 
-fn jira(source: &Source, token: &str, prefix: &str) -> Result<Vec<Task>, String> {
+/// The same, without the half you created, for a tracker that hides it.
+const JIRA_ASSIGNED: &str =
+    "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC";
+
+/// What one Jira tracker holds: your tickets, and its filters' merged in.
+struct JiraRead {
+    tasks: Vec<Task>,
+    /// The filters that answered, by name.
+    filters_read: Vec<String>,
+    /// A filter that did not, in words. The rest of the tracker still counts.
+    warnings: Vec<String>,
+}
+
+fn jira(source: &Source, token: &str, prefix: &str) -> Result<JiraRead, String> {
     let me = jira_me(source, token)?;
+    let mine = if source.hide_created {
+        JIRA_ASSIGNED
+    } else {
+        JIRA_MINE
+    };
+    let mut read = JiraRead {
+        tasks: jira_search(source, token, mine, me.as_deref(), prefix)?,
+        filters_read: Vec::new(),
+        warnings: Vec::new(),
+    };
+    // One request per filter, one after another, like the trackers: a bad
+    // query fails alone and says which.
+    for f in &source.jql_filters {
+        match jira_search(source, token, &f.jql, me.as_deref(), prefix) {
+            Ok(found) => {
+                merge_filter(&mut read.tasks, found, &f.name);
+                read.filters_read.push(f.name.clone());
+            }
+            Err(e) => read.warnings.push(format!("{}: {e}", f.name)),
+        }
+    }
+    Ok(read)
+}
+
+/// One JQL search, as tasks.
+fn jira_search(
+    source: &Source,
+    token: &str,
+    jql: &str,
+    me: Option<&str>,
+    prefix: &str,
+) -> Result<Vec<Task>, String> {
     let site = jira_site(source);
     // `/search/jql`, not `/search`: the older endpoint is deprecated on Jira
     // Cloud and answers 410 on newer sites. `comment` is what makes a new
@@ -893,14 +1039,33 @@ fn jira(source: &Source, token: &str, prefix: &str) -> Result<Vec<Task>, String>
     // says which group a ticket goes in.
     let url = format!(
         "{site}/rest/api/3/search/jql?jql={}&fields=summary,status,issuetype,updated,comment,assignee&maxResults=100",
-        urlencode(JIRA_MINE)
+        urlencode(jql)
     );
     let body = get(
         &url,
         &jira_auth(source, token),
         &["Accept: application/json"],
     )?;
-    parse_jira(&body, source, me.as_deref(), prefix)
+    parse_jira(&body, source, me, prefix)
+}
+
+/// A filter's tickets, into what has been read so far: one already there gets
+/// the filter's name, and one that is not is there only because of it.
+fn merge_filter(tasks: &mut Vec<Task>, found: Vec<Task>, filter: &str) {
+    for mut t in found {
+        match tasks.iter_mut().find(|have| have.id == t.id) {
+            Some(have) => {
+                if !have.filters.iter().any(|f| f == filter) {
+                    have.filters.push(filter.to_string());
+                }
+            }
+            None => {
+                t.relation = Relation::Matched;
+                t.filters = vec![filter.to_string()];
+                tasks.push(t);
+            }
+        }
+    }
 }
 
 fn parse_jira(
@@ -971,6 +1136,7 @@ fn jira_task(
             (None, Some(_)) => Relation::Assigned,
             _ => Relation::Created,
         },
+        filters: Vec::new(),
         updated: Some(string(fields, "updated")).filter(|s| !s.is_empty()),
         comments: comment
             .and_then(|c| c.get("total"))
@@ -1398,6 +1564,7 @@ mod tests {
             project: Some("tools".into()),
             site: Some("https://example.atlassian.net".into()),
             email: Some("you@example.com".into()),
+            ..Default::default()
         }
     }
 
@@ -1870,6 +2037,84 @@ mod tests {
         // everything assigned to whoever the token belongs to.
         let github = source(Kind::GitHub);
         assert_eq!(github.problem(), None);
+    }
+
+    /// A JQL filter is a Jira tracker's alone, and one that could not run
+    /// is refused when it is saved rather than failing on the timer.
+    #[test]
+    fn a_jql_filter_needs_a_name_some_jql_and_a_jira_tracker() {
+        let filter = |name: &str, jql: &str| JqlFilter {
+            name: name.into(),
+            jql: jql.into(),
+        };
+        let mut jira = source(Kind::Jira);
+        jira.jql_filters = vec![filter(" ready ", " status = Ready ")];
+        let jira = jira.normalized();
+        assert_eq!(jira.problem(), None);
+        assert_eq!(jira.jql_filters[0], filter("ready", "status = Ready"));
+        let mut typed = source(Kind::Jira);
+        typed.jql_filters = vec![filter("review", "status = “In Review” AND labels = ‘x’")];
+        assert_eq!(
+            typed.normalized().jql_filters[0].jql,
+            r#"status = "In Review" AND labels = 'x'"#,
+            "smart quotes are straightened"
+        );
+
+        let with = |filters: Vec<JqlFilter>| Source {
+            jql_filters: filters,
+            ..source(Kind::Jira)
+        };
+        let e = with(vec![filter("", "x = 1")]).problem().unwrap();
+        assert!(e.contains("no name"), "{e}");
+        let e = with(vec![filter("ready", "")]).problem().unwrap();
+        assert!(e.contains("no JQL"), "{e}");
+        let e = with(vec![filter("ready", "a = 1"), filter("ready", "b = 2")])
+            .problem()
+            .unwrap();
+        assert!(e.contains("two filters called `ready`"), "{e}");
+
+        let github = Source {
+            jql_filters: vec![filter("ready", "status = Ready")],
+            ..source(Kind::GitHub)
+        };
+        assert!(github.problem().unwrap().contains("only a Jira tracker"));
+    }
+
+    /// A filter's tickets join what was read: one already there takes the
+    /// filter's name and keeps its relation, a new one is `Matched`.
+    #[test]
+    fn a_filter_merges_into_what_was_read() {
+        let tasks = || {
+            parse_jira(
+                &serde_json::from_str(JIRA).unwrap(),
+                &source(Kind::Jira),
+                Some("me-1"),
+                "tobias",
+            )
+            .unwrap()
+        };
+        let mut read = tasks();
+        read.truncate(1);
+        merge_filter(&mut read, tasks(), "board");
+        merge_filter(&mut read, tasks(), "board");
+        merge_filter(&mut read, tasks()[..1].to_vec(), "mine");
+        let rows: Vec<(&str, Relation, Vec<&str>)> = read
+            .iter()
+            .map(|t| {
+                (
+                    t.key.as_str(),
+                    t.relation,
+                    t.filters.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("PROJ-123", Relation::Assigned, vec!["board", "mine"]),
+                ("PROJ-124", Relation::Matched, vec!["board"]),
+            ]
+        );
     }
 
     #[test]

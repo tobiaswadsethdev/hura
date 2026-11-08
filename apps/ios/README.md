@@ -24,8 +24,11 @@ the phone's own loopback, at the same number when that's free, tunnelled to
 the sandbox over the paired connection, and shown in Safari's in-app browser.
 
 The Inbox tab is what is yours on GitHub, Azure DevOps and Jira: tickets
-assigned to you or created by you, and pull requests you opened or that wait
-on your review. A Jira ticket opens in full, to move its status, edit its
+assigned to you or created by you, a section for each of a Jira tracker's JQL
+filters, and pull requests you opened or that wait on your review. When they
+change, the app can notify you as the desktop does, from its own reads: every
+three minutes while it is open, and by background app refresh otherwise
+([docs/tickets.md](../../docs/tickets.md#notifications)). A Jira ticket opens in full, to move its status, edit its
 fields and comment; a pull request opens with its checks, reviewers and
 conversation, to reply, give a review, and read its files. Either starts a
 worktree, on the branch the desktop would give it. Trackers are set up on the

@@ -217,6 +217,8 @@ export const api = {
     invoke<ConfiguredTracker[]>("add_tracker", { tracker, token }),
   setTrackerToken: (name: string, token: string) =>
     invoke<ConfiguredTracker[]>("set_tracker_token", { name, token }),
+  editTracker: (name: string, tracker: Tracker) =>
+    invoke<ConfiguredTracker[]>("edit_tracker", { name, tracker }),
   forgetTracker: (name: string) => invoke<ConfiguredTracker[]>("forget_tracker", { name }),
 
   // What is yours on every tracker, tickets and pull requests, read from this
