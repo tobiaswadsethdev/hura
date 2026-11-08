@@ -47,7 +47,9 @@ struct InboxView: View {
                     ContentUnavailableView {
                         Label("No trackers", systemImage: "tray")
                     } description: {
-                        Text("Add GitHub, Azure DevOps or Jira to see your tickets and pull requests here. The token stays on this phone.")
+                        Text(trackers.signedIn
+                             ? "Add GitHub, Azure DevOps or Jira to see your tickets and pull requests here, on every device signed in to your account."
+                             : "Add GitHub, Azure DevOps or Jira to see your tickets and pull requests here. The token stays on this phone.")
                     } actions: {
                         Button("Add a Tracker") { settings = true }.buttonStyle(.borderedProminent)
                     }

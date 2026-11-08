@@ -3,7 +3,8 @@ import SwiftUI
 
 /// The trackers this phone reads: added with a token, changed (its token, its
 /// filters, whether it shows what you created), or forgotten. Kept in this
-/// phone's Keychain and sent nowhere but the tracker.
+/// phone's Keychain and sent nowhere but the tracker, or, signed in, kept in
+/// the hura account and the same on every device.
 struct TrackersView: View {
     @Environment(TrackersModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -38,13 +39,19 @@ struct TrackersView: View {
                         .tint(.primary)
                         .swipeActions {
                             Button("Forget", role: .destructive) {
-                                do { try model.forget(t.source.name) } catch { failed = error.localizedDescription }
+                                Task {
+                                    do { try await model.forget(t.source.name) } catch { failed = error.localizedDescription }
+                                }
                             }
                         }
                     }
                     Button("Add a Tracker", systemImage: "plus") { adding = true }
                 } footer: {
-                    Text("Tickets assigned to you or created by you, a Jira tracker's own JQL filters, and pull requests you opened or that wait on you. Read from this phone with its own tokens, which stay in its Keychain: no server holds them.")
+                    if model.signedIn {
+                        Text("Tickets assigned to you or created by you, a Jira tracker's own JQL filters, and pull requests you opened or that wait on you. Kept in your hura account and the same on every device signed in to it; their tokens are kept there, encrypted, and never sent back.")
+                    } else {
+                        Text("Tickets assigned to you or created by you, a Jira tracker's own JQL filters, and pull requests you opened or that wait on you. Read from this phone with its own tokens, which stay in its Keychain: no server holds them.")
+                    }
                 }
                 Section {
                     Toggle("Notify When They Change", isOn: Binding(get: { model.notify }, set: { on in
@@ -236,7 +243,9 @@ private struct TrackerSheet: View {
                 } header: {
                     Text("Token")
                 } footer: {
-                    Text(tracker.hasToken ? "Leave it empty to keep the one this phone has." : "This tracker has no token yet.")
+                    Text(tracker.hasToken
+                         ? (model.signedIn ? "Leave it empty to keep the one your account has." : "Leave it empty to keep the one this phone has.")
+                         : "This tracker has no token yet.")
                 }
                 if let error {
                     Section { Text(error).foregroundStyle(.red).font(.callout) }

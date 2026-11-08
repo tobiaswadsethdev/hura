@@ -164,6 +164,11 @@ deleted.
 - [ ] **3. The apps sign in.** Sign-in screens on both, the local and HTTPS
   backends, uploading local trackers, and trackers and filters that are the
   same everywhere.
+  - [x] The phone: an Account tab (signing in is never forced), the account
+    and its devices, `TrackerCore.call` sending requests to the service
+    when signed in, the account's trackers in place of the Keychain's, and
+    moving the phone's own to the account.
+  - [ ] The desktop.
 - [ ] **4. Notifications from the service.** The scheduled reads, the phone
   through the relay (`tracker_change`), the desktop over a live connection.
   This is the phase that makes them timely.
