@@ -75,6 +75,14 @@ struct UnifiedDiffTests {
         #expect(lines.map(\.new) == [1, nil, 2, 3, 4])
     }
 
+    /// A file checked in with \n and checked out with \r\n differs only
+    /// where it was edited, and no line keeps a \r.
+    @Test func ignoresLineEndings() {
+        let lines = UnifiedDiff.lines(original: "a\nb\nc\n", modified: "a\r\nB\r\nc\r\n")
+        #expect(lines.map(\.kind) == [.same, .removed, .added, .same])
+        #expect(lines.map(\.text) == ["a", "b", "B", "c"])
+    }
+
     @Test func foldsWhatDidNotChange() {
         let original = (1...20).map(String.init).joined(separator: "\n")
         let modified = original.replacingOccurrences(of: "\n10\n", with: "\nten\n")
