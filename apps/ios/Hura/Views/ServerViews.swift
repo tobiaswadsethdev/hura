@@ -190,7 +190,11 @@ struct ServerView: View {
             SessionRow(session: s, report: server.reports[s.name])
         }
         .swipeActions {
-            Button("Delete", role: .destructive) { destroying = s }
+            // Red by tint rather than `role: .destructive`: a destructive
+            // swipe action takes the row out of the list at once, and the
+            // dialog hung off it goes with it before it can be answered.
+            Button("Delete") { destroying = s }
+                .tint(.red)
         }
         // On the row, not the list, so it opens over the row it is about
         // rather than at the top of the screen.
