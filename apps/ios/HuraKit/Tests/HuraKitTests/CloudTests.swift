@@ -201,4 +201,17 @@ struct CloudTests {
         #expect(text.title == "P-1 · To Do → Done")
         #expect(text.tracker == "work" && text.id == "10042")
     }
+
+    @Test func signingInWithAppleSendsTheTokenAndKeepsTheSession() async throws {
+        let service = Service()
+        service.on("POST /v1/sign-in/apple", 200, Self.signedIn)
+        let store = InMemoryCloudSessionStore()
+        let cloud = Cloud(store: store, send: service.send)
+        try await cloud.signInWithApple(identityToken: "eyJ.x.y", nonce: "n", email: nil, deviceName: "iPhone")
+        let sent = try #require(service.requests("POST /v1/sign-in/apple").first)
+        #expect(service.body(sent)?["identity_token"]?.string == "eyJ.x.y")
+        #expect(service.body(sent)?["nonce"]?.string == "n")
+        #expect(try store.load()?.refreshToken == "hura_rt_r")
+        #expect(try store.load()?.email == "", "Apple shares an address only on the first sign-in")
+    }
 }

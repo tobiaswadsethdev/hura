@@ -168,6 +168,27 @@ public actor Cloud {
             "code": .string(code),
             "device": .object(["name": .string(deviceName), "platform": .string("ios")]),
         ])
+        return try await begin(answer, email: email.trimmingCharacters(in: .whitespaces).lowercased(), base: base)
+    }
+
+    /// Signs this phone in with Sign in with Apple's identity token, and the
+    /// nonce whose SHA-256 was given to Apple for it. `email` is the address
+    /// Apple shared, if it did: only ever on the first sign-in.
+    @discardableResult
+    public func signInWithApple(identityToken: String, nonce: String, email: String?, deviceName: String,
+                                base: URL = Cloud.defaultBase) async throws -> CloudSession {
+        let answer = try await request(base: base, "POST", "/v1/sign-in/apple", body: [
+            "identity_token": .string(identityToken),
+            "nonce": .string(nonce),
+            "device": .object(["name": .string(deviceName), "platform": .string("ios")]),
+        ])
+        return try await begin(answer, email: email?.lowercased() ?? "", base: base)
+    }
+
+    /// The session a sign-in answered with, kept. Signed in on the service
+    /// with nowhere to keep it, the device is signed straight back out rather
+    /// than left in the list with nothing that can use it.
+    private func begin(_ answer: Data, email: String, base: URL) async throws -> CloudSession {
         struct Signed: Decodable {
             var account: String
             var device: String
@@ -176,15 +197,11 @@ public actor Cloud {
             var expires_in: Double
         }
         let signed = try JSONDecoder().decode(Signed.self, from: answer)
-        let session = CloudSession(base: base, email: email.trimmingCharacters(in: .whitespaces).lowercased(),
-                                   account: signed.account, device: signed.device,
+        let session = CloudSession(base: base, email: email, account: signed.account, device: signed.device,
                                    refreshToken: signed.refresh_token)
         do {
             try store.save(session)
         } catch {
-            // Signed in on the service with nowhere to keep it: sign that
-            // device straight back out, rather than leave one in the list
-            // that nothing can use.
             _ = try? await request(base: base, "POST", "/v1/sign-out", bearer: signed.access_token)
             throw error
         }

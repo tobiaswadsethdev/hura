@@ -56,6 +56,11 @@ async fn service() -> Option<Test> {
             statuses: Mutex::new(Vec::new()),
         },
         live: Default::default(),
+        apple: crate::apple::Apple::fixed(
+            "dev.example.app",
+            "test-key",
+            include_str!("testdata/apple-test-key.n.b64url").trim(),
+        ),
     });
     crate::install_transport();
     Some(Test {
@@ -766,4 +771,159 @@ async fn a_stream_is_not_told_twice_when_the_relay_puts_the_telling_off() {
         stream.try_recv().is_err(),
         "the retry told the phone, not the stream again"
     );
+}
+
+/// An identity token as Apple would sign it, with the test key in
+/// `testdata/` (made for these tests and nothing else).
+fn apple_token(claims: Value) -> String {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+    let der = STANDARD
+        .decode(include_str!("testdata/apple-test-key.pkcs8.b64").trim())
+        .unwrap();
+    let key = ring::signature::RsaKeyPair::from_pkcs8(&der).unwrap();
+    let head = URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","kid":"test-key"}"#);
+    let body = URL_SAFE_NO_PAD.encode(claims.to_string());
+    let signed = format!("{head}.{body}");
+    let mut signature = vec![0; key.public().modulus_len()];
+    key.sign(
+        &ring::signature::RSA_PKCS1_SHA256,
+        &ring::rand::SystemRandom::new(),
+        signed.as_bytes(),
+        &mut signature,
+    )
+    .unwrap();
+    format!("{signed}.{}", URL_SAFE_NO_PAD.encode(signature))
+}
+
+fn apple_claims(sub: &str, email: Option<&str>, nonce: &str) -> Value {
+    use sha2::Digest as _;
+    let hashed: String = sha2::Sha256::digest(nonce.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 600;
+    let mut c = json!({
+        "iss": "https://appleid.apple.com", "aud": "dev.example.app", "exp": exp,
+        "sub": sub, "nonce": hashed,
+    });
+    if let Some(e) = email {
+        c["email"] = json!(e);
+        c["email_verified"] = json!("true");
+    }
+    c
+}
+
+impl Test {
+    async fn apple(&self, token: String, nonce: &str) -> (StatusCode, Value) {
+        let body = json!({
+            "identity_token": token, "nonce": nonce,
+            "device": { "name": "iPhone", "platform": "ios" },
+        });
+        self.call(Method::POST, "/v1/sign-in/apple", None, Some(body))
+            .await
+    }
+}
+
+#[tokio::test]
+async fn signs_in_with_apple_and_joins_the_account_with_the_same_address() {
+    let Some(t) = service().await else { return };
+    let by_email = t.sign_in("me@example.com", "Mac").await;
+
+    let (status, apple) = t
+        .apple(
+            apple_token(apple_claims("001.apple", Some("Me@Example.com"), "n1")),
+            "n1",
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{apple}");
+    assert_eq!(
+        apple["account"], by_email["account"],
+        "joined by the verified address"
+    );
+
+    // The same Apple ID again, whatever its address now: the same account.
+    let (_, again) = t
+        .apple(apple_token(apple_claims("001.apple", None, "n2")), "n2")
+        .await;
+    assert_eq!(again["account"], by_email["account"]);
+
+    let (_, me) = t
+        .call(
+            Method::GET,
+            "/v1/me",
+            Some(token(&apple, "access_token")),
+            None,
+        )
+        .await;
+    let providers: Vec<&str> = me["sign_ins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["provider"].as_str().unwrap())
+        .collect();
+    assert_eq!(providers, ["email", "apple"]);
+}
+
+#[tokio::test]
+async fn a_hidden_address_makes_an_account_of_its_own() {
+    let Some(t) = service().await else { return };
+    let relay = "abc@privaterelay.appleid.com";
+    t.sign_in(relay, "Mac").await;
+    let (_, apple) = t
+        .apple(
+            apple_token(apple_claims("002.apple", Some(relay), "n")),
+            "n",
+        )
+        .await;
+    let (_, mine) = t
+        .call(
+            Method::GET,
+            "/v1/me",
+            Some(token(&apple, "access_token")),
+            None,
+        )
+        .await;
+    assert_eq!(
+        mine["sign_ins"].as_array().unwrap().len(),
+        1,
+        "not joined to the other"
+    );
+}
+
+#[tokio::test]
+async fn an_apple_token_that_does_not_check_out_is_refused() {
+    let Some(t) = service().await else { return };
+    let good = apple_claims("003.apple", None, "nonce");
+    let cases = [
+        // Someone else's app.
+        (json!({ "aud": "dev.other.app" }), "nonce"),
+        // Not from Apple.
+        (json!({ "iss": "https://example.com" }), "nonce"),
+        // Expired.
+        (json!({ "exp": 1 }), "nonce"),
+    ];
+    for (patch, nonce) in cases {
+        let mut claims = good.clone();
+        for (k, v) in patch.as_object().unwrap() {
+            claims[k] = v.clone();
+        }
+        let (status, _) = t.apple(apple_token(claims), nonce).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{patch}");
+    }
+    // Replayed with another nonce.
+    let (status, _) = t.apple(apple_token(good.clone()), "another").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // Tampered with after signing.
+    let token = apple_token(good);
+    let mut parts: Vec<String> = token.split('.').map(String::from).collect();
+    use base64::Engine as _;
+    parts[1] = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(apple_claims("someone.else", None, "nonce").to_string());
+    let (status, _) = t.apple(parts.join("."), "nonce").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }

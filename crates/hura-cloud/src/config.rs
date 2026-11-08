@@ -15,6 +15,9 @@
 //!   `https://hura-relay.twadseth.workers.dev` unless set. The only one: the
 //!   phone links this service on it, and an address a client chose is not
 //!   one the service would send to.
+//! - `HURA_CLOUD_APPLE_AUDIENCE`: the iOS app's bundle ID, which a Sign in
+//!   with Apple identity token must be for, `dev.tobiaswadseth.hura.ios`
+//!   unless set.
 //! - `HURA_CLOUD_MAIL=log`: prints codes instead, for running it on a laptop.
 //!   One of the two is required, so a deployment missing its key fails to
 //!   start rather than signing nobody in.
@@ -30,6 +33,7 @@ pub struct Config {
     pub mail: Mailer,
     pub keys: Keys,
     pub relay: String,
+    pub apple_audience: String,
 }
 
 pub const DEFAULT_FROM: &str = "hura <sign-in@gethura.app>";
@@ -58,12 +62,15 @@ impl Config {
                 "HURA_CLOUD_MASTER_KEY is not set; make one with `openssl rand -base64 32`",
             )?)?;
         let relay = var("HURA_CLOUD_RELAY").unwrap_or_else(|| crate::push::DEFAULT_RELAY.into());
+        let apple_audience =
+            var("HURA_CLOUD_APPLE_AUDIENCE").unwrap_or_else(|| "dev.tobiaswadseth.hura.ios".into());
         Ok(Config {
             database_url,
             listen,
             mail,
             keys,
             relay,
+            apple_audience,
         })
     }
 }

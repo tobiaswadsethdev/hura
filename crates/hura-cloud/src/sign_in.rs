@@ -98,11 +98,7 @@ pub async fn verify(
     Json(body): Json<Verify>,
 ) -> Result<Json<Session>> {
     let email = address(&body.email)?;
-    let name = body.device.name.trim();
-    let platform = body.device.platform.trim();
-    if name.is_empty() || name.chars().count() > 100 || platform.is_empty() || platform.len() > 20 {
-        return Err(Error::bad("a device needs a name and a platform"));
-    }
+    let (name, platform) = device_named(&body.device)?;
     let code: String = body.code.chars().filter(|c| !c.is_whitespace()).collect();
 
     let mut tx = state.db.begin().await?;
@@ -135,6 +131,29 @@ pub async fn verify(
         .await?;
 
     let account = account_for(&mut tx, &email).await?;
+    let session = start(&mut tx, account, name, platform).await?;
+    tx.commit().await?;
+    Ok(Json(session))
+}
+
+/// A device for a name and platform someone typed, or why not.
+pub(crate) fn device_named(device: &NewDevice) -> Result<(&str, &str)> {
+    let name = device.name.trim();
+    let platform = device.platform.trim();
+    if name.is_empty() || name.chars().count() > 100 || platform.is_empty() || platform.len() > 20 {
+        return Err(Error::bad("a device needs a name and a platform"));
+    }
+    Ok((name, platform))
+}
+
+/// A device signed in to `account`, however it got in: its refresh token and
+/// its first access token.
+pub(crate) async fn start(
+    db: &mut PgConnection,
+    account: Uuid,
+    name: &str,
+    platform: &str,
+) -> Result<Session> {
     let refresh_token = token::mint(REFRESH)?;
     let device: Uuid = sqlx::query_scalar(
         "insert into devices (account_id, name, platform, refresh_hash)
@@ -144,12 +163,10 @@ pub async fn verify(
     .bind(name)
     .bind(platform)
     .bind(token::hash(&refresh_token))
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *db)
     .await?;
-    let access_token = auth::issue(&mut tx, device).await?;
-    tx.commit().await?;
-
-    Ok(Json(Session {
+    let access_token = auth::issue(db, device).await?;
+    Ok(Session {
         account,
         device,
         refresh_token,
@@ -157,7 +174,7 @@ pub async fn verify(
             access_token,
             expires_in: ACCESS_SECONDS,
         },
-    }))
+    })
 }
 
 /// The account a verified address signs in to: the one it signed in to

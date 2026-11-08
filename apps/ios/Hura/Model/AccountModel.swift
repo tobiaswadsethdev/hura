@@ -1,3 +1,5 @@
+import AuthenticationServices
+import CryptoKit
 import HuraKit
 import Observation
 import UIKit
@@ -64,6 +66,48 @@ final class AccountModel {
         }
         await load()
         await trackers.refresh()
+    }
+
+    /// A fresh nonce for one Sign in with Apple: its SHA-256 goes to Apple in
+    /// the request, and the nonce itself to the service with the token, which
+    /// ties the token to this sign-in.
+    func appleNonce() -> (nonce: String, hashed: String) {
+        let nonce = (0..<32).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
+        let hashed = SHA256.hash(data: Data(nonce.utf8)).map { String(format: "%02x", $0) }.joined()
+        return (nonce, hashed)
+    }
+
+    /// Signs in with what Sign in with Apple answered. Cancelled is not a
+    /// failure: the person changed their mind.
+    func signInWithApple(_ result: Result<ASAuthorization, Error>, nonce: String, trackers: TrackersModel) async {
+        let credential: ASAuthorizationAppleIDCredential
+        switch result {
+        case let .success(authorization):
+            guard let c = authorization.credential as? ASAuthorizationAppleIDCredential,
+                  let token = c.identityToken.flatMap({ String(data: $0, encoding: .utf8) })
+            else {
+                error = "Apple didn't hand over a sign-in to check."
+                return
+            }
+            credential = c
+            await working {
+                try await cloud.signInWithApple(identityToken: token, nonce: nonce, email: credential.email,
+                                                deviceName: UIDevice.current.name)
+                codeSentTo = nil
+            }
+        case let .failure(e):
+            if (e as? ASAuthorizationError)?.code != .canceled { error = e.localizedDescription }
+            return
+        }
+        await load()
+        await trackers.refresh()
+    }
+
+    /// What the account is known by: the address this phone signed in with,
+    /// or one the account has, or that it is an Apple ID's.
+    var name: String {
+        if let email = session?.email, !email.isEmpty { return email }
+        return account?.signIns.compactMap(\.email).first ?? "Apple ID"
     }
 
     /// Signs this phone out, and goes back to the trackers kept on it.

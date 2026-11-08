@@ -1,3 +1,4 @@
+import AuthenticationServices
 import HuraKit
 import SwiftUI
 
@@ -29,7 +30,9 @@ private struct SignInForm: View {
     @Environment(TrackersModel.self) private var trackers
     @State private var email = ""
     @State private var code = ""
+    @State private var nonce = ""
     @FocusState private var focused: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Form {
@@ -60,6 +63,24 @@ private struct SignInForm: View {
                     Text("The code works for ten minutes, once.")
                 } else {
                     Text("Your trackers and their filters, kept in one place and the same on every device you sign in on. Optional: without an account, trackers stay on this phone, as they do now.")
+                }
+            }
+            if account.codeSentTo == nil {
+                Section {
+                    SignInWithAppleButton(.signIn) { request in
+                        request.requestedScopes = [.email]
+                        let n = account.appleNonce()
+                        nonce = n.nonce
+                        request.nonce = n.hashed
+                    } onCompletion: { result in
+                        Task { await account.signInWithApple(result, nonce: nonce, trackers: trackers) }
+                    }
+                    .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+                    .frame(height: 44)
+                    .clipShape(Capsule())
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .disabled(account.busy)
                 }
             }
             if account.codeSentTo != nil {
@@ -109,7 +130,7 @@ private struct SignedIn: View {
     var body: some View {
         List {
             Section {
-                LabeledContent("Email", value: account.session?.email ?? "")
+                LabeledContent("Signed in as", value: account.name)
                 if let plan = account.account?.plan {
                     LabeledContent("Plan", value: plan.capitalized)
                 }

@@ -75,6 +75,10 @@ targets:
         keychain-access-groups:
           - $(AppIdentifierPrefix)$(HURA_BUNDLE_ID)
           - $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+        # Signing in to hura cloud with an Apple ID. Automatic signing turns
+        # the capability on for the App ID; the service checks the identity
+        # token against Apple's published keys.
+        com.apple.developer.applesignin: [Default]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(HURA_BUNDLE_ID)

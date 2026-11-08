@@ -2,7 +2,7 @@
 //! for running it.
 //!
 //! **Signing in and connecting a tracker are separate.** An account is got
-//! into by an emailed code (and by Sign in with Apple, next); each device that
+//! into by an emailed code or by Sign in with Apple; each device that
 //! signs in holds a long-lived refresh token, listed and revocable from any
 //! other, which it swaps for access tokens that last an hour.
 //!
@@ -16,6 +16,7 @@ use axum::Router;
 use axum::routing::{delete, get, post, put};
 use sqlx::PgPool;
 
+pub mod apple;
 mod auth;
 pub mod config;
 pub mod crypto;
@@ -42,6 +43,7 @@ pub struct State {
     pub keys: crypto::Keys,
     pub relay: push::Relay,
     pub live: live::Live,
+    pub apple: apple::Apple,
 }
 
 pub type Shared = Arc<State>;
@@ -65,6 +67,7 @@ pub fn app(state: Shared) -> Router {
         .route("/healthz", get(healthz))
         .route("/v1/sign-in/email", post(sign_in::send_code))
         .route("/v1/sign-in/email/verify", post(sign_in::verify))
+        .route("/v1/sign-in/apple", post(apple::sign_in))
         .route("/v1/token", post(auth::refresh))
         .route("/v1/sign-out", post(devices::sign_out))
         .route("/v1/me", get(devices::me))

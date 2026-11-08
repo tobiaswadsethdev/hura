@@ -155,7 +155,10 @@ deleted.
   - [x] The Postgres schema for accounts, sign-ins, devices and plans;
     emailed codes through Resend; refresh and access tokens; the device
     list; the image, its workflow and CI against a real Postgres.
-  - [ ] Sign in with Apple.
+  - [x] Sign in with Apple, in the iOS app: its identity token checked
+    against Apple's published keys, with a nonce. The desktop's, through the
+    browser, needs a Services ID and a key from the developer portal, which
+    no CLI of Apple's can make, and waits for them.
   - [x] The encrypted tracker store and `POST /v1/tracker`, with the request
     surface moved from hura-mobile into `hura_core::tracker::request` so the
     phone and the service run the same code.

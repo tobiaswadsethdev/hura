@@ -20,6 +20,7 @@ runs anywhere else.
 | `MAIL_FROM` | who they are from, `hura <sign-in@gethura.app>` unless set. Its domain has to be verified on the Resend account |
 | `HURA_CLOUD_MASTER_KEY` | required: 32 bytes in base64, from `openssl rand -base64 32`. It wraps each account's key for its trackers' tokens, so **losing it loses every stored token**: keep a copy somewhere safe that is not the database's backups |
 | `HURA_CLOUD_RELAY` | the push relay tracker notifications go through, `https://hura-relay.twadseth.workers.dev` unless set. The service sends only there, whatever a phone says |
+| `HURA_CLOUD_APPLE_AUDIENCE` | the iOS app's bundle ID, which a Sign in with Apple token must be for: `dev.tobiaswadseth.hura.ios` unless set |
 | `HURA_CLOUD_MAIL=log` | prints codes instead of sending them, for a laptop. Without this or a Resend key the service will not start |
 
 On a laptop, with Docker for the database:
@@ -71,6 +72,7 @@ hashes of either.
 | --- | --- |
 | `POST /v1/sign-in/email` `{email}` | sends a six-digit code. 204 whether or not the address has an account; 429 if one was sent in the last minute (five an hour at most) |
 | `POST /v1/sign-in/email/verify` `{email, code, device: {name, platform}}` | `{account, device, refresh_token, access_token, expires_in}`. Signs in to the address's account, made if it has none. A code lasts ten minutes, is used once, and is spent after five wrong tries |
+| `POST /v1/sign-in/apple` `{identity_token, nonce, device: {name, platform}}` | the same answer, for Sign in with Apple in the iOS app. The token's signature is checked against Apple's published keys, and it must be for the app (`HURA_CLOUD_APPLE_AUDIENCE`), unexpired, and carry the SHA-256 of `nonce`. It signs in to the account this Apple ID used before, or one whose verified address it shares (never a relayed "hide my email" one), or a new one |
 | `POST /v1/token` `{refresh_token}` | `{access_token, expires_in}` |
 | `GET /v1/me` | `{account, plan, sign_ins: [{provider, email}]}` |
 | `GET /v1/devices` | `[{id, name, platform, created_at, last_seen_at, current}]`, newest first; times in Unix seconds |

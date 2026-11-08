@@ -36,6 +36,7 @@ async fn run() -> Result<(), String> {
         keys: config.keys,
         relay: hura_cloud::push::Relay::https(config.relay),
         live: Default::default(),
+        apple: hura_cloud::apple::Apple::new(config.apple_audience),
     });
     tokio::spawn(hura_cloud::watch::run(state.clone()));
     let listener = tokio::net::TcpListener::bind(config.listen)
