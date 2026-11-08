@@ -196,7 +196,7 @@ struct MarkdownImageTests {
         items.compactMap {
             switch $0 {
             case let .prompt(_, p): ">" + p.text
-            case let .text(_, t): t
+            case let .text(_, t, _): t
             default: nil
             }
         }
@@ -214,6 +214,18 @@ struct MarkdownImageTests {
     folded = ChatItem.fold([prompt(1, "x", "old", receipt: false), reply(2, "old reply"), prompt(3, "y", "new")])
     #expect(shown(folded.items) == [">old", "old reply"])
     #expect(shown(folded.queued) == [">new"])
+}
+
+/// Claude's words and the end of a turn say when, as your messages do, from
+/// a transcript as the host sends it.
+@Test func repliesAndTurnsSayWhen() {
+    let raw = [
+        #"{"seq":1,"at":1790000001000,"ev":{"kind":"sdk","msg":{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"Done."}]}}}}"#,
+        #"{"seq":2,"at":1790000002000,"ev":{"kind":"sdk","msg":{"type":"result","subtype":"success","duration_ms":4200}}}"#,
+    ].compactMap { ChatTranscript.entry(try! JSONDecoder().decode(JSONValue.self, from: Data($0.utf8))) }
+    let items = ChatItem.fold(raw).items
+    #expect(items == [.text(id: "1.0", text: "Done.", at: Date(timeIntervalSince1970: 1_790_000_001)),
+                      .turnEnd(id: "2.0", ms: 4200, at: Date(timeIntervalSince1970: 1_790_000_002))])
 }
 
 /// A subagent is listed from its task events, a resumed one stays one agent,
@@ -245,7 +257,7 @@ struct MarkdownImageTests {
     #expect(agents.first?.tokens == 1200)
 
     func texts(_ items: [ChatItem]) -> [String] {
-        items.compactMap { if case let .text(_, t) = $0 { t } else { nil } }
+        items.compactMap { if case let .text(_, t, _) = $0 { t } else { nil } }
     }
     #expect(texts(ChatItem.fold(entries).items) == ["starting one", "back to you"])
     #expect(texts(ChatItem.fold(entries, thread: "toolu_1").items) == ["reading", "more reading"])

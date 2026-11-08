@@ -19,13 +19,17 @@ struct DirView: View {
                 ForEach(sorted(dir.entries), id: \.self) { e in
                     let full = path.isEmpty ? e.name : "\(path)/\(e.name)"
                     NavigationLink {
-                        if e.dir {
-                            DirView(server: server, name: name, path: full)
-                                .navigationTitle(e.name)
-                                .navigationBarTitleDisplayMode(.inline)
-                        } else {
-                            FileView(server: server, name: name, path: full)
+                        Group {
+                            if e.dir {
+                                DirView(server: server, name: name, path: full)
+                                    .navigationTitle(e.name)
+                                    .navigationBarTitleDisplayMode(.inline)
+                            } else {
+                                FileView(server: server, name: name, path: full)
+                            }
                         }
+                        // Pushed over a session, which hides the tabs.
+                        .toolbar(.hidden, for: .tabBar)
                     } label: {
                         Label(e.name, systemImage: e.dir ? "folder" : icon(e.name))
                     }

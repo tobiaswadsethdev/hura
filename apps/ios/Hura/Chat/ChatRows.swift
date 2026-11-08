@@ -71,8 +71,15 @@ struct ChatRows: View {
                     ReceiptLine(prompt: prompt, receipts: receipts, working: working)
                 }
             }
-        case let .text(_, text):
-            MarkdownText(text: text)
+        case let .text(_, text, at):
+            VStack(alignment: .leading, spacing: 4) {
+                MarkdownText(text: text)
+                if let at {
+                    Text(at, format: .dateTime.hour().minute())
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
         case let .thinking(_, text):
             ThinkingView(text: text)
         case let .tool(_, call):

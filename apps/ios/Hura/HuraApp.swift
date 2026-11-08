@@ -20,9 +20,11 @@ struct HuraApp: App {
                         .tag(0)
                     InboxView()
                         .tabItem { Label("Inbox", systemImage: "tray") }
-                        .badge(trackers.waitingCount)
+                        .badge(trackers.unseenCount)
                         .tag(1)
                 }
+                .onChange(of: tab) { if tab == 1 { trackers.markSeen() } }
+                .onChange(of: trackers.inbox) { if tab == 1 { trackers.markSeen() } }
                 // A notification, or a worktree started from a ticket, goes
                 // to the servers.
                 .onChange(of: model.pendingRoute) { _, route in

@@ -24,7 +24,16 @@ public final class Server: Identifiable {
 
     public private(set) var record: ServerRecord
     public private(set) var state: State = .connecting
-    public private(set) var sessions: [Session] = []
+    /// What hurad last listed, less what is being deleted.
+    public var sessions: [Session] { listed.filter { !deleting.contains($0.name) } }
+    private var listed: [Session] = []
+    /// Sessions asked to be deleted: gone from the list at once, while hurad
+    /// takes its time tearing the sandbox down. Each stays hidden until a
+    /// listing no longer has it, so a refresh that started before the delete
+    /// finished can't bring it back.
+    private var deleting: Set<String> = []
+    /// Why the last delete failed; the session is back in the list.
+    public var deleteFailure: String?
     public private(set) var projects: [Project] = []
     /// The agent's state per session name, for the sessions that have one.
     public private(set) var reports: [String: AgentReport] = [:]
@@ -81,7 +90,8 @@ public final class Server: Identifiable {
         do {
             async let named = client.projects()
             let listed = try await client.sessions()
-            sessions = listed
+            self.listed = listed
+            deleting.formIntersection(listed.map(\.name))
             // An older hurad without projects still lists its sessions.
             if let named = try? await named { projects = named }
             problem = nil
@@ -118,7 +128,7 @@ public final class Server: Identifiable {
     /// Sets what a refresh would have, for tests and previews.
     func load(projects: [Project], sessions: [Session]) {
         self.projects = projects
-        self.sessions = sessions
+        listed = sessions
         state = .online
     }
 
@@ -149,13 +159,24 @@ public final class Server: Identifiable {
     /// Starts a session and answers with its name, once the list has it.
     public func create(_ session: NewSession) async throws -> String {
         let name = try await client.create(session)
+        deleting.remove(name)
         await refresh()
         return name
     }
 
-    public func destroy(_ name: String) async throws {
-        sessions = try await client.destroy(name)
+    /// Deletes a session in the background: it leaves the list now, and
+    /// comes back with `deleteFailure` set if hurad couldn't delete it.
+    public func destroy(_ name: String) {
+        deleting.insert(name)
         reports[name] = nil
+        Task {
+            do {
+                listed = try await client.destroy(name)
+            } catch {
+                deleting.remove(name)
+                deleteFailure = "\(name) wasn't deleted: \(error.localizedDescription)"
+            }
+        }
     }
 
     public func session(named name: String) -> Session? {

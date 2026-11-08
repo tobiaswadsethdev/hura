@@ -12,6 +12,9 @@ final class TrackersModel {
     private(set) var inbox: Inbox?
     private(set) var reading = false
     private(set) var lastError: String?
+    /// What was waiting on you when you last looked at the inbox, by
+    /// tracker and id; the badge counts only what has come since.
+    private(set) var seen: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "inbox.seen") ?? [])
 
     @ObservationIgnored private let store: TrackerStore
     @ObservationIgnored private var loop: Task<Void, Never>?
@@ -97,8 +100,20 @@ final class TrackersModel {
 
     /// Waiting on you: tickets assigned to you and pull requests asking for
     /// your review.
-    var waitingCount: Int {
-        (inbox?.tasks.filter { $0.relation == "assigned" }.count ?? 0)
-            + (inbox?.pulls.filter(\.reviewRequested).count ?? 0)
+    private var waiting: Set<String> {
+        let tasks = inbox?.tasks.filter { $0.relation == "assigned" }.map { "\($0.tracker)/\($0.id)" } ?? []
+        let pulls = inbox?.pulls.filter(\.reviewRequested).map { "\($0.tracker)/\($0.id)" } ?? []
+        return Set(tasks + pulls)
+    }
+
+    /// What is waiting on you that you haven't seen in the inbox yet.
+    var unseenCount: Int { waiting.subtracting(seen).count }
+
+    /// The inbox is on screen: what it shows has been seen. What stops
+    /// waiting is forgotten, so it counts again if it comes back.
+    func markSeen() {
+        guard inbox != nil, seen != waiting else { return }
+        seen = waiting
+        UserDefaults.standard.set(Array(seen), forKey: "inbox.seen")
     }
 }

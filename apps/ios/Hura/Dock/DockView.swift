@@ -58,6 +58,7 @@ struct DockView: View {
             }
         }
         .navigationTitle(pane.rawValue)
+        .toolbar(.hidden, for: .tabBar)
         .navigationBarTitleDisplayMode(.inline)
     }
 }

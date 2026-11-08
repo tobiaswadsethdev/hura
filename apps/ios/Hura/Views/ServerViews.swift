@@ -163,16 +163,6 @@ struct ServerView: View {
                 model.pendingRoute = [.server(server.id), .session(serverID: server.id, name: name)]
             }
         }
-        .confirmationDialog("Delete \(destroying?.name ?? "")?", isPresented: .constant(destroying != nil),
-                            titleVisibility: .visible, presenting: destroying) { s in
-            Button("Delete Worktree", role: .destructive) {
-                destroying = nil
-                act { try await server.destroy(s.name) }
-            }
-            Button("Cancel", role: .cancel) { destroying = nil }
-        } message: { _ in
-            Text("Its sandbox is deleted, with everything in it that hasn't been pushed.")
-        }
         .confirmationDialog("Forget \(forgetting?.name ?? "")?", isPresented: .constant(forgetting != nil),
                             titleVisibility: .visible, presenting: forgetting) { p in
             Button("Forget Project", role: .destructive) {
@@ -188,6 +178,11 @@ struct ServerView: View {
         } message: {
             Text(error ?? "")
         }
+        .alert("Couldn't delete it", isPresented: .constant(server.deleteFailure != nil)) {
+            Button("OK") { server.deleteFailure = nil }
+        } message: {
+            Text(server.deleteFailure ?? "")
+        }
     }
 
     private func row(_ s: Session) -> some View {
@@ -196,6 +191,18 @@ struct ServerView: View {
         }
         .swipeActions {
             Button("Delete", role: .destructive) { destroying = s }
+        }
+        // On the row, not the list, so it opens over the row it is about
+        // rather than at the top of the screen.
+        .confirmationDialog("Delete \(s.name)?", isPresented: Binding(
+            get: { destroying?.name == s.name },
+            set: { if !$0 { destroying = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete Worktree", role: .destructive) { server.destroy(s.name) }
+        } message: {
+            Text(s.isWorktree
+                 ? "Its worktree on the server is deleted with its changes. A branch with commits on it is kept."
+                 : "Its sandbox is deleted, with everything in it that hasn't been pushed.")
         }
     }
 

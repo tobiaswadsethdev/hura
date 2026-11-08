@@ -33,7 +33,8 @@ enum ChatItem: Identifiable, Equatable {
     case prompt(id: String, prompt: Prompt)
     /// The first thing said on a day, so a time is never read as the wrong one.
     case day(id: String, date: Date)
-    case text(id: String, text: String)
+    /// What Claude said, and when.
+    case text(id: String, text: String, at: Date?)
     case thinking(id: String, text: String)
     case tool(id: String, call: ToolCall)
     case turnEnd(id: String, ms: Int64, at: Date?)
@@ -42,7 +43,7 @@ enum ChatItem: Identifiable, Equatable {
 
     var id: String {
         switch self {
-        case let .prompt(id, _), let .day(id, _), let .text(id, _), let .thinking(id, _), let .tool(id, _),
+        case let .prompt(id, _), let .day(id, _), let .text(id, _, _), let .thinking(id, _), let .tool(id, _),
              let .turnEnd(id, _, _), let .divider(id, _), let .notice(id, _, _):
             id
         }
@@ -110,7 +111,7 @@ enum ChatItem: Identifiable, Equatable {
             case TranscriptEntry.Kind.assistant:
                 for (i, b) in blocks.enumerated() {
                     switch b.type {
-                    case "text": items.append(.text(id: id(i), text: b.text ?? ""))
+                    case "text": items.append(.text(id: id(i), text: b.text ?? "", at: e.at))
                     case "thinking": items.append(.thinking(id: id(i), text: b.text ?? ""))
                     case "tool_use":
                         guard let toolID = b.id else { continue }

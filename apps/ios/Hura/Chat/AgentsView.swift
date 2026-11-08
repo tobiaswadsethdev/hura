@@ -45,7 +45,7 @@ struct AgentStatus: View {
 
     var body: some View {
         switch agent.status {
-        case "running": ProgressView().controlSize(.mini)
+        case "running": WorkingDots().foregroundStyle(Color.working)
         case "completed": Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
         default: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
         }
@@ -102,7 +102,7 @@ struct AgentScreen: View {
                     ChatRows(items: items, cwd: Self.cwd, working: agent.running)
                     if agent.running {
                         HStack(spacing: 8) {
-                            ProgressView()
+                            WorkingDots(size: 22).foregroundStyle(Color.working)
                             if let tool = progress?["last_tool_name"]?.string {
                                 Text(tool).font(.caption).foregroundStyle(.secondary)
                             }
