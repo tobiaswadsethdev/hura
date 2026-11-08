@@ -20,7 +20,7 @@ struct FactsPane: View {
                         Text(session.task).font(.callout).textSelection(.enabled)
                     }
                 }
-                spend
+                progress
                 Section("Worktree") {
                     LabeledContent("Branch") {
                         VStack(alignment: .trailing) {
@@ -64,10 +64,9 @@ struct FactsPane: View {
     }
 
     @ViewBuilder
-    private var spend: some View {
-        Section("Spent") {
+    private var progress: some View {
+        Section("Progress") {
             if let usage {
-                LabeledContent("Cost", value: usage.costUSD.map { String(format: "$%.2f", $0) } ?? "not yet")
                 LabeledContent("Worked", value: usage.durationMS.map(duration) ?? "not yet")
                 LabeledContent("Lines") {
                     if let added = usage.linesAdded {

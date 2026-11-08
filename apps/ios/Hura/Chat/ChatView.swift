@@ -244,7 +244,6 @@ struct ChatView: View {
             Spacer()
             if chat.status == "compacting" { Text("compacting") }
             if let ctx = chat.contextPercentage { Text("ctx \(Int(ctx.rounded()))%") }
-            if let cost = chat.costUSD, cost > 0 { Text(String(format: "$%.2f", cost)) }
         }
         .font(.caption)
         .foregroundStyle(.secondary)

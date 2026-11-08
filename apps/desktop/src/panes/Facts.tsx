@@ -5,8 +5,8 @@
 // and the toolchains its image carries are all facts about *that* session, and
 // they stay true after the config file that named them has changed.
 //
-// Read top down in the order the questions come: what is it doing, what has
-// it cost, where is the work, and what was it given to do it with. It used to
+// Read top down in the order the questions come: what is it doing, how far
+// has it got, where is the work, and what was it given to do it with. It used to
 // be one sixteen-row grid in monospace, which answered all four at the same
 // volume -- the task, a sentence, wrapped as code, and the context meter, the
 // one number that says a session is about to compact, came last.
@@ -40,12 +40,11 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
         )}
       </section>
 
-      {/* What this session has spent, which is the half of the status line
+      {/* What this session has done, which is the half of the status line
           payload that *is* about the session -- the rate-limit windows beside
           it in the header are the account's. `null` until the agent's status
-          line has run once, and a session that has spent nothing says so
-          rather than showing $0.00 as though it were a measurement. */}
-      {usage ? <Spend usage={usage} /> : <p className="facts-note">Spending shows here once the agent has reported.</p>}
+          line has run once. */}
+      {usage ? <Spend usage={usage} /> : <p className="facts-note">Progress shows here once the agent has reported.</p>}
 
       <section>
         <h4>worktree</h4>
@@ -100,13 +99,12 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
   );
 }
 
-/// The three numbers, and the context meter under them.
+/// The two numbers, and the context meter under them.
 function Spend({ usage }: { usage: Usage }) {
   const context = usage.context_used_percentage;
   return (
     <section className="facts-spend">
       <div className="tiles">
-        <Tile label="cost" value={usage.cost_usd === null ? notYet : `$${usage.cost_usd.toFixed(2)}`} />
         <Tile label="worked" value={usage.duration_ms === null ? notYet : duration(usage.duration_ms)} />
         <Tile
           label="lines"

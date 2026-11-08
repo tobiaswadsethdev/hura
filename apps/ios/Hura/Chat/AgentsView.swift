@@ -27,7 +27,7 @@ struct AgentsStrip: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.top, 6)
+            .padding(.vertical, 8)
         }
     }
 

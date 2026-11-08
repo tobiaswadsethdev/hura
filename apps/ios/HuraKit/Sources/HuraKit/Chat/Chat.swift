@@ -294,7 +294,6 @@ public final class Chat {
     public private(set) var commands: [String] = []
     /// What Claude Code is doing that isn't a turn: `compacting`.
     public private(set) var status: String?
-    public private(set) var costUSD: Double?
     public private(set) var contextPercentage: Double?
     /// The reply so far, before its message arrives whole.
     public private(set) var streaming = ""
@@ -499,7 +498,6 @@ public final class Chat {
             if case let .array(list)? = s["models"] { models = list.compactMap(ChatModel.init) } else { models = [] }
             if case let .array(list)? = s["commands"] { commands = list.compactMap(\.string) } else { commands = [] }
             status = s["status"]?.string
-            if case let .number(n)? = s["cost_usd"] { costUSD = n } else { costUSD = nil }
             if case let .number(n)? = s["context_percentage"] { contextPercentage = n } else { contextPercentage = nil }
             takesFiles = s["files"]?.bool ?? false
             receipts = s["receipts"]?.bool ?? false
