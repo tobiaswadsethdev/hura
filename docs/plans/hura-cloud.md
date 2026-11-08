@@ -42,6 +42,8 @@ signs in, which is why local-only stays (below).
 | Where it runs | The dedicated server, under Coolify |
 | Local-only mode | Kept. Without signing in, trackers and tokens stay on the device and are read from there, as today |
 | Signing in | Sign in with Apple, and a sign-in that needs no Apple device (an emailed code, passkeys later) |
+| Domain | `gethura.app` |
+| Mail | Resend, with `gethura.app` already verified there as a sending domain |
 
 ## Shape
 
@@ -83,7 +85,7 @@ an email; Jira and GitHub are connections added afterwards.
 - **Sign in with Apple**: native on iOS, and the web flow on the desktop (which
   needs a Services ID).
 - **An emailed one-time code**, so there is no password to store and no Apple
-  device needed. Needs a mail provider (Postmark, Resend or SES).
+  device needed. Sent through Resend, from `gethura.app`.
 - **Passkeys** later.
 - One account, more than one way in: linked by a verified email, and by hand
   where Apple's "hide my email" gives an address that matches nothing.
@@ -143,10 +145,12 @@ deleted.
 
 ## Phases
 
-- [ ] **1. What changed, in `hura-core`.** The comparison that is
-  `inboxNotify.ts` on the desktop (and `InboxWatch.swift` on the phone, once
-  the JQL filters branch lands) becomes one Rust function with one set of
-  tests, called by both apps. Worth it with or without the rest.
+- [x] **1. What changed, in `hura-core`.** `tracker::changes::record` takes
+  a read and what was seen at the last one, and answers what is seen now and
+  what changed. The desktop calls it through the `inbox_changes` command and
+  the phone through hura-mobile's `changes` op; each keeps what was seen where
+  it kept its snapshot before, in the same shape, so nothing is announced
+  twice or missed across the update. The service will keep it per account.
 - [ ] **2. The service, bare.** `crates/hura-cloud`: the Postgres schema
   (accounts, sign-ins, devices, trackers, plans), emailed codes and Sign in
   with Apple, the device list, the encrypted tracker store, `POST /v1/tracker`,
@@ -165,7 +169,5 @@ deleted.
 
 ## Not decided yet
 
-- The domain.
-- The mail provider.
 - Whether the relay ever moves into this service. For now it stays as it is:
   small, separate, and working.

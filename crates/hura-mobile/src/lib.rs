@@ -19,7 +19,9 @@ use std::sync::Once;
 use std::time::Duration;
 
 use hura_core::tracker::{
-    self, FieldChange, HttpRequest, PullFile, PullMerge, PullVerdict, Source, Stored, Transport,
+    self, FieldChange, HttpRequest, Inbox, PullFile, PullMerge, PullVerdict, Source, Stored,
+    Transport,
+    changes::{self, Seen},
 };
 
 use serde::de::DeserializeOwned;
@@ -97,6 +99,16 @@ pub fn handle(request: &str) -> Result<Value, String> {
         "inbox" => {
             let trackers: Vec<Stored> = field(&request, "trackers")?;
             to_value(tracker::inbox(&trackers, arg("prefix")?))
+        }
+        // A read recorded against what was seen at the last one: what is seen
+        // now, for the app to keep and hand back next time, and what changed.
+        // Nothing seen, or something that will not parse, makes this read the
+        // baseline: one quiet read, rather than every ticket announced.
+        "changes" => {
+            let inbox: Inbox = field(&request, "inbox")?;
+            let seen: Option<Seen> = field(&request, "seen").ok().flatten();
+            let (seen, changes) = changes::record(seen.as_ref(), &inbox);
+            Ok(json!({ "seen": seen, "changes": changes }))
         }
         "issue" => to_value(tracker::issue(&stored()?, arg("key")?)?),
         "edit_form" => to_value(tracker::edit_form(&stored()?, arg("key")?)?),
@@ -258,6 +270,32 @@ mod tests {
                 .unwrap_err()
                 .contains("tracker")
         );
+    }
+
+    #[test]
+    fn records_a_read_against_what_was_seen() {
+        let task = json!({
+            "tracker": "work", "kind": "jira", "id": "P-1", "key": "P-1", "title": "T",
+            "url": "", "status": "To Do", "item_type": "Bug", "session_name": "",
+            "branch": "", "repo": null, "relation": "assigned", "filters": [],
+            "updated": null, "comments": 0, "last_commenter": null,
+            "last_comment_mine": false
+        });
+        let inbox = |task: &Value| json!({ "tasks": [task], "warnings": [], "read": ["work"] });
+        let ask = |inbox: Value, seen: &Value| {
+            handle(&json!({ "op": "changes", "inbox": inbox, "seen": seen }).to_string()).unwrap()
+        };
+
+        let first = ask(inbox(&task), &Value::Null);
+        assert_eq!(first["changes"], json!([]), "the first read is a baseline");
+
+        let mut moved = task.clone();
+        moved["status"] = json!("Done");
+        let second = ask(inbox(&moved), &first["seen"]);
+        assert_eq!(second["changes"][0]["what"], "To Do → Done", "{second}");
+
+        let garbled = ask(inbox(&moved), &json!("not what was seen"));
+        assert_eq!(garbled["changes"], json!([]), "a baseline again");
     }
 
     #[test]

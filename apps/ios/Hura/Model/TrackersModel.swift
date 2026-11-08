@@ -139,8 +139,10 @@ final class TrackersModel {
     /// them on doesn't announce everything that happened while they were off.
     private func announce(_ read: Inbox) async {
         let defaults = UserDefaults.standard
-        let before = defaults.data(forKey: "inbox.snapshot").flatMap { try? JSONDecoder().decode(InboxSnapshot.self, from: $0) }
-        let (after, changes) = InboxSnapshot.record(read, after: before)
+        // Kept under the key the snapshot had before hura-core took this
+        // over: it still reads what was written there.
+        let before = defaults.data(forKey: "inbox.snapshot").flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) }
+        guard let (after, changes) = try? await TrackerCore.changes(read, seen: before) else { return }
         defaults.set(try? JSONEncoder().encode(after), forKey: "inbox.snapshot")
         guard notify, !changes.isEmpty else { return }
         let center = UNUserNotificationCenter.current()

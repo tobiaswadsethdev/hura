@@ -460,9 +460,11 @@ export default function App() {
       .tickets(server)
       .then(
         (v) => {
-          onInbox(v, notifyTickets.current);
           setInbox(v);
           setInboxError(null);
+          // Inside the one read at a time, so the next cannot compare with
+          // what this one has not saved yet.
+          return onInbox(v, notifyTickets.current).then(() => {});
         },
         (e) => setInboxError(messageOf(e)),
       )

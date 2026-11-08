@@ -37,6 +37,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod changes;
 pub mod doc;
 mod edit;
 mod issue;

@@ -51,6 +51,7 @@ use hura_core::projects::{NewProject, Project};
 use hura_core::repos::Listing;
 use hura_core::session::Session;
 use hura_core::settings::{Settings, SettingsView};
+use hura_core::tracker::changes::{Change as InboxChange, Seen};
 use hura_core::tracker::{Configured, Inbox, Source as TrackerSource};
 use hura_proto::stream::{Channel, ChannelId, ClientFrame, ServerFrame};
 use hura_proto::{FailureKind, GitOp, McpOp, Reply, Request};
@@ -750,6 +751,25 @@ fn tickets(server: Option<String>) -> Result<Inbox, Failed> {
     Ok(inbox)
 }
 
+/// A read recorded against what was seen at the last one.
+#[derive(Serialize)]
+struct Recorded {
+    seen: Seen,
+    changes: Vec<InboxChange>,
+}
+
+/// What changed since the last read of the trackers, and what is seen now.
+///
+/// Keeps nothing: the window holds what was seen and hands it back, so this
+/// is the same call the phone makes. Nothing seen, or something that will not
+/// parse, makes this read the baseline, which costs one quiet poll.
+#[tauri::command(async)]
+fn inbox_changes(inbox: Inbox, seen: Option<serde_json::Value>) -> Recorded {
+    let seen: Option<Seen> = seen.and_then(|v| serde_json::from_value(v).ok());
+    let (seen, changes) = hura_core::tracker::changes::record(seen.as_ref(), &inbox);
+    Recorded { seen, changes }
+}
+
 /// The server's `branch_prefix`, or the built-in one and why.
 fn branch_prefix(server: Option<&str>) -> (String, Option<String>) {
     match server.map(|s| remote(s).and_then(|r| r.call(Request::Settings).map_err(to_message))) {
@@ -1223,6 +1243,7 @@ fn main() {
             forget_skill,
             my_skills,
             tickets,
+            inbox_changes,
             ticket,
             pull,
             pull_files,

@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Comment } from "./gen/Comment";
 import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
+import type { InboxChange } from "./gen/InboxChange";
 import type { Issue } from "./gen/Issue";
 import type { PullDetail } from "./gen/PullDetail";
 import type { PullMerge } from "./gen/PullMerge";
@@ -225,6 +226,10 @@ export const api = {
   // machine. The server is asked only for its branch prefix, so a ticket
   // suggests the branch its session will get.
   tickets: (server: string | null) => invoke<Inbox>("tickets", { server }),
+  // What changed since the last read, worked out by the same code as on the
+  // phone. `seen` is whatever the last answer gave, kept as it was.
+  inboxChanges: (inbox: Inbox, seen: unknown) =>
+    invoke<{ seen: unknown; changes: InboxChange[] }>("inbox_changes", { inbox, seen }),
   // One of them in full, from the same place with the same token.
   ticket: (tracker: string, key: string) => invoke<Issue>("ticket", { tracker, key }),
   // Changing a Jira ticket, with the same token: its fields, its status, its
