@@ -167,7 +167,15 @@ per minute.
 | `claude_permission` | `CLAUDE_PERMISSION` | `active` | Claude needs your permission |
 | `claude_turn_finished` | `CLAUDE_TURN` | `active` | Claude finished a turn |
 | `claude_failed` | `CLAUDE_FAILED` | `time-sensitive` | A session failed |
+| `tracker_change` | `TRACKER_CHANGE` | `active` | Something changed on your trackers |
 | `test` | `TEST` | `active` | Test notification |
+
+`tracker_change` is sent by hura cloud rather than an `hurad` (see
+[cloud.md](cloud.md)): the phone links the service as it links a server, and
+the service reads the account's trackers and says what changed. Its text is
+always encrypted, and carries two more fields beside `title` and `body`:
+`tracker` and `id`, the ticket or pull request it is about, which the app
+opens when the notification is tapped.
 
 The generic body is what an encrypted notification shows when the phone can't
 decrypt it, with the link's label as the title.

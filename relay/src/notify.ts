@@ -10,6 +10,10 @@ export const KINDS = {
   claude_permission: { category: "CLAUDE_PERMISSION", level: "active" },
   claude_turn_finished: { category: "CLAUDE_TURN", level: "active" },
   claude_failed: { category: "CLAUDE_FAILED", level: "time-sensitive" },
+  // Something of yours changed on a tracker, sent by hura cloud, which reads
+  // the trackers of an account signed in to it. Its text names the ticket, so
+  // it is sent encrypted.
+  tracker_change: { category: "TRACKER_CHANGE", level: "active" },
   test: { category: "TEST", level: "active" },
 } as const;
 
@@ -21,6 +25,7 @@ export const GENERIC_BODY: Record<Kind, string> = {
   claude_permission: "Claude needs your permission",
   claude_turn_finished: "Claude finished a turn",
   claude_failed: "A session failed",
+  tracker_change: "Something changed on your trackers",
   test: "Test notification",
 };
 

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import HuraKit
@@ -173,5 +174,31 @@ struct CloudTests {
         await cloud.signOut()
         #expect(await !cloud.isSignedIn)
         #expect(try store.load() == nil)
+    }
+
+    @Test func thePushRouteIsHandedToTheServiceAndReadBack() async throws {
+        let service = Service()
+        let (cloud, _) = try await signedInCloud(service)
+        service.on("PUT /v1/push", 204, "")
+        service.on("GET /v1/push", 200, #"{"configured":true,"broken":null}"#)
+        try await cloud.setPush(serverID: "h_aaaaaaaaaaaaaaaa", pushToken: "hup_t", pushKey: "a2V5")
+        let put = try #require(service.requests("PUT /v1/push").first)
+        #expect(service.body(put)?["push_token"]?.string == "hup_t")
+        #expect(service.body(put)?["server_id"]?.string == "h_aaaaaaaaaaaaaaaa")
+        let route = try await cloud.pushRoute()
+        #expect(route.configured && route.broken == nil)
+    }
+
+    /// hura cloud's text carries the ticket a tap opens, inside the
+    /// ciphertext, as the service encrypts it (`push::encrypt`).
+    @Test func aTrackerChangeOpensWithItsTicket() throws {
+        let key = PushCrypto.newKey()
+        let plain = Data(#"{"title":"P-1 · To Do → Done","body":"Add it","tracker":"work","id":"10042"}"#.utf8)
+        let aad = Data("hura-push-v1\nh_aaaaaaaaaaaaaaaa\ntracker_change\n\n".utf8)
+        let box = try AES.GCM.seal(plain, using: SymmetricKey(data: key), authenticating: aad)
+        let text = try PushCrypto.open(box.combined!.base64URL, key: key, serverID: "h_aaaaaaaaaaaaaaaa",
+                                       kind: "tracker_change", session: nil, askID: nil)
+        #expect(text.title == "P-1 · To Do → Done")
+        #expect(text.tracker == "work" && text.id == "10042")
     }
 }

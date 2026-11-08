@@ -216,7 +216,7 @@ async fn prepare(
 }
 
 /// The account's trackers, tokens opened.
-async fn stored(state: &Shared, account: Uuid) -> Result<Vec<Stored>> {
+pub(crate) async fn stored(state: &Shared, account: Uuid) -> Result<Vec<Stored>> {
     let rows: Vec<(String, Jsonb<Source>, Option<Vec<u8>>)> = sqlx::query_as(
         "select name, source, token from trackers where account_id = $1 order by created_at",
     )

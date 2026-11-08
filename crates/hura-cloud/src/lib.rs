@@ -23,9 +23,11 @@ mod devices;
 mod error;
 pub mod mail;
 mod outbound;
+pub mod push;
 mod sign_in;
 mod token;
 mod trackers;
+pub mod watch;
 
 #[cfg(test)]
 mod tests;
@@ -37,6 +39,7 @@ pub struct State {
     pub db: PgPool,
     pub mail: Mailer,
     pub keys: crypto::Keys,
+    pub relay: push::Relay,
 }
 
 pub type Shared = Arc<State>;
@@ -72,6 +75,10 @@ pub fn app(state: Shared) -> Router {
         )
         .route("/v1/trackers/{name}/token", put(trackers::set_token))
         .route("/v1/tracker", post(trackers::call))
+        .route(
+            "/v1/push",
+            get(push::status).put(push::configure).delete(push::remove),
+        )
         .with_state(state)
 }
 

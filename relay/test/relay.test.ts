@@ -270,6 +270,7 @@ describe("events", () => {
       claude_permission: ["CLAUDE_PERMISSION", "active"],
       claude_turn_finished: ["CLAUDE_TURN", "active"],
       claude_failed: ["CLAUDE_FAILED", "time-sensitive"],
+      tracker_change: ["TRACKER_CHANGE", "active"],
       test: ["TEST", "active"],
     };
     for (const [kind, [category, level]] of Object.entries(expected)) {

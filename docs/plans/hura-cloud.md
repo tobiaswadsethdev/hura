@@ -177,6 +177,10 @@ deleted.
 - [ ] **4. Notifications from the service.** The scheduled reads, the phone
   through the relay (`tracker_change`), the desktop over a live connection.
   This is the phase that makes them timely.
+  - [x] The scheduled reads, what was seen kept per account, and the phone
+    through the relay: linked as an hurad is, turned on with the phone's own
+    "notify" switch, and the phone's own announcing stopped while it is.
+  - [ ] The desktop over a live connection.
 - [ ] **5. Better connections.** Jira's OAuth app and a GitHub App instead of
   pasted tokens, their webhooks to read a tracker the moment it changes, and
   "seen" shared between devices, clearing a notification on the others.

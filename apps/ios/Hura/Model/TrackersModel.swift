@@ -35,14 +35,19 @@ final class TrackersModel {
 
     @ObservationIgnored private let store: TrackerStore
     @ObservationIgnored private let cloud: Cloud
+    /// The relay link, which signed in, hura cloud is told about so it can
+    /// say what changed: it reads the trackers all day, and the phone only
+    /// while iOS lets it.
+    @ObservationIgnored private let push: PushManager?
     @ObservationIgnored private var loop: Task<Void, Never>?
     /// How often the inbox is read while the app is in front, as on the
     /// desktop.
     @ObservationIgnored private let every: Duration = .seconds(180)
 
-    init(store: TrackerStore = KeychainTrackerStore(), cloud: Cloud = .shared) {
+    init(store: TrackerStore = KeychainTrackerStore(), cloud: Cloud = .shared, push: PushManager? = nil) {
         self.store = store
         self.cloud = cloud
+        self.push = push
         trackers = (try? store.load()) ?? []
     }
 
@@ -57,6 +62,7 @@ final class TrackersModel {
             return
         }
         onPhone = local
+        await linkCloud()
         do {
             trackers = try await cloud.trackers()
         } catch {
@@ -205,6 +211,41 @@ final class TrackersModel {
         notify = on
         UserDefaults.standard.set(on, forKey: "inbox.notify")
         if on { scheduleBackgroundRead() } else { BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundTask) }
+        if signedIn {
+            if on {
+                // The relay needs this phone's device token, which iOS hands
+                // out once notifications are allowed.
+                UIApplication.shared.registerForRemoteNotifications()
+                await linkCloud()
+            } else if let push {
+                await push.disableCloud(cloud)
+            }
+        }
+    }
+
+    /// Whether hura cloud says what changed, in place of this phone noticing
+    /// for itself: signed in, with notifications on and the service linked.
+    var cloudNotifies: Bool { signedIn && notify && (push?.cloudLinked ?? false) }
+
+    /// Signed in with notifications on: links hura cloud to this phone, or
+    /// repairs the link. Until it can (no device token yet, the relay away),
+    /// the phone keeps noticing for itself.
+    private func linkCloud() async {
+        guard signedIn, notify, let push, push.device != nil else { return }
+        do {
+            if push.cloudLinked {
+                try await push.repairCloudIfNeeded(cloud)
+            } else {
+                try await push.enableCloud(cloud)
+            }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Before signing out: stops hura cloud's notifications to this phone.
+    func leaveCloud() async {
+        await push?.disableCloud(cloud)
     }
 
     /// Records a read, and says what changed since the last one. The
@@ -217,7 +258,9 @@ final class TrackersModel {
         let before = defaults.data(forKey: "inbox.snapshot").flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) }
         guard let (after, changes) = try? await TrackerCore.changes(read, seen: before) else { return }
         defaults.set(try? JSONEncoder().encode(after), forKey: "inbox.snapshot")
-        guard notify, !changes.isEmpty else { return }
+        // Signed in and linked, hura cloud tells this phone, and telling it
+        // here too would say everything twice.
+        guard notify, !changes.isEmpty, !cloudNotifies else { return }
         let center = UNUserNotificationCenter.current()
         // Past three at once, one says how many: usually the phone was away
         // for a weekend, and ten banners would be worse than one.

@@ -1,8 +1,8 @@
 # hura cloud
 
 The service behind signing in: accounts, the devices signed in to them, and
-the trackers they keep, read (soon) on a timer so a phone hears about a
-ticket on time. Why it exists, and what comes next, is in
+the trackers they keep, read on a timer so a phone hears about a ticket on
+time. Why it exists, and what comes next, is in
 [plans/hura-cloud.md](plans/hura-cloud.md). Without signing in, nothing here
 is used: trackers and their tokens stay on the device, as before.
 
@@ -19,6 +19,7 @@ runs anywhere else.
 | `RESEND_API_KEY` | sends sign-in codes through [Resend](https://resend.com) |
 | `MAIL_FROM` | who they are from, `hura <sign-in@gethura.app>` unless set. Its domain has to be verified on the Resend account |
 | `HURA_CLOUD_MASTER_KEY` | required: 32 bytes in base64, from `openssl rand -base64 32`. It wraps each account's key for its trackers' tokens, so **losing it loses every stored token**: keep a copy somewhere safe that is not the database's backups |
+| `HURA_CLOUD_RELAY` | the push relay tracker notifications go through, `https://hura-relay.twadseth.workers.dev` unless set. The service sends only there, whatever a phone says |
 | `HURA_CLOUD_MAIL=log` | prints codes instead of sending them, for a laptop. Without this or a Resend key the service will not start |
 
 On a laptop, with Docker for the database:
@@ -98,6 +99,29 @@ hura-core, with two differences: where a request takes a `tracker`, it is the
 name of one of the account's, and `inbox` reads all of them. It answers 200
 with `{"ok": ...}` or `{"error": ...}`, as the phone's does, so a client reads
 the same thing from either.
+
+### Notifications
+
+The phone links the service on the push relay as it links an `hurad`
+([relay-api.md](relay-api.md)): a push token from the relay and a key it makes
+for the text, handed over with `PUT /v1/push`. From then on the account's
+trackers are read every minute or so, by the same comparison the apps make
+for themselves (`hura_core::tracker::changes`), against what was seen kept per
+account. Each change goes to every device with a route as a `tracker_change`
+event whose text only the phone can read.
+
+| | |
+| --- | --- |
+| `PUT /v1/push` `{server_id, push_token, push_key}` | where to tell this device. The token is tried with the relay first; the token and key are kept encrypted |
+| `GET /v1/push` | `{configured, broken}`: `broken` says why the relay stopped taking the token |
+| `DELETE /v1/push` | stop telling this device |
+
+What was seen moves on only once every device has been told, or could not be
+for good. A relay that is away means the same changes are sent again at the
+next read under the same event IDs, which the relay drops as duplicates. An
+account is read only while it has a working route, as often as its plan
+allows plus up to half a minute, and less often while none of its trackers
+answers.
 
 The service only sends requests over HTTPS to public addresses. A Jira site
 inside the server's own network (`https://10.0.0.5`, `localhost`) is refused,

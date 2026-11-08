@@ -11,6 +11,10 @@
 //!   which wraps each account's key for its trackers' tokens. Required. Lost,
 //!   every stored tracker token is lost with it: keep a copy beside the
 //!   database's backups, and not in them.
+//! - `HURA_CLOUD_RELAY`: the push relay tracker notifications go through,
+//!   `https://hura-relay.twadseth.workers.dev` unless set. The only one: the
+//!   phone links this service on it, and an address a client chose is not
+//!   one the service would send to.
 //! - `HURA_CLOUD_MAIL=log`: prints codes instead, for running it on a laptop.
 //!   One of the two is required, so a deployment missing its key fails to
 //!   start rather than signing nobody in.
@@ -25,6 +29,7 @@ pub struct Config {
     pub listen: SocketAddr,
     pub mail: Mailer,
     pub keys: Keys,
+    pub relay: String,
 }
 
 pub const DEFAULT_FROM: &str = "hura <sign-in@gethura.app>";
@@ -52,11 +57,13 @@ impl Config {
             Keys::from_base64(&var("HURA_CLOUD_MASTER_KEY").ok_or(
                 "HURA_CLOUD_MASTER_KEY is not set; make one with `openssl rand -base64 32`",
             )?)?;
+        let relay = var("HURA_CLOUD_RELAY").unwrap_or_else(|| crate::push::DEFAULT_RELAY.into());
         Ok(Config {
             database_url,
             listen,
             mail,
             keys,
+            relay,
         })
     }
 }

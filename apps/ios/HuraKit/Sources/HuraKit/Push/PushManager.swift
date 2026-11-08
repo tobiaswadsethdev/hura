@@ -43,13 +43,15 @@ public final class PushManager {
     @ObservationIgnored private let relay: RelayClient?
     @ObservationIgnored private let store: PushDeviceStore
     @ObservationIgnored private let keys: PushKeyStore
+    @ObservationIgnored private let defaults: UserDefaults
 
     public init(relayURL: URL?, store: PushDeviceStore = KeychainPushDeviceStore(),
                 keys: PushKeyStore = KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup),
-                session: URLSession? = nil) {
+                session: URLSession? = nil, defaults: UserDefaults = .standard) {
         relay = relayURL.map { RelayClient(baseURL: $0, session: session) }
         self.store = store
         self.keys = keys
+        self.defaults = defaults
         device = try? store.load()
     }
 
@@ -137,6 +139,62 @@ public final class PushManager {
         let keyed = status.encrypted && (try? keys.key(serverID: server.id)) != nil
         if status.configured, status.broken == nil, keyed { return nil }
         return try await enable(server, prefs: status.prefs)
+    }
+
+    // MARK: hura cloud
+
+    /// The service's ID on this phone and its link on the relay, while it is
+    /// linked. Kept beside the server records' link IDs, which are the same
+    /// thing for an hurad.
+    private var cloudServerID: String? { defaults.string(forKey: "cloud.push.serverID") }
+    private var cloudLinkID: String? { defaults.string(forKey: "cloud.push.linkID") }
+
+    /// Whether hura cloud tells this phone what changed on its trackers.
+    public var cloudLinked: Bool { cloudLinkID != nil }
+
+    /// Links hura cloud to this phone as a server is linked: a link on the
+    /// relay, a fresh key for the text, both handed to the service, which
+    /// then reads the account's trackers and says what changed.
+    public func enableCloud(_ cloud: Cloud) async throws {
+        guard let relay else { throw PushError.unavailable }
+        guard let device else { throw PushError.notRegistered }
+        let serverID = cloudServerID ?? ServerRecord.newServerID()
+        if let old = cloudLinkID {
+            try? await relay.unlink(old, device: device)
+        }
+        let link = try await relay.link(serverID: serverID, label: "hura cloud", device: device)
+        let key = PushCrypto.newKey()
+        do {
+            try await cloud.setPush(serverID: serverID, pushToken: link.pushToken, pushKey: key.base64URL)
+        } catch {
+            try? await relay.unlink(link.linkID, device: device)
+            throw error
+        }
+        try keys.save(key, serverID: serverID)
+        try? keys.saveName("hura cloud", serverID: serverID)
+        defaults.set(serverID, forKey: "cloud.push.serverID")
+        defaults.set(link.linkID, forKey: "cloud.push.linkID")
+    }
+
+    /// Stops hura cloud's notifications. Best effort on every side: a device
+    /// already signed out has no route on the service.
+    public func disableCloud(_ cloud: Cloud) async {
+        try? await cloud.removePush()
+        if let id = cloudLinkID, let relay, let device {
+            try? await relay.unlink(id, device: device)
+        }
+        if let serverID = cloudServerID { try? keys.delete(serverID: serverID) }
+        defaults.removeObject(forKey: "cloud.push.linkID")
+    }
+
+    /// Links hura cloud again if the service lost the route, the relay
+    /// refused its token, or the phone lost the key.
+    public func repairCloudIfNeeded(_ cloud: Cloud) async throws {
+        guard cloudLinked, device != nil else { return }
+        let route = try await cloud.pushRoute()
+        let keyed = cloudServerID.flatMap { try? keys.key(serverID: $0) } != nil
+        if route.configured, route.broken == nil, keyed { return }
+        try await enableCloud(cloud)
     }
 
     /// Asks the relay to send this phone a test notification.

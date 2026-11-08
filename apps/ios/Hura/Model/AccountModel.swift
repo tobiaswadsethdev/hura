@@ -68,6 +68,7 @@ final class AccountModel {
 
     /// Signs this phone out, and goes back to the trackers kept on it.
     func signOut(trackers: TrackersModel) async {
+        await trackers.leaveCloud()
         await working { await cloud.signOut() }
         session = nil
         account = nil

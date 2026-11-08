@@ -90,6 +90,16 @@ impl AccountKey {
         String::from_utf8(plain).map_err(Error::internal)
     }
 
+    /// Anything else of the account's that is secret, under a label that
+    /// says what it is and so where it may be opened.
+    pub fn seal(&self, label: &str, plain: &[u8]) -> Result<Vec<u8>> {
+        seal(&self.key, &format!("{label}\0{}", self.account), plain)
+    }
+
+    pub fn open(&self, label: &str, sealed: &[u8]) -> Result<Vec<u8>> {
+        open(&self.key, &format!("{label}\0{}", self.account), sealed)
+    }
+
     fn token_aad(&self, tracker: &str) -> String {
         format!("tracker-token\0{}\0{tracker}", self.account)
     }

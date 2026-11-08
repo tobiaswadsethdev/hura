@@ -51,6 +51,10 @@ async fn service() -> Option<Test> {
         mail: Mailer::Kept(Mutex::new(Vec::new())),
         keys: crate::crypto::Keys::from_base64("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
             .unwrap(),
+        relay: crate::push::Relay::Kept {
+            sent: Mutex::new(Vec::new()),
+            statuses: Mutex::new(Vec::new()),
+        },
     });
     crate::install_transport();
     Some(Test {
@@ -433,4 +437,266 @@ async fn tracker_requests_read_the_accounts_own_trackers() {
             .contains("does not send requests"),
         "{refused}"
     );
+}
+
+const PUSH_KEY: [u8; 32] = [9; 32];
+const SERVER_ID: &str = "h_cloudcloudcloud2";
+
+impl Test {
+    fn relay_sent(&self) -> Vec<(String, Value)> {
+        let crate::push::Relay::Kept { sent, .. } = &self.state.relay else {
+            unreachable!()
+        };
+        sent.lock().unwrap().clone()
+    }
+
+    fn relay_answers(&self, list: &[u16]) {
+        let crate::push::Relay::Kept { statuses, .. } = &self.state.relay else {
+            unreachable!()
+        };
+        statuses.lock().unwrap().extend_from_slice(list);
+    }
+
+    /// A device told through the relay, and its account.
+    async fn routed(&self, email: &str) -> (Value, uuid::Uuid) {
+        use base64::Engine as _;
+        let session = self.sign_in(email, "iPhone").await;
+        let body = json!({
+            "server_id": SERVER_ID,
+            "push_token": "hup_token",
+            "push_key": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(PUSH_KEY),
+        });
+        let (status, _) = self
+            .call(
+                Method::PUT,
+                "/v1/push",
+                Some(token(&session, "access_token")),
+                Some(body),
+            )
+            .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let account = session["account"].as_str().unwrap().parse().unwrap();
+        (session, account)
+    }
+}
+
+fn ticket(id: &str, status: &str) -> hura_core::tracker::Task {
+    hura_core::tracker::Task {
+        tracker: "work".into(),
+        kind: hura_core::tracker::Kind::Jira,
+        id: format!("1000{id}"),
+        key: format!("P-{id}"),
+        title: format!("Ticket {id}"),
+        url: String::new(),
+        status: status.into(),
+        item_type: "Bug".into(),
+        session_name: String::new(),
+        branch: String::new(),
+        repo: None,
+        relation: hura_core::tracker::Relation::Assigned,
+        filters: Vec::new(),
+        updated: None,
+        comments: Some(0),
+        last_commenter: None,
+        last_comment_mine: false,
+    }
+}
+
+fn read(tasks: Vec<hura_core::tracker::Task>) -> hura_core::tracker::Inbox {
+    hura_core::tracker::Inbox {
+        tasks,
+        read: vec!["work".into()],
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn a_push_route_is_checked_and_kept_for_the_device() {
+    let Some(t) = service().await else { return };
+    let (session, _) = t.routed("a@example.com").await;
+    let at = token(&session, "access_token");
+    let (_, view) = t.call(Method::GET, "/v1/push", Some(at), None).await;
+    assert_eq!(view, json!({ "configured": true, "broken": null }));
+
+    // Kept encrypted.
+    let kept: Vec<u8> = sqlx::query_scalar("select push_token from push_routes")
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap();
+    assert!(!kept.windows(9).any(|w| w == b"hup_token"));
+
+    for bad in [
+        json!({ "server_id": "nope", "push_token": "hup_x", "push_key": "AAAA" }),
+        json!({ "server_id": SERVER_ID, "push_token": "hup_x", "push_key": "AAAA" }),
+        json!({ "server_id": SERVER_ID, "push_token": "nope", "push_key": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk" }),
+    ] {
+        let (status, body) = t.call(Method::PUT, "/v1/push", Some(at), Some(bad)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    }
+    // A token the relay does not know.
+    t.relay_answers(&[401]);
+    let refused = json!({ "server_id": SERVER_ID, "push_token": "hup_y", "push_key": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk" });
+    let (status, _) = t
+        .call(Method::PUT, "/v1/push", Some(at), Some(refused))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = t.call(Method::DELETE, "/v1/push", Some(at), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, view) = t.call(Method::GET, "/v1/push", Some(at), None).await;
+    assert_eq!(view["configured"], false);
+}
+
+#[tokio::test]
+async fn what_changed_is_told_once_encrypted_to_every_route() {
+    let Some(t) = service().await else { return };
+    let (_, account) = t.routed("a@example.com").await;
+
+    // The first read is the baseline.
+    assert!(
+        crate::watch::announce(&t.state, account, &read(vec![ticket("1", "To Do")]))
+            .await
+            .unwrap()
+    );
+    assert!(t.relay_sent().is_empty());
+
+    assert!(
+        crate::watch::announce(&t.state, account, &read(vec![ticket("1", "Done")]))
+            .await
+            .unwrap()
+    );
+    let sent = t.relay_sent();
+    assert_eq!(sent.len(), 1);
+    let (push_token, event) = &sent[0];
+    assert_eq!(push_token, "hup_token");
+    assert_eq!(event["kind"], "tracker_change");
+    assert!(event.get("title").is_none(), "only ciphertext: {event}");
+    let text = crate::push::decrypt(&PUSH_KEY, SERVER_ID, event["encrypted"].as_str().unwrap());
+    assert_eq!(text.title, "P-1 · To Do → Done");
+    assert_eq!(
+        (text.tracker.as_deref(), text.id.as_deref()),
+        (Some("work"), Some("10001"))
+    );
+
+    // The same read again says nothing.
+    assert!(
+        crate::watch::announce(&t.state, account, &read(vec![ticket("1", "Done")]))
+            .await
+            .unwrap()
+    );
+    assert_eq!(t.relay_sent().len(), 1);
+}
+
+#[tokio::test]
+async fn a_relay_that_is_away_is_tried_again_with_the_same_event() {
+    let Some(t) = service().await else { return };
+    let (_, account) = t.routed("a@example.com").await;
+    crate::watch::announce(&t.state, account, &read(vec![ticket("1", "To Do")]))
+        .await
+        .unwrap();
+
+    t.relay_answers(&[503]);
+    let moved = read(vec![ticket("1", "Done")]);
+    assert!(
+        !crate::watch::announce(&t.state, account, &moved)
+            .await
+            .unwrap(),
+        "not told"
+    );
+    assert!(
+        crate::watch::announce(&t.state, account, &moved)
+            .await
+            .unwrap(),
+        "told now"
+    );
+    let sent = t.relay_sent();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(
+        sent[0].1["event_id"], sent[1].1["event_id"],
+        "a duplicate to the relay"
+    );
+}
+
+#[tokio::test]
+async fn a_refused_route_is_marked_broken_and_left_out() {
+    let Some(t) = service().await else { return };
+    let (session, account) = t.routed("a@example.com").await;
+    crate::watch::announce(&t.state, account, &read(vec![ticket("1", "To Do")]))
+        .await
+        .unwrap();
+
+    t.relay_answers(&[401]);
+    assert!(
+        crate::watch::announce(&t.state, account, &read(vec![ticket("1", "Done")]))
+            .await
+            .unwrap()
+    );
+    let (_, view) = t
+        .call(
+            Method::GET,
+            "/v1/push",
+            Some(token(&session, "access_token")),
+            None,
+        )
+        .await;
+    assert!(
+        view["broken"].as_str().unwrap().contains("refused"),
+        "{view}"
+    );
+
+    // Nobody left to tell, so the account is not read.
+    sqlx::query("update watches set next_read_at = now() - interval '1 minute'")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    assert_eq!(crate::watch::tick(&t.state).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn many_changes_at_once_are_one_notification() {
+    let Some(t) = service().await else { return };
+    let (_, account) = t.routed("a@example.com").await;
+    let tickets = |status: &str| read((1..=5).map(|i| ticket(&i.to_string(), status)).collect());
+    crate::watch::announce(&t.state, account, &tickets("To Do"))
+        .await
+        .unwrap();
+    crate::watch::announce(&t.state, account, &tickets("Done"))
+        .await
+        .unwrap();
+    let sent = t.relay_sent();
+    assert_eq!(sent.len(), 1);
+    let text = crate::push::decrypt(
+        &PUSH_KEY,
+        SERVER_ID,
+        sent[0].1["encrypted"].as_str().unwrap(),
+    );
+    assert!(text.title.starts_with("5 changes"), "{}", text.title);
+    assert_eq!(text.tracker, None);
+}
+
+#[tokio::test]
+async fn a_due_account_with_a_route_is_read_and_put_back_in_line() {
+    let Some(t) = service().await else { return };
+    t.routed("a@example.com").await;
+    assert_eq!(
+        crate::watch::tick(&t.state).await.unwrap(),
+        1,
+        "due at once"
+    );
+    assert_eq!(
+        crate::watch::tick(&t.state).await.unwrap(),
+        0,
+        "not again so soon"
+    );
+    let wait: f64 =
+        sqlx::query_scalar("select extract(epoch from next_read_at - now())::float8 from watches")
+            .fetch_one(&t.state.db)
+            .await
+            .unwrap();
+    assert!((50.0..=95.0).contains(&wait), "next read in {wait}s");
+    let seen: Option<Vec<u8>> = sqlx::query_scalar("select seen from watches")
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap();
+    assert!(seen.is_some(), "the baseline is kept");
 }

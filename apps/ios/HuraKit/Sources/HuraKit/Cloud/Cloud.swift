@@ -217,6 +217,32 @@ public actor Cloud {
         _ = try await authorized("DELETE", "/v1/devices/\(id)")
     }
 
+    // MARK: Notifications
+
+    /// Where the service tells this phone that something changed: a link on
+    /// the push relay, made as for an hurad, and the key for its text.
+    public func setPush(serverID: String, pushToken: String, pushKey: String) async throws {
+        _ = try await authorized("PUT", "/v1/push", body: [
+            "server_id": .string(serverID),
+            "push_token": .string(pushToken),
+            "push_key": .string(pushKey),
+        ])
+    }
+
+    public func removePush() async throws {
+        _ = try await authorized("DELETE", "/v1/push")
+    }
+
+    /// Whether the service tells this phone, and whether that still works.
+    public func pushRoute() async throws -> (configured: Bool, broken: String?) {
+        struct Route: Decodable {
+            var configured: Bool
+            var broken: String?
+        }
+        let r = try JSONDecoder().decode(Route.self, from: try await authorized("GET", "/v1/push"))
+        return (r.configured, r.broken)
+    }
+
     // MARK: Trackers
 
     /// The account's trackers. A token is never sent back: `hasToken` says
