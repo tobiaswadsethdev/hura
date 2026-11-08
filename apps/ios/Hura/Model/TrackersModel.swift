@@ -66,6 +66,7 @@ final class TrackersModel {
         }
         onPhone = local
         await linkCloud()
+        await syncSeen()
         connectable = (try? await cloud.connectable()) ?? connectable
         do {
             trackers = try await cloud.trackers()
@@ -336,9 +337,32 @@ final class TrackersModel {
 
     /// The inbox is on screen: what it shows has been seen. What stops
     /// waiting is forgotten, so it counts again if it comes back.
+    ///
+    /// Signed in, the account's other devices are told, so their badges and
+    /// notifications clear too.
     func markSeen() {
         guard inbox != nil, seen != waiting else { return }
         seen = waiting
         UserDefaults.standard.set(Array(seen), forKey: "inbox.seen")
+        if signedIn {
+            let seen = seen
+            Task { try? await cloud.setSeen(seen) }
+        }
+    }
+
+    /// What was seen on another of the account's devices: the badge follows
+    /// it, and the tracker notifications this phone showed before then go.
+    /// Asked at every read, and when hura cloud wakes the app to say.
+    func syncSeen() async {
+        guard signedIn, let (items, at) = try? await cloud.seen(), let at else { return }
+        if items != seen {
+            seen = items
+            UserDefaults.standard.set(Array(seen), forKey: "inbox.seen")
+        }
+        let center = UNUserNotificationCenter.current()
+        let stale = await center.deliveredNotifications()
+            .filter { $0.request.content.threadIdentifier == "inbox" && $0.date <= at }
+            .map(\.request.identifier)
+        if !stale.isEmpty { center.removeDeliveredNotifications(withIdentifiers: stale) }
     }
 }

@@ -194,7 +194,9 @@ deleted.
     apps; GitHub's webhooks making the people in a delivery due at once.
   - [ ] Jira's webhooks: they cannot say `currentUser()` or a saved filter,
     and expire every thirty days, so Jira is read on the timer for now.
-  - [ ] "Seen" shared between devices.
+  - [x] "Seen" shared between devices: kept per account, set by whichever
+    device last looked at its inbox, and the other phones woken by a
+    background push (`inbox_seen`) to clear their badge and notifications.
 - [ ] **6. Ready for others.** The master key in a KMS, monitoring, rate
   limits, export and deletion, plans enforced, billing.
 

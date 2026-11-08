@@ -244,6 +244,9 @@ export const api = {
   // service says what changed (as `tracker-changes` events) and the window
   // does not announce what it finds itself.
   cloudLive: () => invoke<boolean>("cloud_live"),
+  // The inbox was looked at here, with these waiting (`tracker/id`): signed
+  // in, the account's phones clear what they showed. Nothing signed out.
+  cloudSetSeen: (items: string[]) => invoke<void>("cloud_set_seen", { items }),
   // Connecting a tracker through its own sign-in, in the browser: which can
   // be, and where to send the browser for one.
   cloudConnectable: () => invoke<string[]>("cloud_connectable"),

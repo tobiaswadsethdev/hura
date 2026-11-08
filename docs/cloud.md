@@ -162,6 +162,22 @@ account is read only while it has a working route or an open stream, as often
 as its plan allows plus up to half a minute, and less often while none of its
 trackers answers.
 
+### Seen
+
+Looking at the inbox on one device counts on all of them: what was waiting
+on you then (tickets assigned to you, pull requests asking for your review,
+as `tracker/id`) is kept for the account, and the account's other phones are
+woken quietly to clear their badge and the tracker notifications they showed
+before then.
+
+| | |
+| --- | --- |
+| `GET /v1/seen` | `{items, at}`; `at` in Unix seconds, or null before the inbox has been looked at anywhere |
+| `PUT /v1/seen` `{items}` | the inbox was just looked at on this device. When that differs from what was seen, every other device with a push route gets an `inbox_seen` background push |
+
+iOS spaces background pushes out as it sees fit, so a phone may catch up only
+when it is next opened, which asks too.
+
 The service only sends requests over HTTPS to public addresses. A Jira site
 inside the server's own network (`https://10.0.0.5`, `localhost`) is refused,
 since otherwise any account could make the server ask its neighbours.

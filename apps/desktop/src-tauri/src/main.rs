@@ -747,6 +747,17 @@ fn cloud_sign_out_device(id: String) -> Result<Vec<CloudDevice>, Failed> {
     cloud().devices().map_err(cloud_failed)
 }
 
+/// The inbox was just looked at in this window, with these waiting
+/// (`tracker/id`): signed in, the account's phones clear their badge and the
+/// tracker notifications they showed. Signed out, nothing to tell.
+#[tauri::command(async)]
+fn cloud_set_seen(items: Vec<String>) -> Result<(), Failed> {
+    if !cloud().signed_in() {
+        return Ok(());
+    }
+    cloud().set_seen(&items).map_err(cloud_failed)
+}
+
 /// The trackers hura cloud can connect through their own sign-in.
 #[tauri::command(async)]
 fn cloud_connectable() -> Vec<String> {
@@ -1502,6 +1513,7 @@ fn main() {
             move_trackers_to_cloud,
             cloud_live,
             cloud_connectable,
+            cloud_set_seen,
             cloud_connect,
             ticket,
             pull,

@@ -28,6 +28,7 @@ pub mod mail;
 mod oauth;
 mod outbound;
 pub mod push;
+mod seen;
 mod sign_in;
 mod token;
 mod trackers;
@@ -107,6 +108,7 @@ pub fn app(state: Shared) -> Router {
         .route("/v1/trackers/{name}/token", put(trackers::set_token))
         .route("/v1/tracker", post(trackers::call))
         .route("/v1/events", get(live::events))
+        .route("/v1/seen", get(seen::get).put(seen::put))
         .route("/v1/connect", get(oauth::available))
         .route("/v1/connect/{provider}", post(oauth::start))
         .route("/v1/oauth/github/callback", get(oauth::github_callback))

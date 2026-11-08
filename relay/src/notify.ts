@@ -14,10 +14,17 @@ export const KINDS = {
   // the trackers of an account signed in to it. Its text names the ticket, so
   // it is sent encrypted.
   tracker_change: { category: "TRACKER_CHANGE", level: "active" },
+  // Nothing to show: the inbox was looked at on another of the account's
+  // devices, so the app wakes in the background to clear what it showed.
+  // Sent as a background push, which carries no text.
+  inbox_seen: { category: "", level: "passive" },
   test: { category: "TEST", level: "active" },
 } as const;
 
 export type Kind = keyof typeof KINDS;
+
+/** Kinds sent as background pushes: no alert, no text, low priority. */
+export const BACKGROUND: ReadonlySet<Kind> = new Set<Kind>(["inbox_seen"]);
 
 // What an encrypted notification says until the app's extension decrypts it.
 export const GENERIC_BODY: Record<Kind, string> = {
@@ -26,6 +33,7 @@ export const GENERIC_BODY: Record<Kind, string> = {
   claude_turn_finished: "Claude finished a turn",
   claude_failed: "A session failed",
   tracker_change: "Something changed on your trackers",
+  inbox_seen: "",
   test: "Test notification",
 };
 
@@ -38,6 +46,9 @@ export type Notification = {
 } & ({ title: string; subtitle?: string; body: string; encrypted?: undefined } | { encrypted: string });
 
 export function apnsPayload(n: Notification, link: { id: string; serverId: string; label: string }) {
+  if (BACKGROUND.has(n.kind)) {
+    return { aps: { "content-available": 1 }, hura: { kind: n.kind, server_id: link.serverId, link_id: link.id } };
+  }
   const { category, level } = KINDS[n.kind];
   let alert: Record<string, string>;
   if (n.encrypted !== undefined) {

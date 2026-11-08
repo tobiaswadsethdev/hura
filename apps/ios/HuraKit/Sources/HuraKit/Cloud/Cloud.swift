@@ -260,6 +260,25 @@ public actor Cloud {
         return (r.configured, r.broken)
     }
 
+    // MARK: Seen
+
+    /// What was waiting on you when the inbox was last looked at, on any of
+    /// the account's devices, as `tracker/id` keys, and when.
+    public func seen() async throws -> (items: Set<String>, at: Date?) {
+        struct Seen: Decodable {
+            var items: [String]
+            var at: Double?
+        }
+        let s = try JSONDecoder().decode(Seen.self, from: try await authorized("GET", "/v1/seen"))
+        return (Set(s.items), s.at.map(Date.init(timeIntervalSince1970:)))
+    }
+
+    /// The inbox was just looked at here, with these waiting. The account's
+    /// other phones are told, and clear what they showed.
+    public func setSeen(_ items: Set<String>) async throws {
+        _ = try await authorized("PUT", "/v1/seen", body: ["items": .array(items.sorted().map(JSONValue.string))])
+    }
+
     // MARK: Trackers
 
     /// The account's trackers. A token is never sent back: `hasToken` says

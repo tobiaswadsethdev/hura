@@ -168,6 +168,7 @@ per minute.
 | `claude_turn_finished` | `CLAUDE_TURN` | `active` | Claude finished a turn |
 | `claude_failed` | `CLAUDE_FAILED` | `time-sensitive` | A session failed |
 | `tracker_change` | `TRACKER_CHANGE` | `active` | Something changed on your trackers |
+| `inbox_seen` | — | — | — (a background push: nothing is shown) |
 | `test` | `TEST` | `active` | Test notification |
 
 `tracker_change` is sent by hura cloud rather than an `hurad` (see
@@ -176,6 +177,14 @@ the service reads the account's trackers and says what changed. Its text is
 always encrypted, and carries two more fields beside `title` and `body`:
 `tracker` and `id`, the ticket or pull request it is about, which the app
 opens when the notification is tapped.
+
+`inbox_seen` is hura cloud's too, sent to a phone when the inbox was looked
+at on another of the account's devices. It is a background push
+(`apns-push-type: background`, priority 5) whose payload is only
+`{"aps": {"content-available": 1}, "hura": {kind, server_id, link_id}}`: the
+app wakes, asks the service what was seen, and clears the tracker
+notifications it showed before then. It carries no text, and an event of this
+kind with any is `400`.
 
 The generic body is what an encrypted notification shows when the phone can't
 decrypt it, with the link's label as the title.

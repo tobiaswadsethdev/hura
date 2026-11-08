@@ -214,4 +214,17 @@ struct CloudTests {
         #expect(try store.load()?.refreshToken == "hura_rt_r")
         #expect(try store.load()?.email == "", "Apple shares an address only on the first sign-in")
     }
+
+    @Test func whatWasSeenIsSentAndReadBack() async throws {
+        let service = Service()
+        let (cloud, _) = try await signedInCloud(service)
+        service.on("PUT /v1/seen", 200, #"{"items":["gh/7"],"at":1800000000}"#)
+        service.on("GET /v1/seen", 200, #"{"items":["gh/7","work/1"],"at":1800000000}"#)
+        try await cloud.setSeen(["work/1", "gh/7"])
+        let put = try #require(service.requests("PUT /v1/seen").first)
+        #expect(service.body(put)?["items"] == .array([.string("gh/7"), .string("work/1")]))
+        let seen = try await cloud.seen()
+        #expect(seen.items == ["gh/7", "work/1"])
+        #expect(seen.at == Date(timeIntervalSince1970: 1_800_000_000))
+    }
 }

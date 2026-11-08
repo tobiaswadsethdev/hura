@@ -496,6 +496,30 @@ export default function App() {
     };
   }, [readInbox]);
 
+  // Looking at the inbox here is looking at it everywhere: with the window in
+  // front and the sidebar open, what is waiting on you (the phone's badge
+  // counts the same) is seen, and signed in, the phones clear their badge and
+  // the tracker notifications they showed. Sent when that changes.
+  const lastSeen = useRef<string | null>(null);
+  useEffect(() => {
+    const look = () => {
+      if (!inboxOpen || !inbox || !document.hasFocus()) return;
+      const items = [
+        ...inbox.tasks.filter((t) => t.relation === "assigned").map((t) => `${t.tracker}/${t.id}`),
+        ...inbox.pulls.filter((p) => p.review_requested).map((p) => `${p.tracker}/${p.id}`),
+      ].sort();
+      const key = items.join("\n");
+      if (key === lastSeen.current) return;
+      lastSeen.current = key;
+      api.cloudSetSeen(items).catch(() => {
+        lastSeen.current = null;
+      });
+    };
+    look();
+    window.addEventListener("focus", look);
+    return () => window.removeEventListener("focus", look);
+  }, [inbox, inboxOpen]);
+
   const groups = useMemo(() => group(projects, live), [projects, live]);
 
   // The diff each worktree carries, lifted out of the polls for the tree.

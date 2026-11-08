@@ -1,7 +1,7 @@
 // The hura relay: how hurad reaches a phone. See docs/relay-api.md.
 
 import { DEAD_TOKEN_REASONS, sendApns, type Environment } from "./apns";
-import { apnsPayload, KINDS, type Kind, type Notification } from "./notify";
+import { apnsPayload, BACKGROUND, KINDS, type Kind, type Notification } from "./notify";
 import {
   badRequest,
   bearer,
@@ -258,7 +258,14 @@ async function postEvent(req: Request, env: RelayEnv): Promise<Response> {
   const eventId = str(body, "event_id", { max: 100, re: /^[A-Za-z0-9_.:-]+$/ })!;
   const kind = str(body, "kind", { max: 40 })!;
   if (!(kind in KINDS)) throw badRequest(`unknown kind ${JSON.stringify(kind)}`);
-  const encrypted = str(body, "encrypted", { max: 3000, re: /^[A-Za-z0-9_-]+$/, optional: true });
+  // A background kind carries nothing to show, and is refused with text.
+  const background = BACKGROUND.has(kind as Kind);
+  if (background && ["title", "subtitle", "body", "encrypted"].some((k) => body[k] !== undefined && body[k] !== null)) {
+    throw badRequest(`${kind} carries no text`);
+  }
+  const encrypted = background
+    ? ""
+    : str(body, "encrypted", { max: 3000, re: /^[A-Za-z0-9_-]+$/, optional: true });
   if (encrypted !== undefined && ["title", "subtitle", "body"].some((k) => body[k] !== undefined && body[k] !== null)) {
     throw badRequest("send either encrypted or title, subtitle and body");
   }
@@ -292,7 +299,13 @@ async function postEvent(req: Request, env: RelayEnv): Promise<Response> {
       ? { kind: kind as Kind, encrypted, session, askId }
       : { kind: kind as Kind, title, subtitle, body: text, session, askId };
   const payload = apnsPayload(n, { id: link.id, serverId: link.server_id, label: link.label });
-  const r = await sendApns(env, { token: link.device.apns_token, environment: link.device.environment }, payload);
+  const r = await sendApns(
+    env,
+    { token: link.device.apns_token, environment: link.device.environment },
+    payload,
+    undefined,
+    background ? "background" : "alert",
+  );
   log("event", { link: link.id, kind, apns_status: r.status, apns_reason: r.reason });
 
   if (r.status === 200) {

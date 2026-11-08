@@ -341,6 +341,13 @@ impl Cloud {
         parse(&self.authorized("DELETE", &format!("/v1/trackers/{}", segment(name)), None)?)
     }
 
+    /// The inbox was just looked at here, with these waiting (`tracker/id`
+    /// keys): the account's other phones clear their badge and notifications.
+    pub fn set_seen(&self, items: &[String]) -> Result<(), Failure> {
+        self.authorized("PUT", "/v1/seen", Some(&json!({ "items": items })))
+            .map(drop)
+    }
+
     /// The providers the service can connect a tracker through (`github`,
     /// `jira`).
     pub fn connectable(&self) -> Result<Vec<String>, Failure> {

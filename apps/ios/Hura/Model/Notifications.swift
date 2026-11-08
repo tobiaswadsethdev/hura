@@ -80,6 +80,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return true
     }
 
+    /// A background push: hura cloud saying the inbox was looked at on
+    /// another device. Anything else is not one this answers.
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
+        guard (userInfo["hura"] as? [String: Any])?["kind"] as? String == "inbox_seen" else { return .noData }
+        await trackers.syncSeen()
+        return .newData
+    }
+
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Task { await model.deviceTokenChanged(deviceToken) }
     }

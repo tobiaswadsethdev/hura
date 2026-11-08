@@ -1309,3 +1309,57 @@ async fn a_signed_github_delivery_makes_the_people_in_it_due() {
         .unwrap();
     assert!(due, "read at the watcher's next pass");
 }
+
+#[tokio::test]
+async fn looking_at_the_inbox_on_one_device_quietly_tells_the_other_phones() {
+    let Some(t) = service().await else { return };
+    let (phone, _) = t.routed("a@example.com").await;
+    let mac = t.sign_in("a@example.com", "Mac").await;
+    let mac_at = token(&mac, "access_token");
+
+    let (_, none) = t.call(Method::GET, "/v1/seen", Some(mac_at), None).await;
+    assert_eq!(none, json!({ "items": [], "at": null }));
+
+    let looked = json!({ "items": ["work/10002", " work/10001 ", "work/10001", "gh/7"] });
+    let (status, seen) = t
+        .call(Method::PUT, "/v1/seen", Some(mac_at), Some(looked.clone()))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        seen["items"],
+        json!(["gh/7", "work/10001", "work/10002"]),
+        "trimmed, sorted, once each"
+    );
+    assert!(seen["at"].as_i64().is_some());
+
+    // The phone is told, with nothing to show.
+    let sent = t.relay_sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1["kind"], "inbox_seen");
+    assert!(sent[0].1.get("encrypted").is_none() && sent[0].1.get("body").is_none());
+
+    // The same again says nothing; the phone reads it.
+    t.call(Method::PUT, "/v1/seen", Some(mac_at), Some(looked))
+        .await;
+    assert_eq!(t.relay_sent().len(), 1);
+    let (_, read) = t
+        .call(
+            Method::GET,
+            "/v1/seen",
+            Some(token(&phone, "access_token")),
+            None,
+        )
+        .await;
+    assert_eq!(read["items"], seen["items"]);
+
+    // Looked at on the phone itself: nobody else to tell.
+    let looked = json!({ "items": ["gh/7"] });
+    t.call(
+        Method::PUT,
+        "/v1/seen",
+        Some(token(&phone, "access_token")),
+        Some(looked),
+    )
+    .await;
+    assert_eq!(t.relay_sent().len(), 1);
+}

@@ -72,6 +72,9 @@ export async function sendApns(
   device: { token: string; environment: Environment },
   payload: unknown,
   expiresInSeconds = 6 * 3600,
+  // A background push is sent at low priority, which is what APNs requires
+  // of one, and when the phone is ready rather than at once.
+  pushType: "alert" | "background" = "alert",
 ): Promise<ApnsResult> {
   const url = `${apnsOrigin(env, device.environment)}/3/device/${device.token}`;
   const body = JSON.stringify(payload);
@@ -83,8 +86,8 @@ export async function sendApns(
         headers: {
           authorization: `bearer ${await providerToken(env)}`,
           "apns-topic": env.APNS_TOPIC,
-          "apns-push-type": "alert",
-          "apns-priority": "10",
+          "apns-push-type": pushType,
+          "apns-priority": pushType === "background" ? "5" : "10",
           "apns-expiration": String(Math.floor(Date.now() / 1000) + expiresInSeconds),
           "content-type": "application/json",
         },
