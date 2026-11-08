@@ -341,6 +341,29 @@ impl Cloud {
         parse(&self.authorized("DELETE", &format!("/v1/trackers/{}", segment(name)), None)?)
     }
 
+    /// The providers the service can connect a tracker through (`github`,
+    /// `jira`).
+    pub fn connectable(&self) -> Result<Vec<String>, Failure> {
+        let v: std::collections::BTreeMap<String, bool> =
+            parse(&self.authorized("GET", "/v1/connect", None)?)?;
+        Ok(v.into_iter()
+            .filter(|(_, on)| *on)
+            .map(|(k, _)| k)
+            .collect())
+    }
+
+    /// Where to send a browser to connect `provider`. It ends on a page of
+    /// the service's saying to come back.
+    pub fn connect_url(&self, provider: &str) -> Result<String, Failure> {
+        let path = format!("/v1/connect/{}", segment(provider));
+        let v: Value =
+            parse(&self.authorized("POST", &path, Some(&json!({ "return": "browser" })))?)?;
+        v["url"].as_str().map(String::from).ok_or_else(|| Failure {
+            status: 0,
+            message: "hura cloud gave no address to connect with".into(),
+        })
+    }
+
     /// One of hura-core's tracker requests (`hura_core::tracker::request`),
     /// on the account's trackers: where it takes a `tracker`, a name. The
     /// answer, or the tracker's failure in words.

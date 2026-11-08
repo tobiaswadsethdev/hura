@@ -2591,6 +2591,10 @@ main { position: relative; }
 .panel.account .setting-actions .hint { margin-right: auto; }
 .panel.account > .setting-group { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line-strong); }
 .panel.account > .setting-group h4 { margin-top: 0; }
+/* Connecting a tracker through its own sign-in, above the form that adds one
+   with a token. */
+.panel .setting-actions.connect { max-width: 568px; }
+.panel .setting-actions.connect .hint { margin-right: auto; }
 
 /* What a tracker shows, under its row: a sentence with a box, then its JQL
    filters as name-and-query pairs. Full width, because a query is the longest

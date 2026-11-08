@@ -37,7 +37,16 @@ async fn run() -> Result<(), String> {
         relay: hura_cloud::push::Relay::https(config.relay),
         live: Default::default(),
         apple: hura_cloud::apple::Apple::new(config.apple_audience),
+        web: hura_cloud::web::Web::https(),
+        url: config.url,
+        setup: hura_cloud::new_setup_token(),
     });
+    // The way into the setup page, while there is something to set up.
+    match hura_cloud::needs_setup(&state).await {
+        Ok(true) => eprintln!("setup: {}/setup?token={}", state.url, state.setup),
+        Ok(false) => {}
+        Err(e) => eprintln!("setup: could not tell whether anything needs it: {e:?}"),
+    }
     tokio::spawn(hura_cloud::watch::run(state.clone()));
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await

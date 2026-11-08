@@ -244,6 +244,10 @@ export const api = {
   // service says what changed (as `tracker-changes` events) and the window
   // does not announce what it finds itself.
   cloudLive: () => invoke<boolean>("cloud_live"),
+  // Connecting a tracker through its own sign-in, in the browser: which can
+  // be, and where to send the browser for one.
+  cloudConnectable: () => invoke<string[]>("cloud_connectable"),
+  cloudConnect: (provider: string) => invoke<string>("cloud_connect", { provider }),
 
   // What is yours on every tracker, tickets and pull requests, read from this
   // machine. The server is asked only for its branch prefix, so a ticket

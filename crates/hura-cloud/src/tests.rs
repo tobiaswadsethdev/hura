@@ -61,6 +61,9 @@ async fn service() -> Option<Test> {
             "test-key",
             include_str!("testdata/apple-test-key.n.b64url").trim(),
         ),
+        web: crate::web::Web::kept(),
+        url: "https://cloud.example".into(),
+        setup: "setup-token".into(),
     });
     crate::install_transport();
     Some(Test {
@@ -926,4 +929,372 @@ async fn an_apple_token_that_does_not_check_out_is_refused() {
         .encode(apple_claims("someone.else", None, "nonce").to_string());
     let (status, _) = t.apple(parts.join("."), "nonce").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+const MANIFEST_APP: &str = r#"{"id":1,"slug":"hura-cloud","client_id":"Iv1.client","client_secret":"shh","webhook_secret":"hook-secret","pem":"-----","html_url":"https://github.com/apps/hura-cloud"}"#;
+
+impl Test {
+    /// Raw, for answers that are a redirect or a page.
+    async fn get_raw(&self, path: &str) -> (StatusCode, String, String) {
+        let request = Request::builder().uri(path).body(Body::empty()).unwrap();
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let location = response
+            .headers()
+            .get("location")
+            .map(|v| v.to_str().unwrap().to_string())
+            .unwrap_or_default();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            location,
+            String::from_utf8_lossy(&bytes).into_owned(),
+        )
+    }
+
+    async fn github_set_up(&self) {
+        self.state.web.on(
+            "POST https://api.github.com/app-manifests/abc123/conversions",
+            201,
+            MANIFEST_APP,
+        );
+        let (status, _, page) = self
+            .get_raw("/setup/github/done?code=abc123&state=setup-token")
+            .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+    }
+
+    /// The state in a URL the service handed out.
+    async fn connect(&self, at: &str, provider: &str) -> String {
+        let (status, body) = self
+            .call(
+                Method::POST,
+                &format!("/v1/connect/{provider}"),
+                Some(at),
+                Some(json!({ "return": "app" })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let url = body["url"].as_str().unwrap().to_string();
+        url.split("state=")
+            .nth(1)
+            .unwrap()
+            .split('&')
+            .next()
+            .unwrap()
+            .to_string()
+    }
+}
+
+#[tokio::test]
+async fn the_setup_page_is_only_for_whoever_has_the_token() {
+    let Some(t) = service().await else { return };
+    let (status, _, _) = t.get_raw("/setup?token=wrong").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, page) = t.get_raw("/setup?token=setup-token").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        page.contains("github.com/settings/apps/new"),
+        "the manifest form"
+    );
+    assert!(
+        page.contains("https://cloud.example/v1/webhooks/github"),
+        "its webhook"
+    );
+
+    let (status, _, _) = t
+        .get_raw("/setup/github/done?code=abc123&state=wrong")
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    t.github_set_up().await;
+    let kept: Vec<u8> = sqlx::query_scalar("select config from integrations where kind = 'github'")
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap();
+    assert!(
+        !kept.windows(3).any(|w| w == b"shh"),
+        "the secret is encrypted"
+    );
+}
+
+#[tokio::test]
+async fn github_connects_as_you_and_installs_where_it_is_needed() {
+    let Some(t) = service().await else { return };
+    t.github_set_up().await;
+    let me = t.sign_in("a@example.com", "iPhone").await;
+    let at = token(&me, "access_token");
+    let (_, can) = t.call(Method::GET, "/v1/connect", Some(at), None).await;
+    assert_eq!(can, json!({ "github": true, "jira": false }));
+
+    let web = &t.state.web;
+    web.on(
+        "POST https://github.com/login/oauth/access_token",
+        200,
+        r#"{"access_token":"ghu_access","refresh_token":"ghr_refresh","expires_in":28800}"#,
+    );
+    web.on(
+        "GET https://api.github.com/user",
+        200,
+        r#"{"login":"OctoCat"}"#,
+    );
+    web.on(
+        "GET https://api.github.com/user/installations",
+        200,
+        r#"{"total_count":0}"#,
+    );
+
+    let state = t.connect(at, "github").await;
+    let (status, to, _) = t
+        .get_raw(&format!("/v1/oauth/github/callback?code=c&state={state}"))
+        .await;
+    assert_eq!(status, StatusCode::FOUND);
+    assert!(
+        to.starts_with("https://github.com/apps/hura-cloud/installations/new?state="),
+        "{to}"
+    );
+
+    // The same state does not work twice.
+    let (status, _, _) = t
+        .get_raw(&format!("/v1/oauth/github/callback?code=c&state={state}"))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Back from installing: into the app.
+    let install = to.split("state=").nth(1).unwrap();
+    let (_, to, _) = t
+        .get_raw(&format!(
+            "/v1/oauth/github/callback?installation_id=1&setup_action=install&state={install}"
+        ))
+        .await;
+    assert_eq!(to, "hura://cloud/connected?provider=github");
+
+    let (_, list) = t.call(Method::GET, "/v1/trackers", Some(at), None).await;
+    assert_eq!(list[0]["source"]["name"], "github");
+    assert_eq!(list[0]["connected"], "@OctoCat");
+    assert_eq!(list[0]["token_set"], true);
+    let (status, _) = t
+        .call(
+            Method::PUT,
+            "/v1/trackers/github/token",
+            Some(at),
+            Some(json!({ "token": "x" })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "nothing to paste on a connected tracker"
+    );
+}
+
+#[tokio::test]
+async fn jira_connects_the_tracker_already_there_for_its_site() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("a@example.com", "Mac").await;
+    let at = token(&me, "access_token");
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/setup/jira?token=setup-token")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(Body::from(
+            "client_id=jira-client&client_secret=jira-secret",
+        ))
+        .unwrap();
+    assert_eq!(
+        t.app.clone().oneshot(request).await.unwrap().status(),
+        StatusCode::OK
+    );
+
+    // A tracker with a pasted token and a filter, before connecting.
+    let work = json!({ "source": {
+        "kind": "jira", "name": "work", "site": "https://acme.atlassian.net/", "email": "a@example.com",
+        "jql_filters": [{ "name": "ready", "jql": "status = Ready" }] }, "token": "pasted" });
+    t.call(Method::POST, "/v1/trackers", Some(at), Some(work))
+        .await;
+
+    let web = &t.state.web;
+    web.on(
+        "POST https://auth.atlassian.com/oauth/token",
+        200,
+        r#"{"access_token":"jira-access","refresh_token":"jira-refresh-1","expires_in":3600}"#,
+    );
+    web.on(
+        "GET https://api.atlassian.com/oauth/token/accessible-resources",
+        200,
+        r#"[{"id":"cloud-1","url":"https://acme.atlassian.net","name":"acme"}]"#,
+    );
+    web.on(
+        "GET https://api.atlassian.com/me",
+        200,
+        r#"{"email":"a@example.com","name":"A"}"#,
+    );
+
+    let state = t.connect(at, "jira").await;
+    let (_, to, _) = t
+        .get_raw(&format!("/v1/oauth/jira/callback?code=c&state={state}"))
+        .await;
+    assert_eq!(to, "hura://cloud/connected?provider=jira");
+
+    let (_, list) = t.call(Method::GET, "/v1/trackers", Some(at), None).await;
+    assert_eq!(
+        list.as_array().unwrap().len(),
+        1,
+        "connected in place, not added"
+    );
+    assert_eq!(list[0]["source"]["name"], "work");
+    assert_eq!(
+        list[0]["source"]["jql_filters"][0]["name"], "ready",
+        "its filters stay"
+    );
+    assert_eq!(list[0]["connected"], "a@example.com");
+    assert!(list[0]["source"].get("cloud_id").is_none(), "never shown");
+
+    // Read with Atlassian's gateway.
+    let account = me["account"].as_str().unwrap().parse().unwrap();
+    let stored = crate::trackers::stored(&t.state, account).await.unwrap();
+    assert_eq!(stored[0].source.cloud_id.as_deref(), Some("cloud-1"));
+    assert_eq!(stored[0].token.as_deref(), Some("jira-access"));
+
+    // Changed without an email, which the connection makes right.
+    let edit = json!({ "source": { "kind": "jira", "name": "work", "site": "https://acme.atlassian.net",
+        "hide_created": true } });
+    let (status, body) = t
+        .call(Method::PUT, "/v1/trackers/work", Some(at), Some(edit))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn a_token_about_to_run_out_is_renewed_before_it_is_read() {
+    let Some(t) = service().await else { return };
+    t.github_set_up().await;
+    let me = t.sign_in("a@example.com", "iPhone").await;
+    let at = token(&me, "access_token");
+    let web = &t.state.web;
+    web.on(
+        "POST https://github.com/login/oauth/access_token",
+        200,
+        r#"{"access_token":"ghu_1","refresh_token":"ghr_1","expires_in":28800}"#,
+    );
+    web.on(
+        "POST https://github.com/login/oauth/access_token",
+        200,
+        r#"{"access_token":"ghu_2","refresh_token":"ghr_2","expires_in":28800}"#,
+    );
+    web.on(
+        "POST https://github.com/login/oauth/access_token",
+        400,
+        r#"{"error":"bad_refresh_token"}"#,
+    );
+    web.on(
+        "GET https://api.github.com/user",
+        200,
+        r#"{"login":"octocat"}"#,
+    );
+    web.on(
+        "GET https://api.github.com/user/installations",
+        200,
+        r#"{"total_count":1}"#,
+    );
+    let state = t.connect(at, "github").await;
+    t.get_raw(&format!("/v1/oauth/github/callback?code=c&state={state}"))
+        .await;
+
+    let account = me["account"].as_str().unwrap().parse().unwrap();
+    let expire = || async {
+        sqlx::query("update trackers set connection = jsonb_set(connection, '{expires_at}', '1')")
+            .execute(&t.state.db)
+            .await
+            .unwrap();
+    };
+    expire().await;
+    let stored = crate::trackers::stored(&t.state, account).await.unwrap();
+    assert_eq!(stored[0].token.as_deref(), Some("ghu_2"), "renewed");
+    let sent = web.sent("POST https://github.com/login/oauth/access_token");
+    assert!(
+        sent.last()
+            .unwrap()
+            .as_deref()
+            .unwrap()
+            .contains("refresh_token=ghr_1")
+    );
+
+    // Refused: the token goes, and connecting again is the way back.
+    expire().await;
+    let stored = crate::trackers::stored(&t.state, account).await.unwrap();
+    assert_eq!(stored[0].token, None);
+    let (_, list) = t.call(Method::GET, "/v1/trackers", Some(at), None).await;
+    assert_eq!(list[0]["token_set"], false);
+}
+
+#[tokio::test]
+async fn a_signed_github_delivery_makes_the_people_in_it_due() {
+    let Some(t) = service().await else { return };
+    t.github_set_up().await;
+    let me = t.sign_in("a@example.com", "iPhone").await;
+    let at = token(&me, "access_token");
+    let web = &t.state.web;
+    web.on(
+        "POST https://github.com/login/oauth/access_token",
+        200,
+        r#"{"access_token":"ghu","expires_in":28800}"#,
+    );
+    web.on(
+        "GET https://api.github.com/user",
+        200,
+        r#"{"login":"octocat"}"#,
+    );
+    web.on(
+        "GET https://api.github.com/user/installations",
+        200,
+        r#"{"total_count":1}"#,
+    );
+    let state = t.connect(at, "github").await;
+    t.get_raw(&format!("/v1/oauth/github/callback?code=c&state={state}"))
+        .await;
+    sqlx::query("insert into watches (account_id, next_read_at) values ($1::uuid, now() + interval '1 hour')")
+        .bind(me["account"].as_str().unwrap())
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+
+    let body = r#"{"action":"review_requested","requested_reviewer":{"login":"OctoCat"},"sender":{"login":"someone"}}"#;
+    let sign = |secret: &[u8]| {
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret);
+        let tag = ring::hmac::sign(&key, body.as_bytes());
+        format!(
+            "sha256={}",
+            tag.as_ref()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        )
+    };
+    let deliver = |signature: String| {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/v1/webhooks/github")
+            .header("X-Hub-Signature-256", signature)
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let refused = t
+        .app
+        .clone()
+        .oneshot(deliver(sign(b"wrong")))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+    let taken = t
+        .app
+        .clone()
+        .oneshot(deliver(sign(b"hook-secret")))
+        .await
+        .unwrap();
+    assert_eq!(taken.status(), StatusCode::ACCEPTED);
+    let due: bool = sqlx::query_scalar("select next_read_at <= now() from watches")
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap();
+    assert!(due, "read at the watcher's next pass");
 }

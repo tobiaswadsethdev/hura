@@ -21,6 +21,9 @@ final class TrackersModel {
     /// While signed in, the trackers still in this phone's Keychain: not
     /// read, and offered to be moved to the account.
     private(set) var onPhone: [StoredTracker] = []
+    /// Signed in, the trackers hura cloud can connect through their own
+    /// sign-in rather than a pasted token: `github`, `jira`.
+    private(set) var connectable: Set<String> = []
     private(set) var inbox: Inbox?
     private(set) var reading = false
     private(set) var lastError: String?
@@ -63,6 +66,7 @@ final class TrackersModel {
         }
         onPhone = local
         await linkCloud()
+        connectable = (try? await cloud.connectable()) ?? connectable
         do {
             trackers = try await cloud.trackers()
         } catch {
@@ -74,6 +78,11 @@ final class TrackersModel {
                 trackers = local
             }
         }
+    }
+
+    /// Where to send the browser to connect `provider` to the account.
+    func connectURL(_ provider: String) async throws -> URL {
+        try await cloud.connectURL(provider)
     }
 
     /// Moves this phone's trackers, tokens and all, to the account, and

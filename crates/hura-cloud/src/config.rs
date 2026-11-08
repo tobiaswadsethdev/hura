@@ -18,6 +18,9 @@
 //! - `HURA_CLOUD_APPLE_AUDIENCE`: the iOS app's bundle ID, which a Sign in
 //!   with Apple identity token must be for, `dev.tobiaswadseth.hura.ios`
 //!   unless set.
+//! - `HURA_CLOUD_URL`: where the service is reached from outside,
+//!   `https://api.gethura.app` unless set: the address in the callbacks and
+//!   the webhook it gives GitHub and Atlassian.
 //! - `HURA_CLOUD_MAIL=log`: prints codes instead, for running it on a laptop.
 //!   One of the two is required, so a deployment missing its key fails to
 //!   start rather than signing nobody in.
@@ -34,6 +37,7 @@ pub struct Config {
     pub keys: Keys,
     pub relay: String,
     pub apple_audience: String,
+    pub url: String,
 }
 
 pub const DEFAULT_FROM: &str = "hura <sign-in@gethura.app>";
@@ -64,6 +68,10 @@ impl Config {
         let relay = var("HURA_CLOUD_RELAY").unwrap_or_else(|| crate::push::DEFAULT_RELAY.into());
         let apple_audience =
             var("HURA_CLOUD_APPLE_AUDIENCE").unwrap_or_else(|| "dev.tobiaswadseth.hura.ios".into());
+        let url = var("HURA_CLOUD_URL")
+            .unwrap_or_else(|| "https://api.gethura.app".into())
+            .trim_end_matches('/')
+            .to_string();
         Ok(Config {
             database_url,
             listen,
@@ -71,6 +79,7 @@ impl Config {
             keys,
             relay,
             apple_audience,
+            url,
         })
     }
 }

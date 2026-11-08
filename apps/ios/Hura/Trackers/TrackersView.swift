@@ -1,3 +1,4 @@
+import AuthenticationServices
 import HuraKit
 import SwiftUI
 
@@ -11,6 +12,8 @@ struct TrackersView: View {
     @State private var adding = false
     @State private var editing: String?
     @State private var failed: String?
+    @State private var connecting: String?
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
         NavigationStack {
@@ -31,9 +34,15 @@ struct TrackersView: View {
                                     }
                                 }
                                 Spacer()
-                                Text(t.hasToken ? "token stored" : "NO token")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(t.hasToken ? .green : .red)
+                                if let who = t.connected {
+                                    Text(t.hasToken ? who : "connect again")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(t.hasToken ? .green : .red)
+                                } else {
+                                    Text(t.hasToken ? "token stored" : "NO token")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(t.hasToken ? .green : .red)
+                                }
                             }
                         }
                         .tint(.primary)
@@ -45,7 +54,19 @@ struct TrackersView: View {
                             }
                         }
                     }
-                    Button("Add a Tracker", systemImage: "plus") { adding = true }
+                    if model.signedIn {
+                        ForEach(["github", "jira"].filter(model.connectable.contains), id: \.self) { provider in
+                            Button {
+                                connect(provider)
+                            } label: {
+                                Label(provider == "github" ? "Connect GitHub" : "Connect Jira",
+                                      systemImage: "link")
+                            }
+                            .disabled(connecting != nil)
+                        }
+                    }
+                    Button(model.connectable.isEmpty || !model.signedIn ? "Add a Tracker" : "Add with a Token",
+                           systemImage: "plus") { adding = true }
                 } footer: {
                     if model.signedIn {
                         Text("Tickets assigned to you or created by you, a Jira tracker's own JQL filters, and pull requests you opened or that wait on you. Kept in your hura account and the same on every device signed in to it; their tokens are kept there, encrypted, and never sent back.")
@@ -74,6 +95,30 @@ struct TrackersView: View {
                 TrackerSheet(tracker: n.tracker)
             }
             .failure($failed)
+        }
+    }
+
+    /// Signs in to the tracker in a browser sheet, and reads the trackers
+    /// again once the service sends the browser back.
+    private func connect(_ provider: String) {
+        connecting = provider
+        Task {
+            defer { connecting = nil }
+            do {
+                let url = try await model.connectURL(provider)
+                // Safari's session, so someone signed in to GitHub there is
+                // not asked again.
+                let back = try await webAuthenticationSession.authenticate(using: url, callbackURLScheme: "hura")
+                if let e = URLComponents(url: back, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "error" })?.value {
+                    failed = e
+                }
+                await model.refresh()
+            } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
+                // Closed: nothing to say.
+            } catch {
+                failed = error.localizedDescription
+            }
         }
     }
 
@@ -238,14 +283,24 @@ private struct TrackerSheet: View {
                         Text("Each is a section of its own in the inbox. The JQL is sent as written, so add statusCategory != Done if done tickets should stay out.")
                     }
                 }
-                Section {
-                    SecureField(tracker.hasToken ? "Paste a new token" : "Paste the token", text: $token)
-                } header: {
-                    Text("Token")
-                } footer: {
-                    Text(tracker.hasToken
-                         ? (model.signedIn ? "Leave it empty to keep the one your account has." : "Leave it empty to keep the one this phone has.")
-                         : "This tracker has no token yet.")
+                if let who = tracker.connected {
+                    Section {
+                        LabeledContent("Connected as", value: who)
+                    } footer: {
+                        Text(tracker.hasToken
+                             ? "Through its own sign-in, which hura cloud renews. Connect it again from the trackers list to sign in as someone else."
+                             : "Its sign-in ran out or was taken back. Connect it again from the trackers list.")
+                    }
+                } else {
+                    Section {
+                        SecureField(tracker.hasToken ? "Paste a new token" : "Paste the token", text: $token)
+                    } header: {
+                        Text("Token")
+                    } footer: {
+                        Text(tracker.hasToken
+                             ? (model.signedIn ? "Leave it empty to keep the one your account has." : "Leave it empty to keep the one this phone has.")
+                             : "This tracker has no token yet.")
+                    }
                 }
                 if let error {
                     Section { Text(error).foregroundStyle(.red).font(.callout) }

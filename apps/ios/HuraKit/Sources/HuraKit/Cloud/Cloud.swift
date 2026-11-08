@@ -288,6 +288,22 @@ public actor Cloud {
         try configured(try await authorized("DELETE", "/v1/trackers/\(path(name))"))
     }
 
+    /// The trackers the service can connect through their own sign-in, by
+    /// provider (`github`, `jira`).
+    public func connectable() async throws -> Set<String> {
+        let v = try JSONDecoder().decode([String: Bool].self, from: try await authorized("GET", "/v1/connect"))
+        return Set(v.filter(\.value).keys)
+    }
+
+    /// Where to send a browser to connect `provider`: back to the app with
+    /// `hura://cloud/connected` at the end.
+    public func connectURL(_ provider: String) async throws -> URL {
+        let data = try await authorized("POST", "/v1/connect/\(path(provider))", body: ["return": .string("app")])
+        guard let s = (try JSONDecoder().decode(JSONValue.self, from: data))["url"]?.string, let url = URL(string: s)
+        else { throw CloudError(status: 0, message: "hura cloud gave no address to connect with.") }
+        return url
+    }
+
     /// One of hura-core's tracker requests, on the account's trackers, as
     /// `{"ok": ...}` or `{"error": ...}`: what the phone's own copy answers.
     func tracker(_ request: [String: JSONValue]) async throws -> JSONValue {
@@ -301,10 +317,12 @@ public actor Cloud {
         struct Configured: Decodable {
             var source: TrackerSource
             var token_set: Bool
+            var connected: String?
         }
         return try JSONDecoder().decode([Configured].self, from: data).map {
             var t = StoredTracker(source: $0.source, token: nil)
             t.tokenKept = $0.token_set
+            t.connected = $0.connected
             return t
         }
     }

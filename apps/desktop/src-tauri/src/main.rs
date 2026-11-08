@@ -744,6 +744,21 @@ fn cloud_sign_out_device(id: String) -> Result<Vec<CloudDevice>, Failed> {
     cloud().devices().map_err(cloud_failed)
 }
 
+/// The trackers hura cloud can connect through their own sign-in.
+#[tauri::command(async)]
+fn cloud_connectable() -> Vec<String> {
+    if !cloud().signed_in() {
+        return Vec::new();
+    }
+    cloud().connectable().unwrap_or_default()
+}
+
+/// Where to send the browser to connect `provider` to the account.
+#[tauri::command(async)]
+fn cloud_connect(provider: String) -> Result<String, Failed> {
+    cloud().connect_url(&provider).map_err(cloud_failed)
+}
+
 /// While signed in, the trackers still kept on this machine: not read, and
 /// offered to be moved to the account.
 #[tauri::command(async)]
@@ -1483,6 +1498,8 @@ fn main() {
             local_trackers,
             move_trackers_to_cloud,
             cloud_live,
+            cloud_connectable,
+            cloud_connect,
             ticket,
             pull,
             pull_files,

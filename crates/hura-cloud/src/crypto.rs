@@ -36,6 +36,16 @@ impl Keys {
         })
     }
 
+    /// The service's own secrets, not any account's: its apps on GitHub and
+    /// Atlassian. Sealed with the master key itself, under a label.
+    pub fn seal_service(&self, label: &str, plain: &[u8]) -> Result<Vec<u8>> {
+        seal(&self.master, &format!("service\0{label}"), plain)
+    }
+
+    pub fn open_service(&self, label: &str, sealed: &[u8]) -> Result<Vec<u8>> {
+        open(&self.master, &format!("service\0{label}"), sealed)
+    }
+
     /// An account's key, made the first time it is asked for.
     pub async fn account(&self, db: &PgPool, account: Uuid) -> Result<AccountKey> {
         let aad = format!("account-key\0{account}");

@@ -188,6 +188,13 @@ deleted.
 - [ ] **5. Better connections.** Jira's OAuth app and a GitHub App instead of
   pasted tokens, their webhooks to read a tracker the moment it changes, and
   "seen" shared between devices, clearing a notification on the others.
+  - [x] A GitHub App with user tokens, made from a setup page by GitHub's
+    manifest flow; Jira through Atlassian's OAuth 2.0 (3LO), set up from the
+    same page; tokens renewed before they run out; connect buttons in both
+    apps; GitHub's webhooks making the people in a delivery due at once.
+  - [ ] Jira's webhooks: they cannot say `currentUser()` or a saved filter,
+    and expire every thirty days, so Jira is read on the timer for now.
+  - [ ] "Seen" shared between devices.
 - [ ] **6. Ready for others.** The master key in a KMS, monitoring, rate
   limits, export and deletion, plans enforced, billing.
 

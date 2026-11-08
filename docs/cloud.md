@@ -21,6 +21,7 @@ runs anywhere else.
 | `HURA_CLOUD_MASTER_KEY` | required: 32 bytes in base64, from `openssl rand -base64 32`. It wraps each account's key for its trackers' tokens, so **losing it loses every stored token**: keep a copy somewhere safe that is not the database's backups |
 | `HURA_CLOUD_RELAY` | the push relay tracker notifications go through, `https://hura-relay.twadseth.workers.dev` unless set. The service sends only there, whatever a phone says |
 | `HURA_CLOUD_APPLE_AUDIENCE` | the iOS app's bundle ID, which a Sign in with Apple token must be for: `dev.tobiaswadseth.hura.ios` unless set |
+| `HURA_CLOUD_URL` | where the service is reached from outside, `https://api.gethura.app` unless set: the address in the callbacks and the webhook it gives GitHub and Atlassian |
 | `HURA_CLOUD_MAIL=log` | prints codes instead of sending them, for a laptop. Without this or a Resend key the service will not start |
 
 On a laptop, with Docker for the database:
@@ -101,6 +102,33 @@ hura-core, with two differences: where a request takes a `tracker`, it is the
 name of one of the account's, and `inbox` reads all of them. It answers 200
 with `{"ok": ...}` or `{"error": ...}`, as the phone's does, so a client reads
 the same thing from either.
+
+### Connecting a tracker through its own sign-in
+
+Instead of pasting a token, a tracker can be connected through GitHub (as a
+GitHub App, with user tokens that act as you, so "assigned to me" is still
+you) or through Atlassian's OAuth for Jira. The service swaps the code for
+tokens, keeps them encrypted on a tracker of the account's (one already there
+for the same account or site is connected in place, keeping its filters), and
+renews them before they run out.
+
+| | |
+| --- | --- |
+| `GET /v1/connect` | `{github, jira}`: which the service is set up to connect |
+| `POST /v1/connect/{provider}` `{return}` | `{url}`, where to send the browser. `return` is `app`, to come back on `hura://cloud/connected`, or `browser`, to end on a page saying to go back |
+| `GET /v1/oauth/{github,jira}/callback` | where the providers send the browser back |
+| `POST /v1/webhooks/github` | the GitHub App's webhook: signed with its secret, and every account whose GitHub login is in a delivery is read at the watcher's next pass |
+
+A connected tracker's list entry carries `connected`, who it is connected as;
+its token cannot be set by hand.
+
+**Setting the apps up.** While either is missing, the service writes
+`setup: <url>/setup?token=…` to its log at start; the token is fresh at each
+start and is the only way in. The page makes the GitHub App with GitHub's
+manifest flow (one button, and its credentials come straight back), and takes
+the Jira OAuth app's client ID and secret, with the steps for making one in
+Atlassian's console. Both are kept encrypted with the master key. The GitHub
+App is private to whoever makes it until it is made public in its settings.
 
 ### Notifications
 

@@ -37,6 +37,14 @@ site: string | null, email: string | null,
  */
 hide_created: boolean, 
 /**
+ * Jira only, connected through Atlassian's OAuth rather than an API
+ * token: the site's cloud ID, which sends requests to
+ * `api.atlassian.com/ex/jira/{id}` with the token as a bearer, and makes
+ * `email` unneeded. Set by hura cloud, which holds the connection; no
+ * client sends or shows it.
+ */
+cloud_id?: string, 
+/**
  * Jira only: named JQL queries read beside your own tickets.
  *
  * Not called `filters`, because that is what a file from before the

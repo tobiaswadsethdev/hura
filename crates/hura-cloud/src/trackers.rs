@@ -95,7 +95,20 @@ pub async fn edit(
     Path(name): Path<String>,
     Json(body): Json<Edit>,
 ) -> Result<Json<Vec<Configured>>> {
-    let source = checked(&body.source)?;
+    // A Jira tracker connected through Atlassian has no email, which only
+    // its connection makes right: checked as it is read.
+    let cloud_id: Option<String> = sqlx::query_scalar(
+        "select connection->>'cloud_id' from trackers where account_id = $1 and name = $2",
+    )
+    .bind(signed.account)
+    .bind(&name)
+    .fetch_optional(&state.db)
+    .await?
+    .flatten();
+    let mut source = body.source.clone();
+    source.cloud_id = cloud_id;
+    let mut source = checked(&source)?;
+    source.cloud_id = None;
     if source.name != name {
         return Err(Error::bad(format!(
             "a tracker cannot be renamed; `{name}` is still `{name}`"
@@ -123,6 +136,18 @@ pub async fn set_token(
     let token = body.token.trim();
     if token.is_empty() {
         return Err(Error::bad("that token is empty"));
+    }
+    let connected: Option<bool> = sqlx::query_scalar(
+        "select connection is not null from trackers where account_id = $1 and name = $2",
+    )
+    .bind(signed.account)
+    .bind(&name)
+    .fetch_optional(&state.db)
+    .await?;
+    if connected == Some(true) {
+        return Err(Error::bad(format!(
+            "`{name}` is connected through its own sign-in; connect it again to replace it"
+        )));
     }
     let key = state.keys.account(&state.db, signed.account).await?;
     let changed = sqlx::query(
@@ -215,46 +240,53 @@ async fn prepare(
     Ok(Ok(()))
 }
 
-/// The account's trackers, tokens opened.
+/// The account's trackers, tokens opened: any that run out soon renewed
+/// first, and a Jira tracker connected through Atlassian given its cloud ID.
 pub(crate) async fn stored(state: &Shared, account: Uuid) -> Result<Vec<Stored>> {
-    let rows: Vec<(String, Jsonb<Source>, Option<Vec<u8>>)> = sqlx::query_as(
-        "select name, source, token from trackers where account_id = $1 order by created_at",
+    crate::oauth::refresh_due(state, account).await?;
+    /// Its name, source, sealed token and Atlassian cloud ID.
+    type Row = (String, Jsonb<Source>, Option<Vec<u8>>, Option<String>);
+    let rows: Vec<Row> = sqlx::query_as(
+        "select name, source, token, connection->>'cloud_id' from trackers
+         where account_id = $1 order by created_at",
     )
     .bind(account)
     .fetch_all(&state.db)
     .await?;
-    if rows.iter().all(|(_, _, token)| token.is_none()) {
-        return Ok(rows
-            .into_iter()
-            .map(|(_, s, _)| Stored {
-                source: s.0,
-                token: None,
-            })
-            .collect());
-    }
-    let key = state.keys.account(&state.db, account).await?;
+    let key = if rows.iter().any(|(_, _, token, _)| token.is_some()) {
+        Some(state.keys.account(&state.db, account).await?)
+    } else {
+        None
+    };
     rows.into_iter()
-        .map(|(name, source, token)| {
-            Ok(Stored {
-                source: source.0,
-                token: token.map(|t| key.open_token(&name, &t)).transpose()?,
-            })
+        .map(|(name, Jsonb(mut source), token, cloud_id)| {
+            source.cloud_id = cloud_id;
+            let token = match (token, &key) {
+                (Some(t), Some(key)) => Some(key.open_token(&name, &t)?),
+                _ => None,
+            };
+            Ok(Stored { source, token })
         })
         .collect()
 }
 
 async fn views(state: &Shared, account: Uuid) -> Result<Json<Vec<Configured>>> {
-    let rows: Vec<(Jsonb<Source>, bool)> = sqlx::query_as(
-        "select source, token is not null from trackers where account_id = $1 order by created_at",
+    let rows: Vec<(Jsonb<Source>, bool, Option<String>)> = sqlx::query_as(
+        "select source, token is not null,
+                case connection->>'provider'
+                    when 'github' then '@' || (connection->>'login')
+                    else connection->>'login' end
+         from trackers where account_id = $1 order by created_at",
     )
     .bind(account)
     .fetch_all(&state.db)
     .await?;
     Ok(Json(
         rows.into_iter()
-            .map(|(source, token_set)| Configured {
+            .map(|(source, token_set, connected)| Configured {
                 source: source.0,
                 token_set,
+                connected,
             })
             .collect(),
     ))
