@@ -116,12 +116,21 @@ event whose text only the phone can read.
 | `GET /v1/push` | `{configured, broken}`: `broken` says why the relay stopped taking the token |
 | `DELETE /v1/push` | stop telling this device |
 
+A desktop is told over a connection it keeps open while its window is:
+
+| | |
+| --- | --- |
+| `GET /v1/events` | server-sent events: a `tracker_change` event for each read that found something, its data `{"changes": [...]}` as `hura_core::tracker::changes` gives them, and a comment every fifteen seconds to keep proxies from closing it |
+
+An account with a stream open is read even with no phone linked. The
+streams are the process's own, so for now the service runs as one instance.
+
 What was seen moves on only once every device has been told, or could not be
 for good. A relay that is away means the same changes are sent again at the
 next read under the same event IDs, which the relay drops as duplicates. An
-account is read only while it has a working route, as often as its plan
-allows plus up to half a minute, and less often while none of its trackers
-answers.
+account is read only while it has a working route or an open stream, as often
+as its plan allows plus up to half a minute, and less often while none of its
+trackers answers.
 
 The service only sends requests over HTTPS to public addresses. A Jira site
 inside the server's own network (`https://10.0.0.5`, `localhost`) is refused,

@@ -55,6 +55,7 @@ async fn service() -> Option<Test> {
             sent: Mutex::new(Vec::new()),
             statuses: Mutex::new(Vec::new()),
         },
+        live: Default::default(),
     });
     crate::install_transport();
     Some(Test {
@@ -699,4 +700,70 @@ async fn a_due_account_with_a_route_is_read_and_put_back_in_line() {
         .await
         .unwrap();
     assert!(seen.is_some(), "the baseline is kept");
+}
+
+#[tokio::test]
+async fn an_open_stream_is_told_once_and_gets_its_account_read() {
+    let Some(t) = service().await else { return };
+    let session = t.sign_in("a@example.com", "Mac").await;
+    let account: uuid::Uuid = session["account"].as_str().unwrap().parse().unwrap();
+
+    // Asked over HTTP: a stream of events, for a signed-in device only.
+    let (status, _) = t.call(Method::GET, "/v1/events", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let request = Request::builder()
+        .uri("/v1/events")
+        .header(
+            "Authorization",
+            format!("Bearer {}", token(&session, "access_token")),
+        )
+        .body(Body::empty())
+        .unwrap();
+    let response = t.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+
+    // With a stream open and no phone, the account is read.
+    let mut stream = t.state.live.subscribe(account);
+    assert_eq!(crate::watch::tick(&t.state).await.unwrap(), 1);
+
+    // The first read with the tracker in it is its baseline.
+    crate::watch::announce(&t.state, account, &read(vec![ticket("1", "To Do")]))
+        .await
+        .unwrap();
+    crate::watch::announce(&t.state, account, &read(vec![ticket("1", "Done")]))
+        .await
+        .unwrap();
+    let told = stream.try_recv().unwrap();
+    assert_eq!(told["changes"][0]["what"], "To Do → Done");
+    assert!(stream.try_recv().is_err(), "once");
+    drop(response);
+}
+
+#[tokio::test]
+async fn a_stream_is_not_told_twice_when_the_relay_puts_the_telling_off() {
+    let Some(t) = service().await else { return };
+    let (_, account) = t.routed("a@example.com").await;
+    let mut stream = t.state.live.subscribe(account);
+    crate::watch::announce(&t.state, account, &read(vec![ticket("1", "To Do")]))
+        .await
+        .unwrap();
+
+    t.relay_answers(&[503]);
+    let moved = read(vec![ticket("1", "Done")]);
+    assert!(
+        !crate::watch::announce(&t.state, account, &moved)
+            .await
+            .unwrap()
+    );
+    assert!(
+        crate::watch::announce(&t.state, account, &moved)
+            .await
+            .unwrap()
+    );
+    assert!(stream.try_recv().is_ok());
+    assert!(
+        stream.try_recv().is_err(),
+        "the retry told the phone, not the stream again"
+    );
 }

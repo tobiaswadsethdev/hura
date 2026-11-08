@@ -1003,6 +1003,7 @@ version = "0.37.1"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "futures-util",
  "http-body-util",
  "hura-core",
  "rand 0.10.2",

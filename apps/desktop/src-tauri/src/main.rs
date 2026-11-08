@@ -782,6 +782,56 @@ fn move_trackers_to_cloud() -> Result<Vec<Configured>, Failed> {
     })
 }
 
+/// Whether hura cloud's stream of tracker changes is open, so the window
+/// leaves announcing them to it.
+static LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// What the window is sent for each batch of changes hura cloud finds.
+const TRACKER_CHANGES: &str = "tracker-changes";
+
+/// Whether hura cloud is telling this computer what changed on the trackers,
+/// over its open stream. While it is, the window does not announce what it
+/// finds itself, which would say everything twice.
+#[tauri::command]
+fn cloud_live() -> bool {
+    LIVE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Keeps hura cloud's stream of the account's tracker changes open while
+/// this computer is signed in, for as long as the app runs, and hands each
+/// batch to the window. A stream that drops is opened again, sooner while
+/// they last and later while they fail.
+fn listen(app: tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    std::thread::spawn(move || {
+        let mut wait = std::time::Duration::from_secs(5);
+        loop {
+            if !cloud().signed_in() {
+                LIVE.store(false, Ordering::Relaxed);
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                continue;
+            }
+            let started = std::time::Instant::now();
+            let ended = cloud().events(
+                &mut || LIVE.store(true, Ordering::Relaxed),
+                &mut |changes| {
+                    let _ = app.emit(TRACKER_CHANGES, changes);
+                },
+            );
+            LIVE.store(false, Ordering::Relaxed);
+            // A stream that stayed up a while was a good one: start over.
+            if started.elapsed() > std::time::Duration::from_secs(120) {
+                wait = std::time::Duration::from_secs(5);
+            }
+            if let Err(e) = ended {
+                eprintln!("hura cloud's stream: {e}");
+            }
+            std::thread::sleep(wait);
+            wait = (wait * 2).min(std::time::Duration::from_secs(120));
+        }
+    });
+}
+
 /// What a device is called in the account's list: the name this computer
 /// goes by.
 fn computer_name() -> String {
@@ -1352,6 +1402,7 @@ fn main() {
 
     builder
         .setup(|app| {
+            listen(app.handle().clone());
             // Debug builds open the inspector. There is no other way to see a
             // console message from inside this window.
             #[cfg(debug_assertions)]
@@ -1431,6 +1482,7 @@ fn main() {
             cloud_sign_out_device,
             local_trackers,
             move_trackers_to_cloud,
+            cloud_live,
             ticket,
             pull,
             pull_files,

@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use hura_core::cloud::{Account, Device};
 use hura_core::state;
+use hura_core::tracker::changes::Change;
 use hura_core::tracker::{Configured, Source};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -54,19 +55,44 @@ pub trait Http: Send + Sync {
         bearer: Option<&str>,
         body: Option<&Value>,
     ) -> Result<(u16, String), String>;
+
+    /// A `GET` whose answer is read a line at a time as it arrives, for as
+    /// long as `line` answers true and the connection stays open. The status,
+    /// once it is over.
+    fn lines(
+        &self,
+        url: &str,
+        bearer: &str,
+        line: &mut dyn FnMut(&str) -> bool,
+    ) -> Result<u16, String>;
 }
 
 /// [`Http`] over ureq, with the public roots: the service has an ordinary
 /// certificate, unlike a paired server.
-pub struct Ureq(ureq::Agent);
+pub struct Ureq {
+    agent: ureq::Agent,
+    /// For a stream, which is meant to stay open: no limit on the whole
+    /// request, only on getting it started and on silence (the service
+    /// writes a comment every fifteen seconds).
+    streams: ureq::Agent,
+}
 
 impl Ureq {
     pub fn new() -> Self {
-        let config = ureq::Agent::config_builder()
+        let agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(30)))
             .build();
-        Ureq(config.into())
+        let streams = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_connect(Some(Duration::from_secs(15)))
+            .timeout_recv_response(Some(Duration::from_secs(30)))
+            .timeout_recv_body(Some(Duration::from_secs(60)))
+            .build();
+        Ureq {
+            agent: agent.into(),
+            streams: streams.into(),
+        }
     }
 }
 
@@ -95,7 +121,7 @@ impl Http for Ureq {
             .body(body.map(Value::to_string).unwrap_or_default())
             .map_err(|e| e.to_string())?;
         let mut response = self
-            .0
+            .agent
             .run(request)
             .map_err(|e| format!("could not reach hura cloud: {e}"))?;
         let status = response.status().as_u16();
@@ -104,6 +130,34 @@ impl Http for Ureq {
             .read_to_string()
             .map_err(|e| format!("could not read hura cloud's answer: {e}"))?;
         Ok((status, text))
+    }
+
+    fn lines(
+        &self,
+        url: &str,
+        bearer: &str,
+        line: &mut dyn FnMut(&str) -> bool,
+    ) -> Result<u16, String> {
+        use std::io::BufRead as _;
+        let mut response = self
+            .streams
+            .get(url)
+            .header("Authorization", format!("Bearer {bearer}"))
+            .header("Accept", "text/event-stream")
+            .call()
+            .map_err(|e| format!("could not reach hura cloud: {e}"))?;
+        let status = response.status().as_u16();
+        if status != 200 {
+            return Ok(status);
+        }
+        let reader = std::io::BufReader::new(response.body_mut().as_reader());
+        for read in reader.lines() {
+            let text = read.map_err(|e| format!("the stream from hura cloud broke: {e}"))?;
+            if !line(&text) {
+                break;
+            }
+        }
+        Ok(status)
     }
 }
 
@@ -301,6 +355,64 @@ impl Cloud {
         }
     }
 
+    // ------------------------------------------------------------ live
+
+    /// Blocks while hura cloud's stream of the account's changes is open
+    /// (`GET /v1/events`), calling `on` with each batch as the service finds
+    /// it, and `open` once the first line has arrived. Returns when the
+    /// connection closes or this machine signs out; the caller reconnects.
+    pub fn events(
+        &self,
+        open: &mut dyn FnMut(),
+        on: &mut dyn FnMut(Vec<Change>),
+    ) -> Result<(), Failure> {
+        let session = self.session().ok_or_else(Failure::signed_out)?;
+        let token = self.access_token(&session)?;
+        let mut data = String::new();
+        let mut opened = false;
+        let status = self
+            .http
+            .lines(
+                &format!("{}/v1/events", session.base),
+                &token,
+                &mut |line| {
+                    if !opened {
+                        opened = true;
+                        open();
+                    }
+                    if let Some(d) = line.strip_prefix("data:") {
+                        data.push_str(d.strip_prefix(' ').unwrap_or(d));
+                    } else if line.is_empty() && !data.is_empty() {
+                        #[derive(Deserialize)]
+                        struct Told {
+                            changes: Vec<Change>,
+                        }
+                        if let Ok(told) = serde_json::from_str::<Told>(&data) {
+                            on(told.changes);
+                        }
+                        data.clear();
+                    }
+                    // Signed out meanwhile: done.
+                    self.path.exists()
+                },
+            )
+            .map_err(|message| Failure { status: 0, message })?;
+        match status {
+            200 => Ok(()),
+            401 => {
+                *self.access.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                Err(Failure {
+                    status,
+                    message: "hura cloud refused the access token".into(),
+                })
+            }
+            other => Err(Failure {
+                status: other,
+                message: format!("hura cloud answered {other}"),
+            }),
+        }
+    }
+
     // ------------------------------------------------------------ requests
 
     /// A request as the signed-in device. An access token that is refused is
@@ -491,6 +603,21 @@ mod tests {
                 _ => queue.remove(0),
             })
         }
+
+        fn lines(
+            &self,
+            url: &str,
+            bearer: &str,
+            line: &mut dyn FnMut(&str) -> bool,
+        ) -> Result<u16, String> {
+            let (status, body) = self.send("GET", url, Some(bearer), None)?;
+            for text in body.lines() {
+                if !line(text) {
+                    break;
+                }
+            }
+            Ok(status)
+        }
     }
 
     const SIGNED: &str = r#"{"account":"acc","device":"dev","refresh_token":"hura_rt_r","access_token":"hura_at_1","expires_in":3600}"#;
@@ -511,11 +638,16 @@ mod tests {
         (cloud, service, path)
     }
 
-    fn rand_suffix() -> u128 {
-        std::time::SystemTime::now()
+    /// A directory name of each test's own: the clock alone is the same for
+    /// two tests started together, and two writing one `cloud.json` race.
+    fn rand_suffix() -> String {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos();
+        format!("{nanos}-{n}")
     }
 
     #[test]
@@ -608,6 +740,28 @@ mod tests {
         );
         let out = &service.sent("POST /v1/sign-out")[0];
         assert_eq!(out.bearer.as_deref(), Some("hura_at_1"));
+    }
+
+    #[test]
+    fn the_stream_hands_over_each_batch_of_changes() {
+        let (cloud, service, _) = signed_in();
+        let change = r#"{"tracker":"work","id":"1","key":"P-1","title":"T","what":"To Do → Done"}"#;
+        service.on(
+            "GET /v1/events",
+            200,
+            &format!(": keep-alive\n\nevent: tracker_change\ndata: {{\"changes\":[{change}]}}\n\n"),
+        );
+        let (mut opened, mut told) = (0, Vec::new());
+        cloud
+            .events(&mut || opened += 1, &mut |changes| told.extend(changes))
+            .unwrap();
+        assert_eq!(opened, 1);
+        assert_eq!(told.len(), 1);
+        assert_eq!(told[0].what, "To Do → Done");
+        assert_eq!(
+            service.sent("GET /v1/events")[0].bearer.as_deref(),
+            Some("hura_at_1")
+        );
     }
 
     #[test]

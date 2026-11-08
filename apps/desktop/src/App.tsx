@@ -19,6 +19,7 @@
 // sidebar of tickets and pull requests is not a destination: it stays beside
 // whatever is showing, which is the reason it replaced a tickets screen.
 
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, messageOf, type Paired, type ServerSummary } from "./api";
@@ -41,13 +42,14 @@ import { IntegrationsScreen } from "./Integrations";
 import { ServersScreen } from "./Connect";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Inbox } from "./gen/Inbox";
+import type { InboxChange } from "./gen/InboxChange";
 import type { Project } from "./gen/Project";
 import type { Session } from "./gen/Session";
 import type { PullRequest } from "./gen/PullRequest";
 import type { Task } from "./gen/Task";
 import type { Poll } from "./gen/Poll";
 import { onSessions, reset as resetNotifications } from "./notify";
-import { onInbox } from "./inboxNotify";
+import { onCloudChanges, onInbox } from "./inboxNotify";
 import { close, nextChannelId, open } from "./stream";
 import { NewProjectDialog } from "./NewProject";
 import { NewWorktreeDialog } from "./NewWorktree";
@@ -481,6 +483,18 @@ export default function App() {
     const timer = setInterval(readInbox, INBOX_POLL_MS);
     return () => clearInterval(timer);
   }, [ready, readInbox]);
+
+  // Signed in to hura cloud, what it finds on the trackers arrives as it
+  // finds it: said, and the sidebar read again so it shows the same thing.
+  useEffect(() => {
+    const off = listen<InboxChange[]>("tracker-changes", (e) => {
+      onCloudChanges(e.payload, notifyTickets.current);
+      readInbox();
+    });
+    return () => {
+      void off.then((unlisten) => unlisten());
+    };
+  }, [readInbox]);
 
   const groups = useMemo(() => group(projects, live), [projects, live]);
 

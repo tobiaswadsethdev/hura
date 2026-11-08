@@ -240,6 +240,10 @@ export const api = {
   // to the account; the answer is what stayed.
   localTrackers: () => invoke<ConfiguredTracker[]>("local_trackers"),
   moveTrackersToCloud: () => invoke<ConfiguredTracker[]>("move_trackers_to_cloud"),
+  // Whether hura cloud's stream of tracker changes is open: while it is, the
+  // service says what changed (as `tracker-changes` events) and the window
+  // does not announce what it finds itself.
+  cloudLive: () => invoke<boolean>("cloud_live"),
 
   // What is yours on every tracker, tickets and pull requests, read from this
   // machine. The server is asked only for its branch prefix, so a ticket

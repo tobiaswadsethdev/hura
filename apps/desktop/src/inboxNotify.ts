@@ -6,6 +6,11 @@
 // requests a review asked of you, failing checks, an approval or changes
 // asked for. This keeps what was seen and says it.
 //
+// **Signed in to hura cloud, the service says what changed** instead, over a
+// stream the Rust side keeps open, and each batch arrives as a
+// `tracker-changes` event (see `onCloudChanges`). While that stream is open,
+// what this window finds is recorded but not announced.
+//
 // **What was seen is kept on disk.** Not in memory, like `notify.ts` keeps
 // session states: a ticket that moved while the window was closed has still
 // moved, and finding out when the window opens is the point. The very first
@@ -46,11 +51,17 @@ export async function onInbox(inbox: Inbox, on = true): Promise<InboxChange[]> {
   try {
     const { seen, changes } = await api.inboxChanges(inbox, load());
     save(seen);
-    if (on && changes.length > 0) void announce(changes);
+    if (on && changes.length > 0 && !(await api.cloudLive())) void announce(changes);
     return changes;
   } catch {
     return [];
   }
+}
+
+/// What hura cloud found, as it found it: announced like what this window
+/// finds, under the same switch.
+export function onCloudChanges(changes: InboxChange[], on = true) {
+  if (on && changes.length > 0) void announce(changes);
 }
 
 async function announce(changes: InboxChange[]) {

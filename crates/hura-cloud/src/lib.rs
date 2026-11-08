@@ -21,6 +21,7 @@ pub mod config;
 pub mod crypto;
 mod devices;
 mod error;
+mod live;
 pub mod mail;
 mod outbound;
 pub mod push;
@@ -40,6 +41,7 @@ pub struct State {
     pub mail: Mailer,
     pub keys: crypto::Keys,
     pub relay: push::Relay,
+    pub live: live::Live,
 }
 
 pub type Shared = Arc<State>;
@@ -75,6 +77,7 @@ pub fn app(state: Shared) -> Router {
         )
         .route("/v1/trackers/{name}/token", put(trackers::set_token))
         .route("/v1/tracker", post(trackers::call))
+        .route("/v1/events", get(live::events))
         .route(
             "/v1/push",
             get(push::status).put(push::configure).delete(push::remove),

@@ -8,7 +8,8 @@
 //! every device.
 //!
 //! **Only accounts with a device to tell are read**: one with a working push
-//! route (see [`crate::push`]). Each is read at most as often as its plan
+//! route (see [`crate::push`]), or a desktop with its stream open (see
+//! [`crate::live`]). Each is read at most as often as its plan
 //! allows, a little later at random so they do not all go at once, and less
 //! often while none of its trackers answers.
 //!
@@ -57,13 +58,15 @@ pub async fn tick(state: &Shared) -> Result<usize> {
          where account_id in (
              select w.account_id from watches w
              where w.next_read_at <= now()
-               and exists (select 1 from push_routes p
-                           where p.account_id = w.account_id and p.broken is null)
+               and (w.account_id = any($1)
+                    or exists (select 1 from push_routes p
+                               where p.account_id = w.account_id and p.broken is null))
              order by w.next_read_at
              limit {BATCH}
              for update skip locked)
          returning account_id"
     ))
+    .bind(state.live.accounts())
     .fetch_all(&state.db)
     .await?;
     for account in &due {
@@ -107,6 +110,7 @@ pub(crate) async fn announce(state: &Shared, account: Uuid, inbox: &Inbox) -> Re
 
     if !found.is_empty() {
         let since = String::from_utf8_lossy(before.as_deref().unwrap_or_default()).into_owned();
+        state.live.tell(account, &batch(&since, &found), &found);
         let mut later = false;
         for route in push::routes(state, account).await? {
             for text in texts(&found) {
@@ -202,6 +206,24 @@ fn texts(found: &[Change]) -> Vec<Text> {
             tracker: Some(c.tracker.clone()),
             id: Some(c.id.clone()),
         })
+        .collect()
+}
+
+/// The same for the same changes found from the same place: what a stream
+/// was told, so a retry does not tell it again.
+fn batch(since: &str, found: &[Change]) -> String {
+    let mut hash = Sha256::new();
+    hash.update(since.as_bytes());
+    for c in found {
+        for part in [&c.tracker, &c.id, &c.what] {
+            hash.update(part.as_bytes());
+            hash.update([0]);
+        }
+    }
+    hash.finalize()
+        .iter()
+        .take(16)
+        .map(|b| format!("{b:02x}"))
         .collect()
 }
 

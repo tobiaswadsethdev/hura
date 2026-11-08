@@ -35,6 +35,7 @@ async fn run() -> Result<(), String> {
         mail: config.mail,
         keys: config.keys,
         relay: hura_cloud::push::Relay::https(config.relay),
+        live: Default::default(),
     });
     tokio::spawn(hura_cloud::watch::run(state.clone()));
     let listener = tokio::net::TcpListener::bind(config.listen)
