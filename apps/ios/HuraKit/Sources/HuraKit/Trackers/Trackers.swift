@@ -155,7 +155,7 @@ public struct StoredTracker: Codable, Equatable, Sendable {
     /// has one there. Not stored, and not sent to hura-core.
     public var tokenKept = false
     /// One hura cloud connected through the tracker's own sign-in: who as
-    /// (`@octocat`, `you@example.com`). Its token is renewed there, and
+    /// (`@octocat`, or a Jira site). Its token is renewed there, and
     /// there is none to paste.
     public var connected: String?
 

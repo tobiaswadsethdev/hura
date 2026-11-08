@@ -481,8 +481,8 @@ pub struct Configured {
     pub source: Source,
     pub token_set: bool,
     /// Connected through the tracker's own sign-in rather than a pasted
-    /// token, by hura cloud: who it is connected as (`@octocat`,
-    /// `you@example.com`). There is no token to paste for one of these;
+    /// token, by hura cloud: who it is connected as: `@octocat` on GitHub,
+    /// the site (`acme.atlassian.net`) on Jira. There is no token to paste for one of these;
     /// connecting again replaces it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]

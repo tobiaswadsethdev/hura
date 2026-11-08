@@ -36,7 +36,10 @@ use crate::token;
 
 const GITHUB_TOKEN: &str = "https://github.com/login/oauth/access_token";
 const JIRA_TOKEN: &str = "https://auth.atlassian.com/oauth/token";
-const JIRA_SCOPES: &str = "read:jira-work write:jira-work read:jira-user read:me offline_access";
+/// No `read:me`: who the token belongs to is never kept, so the service holds
+/// no Atlassian personal data (and Atlassian's personal data reporting does
+/// not apply). Jira's own `/myself` answers it for each read, in memory.
+const JIRA_SCOPES: &str = "read:jira-work write:jira-work read:jira-user offline_access";
 /// How long before it runs out an access token is renewed.
 const EARLY: i64 = 5 * 60;
 
@@ -307,18 +310,6 @@ pub async fn jira_callback(
             Err("no Jira site was shared with hura"),
         ));
     }
-    let (_, me) = state
-        .web
-        .send("GET", "https://api.atlassian.com/me", &bearer, None)
-        .await
-        .map_err(Error::internal)?;
-    let me: Value = serde_json::from_str(&me).unwrap_or_default();
-    let login = me["email"]
-        .as_str()
-        .or(me["name"].as_str())
-        .unwrap_or("Jira")
-        .to_string();
-
     let mut tx = state.db.begin().await?;
     for site in &sites {
         let (Some(cloud_id), Some(url)) = (site["id"].as_str(), site["url"].as_str()) else {
@@ -363,8 +354,11 @@ pub async fn jira_callback(
                 }
             }
         };
+        // Labelled with its site, not whoever connected it: nothing about the
+        // person is kept.
+        let host = url.trim_start_matches("https://");
         let connection = json!({
-            "provider": "jira", "login": login, "cloud_id": cloud_id, "expires_at": tokens.expires_at(),
+            "provider": "jira", "login": host, "cloud_id": cloud_id, "expires_at": tokens.expires_at(),
         });
         keep(&state, &mut tx, account, &source, &tokens, connection).await?;
     }

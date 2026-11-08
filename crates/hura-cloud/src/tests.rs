@@ -1123,11 +1123,6 @@ async fn jira_connects_the_tracker_already_there_for_its_site() {
         200,
         r#"[{"id":"cloud-1","url":"https://acme.atlassian.net","name":"acme"}]"#,
     );
-    web.on(
-        "GET https://api.atlassian.com/me",
-        200,
-        r#"{"email":"a@example.com","name":"A"}"#,
-    );
 
     let state = t.connect(at, "jira").await;
     let (_, to, _) = t
@@ -1146,7 +1141,10 @@ async fn jira_connects_the_tracker_already_there_for_its_site() {
         list[0]["source"]["jql_filters"][0]["name"], "ready",
         "its filters stay"
     );
-    assert_eq!(list[0]["connected"], "a@example.com");
+    assert_eq!(
+        list[0]["connected"], "acme.atlassian.net",
+        "the site, not the person"
+    );
     assert!(list[0]["source"].get("cloud_id").is_none(), "never shown");
 
     // Read with Atlassian's gateway.
