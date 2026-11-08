@@ -686,6 +686,7 @@ mod tests {
         let kept = cloud.session().unwrap();
         assert_eq!(kept.email, "me@example.com");
         assert!(!format!("{kept:?}").contains("hura_rt_r"), "redacted");
+        assert!(path.exists());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
