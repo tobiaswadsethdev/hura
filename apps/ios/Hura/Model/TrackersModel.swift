@@ -139,17 +139,21 @@ final class TrackersModel {
     }
 
     /// Its filters, or whether it hides what you created: checked by
-    /// hura-core as when it was added, and kept with its token.
+    /// hura-core as when it was added, and kept with its token. Signed in,
+    /// the service checks it instead, which knows what a tracker connected
+    /// through its own sign-in needs: a Jira one has no email, and checked
+    /// here, would be refused for it.
     func edit(_ name: String, _ source: TrackerSource) async throws {
+        if signedIn {
+            trackers = try await cloud.editTracker(name, source)
+            await refresh()
+            return
+        }
         let checked = try await TrackerCore.check(source)
         guard checked.name == name else {
             throw TrackerError(message: "A tracker can't be renamed; forget it and add it again.")
         }
-        if signedIn {
-            trackers = try await cloud.editTracker(name, checked)
-        } else {
-            try save(trackers.map { $0.source.name == name ? StoredTracker(source: checked, token: $0.token) : $0 })
-        }
+        try save(trackers.map { $0.source.name == name ? StoredTracker(source: checked, token: $0.token) : $0 })
         await refresh()
     }
 

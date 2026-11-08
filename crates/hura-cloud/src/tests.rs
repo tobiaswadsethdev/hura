@@ -1153,6 +1153,19 @@ async fn jira_connects_the_tracker_already_there_for_its_site() {
     assert_eq!(stored[0].source.cloud_id.as_deref(), Some("cloud-1"));
     assert_eq!(stored[0].token.as_deref(), Some("jira-access"));
 
+    // A filter changed from the phone, as it sends it: untrimmed, with no
+    // email and no cloud ID, both of which only the service knows about.
+    let from_phone = json!({ "source": { "kind": "jira", "name": "work", "site": "https://acme.atlassian.net",
+        "email": null, "jql_filters": [{ "name": " ready ", "jql": "status = “Ready”" }] } });
+    let (status, body) = t
+        .call(Method::PUT, "/v1/trackers/work", Some(at), Some(from_phone))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body[0]["source"]["jql_filters"][0],
+        json!({ "name": "ready", "jql": "status = \"Ready\"" })
+    );
+
     // Changed without an email, which the connection makes right.
     let edit = json!({ "source": { "kind": "jira", "name": "work", "site": "https://acme.atlassian.net",
         "hide_created": true } });

@@ -658,11 +658,14 @@ fn set_tracker_token(name: String, token: String) -> Result<Vec<Configured>, Fai
 
 /// Change a tracker's filters, or whether it hides what you created. Its
 /// token stays where it is and is not sent back for this.
+///
+/// Signed in, checked by the service rather than here: it knows what a
+/// tracker connected through its own sign-in needs, and a Jira one, which
+/// has no email, would be refused by the check here.
 #[tauri::command(async)]
 fn edit_tracker(name: String, tracker: TrackerSource) -> Result<Vec<Configured>, Failed> {
     if cloud().signed_in() {
-        let source = checked_source(&tracker)?;
-        return cloud().edit_tracker(&name, &source).map_err(cloud_failed);
+        return cloud().edit_tracker(&name, &tracker).map_err(cloud_failed);
     }
     change_trackers(|t| t.edit(&name, &tracker))
 }
