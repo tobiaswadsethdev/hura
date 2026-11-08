@@ -151,10 +151,13 @@ deleted.
   the phone through hura-mobile's `changes` op; each keeps what was seen where
   it kept its snapshot before, in the same shape, so nothing is announced
   twice or missed across the update. The service will keep it per account.
-- [ ] **2. The service, bare.** `crates/hura-cloud`: the Postgres schema
-  (accounts, sign-ins, devices, trackers, plans), emailed codes and Sign in
-  with Apple, the device list, the encrypted tracker store, `POST /v1/tracker`,
-  the image and its workflow, and a Coolify deployment.
+- [ ] **2. The service, bare.** `crates/hura-cloud` ([cloud.md](../cloud.md)):
+  - [x] The Postgres schema for accounts, sign-ins, devices and plans;
+    emailed codes through Resend; refresh and access tokens; the device
+    list; the image, its workflow and CI against a real Postgres.
+  - [ ] Sign in with Apple.
+  - [ ] The encrypted tracker store and `POST /v1/tracker`.
+  - [ ] The Coolify deployment at `api.gethura.app`.
 - [ ] **3. The apps sign in.** Sign-in screens on both, the local and HTTPS
   backends, uploading local trackers, and trackers and filters that are the
   same everywhere.
