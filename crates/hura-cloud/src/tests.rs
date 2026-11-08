@@ -964,6 +964,45 @@ impl Test {
         assert_eq!(status, StatusCode::OK, "{page}");
     }
 
+    /// Back from a provider: the confirmation page, then its Connect (or
+    /// Cancel). The status and where it sends the browser.
+    async fn finish(&self, callback: &str, cancel: bool) -> (StatusCode, String, String) {
+        let (status, location, page) = self.get_raw(callback).await;
+        if status != StatusCode::OK {
+            return (status, location, page);
+        }
+        let made = page
+            .split("name=\"state\" value=\"")
+            .nth(1)
+            .and_then(|r| r.split('"').next())
+            .unwrap_or_else(|| panic!("no confirmation in {page}"))
+            .to_string();
+        let form = if cancel {
+            format!("state={made}&cancel=1")
+        } else {
+            format!("state={made}")
+        };
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/oauth/confirm")
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(Body::from(form))
+            .unwrap();
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let location = response
+            .headers()
+            .get("location")
+            .map(|v| v.to_str().unwrap().to_string())
+            .unwrap_or_default();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (
+            status,
+            location,
+            String::from_utf8_lossy(&bytes).into_owned(),
+        )
+    }
+
     /// The state in a URL the service handed out.
     async fn connect(&self, at: &str, provider: &str) -> String {
         let (status, body) = self
@@ -1044,10 +1083,13 @@ async fn github_connects_as_you_and_installs_where_it_is_needed() {
     );
 
     let state = t.connect(at, "github").await;
-    let (status, to, _) = t
-        .get_raw(&format!("/v1/oauth/github/callback?code=c&state={state}"))
+    let (status, to, page) = t
+        .finish(
+            &format!("/v1/oauth/github/callback?code=c&state={state}"),
+            false,
+        )
         .await;
-    assert_eq!(status, StatusCode::FOUND);
+    assert_eq!(status, StatusCode::FOUND, "{page}");
     assert!(
         to.starts_with("https://github.com/apps/hura-cloud/installations/new?state="),
         "{to}"
@@ -1126,7 +1168,10 @@ async fn jira_connects_the_tracker_already_there_for_its_site() {
 
     let state = t.connect(at, "jira").await;
     let (_, to, _) = t
-        .get_raw(&format!("/v1/oauth/jira/callback?code=c&state={state}"))
+        .finish(
+            &format!("/v1/oauth/jira/callback?code=c&state={state}"),
+            false,
+        )
         .await;
     assert_eq!(to, "hura://cloud/connected?provider=jira");
 
@@ -1208,8 +1253,11 @@ async fn a_token_about_to_run_out_is_renewed_before_it_is_read() {
         r#"{"total_count":1}"#,
     );
     let state = t.connect(at, "github").await;
-    t.get_raw(&format!("/v1/oauth/github/callback?code=c&state={state}"))
-        .await;
+    t.finish(
+        &format!("/v1/oauth/github/callback?code=c&state={state}"),
+        false,
+    )
+    .await;
 
     let account = me["account"].as_str().unwrap().parse().unwrap();
     let expire = || async {
@@ -1261,8 +1309,11 @@ async fn a_signed_github_delivery_makes_the_people_in_it_due() {
         r#"{"total_count":1}"#,
     );
     let state = t.connect(at, "github").await;
-    t.get_raw(&format!("/v1/oauth/github/callback?code=c&state={state}"))
-        .await;
+    t.finish(
+        &format!("/v1/oauth/github/callback?code=c&state={state}"),
+        false,
+    )
+    .await;
     sqlx::query("insert into watches (account_id, next_read_at) values ($1::uuid, now() + interval '1 hour')")
         .bind(me["account"].as_str().unwrap())
         .execute(&t.state.db)
@@ -1362,4 +1413,187 @@ async fn looking_at_the_inbox_on_one_device_quietly_tells_the_other_phones() {
     )
     .await;
     assert_eq!(t.relay_sent().len(), 1);
+}
+
+#[tokio::test]
+async fn nothing_is_connected_until_the_account_is_confirmed() {
+    let Some(t) = service().await else { return };
+    t.github_set_up().await;
+    let me = t.sign_in("a@example.com", "iPhone").await;
+    let at = token(&me, "access_token");
+    let web = &t.state.web;
+    web.on(
+        "POST https://github.com/login/oauth/access_token",
+        200,
+        r#"{"access_token":"ghu","expires_in":28800}"#,
+    );
+    web.on(
+        "GET https://api.github.com/user",
+        200,
+        r#"{"login":"victim"}"#,
+    );
+    web.on(
+        "GET https://api.github.com/user/installations",
+        200,
+        r#"{"total_count":1}"#,
+    );
+
+    let state = t.connect(at, "github").await;
+    let (status, _, page) = t
+        .get_raw(&format!("/v1/oauth/github/callback?code=c&state={state}"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, list) = t.call(Method::GET, "/v1/trackers", Some(at), None).await;
+    assert_eq!(list, json!([]), "not before Connect");
+    assert!(
+        page.contains("a@example.com"),
+        "says whose account it would join"
+    );
+
+    // Cancelled: nothing saved, and back to the app saying so.
+    let state = t.connect(at, "github").await;
+    let (_, to, _) = t
+        .finish(
+            &format!("/v1/oauth/github/callback?code=c&state={state}"),
+            true,
+        )
+        .await;
+    assert_eq!(to, "hura://cloud/connected?error=cancelled");
+    let (_, list) = t.call(Method::GET, "/v1/trackers", Some(at), None).await;
+    assert_eq!(list, json!([]));
+
+    // A made-up confirmation does nothing.
+    let forged = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/oauth/confirm")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(Body::from("state=made-up"))
+        .unwrap();
+    assert_eq!(
+        t.app.clone().oneshot(forged).await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn jira_sites_from_one_consent_are_renewed_together() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("a@example.com", "Mac").await;
+    let at = token(&me, "access_token");
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/setup/jira?token=setup-token")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(Body::from("client_id=c&client_secret=s"))
+        .unwrap();
+    t.app.clone().oneshot(request).await.unwrap();
+    let web = &t.state.web;
+    web.on(
+        "POST https://auth.atlassian.com/oauth/token",
+        200,
+        r#"{"access_token":"a1","refresh_token":"r1","expires_in":3600}"#,
+    );
+    web.on(
+        "POST https://auth.atlassian.com/oauth/token",
+        200,
+        r#"{"access_token":"a2","refresh_token":"r2","expires_in":3600}"#,
+    );
+    web.on("GET https://api.atlassian.com/oauth/token/accessible-resources", 200,
+        r#"[{"id":"one","url":"https://one.atlassian.net"},{"id":"two","url":"https://two.atlassian.net"}]"#);
+    let state = t.connect(at, "jira").await;
+    t.finish(
+        &format!("/v1/oauth/jira/callback?code=c&state={state}"),
+        false,
+    )
+    .await;
+
+    sqlx::query("update trackers set connection = jsonb_set(connection, '{expires_at}', '1')")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    let account = me["account"].as_str().unwrap().parse().unwrap();
+    let stored = crate::trackers::stored(&t.state, account).await.unwrap();
+    assert_eq!(stored.len(), 2);
+    assert!(
+        stored.iter().all(|s| s.token.as_deref() == Some("a2")),
+        "both renewed: {stored:?}"
+    );
+    // One renewal for the two, with the one refresh token.
+    let refreshes: Vec<_> = web
+        .sent("POST https://auth.atlassian.com/oauth/token")
+        .into_iter()
+        .flatten()
+        .filter(|b| b.contains("refresh_token"))
+        .collect();
+    assert_eq!(refreshes.len(), 1, "{refreshes:?}");
+    assert!(refreshes[0].contains("\"r1\""));
+}
+
+#[tokio::test]
+async fn a_provider_that_is_away_does_not_cost_the_connection() {
+    let Some(t) = service().await else { return };
+    t.github_set_up().await;
+    let me = t.sign_in("a@example.com", "iPhone").await;
+    let at = token(&me, "access_token");
+    let web = &t.state.web;
+    web.on(
+        "POST https://github.com/login/oauth/access_token",
+        200,
+        r#"{"access_token":"ghu_1","refresh_token":"ghr_1","expires_in":28800}"#,
+    );
+    web.on(
+        "POST https://github.com/login/oauth/access_token",
+        503,
+        "busy",
+    );
+    web.on(
+        "GET https://api.github.com/user",
+        200,
+        r#"{"login":"octocat"}"#,
+    );
+    web.on(
+        "GET https://api.github.com/user/installations",
+        200,
+        r#"{"total_count":1}"#,
+    );
+    let state = t.connect(at, "github").await;
+    t.finish(
+        &format!("/v1/oauth/github/callback?code=c&state={state}"),
+        false,
+    )
+    .await;
+    sqlx::query("update trackers set connection = jsonb_set(connection, '{expires_at}', '1')")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    let account = me["account"].as_str().unwrap().parse().unwrap();
+    let stored = crate::trackers::stored(&t.state, account).await.unwrap();
+    assert_eq!(
+        stored[0].token.as_deref(),
+        Some("ghu_1"),
+        "kept, to be renewed at the next read"
+    );
+}
+
+#[tokio::test]
+async fn a_read_asked_for_while_one_runs_is_not_put_off() {
+    let Some(t) = service().await else { return };
+    t.routed("a@example.com").await;
+    // As a webhook does while the account is leased for a read.
+    sqlx::query("update watches set next_read_at = now() - interval '1 minute'")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    assert_eq!(crate::watch::tick(&t.state).await.unwrap(), 1);
+    sqlx::query("update watches set next_read_at = now()")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    // The read that was running puts itself back in line: the earlier time stays.
+    let wait: f64 =
+        sqlx::query_scalar("select extract(epoch from next_read_at - now())::float8 from watches")
+            .fetch_one(&t.state.db)
+            .await
+            .unwrap();
+    assert!(wait <= 1.0, "{wait}");
 }

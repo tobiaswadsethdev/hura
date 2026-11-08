@@ -786,29 +786,23 @@ fn local_trackers() -> Result<Vec<Configured>, Failed> {
 /// Move this machine's trackers, tokens and all, to the account, and forget
 /// them here. One whose name the account already has stays, and the answer
 /// is what stayed.
+///
+/// Each is forgotten here as soon as the account has it, so a failure part
+/// way leaves only those not yet moved, to move again, and never a copy of
+/// one the account already holds.
 #[tauri::command(async)]
 fn move_trackers_to_cloud() -> Result<Vec<Configured>, Failed> {
-    let mut left = Vec::new();
     for t in load_trackers()?.list() {
         match cloud().add_tracker(&t.source, t.token.as_deref()) {
-            Ok(_) => {}
-            Err(e) if e.status == 409 => left.push(t.source.name.clone()),
+            Ok(_) => {
+                change_trackers(|local| local.forget(&t.source.name))?;
+            }
+            // The account has one by that name: this one stays.
+            Err(e) if e.status == 409 => {}
             Err(e) => return Err(cloud_failed(e)),
         }
     }
-    change_trackers(|t| {
-        for name in t
-            .list()
-            .iter()
-            .map(|s| s.source.name.clone())
-            .collect::<Vec<_>>()
-        {
-            if !left.contains(&name) {
-                t.forget(&name)?;
-            }
-        }
-        Ok(())
-    })
+    Ok(load_trackers()?.views())
 }
 
 /// Whether hura cloud's stream of tracker changes is open, so the window

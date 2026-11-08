@@ -7,6 +7,10 @@
 //! through [`Public`], which sends only HTTPS, and only to a host whose
 //! every address is a public one.
 //!
+//! **No redirect is followed**, or a public host could answer with one to an
+//! address inside: a redirect is an answer, which the tracker code reads as a
+//! failure.
+//!
 //! What this does not close: the host is resolved again by the client that
 //! sends the request, so a name that answers differently the second time
 //! (DNS rebinding) could still get past. Pinning the resolved address into

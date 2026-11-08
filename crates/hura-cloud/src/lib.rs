@@ -85,7 +85,7 @@ pub async fn needs_setup(state: &Shared) -> std::result::Result<bool, String> {
 /// [`outbound`]), rather than through `curl`. Once per process.
 pub fn install_transport() {
     hura_core::tracker::use_transport(Box::new(outbound::Public(
-        hura_core::tracker::ureq::Ureq::new(),
+        hura_core::tracker::ureq::Ureq::without_redirects(),
     )));
 }
 
@@ -113,6 +113,7 @@ pub fn app(state: Shared) -> Router {
         .route("/v1/connect/{provider}", post(oauth::start))
         .route("/v1/oauth/github/callback", get(oauth::github_callback))
         .route("/v1/oauth/jira/callback", get(oauth::jira_callback))
+        .route("/v1/oauth/confirm", post(oauth::confirm))
         .route("/v1/webhooks/github", post(webhooks::github))
         .route("/setup", get(integrations::page))
         .route("/setup/github/done", get(integrations::github_done))

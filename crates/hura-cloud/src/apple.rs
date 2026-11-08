@@ -41,6 +41,10 @@ const KEYS: &str = "https://appleid.apple.com/auth/keys";
 /// signed with a key not among them fetches them at once, so a new key of
 /// Apple's is picked up without waiting.
 const KEYS_FOR: Duration = Duration::from_secs(60 * 60);
+/// But not more often than this, whatever key a token names: a token is not
+/// checked until its key is found, so anybody could otherwise make every
+/// request a fetch from Apple, and every sign-in wait behind it.
+const KEYS_AT_MOST_EVERY: Duration = Duration::from_secs(60);
 
 /// Apple's published keys, and the app the tokens must be for.
 pub struct Apple {
@@ -104,11 +108,16 @@ impl Apple {
                 .ok_or_else(refused),
             Keys::Fetched { agent, cache } => {
                 let mut cache = cache.lock().await;
-                if let Some((at, keys)) = cache.as_ref()
-                    && at.elapsed() < KEYS_FOR
-                    && let Some(k) = keys.iter().find(|k| k.kid == kid)
-                {
-                    return Ok(k.clone());
+                if let Some((at, keys)) = cache.as_ref() {
+                    let known = keys.iter().find(|k| k.kid == kid);
+                    if at.elapsed() < KEYS_FOR
+                        && let Some(k) = known
+                    {
+                        return Ok(k.clone());
+                    }
+                    if at.elapsed() < KEYS_AT_MOST_EVERY {
+                        return known.cloned().ok_or_else(refused);
+                    }
                 }
                 let agent = agent.clone();
                 let text = tokio::task::spawn_blocking(move || {

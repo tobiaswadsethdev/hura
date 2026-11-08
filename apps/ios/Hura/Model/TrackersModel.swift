@@ -89,20 +89,24 @@ final class TrackersModel {
     /// Moves this phone's trackers, tokens and all, to the account, and
     /// forgets them here. One whose name the account already has stays on
     /// the phone, and is returned.
+    ///
+    /// Each is forgotten here as soon as the account has it, so a failure part
+    /// way leaves only those not yet moved, to move again, and never a copy of
+    /// one the account already holds.
     @discardableResult
     func moveToAccount() async throws -> [String] {
-        var kept: [StoredTracker] = []
+        var kept: [String] = []
+        defer { onPhone = (try? store.load()) ?? onPhone }
         for t in onPhone {
             do {
                 trackers = try await cloud.addTracker(t.source, token: t.token)
+                try store.save(((try? store.load()) ?? []).filter { $0.source.name != t.source.name })
             } catch let e as CloudError where e.status == 409 {
-                kept.append(t)
+                kept.append(t.source.name)
             }
         }
-        try store.save(kept)
-        onPhone = kept
         await refresh()
-        return kept.map(\.source.name)
+        return kept
     }
 
     func tracker(named name: String) -> StoredTracker? {

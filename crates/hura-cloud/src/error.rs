@@ -30,6 +30,10 @@ impl Error {
         Error::new(StatusCode::UNAUTHORIZED, "not signed in")
     }
 
+    pub fn is_status(&self, status: StatusCode) -> bool {
+        self.status == status
+    }
+
     pub fn not_found(message: impl Into<String>) -> Self {
         Error::new(StatusCode::NOT_FOUND, message)
     }

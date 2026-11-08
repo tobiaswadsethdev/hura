@@ -122,6 +122,18 @@ renews them before they run out.
 A connected tracker's list entry carries `connected`, who it is connected as;
 its token cannot be set by hand.
 
+**Nothing is saved before it is confirmed.** Back from the provider, the
+browser is shown a page naming the hura account the connection would join,
+and only its Connect saves it. A connect link started by one account and
+finished by somebody else would otherwise put that person's GitHub or Jira on
+the first account. The page cannot be shown inside another, and its Connect
+carries a state of its own.
+
+**A refresh that fails** for the provider being away (a timeout, a 5xx) keeps
+the tokens, to try at the next read; only a refusal clears them. The Jira
+sites of one consent share its refresh token, which Atlassian changes at
+every use, and are renewed together.
+
 **Setting the apps up.** While either is missing, the service writes
 `setup: <url>/setup?token=…` to its log at start; the token is fresh at each
 start and is the only way in. The page makes the GitHub App with GitHub's
@@ -156,7 +168,10 @@ An account with a stream open is read even with no phone linked. The
 streams are the process's own, so for now the service runs as one instance.
 
 What was seen moves on only once every device has been told, or could not be
-for good. A relay that is away means the same changes are sent again at the
+for good. (While one device's relay keeps putting its events off, the
+others may be told again of changes they had, if more arrive meanwhile and
+change what the notification says; the relay's duplicate check is by the
+text.) A relay that is away means the same changes are sent again at the
 next read under the same event IDs, which the relay drops as duplicates. An
 account is read only while it has a working route or an open stream, as often
 as its plan allows plus up to half a minute, and less often while none of its
@@ -177,6 +192,12 @@ before then.
 
 iOS spaces background pushes out as it sees fit, so a phone may catch up only
 when it is next opened, which asks too.
+
+What counts is what was waiting on you, and the others are told when that
+changes. Looking again at the same things does not tell them, so a
+notification that arrived on a phone since the last change stays until the
+inbox is looked at on that phone; telling the phones at every look would be a
+background push each time, which iOS would soon stop delivering.
 
 The service only sends requests over HTTPS to public addresses. A Jira site
 inside the server's own network (`https://10.0.0.5`, `localhost`) is refused,

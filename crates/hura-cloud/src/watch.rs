@@ -179,7 +179,11 @@ async fn schedule(state: &Shared, account: Uuid, failed: bool, told: bool) -> Re
         every + jitter
     };
     sqlx::query(
-        "update watches set failures = $2, next_read_at = now() + $3 * interval '1 second'
+        // The earlier of the two: a webhook that made the account due while
+        // this read held it asked for another read, and keeps it. (The
+        // lease is later than any interval, so it never wins.)
+        "update watches set failures = $2,
+             next_read_at = least(next_read_at, now() + $3 * interval '1 second')
          where account_id = $1",
     )
     .bind(account)

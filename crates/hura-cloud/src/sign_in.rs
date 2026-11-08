@@ -32,13 +32,20 @@ pub struct Ask {
 /// `POST /v1/sign-in/email`: send a code.
 pub async fn send_code(State(state): State<Shared>, Json(body): Json<Ask>) -> Result<StatusCode> {
     let email = address(&body.email)?;
+    // One request for an address at a time, so two at once cannot both find
+    // the limit unreached: held until the code is written.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("select pg_advisory_xact_lock(hashtext($1))")
+        .bind(&email)
+        .execute(&mut *tx)
+        .await?;
     let (minute, hour): (i64, i64) = sqlx::query_as(
         "select count(*) filter (where created_at > now() - interval '1 minute'),
                 count(*) filter (where created_at > now() - interval '1 hour')
          from email_codes where email = $1",
     )
     .bind(&email)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
     if minute >= PER_MINUTE || hour >= PER_HOUR {
         return Err(Error::new(
@@ -55,8 +62,9 @@ pub async fn send_code(State(state): State<Shared>, Json(body): Json<Ask>) -> Re
     .bind(&email)
     .bind(code_hash(&email, &code))
     .bind(CODE_SECONDS)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     state
         .mail
         .send_code(&email, &code)
