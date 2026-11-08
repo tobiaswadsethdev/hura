@@ -29,9 +29,11 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|e| format!("could not bring the database up to date: {e}"))?;
 
+    hura_cloud::install_transport();
     let state = Arc::new(hura_cloud::State {
         db,
         mail: config.mail,
+        keys: config.keys,
     });
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await

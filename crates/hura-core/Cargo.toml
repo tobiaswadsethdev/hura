@@ -14,9 +14,13 @@ serde_json.workspace = true
 thiserror.workspace = true
 toml = { version = "1.1", default-features = false, features = ["std", "parse", "serde"] }
 ts-rs = { version = "12", optional = true }
+ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
 
 [features]
 # TypeScript for the desktop application, generated from these very types so
 # there is never a second hand-maintained copy of them. Off by default: it is a
 # build-time concern of one consumer, and no shipped binary needs it.
 ts = ["dep:ts-rs"]
+# `tracker::ureq`: a transport for tracker requests that is not `curl`, for the
+# iOS app and hura cloud.
+ureq = ["dep:ureq"]

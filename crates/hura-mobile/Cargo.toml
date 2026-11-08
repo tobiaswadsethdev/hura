@@ -13,7 +13,6 @@ publish = false
 crate-type = ["staticlib", "lib"]
 
 [dependencies]
-hura-core = { path = "../hura-core" }
+hura-core = { path = "../hura-core", features = ["ureq"] }
 serde.workspace = true
 serde_json.workspace = true
-ureq = { version = "3", default-features = false, features = ["rustls"] }

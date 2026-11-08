@@ -1,7 +1,7 @@
 # hura cloud
 
 The service behind signing in: accounts, the devices signed in to them, and
-(being built) the trackers they keep, read on a timer so a phone hears about a
+the trackers they keep, read (soon) on a timer so a phone hears about a
 ticket on time. Why it exists, and what comes next, is in
 [plans/hura-cloud.md](plans/hura-cloud.md). Without signing in, nothing here
 is used: trackers and their tokens stay on the device, as before.
@@ -18,6 +18,7 @@ runs anywhere else.
 | `LISTEN` | `0.0.0.0:8080` unless set. Plain HTTP: TLS is the proxy's in front of it |
 | `RESEND_API_KEY` | sends sign-in codes through [Resend](https://resend.com) |
 | `MAIL_FROM` | who they are from, `hura <sign-in@gethura.app>` unless set. Its domain has to be verified on the Resend account |
+| `HURA_CLOUD_MASTER_KEY` | required: 32 bytes in base64, from `openssl rand -base64 32`. It wraps each account's key for its trackers' tokens, so **losing it loses every stored token**: keep a copy somewhere safe that is not the database's backups |
 | `HURA_CLOUD_MAIL=log` | prints codes instead of sending them, for a laptop. Without this or a Resend key the service will not start |
 
 On a laptop, with Docker for the database:
@@ -25,7 +26,7 @@ On a laptop, with Docker for the database:
 ```sh
 docker run -d --name hura-cloud-pg -e POSTGRES_PASSWORD=hura -p 55432:5432 postgres:17-alpine
 DATABASE_URL=postgres://postgres:hura@localhost:55432/postgres HURA_CLOUD_MAIL=log \
-  cargo run -p hura-cloud
+  HURA_CLOUD_MASTER_KEY=$(openssl rand -base64 32) cargo run -p hura-cloud
 ```
 
 Its tests run against the same database, each on one of its own, and skip
@@ -48,7 +49,8 @@ The image is `ghcr.io/tobiaswadsethdev/hura-cloud`, built from main by
    `/healthz`. The package is private unless made public on GitHub; a private
    one needs ghcr.io credentials (a token with `read:packages`) added to
    Coolify.
-3. **Its environment**: `DATABASE_URL` and `RESEND_API_KEY` as secrets.
+3. **Its environment**: `DATABASE_URL`, `RESEND_API_KEY` and
+   `HURA_CLOUD_MASTER_KEY` as secrets.
 4. **Redeploy** to take a new `latest`, by hand or with Coolify's webhook from
    the workflow.
 
@@ -74,3 +76,29 @@ hashes of either.
 | `DELETE /v1/devices/{id}` | signs that device out; its tokens stop working at once |
 | `POST /v1/sign-out` | signs out the device asking |
 | `GET /healthz` | `ok`, once the database answers |
+
+### Trackers
+
+Kept as the desktop keeps them: the same checks on adding one, a name that is
+never changed, and a token that is stored but never shown. Each change answers
+with the whole list, `[{source, token_set}]`. A token is encrypted with a key
+of the account's own, which the master key wraps.
+
+| | |
+| --- | --- |
+| `GET /v1/trackers` | the list |
+| `POST /v1/trackers` `{source, token?}` | adds one. 400 if it could not work (a Jira tracker with no site), 409 if the name is taken |
+| `PUT /v1/trackers/{name}` `{source}` | changes one, keeping its token. Not its name |
+| `PUT /v1/trackers/{name}/token` `{token}` | stores or replaces its token |
+| `DELETE /v1/trackers/{name}` | takes it away, token and all |
+| `POST /v1/tracker` `{op, ...}` | one of the requests the iOS app makes of hura-core (`hura_core::tracker::request`), on the account's trackers |
+
+`POST /v1/tracker` takes the same requests as the phone's own copy of
+hura-core, with two differences: where a request takes a `tracker`, it is the
+name of one of the account's, and `inbox` reads all of them. It answers 200
+with `{"ok": ...}` or `{"error": ...}`, as the phone's does, so a client reads
+the same thing from either.
+
+The service only sends requests over HTTPS to public addresses. A Jira site
+inside the server's own network (`https://10.0.0.5`, `localhost`) is refused,
+since otherwise any account could make the server ask its neighbours.

@@ -7,6 +7,10 @@
 //! - `RESEND_API_KEY`: sends sign-in codes through Resend, from `MAIL_FROM`
 //!   (`hura <sign-in@gethura.app>` unless set), whose domain has to be
 //!   verified on that Resend account.
+//! - `HURA_CLOUD_MASTER_KEY`: 32 bytes in base64 (`openssl rand -base64 32`),
+//!   which wraps each account's key for its trackers' tokens. Required. Lost,
+//!   every stored tracker token is lost with it: keep a copy beside the
+//!   database's backups, and not in them.
 //! - `HURA_CLOUD_MAIL=log`: prints codes instead, for running it on a laptop.
 //!   One of the two is required, so a deployment missing its key fails to
 //!   start rather than signing nobody in.
@@ -14,11 +18,13 @@
 use std::net::SocketAddr;
 
 use crate::Mailer;
+use crate::crypto::Keys;
 
 pub struct Config {
     pub database_url: String,
     pub listen: SocketAddr,
     pub mail: Mailer,
+    pub keys: Keys,
 }
 
 pub const DEFAULT_FROM: &str = "hura <sign-in@gethura.app>";
@@ -42,10 +48,15 @@ impl Config {
                 );
             }
         };
+        let keys =
+            Keys::from_base64(&var("HURA_CLOUD_MASTER_KEY").ok_or(
+                "HURA_CLOUD_MASTER_KEY is not set; make one with `openssl rand -base64 32`",
+            )?)?;
         Ok(Config {
             database_url,
             listen,
             mail,
+            keys,
         })
     }
 }

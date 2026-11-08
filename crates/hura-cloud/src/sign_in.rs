@@ -114,7 +114,7 @@ pub async fn verify(
     .bind(&email)
     .fetch_optional(&mut *tx)
     .await?;
-    let spent = || Error::bad("that code has expired: ask for a new one");
+    let spent = || Error::bad("that code has been used or has expired: ask for a new one");
     let (id, hash, attempts) = row.ok_or_else(spent)?;
     if attempts >= MAX_ATTEMPTS {
         return Err(spent());

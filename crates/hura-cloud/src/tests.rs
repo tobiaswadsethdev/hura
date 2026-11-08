@@ -49,7 +49,10 @@ async fn service() -> Option<Test> {
     let state = Arc::new(State {
         db,
         mail: Mailer::Kept(Mutex::new(Vec::new())),
+        keys: crate::crypto::Keys::from_base64("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+            .unwrap(),
     });
+    crate::install_transport();
     Some(Test {
         app: crate::app(state.clone()),
         state,
@@ -278,4 +281,156 @@ async fn nothing_is_answered_without_a_token() {
     }
     let (status, _) = t.call(Method::GET, "/healthz", None, None).await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn trackers_are_kept_and_their_tokens_never_shown() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("a@example.com", "Mac").await;
+    let at = token(&me, "access_token");
+    let gh = json!({ "kind": "git-hub", "name": " gh " });
+
+    let (status, list) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": gh, "token": "ghp_secret" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list[0]["source"]["name"], "gh", "trimmed");
+    assert_eq!(list[0]["token_set"], true);
+    assert!(!list.to_string().contains("ghp_secret"));
+
+    // Encrypted where it is kept.
+    let kept: Vec<u8> = sqlx::query_scalar("select token from trackers")
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap();
+    assert!(!kept.windows(10).any(|w| w == b"ghp_secret"));
+
+    let (status, _) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": gh })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "the name is taken");
+    let jira = json!({ "kind": "jira", "name": "work" });
+    let (status, body) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": jira })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a Jira tracker needs a site: {body}"
+    );
+
+    let renamed = json!({ "source": { "kind": "git-hub", "name": "other" } });
+    let (status, _) = t
+        .call(Method::PUT, "/v1/trackers/gh", Some(at), Some(renamed))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "not renamed");
+    let edited = json!({ "source": { "kind": "git-hub", "name": "gh", "hide_created": true } });
+    let (status, list) = t
+        .call(Method::PUT, "/v1/trackers/gh", Some(at), Some(edited))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list[0]["source"]["hide_created"], true);
+    assert_eq!(list[0]["token_set"], true, "the token stays");
+
+    let (status, _) = t
+        .call(
+            Method::PUT,
+            "/v1/trackers/nope/token",
+            Some(at),
+            Some(json!({ "token": "x" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Nobody else's.
+    let other = t.sign_in("b@example.com", "Laptop").await;
+    let (_, theirs) = t
+        .call(
+            Method::GET,
+            "/v1/trackers",
+            Some(token(&other, "access_token")),
+            None,
+        )
+        .await;
+    assert_eq!(theirs, json!([]));
+
+    let (status, list) = t
+        .call(Method::DELETE, "/v1/trackers/gh", Some(at), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list, json!([]));
+}
+
+#[tokio::test]
+async fn tracker_requests_read_the_accounts_own_trackers() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("a@example.com", "iPhone").await;
+    let at = token(&me, "access_token");
+    let ask = |request: Value| t.call(Method::POST, "/v1/tracker", Some(at), Some(request));
+
+    // No token, so nothing is sent anywhere: the inbox says so.
+    t.call(
+        Method::POST,
+        "/v1/trackers",
+        Some(at),
+        Some(json!({ "source": { "kind": "git-hub", "name": "gh" } })),
+    )
+    .await;
+    let (status, inbox) = ask(json!({ "op": "inbox", "prefix": "hura" })).await;
+    assert_eq!(status, StatusCode::OK);
+    let warnings = inbox["ok"]["warnings"].to_string();
+    assert!(warnings.contains("gh"), "{inbox}");
+
+    let (_, branch) =
+        ask(json!({ "op": "branch", "prefix": "hura", "key": "P-1", "title": "Add it" })).await;
+    assert!(
+        branch["ok"].as_str().unwrap().starts_with("hura/P-1"),
+        "{branch}"
+    );
+
+    let (_, unknown) = ask(json!({ "op": "issue", "tracker": "nope", "key": "1" })).await;
+    assert_eq!(unknown["error"], "no tracker called `nope`");
+
+    // A tracker brought along, token and all, is refused: the service is not
+    // a way to send any token anywhere.
+    let brought = json!({ "source": { "kind": "git-hub", "name": "x" }, "token": "t" });
+    let (_, refused) = ask(json!({ "op": "issue", "tracker": brought, "key": "1" })).await;
+    assert!(
+        refused["error"].as_str().unwrap().contains("name"),
+        "{refused}"
+    );
+
+    // A site inside the server's network is never asked.
+    let inside =
+        json!({ "kind": "jira", "name": "work", "site": "https://127.0.0.1", "email": "a@b.c" });
+    t.call(
+        Method::POST,
+        "/v1/trackers",
+        Some(at),
+        Some(json!({ "source": inside, "token": "t" })),
+    )
+    .await;
+    let (_, refused) = ask(json!({ "op": "issue", "tracker": "work", "key": "P-1" })).await;
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("does not send requests"),
+        "{refused}"
+    );
 }

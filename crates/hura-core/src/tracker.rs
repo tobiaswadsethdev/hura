@@ -44,6 +44,9 @@ mod issue;
 pub mod markdown;
 mod pull;
 mod pulls;
+pub mod request;
+#[cfg(feature = "ureq")]
+pub mod ureq;
 pub use edit::{
     Choice, EditField, EditForm, Editable, FieldChange, Transition, UserChoice, comment,
     delete_comment, edit_comment, edit_form, save, transition, transitions, users,

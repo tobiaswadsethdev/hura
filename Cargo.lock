@@ -1003,7 +1003,9 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "http-body-util",
+ "hura-core",
  "rand 0.10.2",
+ "ring",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -1025,6 +1027,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "ts-rs",
+ "ureq",
 ]
 
 [[package]]
@@ -1034,7 +1037,6 @@ dependencies = [
  "hura-core",
  "serde",
  "serde_json",
- "ureq",
 ]
 
 [[package]]

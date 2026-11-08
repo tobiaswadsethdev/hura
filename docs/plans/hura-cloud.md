@@ -156,8 +156,11 @@ deleted.
     emailed codes through Resend; refresh and access tokens; the device
     list; the image, its workflow and CI against a real Postgres.
   - [ ] Sign in with Apple.
-  - [ ] The encrypted tracker store and `POST /v1/tracker`.
-  - [ ] The Coolify deployment at `api.gethura.app`.
+  - [x] The encrypted tracker store and `POST /v1/tracker`, with the request
+    surface moved from hura-mobile into `hura_core::tracker::request` so the
+    phone and the service run the same code.
+  - [x] The Coolify deployment at `api.gethura.app`, behind the Cloudflare
+    tunnel.
 - [ ] **3. The apps sign in.** Sign-in screens on both, the local and HTTPS
   backends, uploading local trackers, and trackers and filters that are the
   same everywhere.
