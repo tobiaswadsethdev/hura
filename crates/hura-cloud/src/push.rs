@@ -72,18 +72,34 @@ impl Relay {
     /// checks before it keeps one.
     pub async fn check(&self, token: &str) -> std::result::Result<(), String> {
         match self.call("GET", "/v1/link", token, None).await {
-            Ok(200) => Ok(()),
-            Ok(401) | Ok(404) => Err("the relay does not know this push token".into()),
-            Ok(status) => Err(format!("the relay answered {status}")),
+            Ok((200, _)) => Ok(()),
+            Ok((401 | 404, _)) => Err("the relay does not know this push token".into()),
+            Ok((status, text)) => Err(format!("the relay answered {status}: {text}")),
             Err(e) => Err(e),
         }
     }
 
+    /// Sends one event, and says what became of it. What the relay said is
+    /// logged unless it was sent: a duplicate, a phone gone from the relay,
+    /// or an event it would not take are all worth seeing once.
     pub async fn send(&self, token: &str, event: &Value) -> Sent {
-        match self.call("POST", "/v1/events", token, Some(event)).await {
-            Ok(200) | Ok(400) => Sent::Done,
-            Ok(401) => Sent::Refused("the relay refused the push token".into()),
-            Ok(status) => Sent::Later(format!("the relay answered {status}")),
+        let answer = self.call("POST", "/v1/events", token, Some(event)).await;
+        let id = event["event_id"].as_str().unwrap_or_default();
+        match answer {
+            Ok((200, text)) => {
+                if !text.contains("\"sent\":true") {
+                    eprintln!("relay: event {id} not sent: {text}");
+                }
+                Sent::Done
+            }
+            // Malformed, so sending it again would not help; but it is a bug
+            // here, and says so.
+            Ok((400, text)) => {
+                eprintln!("relay: event {id} refused as malformed: {text}");
+                Sent::Done
+            }
+            Ok((401, _)) => Sent::Refused("the relay refused the push token".into()),
+            Ok((status, text)) => Sent::Later(format!("the relay answered {status}: {text}")),
             Err(e) => Sent::Later(e),
         }
     }
@@ -94,7 +110,7 @@ impl Relay {
         path: &str,
         token: &str,
         body: Option<&Value>,
-    ) -> std::result::Result<u16, String> {
+    ) -> std::result::Result<(u16, String), String> {
         match self {
             Relay::Https { base, agent } => {
                 let (agent, url, token) =
@@ -111,10 +127,12 @@ impl Relay {
                     let request = request
                         .body(body.unwrap_or_default())
                         .map_err(|e| e.to_string())?;
-                    agent
+                    let mut response = agent
                         .run(request)
-                        .map(|r| r.status().as_u16())
-                        .map_err(|e| format!("could not reach the relay: {e}"))
+                        .map_err(|e| format!("could not reach the relay: {e}"))?;
+                    let status = response.status().as_u16();
+                    let text = response.body_mut().read_to_string().unwrap_or_default();
+                    Ok((status, text))
                 })
                 .await
                 .map_err(|e| e.to_string())?
@@ -125,11 +143,12 @@ impl Relay {
                     sent.lock().unwrap().push((token.to_string(), body.clone()));
                 }
                 let mut statuses = statuses.lock().unwrap();
-                Ok(if statuses.is_empty() {
+                let status = if statuses.is_empty() {
                     200
                 } else {
                     statuses.remove(0)
-                })
+                };
+                Ok((status, r#"{"sent":true}"#.to_string()))
             }
         }
     }

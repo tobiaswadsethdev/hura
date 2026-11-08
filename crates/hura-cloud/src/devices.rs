@@ -16,6 +16,22 @@ pub struct Me {
     account: Uuid,
     plan: String,
     sign_ins: Vec<SignIn>,
+    /// How the account's trackers are being read for its devices, once
+    /// something has asked them to be.
+    watch: Option<Watch>,
+}
+
+/// Reading the account's trackers on a timer: what to look at when a
+/// notification does not come.
+#[derive(Serialize, sqlx::FromRow)]
+pub struct Watch {
+    /// Unix seconds, or null before the first read.
+    last_read_at: Option<i64>,
+    next_read_at: i64,
+    /// Reads in a row in which no tracker answered.
+    failures: i32,
+    /// Devices it is told to, through the relay and still working.
+    routes: i64,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -37,10 +53,22 @@ pub async fn me(State(state): State<Shared>, signed: Signed) -> Result<Json<Me>>
     .bind(signed.account)
     .fetch_all(&state.db)
     .await?;
+    let watch = sqlx::query_as(
+        "select extract(epoch from w.last_read_at)::bigint as last_read_at,
+                extract(epoch from w.next_read_at)::bigint as next_read_at,
+                w.failures,
+                (select count(*) from push_routes p
+                 where p.account_id = w.account_id and p.broken is null) as routes
+         from watches w where w.account_id = $1",
+    )
+    .bind(signed.account)
+    .fetch_optional(&state.db)
+    .await?;
     Ok(Json(Me {
         account: signed.account,
         plan,
         sign_ins,
+        watch,
     }))
 }
 

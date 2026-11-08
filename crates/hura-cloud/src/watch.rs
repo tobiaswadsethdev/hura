@@ -69,6 +69,9 @@ pub async fn tick(state: &Shared) -> Result<usize> {
     .bind(state.live.accounts())
     .fetch_all(&state.db)
     .await?;
+    if !due.is_empty() {
+        eprintln!("watch: reading {} account(s)", due.len());
+    }
     for account in &due {
         if let Err(e) = watch(state, *account).await {
             eprintln!("watch {account}: {e:?}");
@@ -89,6 +92,12 @@ async fn watch(state: &Shared, account: Uuid) -> Result<()> {
             .map_err(Error::internal)?
     };
     let failed = answered && inbox.read.is_empty() && inbox.pulls_read.is_empty();
+    if failed {
+        eprintln!(
+            "watch {account}: no tracker answered: {}",
+            inbox.warnings.join("; ")
+        );
+    }
     let told = announce(state, account, &inbox).await?;
     schedule(state, account, failed, told).await
 }
@@ -109,6 +118,7 @@ pub(crate) async fn announce(state: &Shared, account: Uuid, inbox: &Inbox) -> Re
     let (next, found) = changes::record(seen.as_ref(), inbox);
 
     if !found.is_empty() {
+        eprintln!("watch {account}: {} change(s)", found.len());
         let since = String::from_utf8_lossy(before.as_deref().unwrap_or_default()).into_owned();
         state.live.tell(account, &batch(&since, &found), &found);
         let mut later = false;
