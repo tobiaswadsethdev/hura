@@ -1,7 +1,10 @@
 # Read by BuildKit for crates/hura-cloud/Dockerfile only. The build needs the
-# workspace's manifests and crates; everything else is weight.
+# workspace's manifests and crates, and what hura-core includes from images/
+# and policies/; everything else is weight.
 *
 !Cargo.toml
 !Cargo.lock
 !crates/
+!images/
+!policies/
 crates/**/target

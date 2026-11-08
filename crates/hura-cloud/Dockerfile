@@ -12,6 +12,9 @@ FROM rust:1-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
+# hura-core compiles in the sandbox image's files and the built-in policies.
+COPY images images
+COPY policies policies
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p hura-cloud \
