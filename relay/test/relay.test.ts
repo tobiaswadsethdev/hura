@@ -262,6 +262,21 @@ describe("events", () => {
     expect(list.json.links[0].last_event_at).not.toBeNull();
   });
 
+  it("sends inbox_seen as a background push with nothing to show", async () => {
+    const d = await device();
+    const l = await link(d.device_secret);
+    const quiet = { event_id: `h_testboot01-${++eventCounter}`, kind: "inbox_seen" };
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: quiet })).status).toBe(200);
+    expect(apnsCalls[0].body).toEqual({
+      aps: { "content-available": 1 },
+      hura: { kind: "inbox_seen", server_id: SERVER, link_id: l.link_id },
+    });
+    expect(apnsCalls[0].headers.get("apns-push-type")).toBe("background");
+    expect(apnsCalls[0].headers.get("apns-priority")).toBe("5");
+    const loud = { event_id: `h_testboot01-${++eventCounter}`, kind: "inbox_seen", body: "hello" };
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: loud })).status).toBe(400);
+  });
+
   it("maps kinds to categories and interruption levels", async () => {
     const d = await device();
     const l = await link(d.device_secret);
@@ -270,6 +285,7 @@ describe("events", () => {
       claude_permission: ["CLAUDE_PERMISSION", "active"],
       claude_turn_finished: ["CLAUDE_TURN", "active"],
       claude_failed: ["CLAUDE_FAILED", "time-sensitive"],
+      tracker_change: ["TRACKER_CHANGE", "active"],
       test: ["TEST", "active"],
     };
     for (const [kind, [category, level]] of Object.entries(expected)) {

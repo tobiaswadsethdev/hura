@@ -282,7 +282,7 @@ struct PullView: View {
 
     private func load() async {
         guard let stored else {
-            error = "No tracker called \(pull.tracker) on this phone."
+            error = "No tracker called \(pull.tracker) \(trackers.signedIn ? "in your account" : "on this phone")."
             return
         }
         do {

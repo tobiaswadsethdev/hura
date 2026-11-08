@@ -3,7 +3,8 @@
 //
 // A section of the settings screen, under "this window", because a tracker is
 // kept on this computer, token included, and read from here. The server never
-// sees either. The sidebar on the right is what it feeds, and the sidebar's
+// sees either. Signed in to hura cloud (the account section above), the
+// trackers are the account's instead, kept and read there. The sidebar on the right is what it feeds, and the sidebar's
 // empty state is a button that brings you here.
 //
 // Every tracker answers the same question, what is assigned to you or created
@@ -20,12 +21,17 @@ import type { JqlFilter } from "./gen/JqlFilter";
 import type { Tracker } from "./gen/Tracker";
 import type { TrackerKind } from "./gen/TrackerKind";
 import { Forget, Plus, Store, Tracker as TrackerGlyph } from "./icons";
+import { openExternal } from "./open";
 import { Select } from "./Select";
 
 export function TrackersSection({
+  signedIn,
   focus,
   onChanged,
 }: {
+  /// Whether these are the hura account's trackers rather than this
+  /// computer's.
+  signedIn: boolean;
   /// Scrolled to when the screen opens, because the sidebar's "add a tracker"
   /// is what opened it.
   focus: boolean;
@@ -35,7 +41,42 @@ export function TrackersSection({
   const [trackers, setTrackers] = useState<ConfiguredTracker[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Signed in, what hura cloud can connect through its own sign-in.
+  const [connectable, setConnectable] = useState<string[]>([]);
+  // The provider being connected in the browser, while the list is watched
+  // for it to arrive.
+  const [connecting, setConnecting] = useState<string | null>(null);
   const section = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    api.cloudConnectable().then(setConnectable, () => setConnectable([]));
+  }, [signedIn]);
+
+  /// Opens the provider's sign-in in the browser, then reads the list every
+  /// few seconds until it changes (the tracker connected) or a few minutes
+  /// have gone by.
+  const connect = async (provider: string) => {
+    setError(null);
+    try {
+      openExternal(await api.cloudConnect(provider));
+    } catch (e) {
+      setError(messageOf(e));
+      return;
+    }
+    setConnecting(provider);
+    const before = JSON.stringify(trackers);
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const list = await api.trackers().catch(() => null);
+      if (list && JSON.stringify(list) !== before) {
+        setTrackers(list);
+        onChanged(list);
+        break;
+      }
+    }
+    setConnecting(null);
+  };
 
   useEffect(() => {
     let live = true;
@@ -73,8 +114,9 @@ export function TrackersSection({
     <section ref={section} className="setting-group panel trackers">
       <h3>trackers</h3>
       <p className="hint">
-        Where the sidebar's tickets and pull requests come from. Kept on this computer, token
-        included, and read from here. The server never sees either.
+        {signedIn
+          ? "Where the sidebar's tickets and pull requests come from. Kept in your hura account, the same on every device signed in to it; tokens are kept there encrypted and never sent back."
+          : "Where the sidebar's tickets and pull requests come from. Kept on this computer, token included, and read from here. The server never sees either."}
       </p>
       {error && <p className="error">{error}</p>}
       {trackers === null && !error && <Waiting />}
@@ -87,6 +129,7 @@ export function TrackersSection({
           onToken={(value) =>
             act(`tracker:${t.source.name}`, () => api.setTrackerToken(t.source.name, value))
           }
+          signedIn={signedIn}
           onForget={() =>
             void act(`tracker:${t.source.name}`, () => api.forgetTracker(t.source.name))
           }
@@ -95,7 +138,22 @@ export function TrackersSection({
           }
         />
       ))}
+      {signedIn && connectable.length > 0 && (
+        <div className="setting-actions connect">
+          <span className="hint">
+            {connecting
+              ? `Finish signing in to ${connecting === "github" ? "GitHub" : "Jira"} in the browser…`
+              : "Or connect one through its own sign-in, with no token to paste:"}
+          </span>
+          {connectable.map((p) => (
+            <button key={p} className="go" disabled={connecting !== null} onClick={() => void connect(p)}>
+              {p === "github" ? "connect GitHub" : "connect Jira"}
+            </button>
+          ))}
+        </div>
+      )}
       <NewTracker
+        signedIn={signedIn}
         busy={busy !== null}
         onAdd={(tracker, token) => act(`tracker:${tracker.name}`, () => api.addTracker(tracker, token))}
       />
@@ -141,13 +199,16 @@ function kindLabel(kind: TrackerKind): string {
 function TrackerRow({
   tracker,
   busy,
+  signedIn,
   onToken,
   onForget,
   onEdit,
 }: {
   tracker: ConfiguredTracker;
   busy: string | null;
-  /// Store or replace the token. Kept on this computer and never shown again.
+  signedIn: boolean;
+  /// Store or replace the token. Kept where the tracker is, and never shown
+  /// again.
   onToken: (value: string) => Promise<boolean>;
   onForget: () => void;
   /// Save what it shows. The token stays where it is.
@@ -163,39 +224,56 @@ function TrackerRow({
       <span className="hint" title={target(t)}>
         {target(t)}
       </span>
-      <span className={tracker.token_set ? "yes" : "no"}>
-        {tracker.token_set ? "token stored" : "no token"}
-      </span>
+      {tracker.connected ? (
+        <span className={tracker.token_set ? "yes" : "no"}>
+          {tracker.token_set ? `connected as ${tracker.connected}` : "connect it again"}
+        </span>
+      ) : (
+        <span className={tracker.token_set ? "yes" : "no"}>
+          {tracker.token_set ? "token stored" : "no token"}
+        </span>
+      )}
       <span className="row-actions">
-        <input
-          type="password"
-          value={token}
-          placeholder={tracker.token_set ? "replace the token" : "paste the token"}
-          onChange={(e) => setToken(e.target.value)}
-        />
-        <button
-          className="quiet-icon"
-          disabled={working || token.trim().length === 0}
-          title={tracker.token_set ? "replace the token" : "store the token"}
-          onClick={() => {
-            // Cleared either way: a password field holding a token is worth
-            // nothing once it is stored, and less if it was refused.
-            void onToken(token.trim()).finally(() => setToken(""));
-          }}
-        >
-          <Store aria-label="store the token" />
-        </button>
+        {!tracker.connected && (
+          <>
+            <input
+              type="password"
+              value={token}
+              placeholder={tracker.token_set ? "replace the token" : "paste the token"}
+              onChange={(e) => setToken(e.target.value)}
+            />
+            <button
+              className="quiet-icon"
+              disabled={working || token.trim().length === 0}
+              title={tracker.token_set ? "replace the token" : "store the token"}
+              onClick={() => {
+                // Cleared either way: a password field holding a token is worth
+                // nothing once it is stored, and less if it was refused.
+                void onToken(token.trim()).finally(() => setToken(""));
+              }}
+            >
+              <Store aria-label="store the token" />
+            </button>
+          </>
+        )}
         <button
           className="quiet-icon danger"
           disabled={working}
-          title="remove this tracker and its token from this computer"
+          title={
+            signedIn
+              ? "remove this tracker and its token from your account"
+              : "remove this tracker and its token from this computer"
+          }
           onClick={onForget}
         >
           <Forget aria-label={`forget ${t.name}`} />
         </button>
       </span>
-      {!tracker.token_set && (
+      {!tracker.token_set && !tracker.connected && (
         <p className="problem">No token yet; paste one above and this tracker starts answering.</p>
+      )}
+      {!tracker.token_set && tracker.connected && (
+        <p className="problem">Its sign-in ran out or was taken back; connect it again below.</p>
       )}
       <Shows source={t} working={working} onSave={onEdit} />
     </div>
@@ -305,9 +383,11 @@ function Shows({
 ///
 /// Only what each kind needs, the required ones marked.
 function NewTracker({
+  signedIn,
   busy,
   onAdd,
 }: {
+  signedIn: boolean;
   busy: boolean;
   /// Answers whether it was taken. A rejected entry keeps what was typed:
   /// the reason is usually one field, and re-typing the rest would be the
@@ -411,7 +491,10 @@ function NewTracker({
       <Field label={TOKEN_LABEL[kind]} required>
         <input type="password" value={token} onChange={(e) => setToken(e.target.value)} />
       </Field>
-      <p className="hint indent">{TOKEN_HINT[kind]}</p>
+      <p className="hint indent">
+        {TOKEN_HINT[kind]}{" "}
+        {signedIn ? "Kept in your hura account, encrypted." : "Stored on this computer only."}
+      </p>
 
       <Field label="name">
         <input value={name} placeholder={kindLabel(kind)} onChange={(e) => setName(e.target.value)} />
@@ -468,9 +551,9 @@ const TOKEN_LABEL: Record<TrackerKind, string> = {
 };
 
 const TOKEN_HINT: Record<TrackerKind, string> = {
-  jira: "Created at id.atlassian.com → Security → API tokens. Stored on this computer only.",
+  jira: "Created at id.atlassian.com → Security → API tokens.",
   "azure-dev-ops":
-    "A personal access token with Work Items (read) for the tickets and Code (read) for the pull requests, or Code (read & write) to comment and vote on them. Stored on this computer only.",
+    "A personal access token with Work Items (read) for the tickets and Code (read) for the pull requests, or Code (read & write) to comment and vote on them.",
   "git-hub":
-    "A token that can read issues and pull requests, and write pull requests to comment and review. Stored on this computer only.",
+    "A token that can read issues and pull requests, and write pull requests to comment and review.",
 };

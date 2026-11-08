@@ -7,9 +7,13 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+import type { CloudAccount } from "./gen/CloudAccount";
+import type { CloudDevice } from "./gen/CloudDevice";
+import type { CloudStatus } from "./gen/CloudStatus";
 import type { Comment } from "./gen/Comment";
 import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
+import type { InboxChange } from "./gen/InboxChange";
 import type { Issue } from "./gen/Issue";
 import type { PullDetail } from "./gen/PullDetail";
 import type { PullMerge } from "./gen/PullMerge";
@@ -221,10 +225,41 @@ export const api = {
     invoke<ConfiguredTracker[]>("edit_tracker", { name, tracker }),
   forgetTracker: (name: string) => invoke<ConfiguredTracker[]>("forget_tracker", { name }),
 
+  // hura cloud, optional: signed in, the tracker calls above and below act on
+  // the account's trackers instead of this machine's. The session is kept on
+  // this machine by the Rust side; the window only ever sees who it is.
+  cloudStatus: () => invoke<CloudStatus | null>("cloud_status"),
+  cloudSendCode: (email: string) => invoke<void>("cloud_send_code", { email }),
+  cloudVerify: (email: string, code: string) =>
+    invoke<CloudStatus>("cloud_verify", { email, code }),
+  cloudSignOut: () => invoke<void>("cloud_sign_out"),
+  cloudAccount: () => invoke<CloudAccount>("cloud_account"),
+  cloudDevices: () => invoke<CloudDevice[]>("cloud_devices"),
+  cloudSignOutDevice: (id: string) => invoke<CloudDevice[]>("cloud_sign_out_device", { id }),
+  // While signed in, the trackers still kept on this machine, and moving them
+  // to the account; the answer is what stayed.
+  localTrackers: () => invoke<ConfiguredTracker[]>("local_trackers"),
+  moveTrackersToCloud: () => invoke<ConfiguredTracker[]>("move_trackers_to_cloud"),
+  // Whether hura cloud's stream of tracker changes is open: while it is, the
+  // service says what changed (as `tracker-changes` events) and the window
+  // does not announce what it finds itself.
+  cloudLive: () => invoke<boolean>("cloud_live"),
+  // The inbox was looked at here, with these waiting (`tracker/id`): signed
+  // in, the account's phones clear what they showed. Nothing signed out.
+  cloudSetSeen: (items: string[]) => invoke<void>("cloud_set_seen", { items }),
+  // Connecting a tracker through its own sign-in, in the browser: which can
+  // be, and where to send the browser for one.
+  cloudConnectable: () => invoke<string[]>("cloud_connectable"),
+  cloudConnect: (provider: string) => invoke<string>("cloud_connect", { provider }),
+
   // What is yours on every tracker, tickets and pull requests, read from this
   // machine. The server is asked only for its branch prefix, so a ticket
   // suggests the branch its session will get.
   tickets: (server: string | null) => invoke<Inbox>("tickets", { server }),
+  // What changed since the last read, worked out by the same code as on the
+  // phone. `seen` is whatever the last answer gave, kept as it was.
+  inboxChanges: (inbox: Inbox, seen: unknown) =>
+    invoke<{ seen: unknown; changes: InboxChange[] }>("inbox_changes", { inbox, seen }),
   // One of them in full, from the same place with the same token.
   ticket: (tracker: string, key: string) => invoke<Issue>("ticket", { tracker, key }),
   // Changing a Jira ticket, with the same token: its fields, its status, its

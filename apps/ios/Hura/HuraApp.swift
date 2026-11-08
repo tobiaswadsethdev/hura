@@ -6,6 +6,7 @@ struct HuraApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
     private var model: AppModel { delegate.model }
     @State private var lock = AppLock()
+    @State private var account = AccountModel()
     private var trackers: TrackersModel { delegate.trackers }
     @State private var tab = 0
     @State private var pendingPairURL: String?
@@ -22,6 +23,9 @@ struct HuraApp: App {
                         .tabItem { Label("Inbox", systemImage: "tray") }
                         .badge(trackers.unseenCount)
                         .tag(1)
+                    AccountView()
+                        .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                        .tag(2)
                 }
                 .onChange(of: tab) { if tab == 1 { trackers.markSeen() } }
                 .onChange(of: trackers.inbox) { if tab == 1 { trackers.markSeen() } }
@@ -48,6 +52,7 @@ struct HuraApp: App {
             .environment(model)
             .environment(lock)
             .environment(trackers)
+            .environment(account)
             .task {
                 // Launch: scenePhase may already be .active, so onChange
                 // wouldn't fire.

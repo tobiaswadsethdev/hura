@@ -54,8 +54,17 @@ enum NotificationCategories {
 /// view exists (an answer launches the app in the background), have them at
 /// hand, and so does a background read of the trackers.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    let model = AppModel()
-    let trackers = TrackersModel()
+    let model: AppModel
+    let trackers: TrackersModel
+
+    override init() {
+        let model = AppModel()
+        self.model = model
+        // Hands hura cloud's link to the relay to the trackers, which turn it
+        // on and off with their notifications.
+        trackers = TrackersModel(push: model.push)
+        super.init()
+    }
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -69,6 +78,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         }
         Task { await model.registerForPushIfAllowed() }
         return true
+    }
+
+    /// A background push: hura cloud saying the inbox was looked at on
+    /// another device. Anything else is not one this answers.
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
+        guard (userInfo["hura"] as? [String: Any])?["kind"] as? String == "inbox_seen" else { return .noData }
+        await trackers.syncSeen()
+        return .newData
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
@@ -92,8 +110,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        // A change on a tracker, which the app noticed itself: to the inbox.
-        if response.notification.request.content.userInfo["inbox"] != nil {
+        // A change on a tracker, which the app noticed itself or hura cloud
+        // told it (marked by the extension, or not when it couldn't run): to
+        // the inbox.
+        let info = response.notification.request.content.userInfo
+        if info["inbox"] != nil || (info["hura"] as? [String: Any])?["kind"] as? String == "tracker_change" {
             await MainActor.run { trackers.showInbox = true }
             return
         }

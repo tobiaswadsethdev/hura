@@ -16,6 +16,7 @@
 //! it has two, and the shortcuts it has taken are invisible until the second one
 //! tries to use it.
 
+pub mod cloud;
 mod http;
 mod pin;
 pub mod trackers;

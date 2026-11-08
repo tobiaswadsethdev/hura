@@ -17,7 +17,22 @@ final class NotificationService: UNNotificationServiceExtension {
         }
         self.content = content
         let keys = KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup)
-        if let text = PushCrypto.open(payload: content.userInfo, keys: keys) {
+        let kind = (content.userInfo["hura"] as? [String: Any])?["kind"] as? String
+        let text = PushCrypto.open(payload: content.userInfo, keys: keys)
+        if kind == "tracker_change" {
+            // From hura cloud, about the account's trackers: shown as the app
+            // shows the changes it finds itself, and a tap opens the inbox at
+            // the ticket, or the inbox alone when it couldn't be read.
+            content.threadIdentifier = "inbox"
+            var info: [String: String] = [:]
+            if let text {
+                content.title = text.title
+                content.subtitle = ""
+                content.body = text.body
+                if let tracker = text.tracker, let id = text.id { info = ["tracker": tracker, "id": id] }
+            }
+            content.userInfo["inbox"] = info
+        } else if let text {
             content.title = text.title
             content.subtitle = PushCrypto.subtitle(text.subtitle, serverName: PushCrypto.serverName(of: content.userInfo,
                                                                                                     keys: keys))

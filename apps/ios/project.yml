@@ -59,8 +59,10 @@ targets:
             CFBundleURLSchemes: [hura]
         ITSAppUsesNonExemptEncryption: false
         # The trackers are read now and then in the background, to notify
-        # when your tickets change (TrackersModel.scheduleBackgroundRead).
-        UIBackgroundModes: [fetch]
+        # when your tickets change (TrackersModel.scheduleBackgroundRead);
+        # and hura cloud wakes the app quietly when the inbox was looked at
+        # on another device, to clear what it showed (TrackersModel.syncSeen).
+        UIBackgroundModes: [fetch, remote-notification]
         BGTaskSchedulerPermittedIdentifiers:
           - $(PRODUCT_BUNDLE_IDENTIFIER).inbox
         HuraRelayHost: $(HURA_RELAY_HOST)
@@ -75,6 +77,10 @@ targets:
         keychain-access-groups:
           - $(AppIdentifierPrefix)$(HURA_BUNDLE_ID)
           - $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+        # Signing in to hura cloud with an Apple ID. Automatic signing turns
+        # the capability on for the App ID; the service checks the identity
+        # token against Apple's published keys.
+        com.apple.developer.applesignin: [Default]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(HURA_BUNDLE_ID)

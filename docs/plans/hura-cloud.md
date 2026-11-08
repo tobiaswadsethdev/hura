@@ -42,6 +42,8 @@ signs in, which is why local-only stays (below).
 | Where it runs | The dedicated server, under Coolify |
 | Local-only mode | Kept. Without signing in, trackers and tokens stay on the device and are read from there, as today |
 | Signing in | Sign in with Apple, and a sign-in that needs no Apple device (an emailed code, passkeys later) |
+| Domain | `gethura.app` |
+| Mail | Resend, with `gethura.app` already verified there as a sending domain |
 
 ## Shape
 
@@ -83,7 +85,7 @@ an email; Jira and GitHub are connections added afterwards.
 - **Sign in with Apple**: native on iOS, and the web flow on the desktop (which
   needs a Services ID).
 - **An emailed one-time code**, so there is no password to store and no Apple
-  device needed. Needs a mail provider (Postmark, Resend or SES).
+  device needed. Sent through Resend, from `gethura.app`.
 - **Passkeys** later.
 - One account, more than one way in: linked by a verified email, and by hand
   where Apple's "hide my email" gives an address that matches nothing.
@@ -143,29 +145,62 @@ deleted.
 
 ## Phases
 
-- [ ] **1. What changed, in `hura-core`.** The comparison that is
-  `inboxNotify.ts` on the desktop (and `InboxWatch.swift` on the phone, once
-  the JQL filters branch lands) becomes one Rust function with one set of
-  tests, called by both apps. Worth it with or without the rest.
-- [ ] **2. The service, bare.** `crates/hura-cloud`: the Postgres schema
-  (accounts, sign-ins, devices, trackers, plans), emailed codes and Sign in
-  with Apple, the device list, the encrypted tracker store, `POST /v1/tracker`,
-  the image and its workflow, and a Coolify deployment.
-- [ ] **3. The apps sign in.** Sign-in screens on both, the local and HTTPS
+- [x] **1. What changed, in `hura-core`.** `tracker::changes::record` takes
+  a read and what was seen at the last one, and answers what is seen now and
+  what changed. The desktop calls it through the `inbox_changes` command and
+  the phone through hura-mobile's `changes` op; each keeps what was seen where
+  it kept its snapshot before, in the same shape, so nothing is announced
+  twice or missed across the update. The service will keep it per account.
+- [ ] **2. The service, bare.** `crates/hura-cloud` ([cloud.md](../cloud.md)):
+  - [x] The Postgres schema for accounts, sign-ins, devices and plans;
+    emailed codes through Resend; refresh and access tokens; the device
+    list; the image, its workflow and CI against a real Postgres.
+  - [x] Sign in with Apple, in the iOS app: its identity token checked
+    against Apple's published keys, with a nonce. The desktop's, through the
+    browser, needs a Services ID and a key from the developer portal, which
+    no CLI of Apple's can make, and waits for them.
+  - [x] The encrypted tracker store and `POST /v1/tracker`, with the request
+    surface moved from hura-mobile into `hura_core::tracker::request` so the
+    phone and the service run the same code.
+  - [x] The Coolify deployment at `api.gethura.app`, behind the Cloudflare
+    tunnel.
+- [x] **3. The apps sign in.** Sign-in screens on both, the local and HTTPS
   backends, uploading local trackers, and trackers and filters that are the
   same everywhere.
-- [ ] **4. Notifications from the service.** The scheduled reads, the phone
+  - [x] The phone: an Account tab (signing in is never forced), the account
+    and its devices, `TrackerCore.call` sending requests to the service
+    when signed in, the account's trackers in place of the Keychain's, and
+    moving the phone's own to the account.
+  - [x] The desktop: an account section in settings with the same emailed
+    code, the devices, moving this computer's trackers to the account, and
+    every tracker command going to the service when signed in, through the
+    same `hura_core::tracker::request` either way. Signing in through the
+    browser and a `hura://` link waits for Sign in with Apple, which is
+    what needs it.
+- [x] **4. Notifications from the service.** The scheduled reads, the phone
   through the relay (`tracker_change`), the desktop over a live connection.
   This is the phase that makes them timely.
+  - [x] The scheduled reads, what was seen kept per account, and the phone
+    through the relay: linked as an hurad is, turned on with the phone's own
+    "notify" switch, and the phone's own announcing stopped while it is.
+  - [x] The desktop over a live connection: `GET /v1/events`, kept open by
+    the desktop while signed in, which then leaves announcing to it.
 - [ ] **5. Better connections.** Jira's OAuth app and a GitHub App instead of
   pasted tokens, their webhooks to read a tracker the moment it changes, and
   "seen" shared between devices, clearing a notification on the others.
+  - [x] A GitHub App with user tokens, made from a setup page by GitHub's
+    manifest flow; Jira through Atlassian's OAuth 2.0 (3LO), set up from the
+    same page; tokens renewed before they run out; connect buttons in both
+    apps; GitHub's webhooks making the people in a delivery due at once.
+  - [ ] Jira's webhooks: they cannot say `currentUser()` or a saved filter,
+    and expire every thirty days, so Jira is read on the timer for now.
+  - [x] "Seen" shared between devices: kept per account, set by whichever
+    device last looked at its inbox, and the other phones woken by a
+    background push (`inbox_seen`) to clear their badge and notifications.
 - [ ] **6. Ready for others.** The master key in a KMS, monitoring, rate
   limits, export and deletion, plans enforced, billing.
 
 ## Not decided yet
 
-- The domain.
-- The mail provider.
 - Whether the relay ever moves into this service. For now it stays as it is:
   small, separate, and working.

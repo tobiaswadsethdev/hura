@@ -116,6 +116,40 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo check
 
+  # hura cloud against a real Postgres. Its tests skip themselves without
+  # HURA_CLOUD_TEST_DATABASE_URL, which keeps the suite above needing nothing
+  # running; this is where they run.
+  cloud:
+    name: hura cloud
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: hura
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tests
+        env:
+          HURA_CLOUD_TEST_DATABASE_URL: postgres://postgres:hura@localhost:5432/postgres
+        run: cargo test -p hura-cloud
+
+      # The image builds, so a merge does not first find out in cloud.yml.
+      - name: Image
+        run: docker build -f crates/hura-cloud/Dockerfile -t hura-cloud .
+
   # The push relay: its routes, validation and APNs payloads, in the Workers
   # runtime, and its types against wrangler's.
   relay:

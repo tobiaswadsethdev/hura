@@ -52,6 +52,8 @@ Five crates, and an application:
 | `crates/hura-proto` | one definition of every message on the wire, so a server and a client cannot drift. Built on `hura-core`, because the types it carries are the core's own rather than a second set kept in step by hand |
 | `crates/hurad` | the whole Linux side: the clap CLI, and the server behind TLS, one token check and `/rpc`. Async only where it has to be -- everything it calls is blocking and goes to `spawn_blocking`. `crates/hura` carried the CLI and a ratatui TUI beside it until v0.4.0, when two front ends onto one set of sessions stopped earning their keep |
 | `crates/hura-client` | the client half: paired servers, and one certificate-pinned connection to each. Its own crate because the CLI and the desktop application both need it, and a webview cannot pin a certificate for itself |
+| `crates/hura-mobile` | hura-core's tracker client for the iOS app, behind one C function that takes and answers JSON |
+| `crates/hura-cloud` | the hura cloud service: accounts, devices and (coming) the trackers they keep, on Postgres. See [cloud.md](cloud.md) |
 | `apps/desktop` | Tauri v2 and React. Deliberately *not* a workspace member: `cargo build --workspace` would otherwise need a GUI toolkit installed to check that a session store reconciles |
 
 ## Where things live

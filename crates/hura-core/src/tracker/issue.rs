@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use super::doc::{self, Block};
 use super::markdown::{Markdown, to_markdown};
-use super::{Kind, Stored, get, jira_auth, jira_me, jira_site, string};
+use super::{Kind, Stored, get, jira_api, jira_auth, jira_me, jira_site, string};
 
 /// A ticket, read in full.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -133,7 +133,7 @@ pub fn issue(tracker: &Stored, key: &str) -> Result<Issue, String> {
     let me = jira_me(source, token)?;
     let url = format!(
         "{}/rest/api/3/issue/{key}?fields={FIELDS}",
-        jira_site(source)
+        jira_api(source)
     );
     let body = get(
         &url,

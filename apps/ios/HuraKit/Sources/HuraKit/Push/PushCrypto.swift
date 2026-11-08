@@ -11,6 +11,11 @@ public enum PushCrypto {
         public var title: String
         public var subtitle: String?
         public var body: String
+        /// `tracker_change` only: the ticket or pull request it is about,
+        /// which a tap opens. Inside the ciphertext, so the relay never sees
+        /// which.
+        public var tracker: String?
+        public var id: String?
     }
 
     public enum Failure: Error, Equatable {

@@ -2583,6 +2583,19 @@ main { position: relative; }
 .panel .new-tracker .setting-actions .hint { margin-right: auto; }
 .setting-group .required { color: var(--warn); }
 
+/* hura cloud, above the trackers: the sign-in fields in the settings grid,
+   then who is signed in, the trackers not yet moved, and the devices. */
+.panel.account h4 { margin: 14px 0 4px; font-size: 12px; font-weight: 500; color: var(--text); }
+.panel.account > label > .value { padding-top: 6px; font-size: 12px; font-family: var(--font-mono); }
+.panel.account .setting-actions { max-width: 568px; }
+.panel.account .setting-actions .hint { margin-right: auto; }
+.panel.account > .setting-group { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line-strong); }
+.panel.account > .setting-group h4 { margin-top: 0; }
+/* Connecting a tracker through its own sign-in, above the form that adds one
+   with a token. */
+.panel .setting-actions.connect { max-width: 568px; }
+.panel .setting-actions.connect .hint { margin-right: auto; }
+
 /* What a tracker shows, under its row: a sentence with a box, then its JQL
    filters as name-and-query pairs. Full width, because a query is the longest
    thing on this screen and the one most worth reading whole. */

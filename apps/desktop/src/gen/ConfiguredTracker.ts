@@ -4,4 +4,11 @@ import type { Tracker } from "./Tracker";
 /**
  * A tracker as a webview sees it: whether there is a token, never the token.
  */
-export type ConfiguredTracker = { source: Tracker, token_set: boolean, };
+export type ConfiguredTracker = { source: Tracker, token_set: boolean, 
+/**
+ * Connected through the tracker's own sign-in rather than a pasted
+ * token, by hura cloud: who it is connected as: `@octocat` on GitHub,
+ * the site (`acme.atlassian.net`) on Jira. There is no token to paste for one of these;
+ * connecting again replaces it.
+ */
+connected?: string, };

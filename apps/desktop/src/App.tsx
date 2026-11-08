@@ -19,6 +19,7 @@
 // sidebar of tickets and pull requests is not a destination: it stays beside
 // whatever is showing, which is the reason it replaced a tickets screen.
 
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, messageOf, type Paired, type ServerSummary } from "./api";
@@ -41,13 +42,14 @@ import { IntegrationsScreen } from "./Integrations";
 import { ServersScreen } from "./Connect";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import type { Inbox } from "./gen/Inbox";
+import type { InboxChange } from "./gen/InboxChange";
 import type { Project } from "./gen/Project";
 import type { Session } from "./gen/Session";
 import type { PullRequest } from "./gen/PullRequest";
 import type { Task } from "./gen/Task";
 import type { Poll } from "./gen/Poll";
 import { onSessions, reset as resetNotifications } from "./notify";
-import { onInbox } from "./inboxNotify";
+import { onCloudChanges, onInbox } from "./inboxNotify";
 import { close, nextChannelId, open } from "./stream";
 import { NewProjectDialog } from "./NewProject";
 import { NewWorktreeDialog } from "./NewWorktree";
@@ -460,9 +462,11 @@ export default function App() {
       .tickets(server)
       .then(
         (v) => {
-          onInbox(v, notifyTickets.current);
           setInbox(v);
           setInboxError(null);
+          // Inside the one read at a time, so the next cannot compare with
+          // what this one has not saved yet.
+          return onInbox(v, notifyTickets.current).then(() => {});
         },
         (e) => setInboxError(messageOf(e)),
       )
@@ -479,6 +483,42 @@ export default function App() {
     const timer = setInterval(readInbox, INBOX_POLL_MS);
     return () => clearInterval(timer);
   }, [ready, readInbox]);
+
+  // Signed in to hura cloud, what it finds on the trackers arrives as it
+  // finds it: said, and the sidebar read again so it shows the same thing.
+  useEffect(() => {
+    const off = listen<InboxChange[]>("tracker-changes", (e) => {
+      onCloudChanges(e.payload, notifyTickets.current);
+      readInbox();
+    });
+    return () => {
+      void off.then((unlisten) => unlisten());
+    };
+  }, [readInbox]);
+
+  // Looking at the inbox here is looking at it everywhere: with the window in
+  // front and the sidebar open, what is waiting on you (the phone's badge
+  // counts the same) is seen, and signed in, the phones clear their badge and
+  // the tracker notifications they showed. Sent when that changes.
+  const lastSeen = useRef<string | null>(null);
+  useEffect(() => {
+    const look = () => {
+      if (!inboxOpen || !inbox || !document.hasFocus()) return;
+      const items = [
+        ...inbox.tasks.filter((t) => t.relation === "assigned").map((t) => `${t.tracker}/${t.id}`),
+        ...inbox.pulls.filter((p) => p.review_requested).map((p) => `${p.tracker}/${p.id}`),
+      ].sort();
+      const key = items.join("\n");
+      if (key === lastSeen.current) return;
+      lastSeen.current = key;
+      api.cloudSetSeen(items).catch(() => {
+        lastSeen.current = null;
+      });
+    };
+    look();
+    window.addEventListener("focus", look);
+    return () => window.removeEventListener("focus", look);
+  }, [inbox, inboxOpen]);
 
   const groups = useMemo(() => group(projects, live), [projects, live]);
 

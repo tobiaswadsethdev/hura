@@ -22,6 +22,7 @@
 pub mod ansi;
 pub mod backend;
 pub mod chat;
+pub mod cloud;
 pub mod comments;
 pub mod config;
 pub mod credentials;

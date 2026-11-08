@@ -18,12 +18,33 @@ public struct TrackerError: Error, LocalizedError, Equatable {
 }
 
 /// hura-core's tracker functions, one JSON request at a time.
+///
+/// **Two places to run them.** Signed out, in this process, through
+/// hura-mobile, with the tracker and its token from the Keychain. Signed in to
+/// hura cloud, on the service, which holds the account's trackers: the same
+/// request, with the tracker named rather than sent. The answer is the same
+/// either way, so nothing above this knows which it was.
 public enum TrackerCore {
-    /// Runs `op` with `args` off the main thread: the call blocks until the
-    /// tracker answers.
+    /// Where requests go when signed in. A task-local so a test can point it
+    /// at a service of its own.
+    @TaskLocal public static var cloud: Cloud = .shared
+
+    /// What needs no tracker, and so is answered here whether signed in or
+    /// not.
+    static let local: Set<String> = ["check", "branch", "changes"]
+
+    /// Runs `op` with `args`: on hura cloud when signed in, otherwise off the
+    /// main thread here, where the call blocks until the tracker answers.
     public static func call(_ op: String, _ args: [String: JSONValue] = [:]) async throws -> JSONValue {
         var request = args
         request["op"] = .string(op)
+        if !local.contains(op), await cloud.isSignedIn {
+            if let name = request["tracker"]?["source"]?["name"]?.string {
+                request["tracker"] = .string(name)
+            }
+            request["trackers"] = nil
+            return try answer(try await cloud.tracker(request))
+        }
         let body = try String(decoding: JSONEncoder().encode(JSONValue.object(request)), as: UTF8.self)
         let answer: String = await Task.detached(priority: .userInitiated) {
             body.withCString { ptr in
@@ -32,7 +53,11 @@ public enum TrackerCore {
                 return String(cString: out)
             }
         }.value
-        let v = try JSONDecoder().decode(JSONValue.self, from: Data(answer.utf8))
+        return try self.answer(try JSONDecoder().decode(JSONValue.self, from: Data(answer.utf8)))
+    }
+
+    /// `{"ok": ...}` or `{"error": ...}`, from either place.
+    private static func answer(_ v: JSONValue) throws -> JSONValue {
         if let e = v["error"]?.string { throw TrackerError(message: e) }
         return v["ok"] ?? .null
     }
@@ -126,13 +151,24 @@ public struct JqlFilter: Codable, Equatable, Hashable, Sendable {
 public struct StoredTracker: Codable, Equatable, Sendable {
     public var source: TrackerSource
     public var token: String?
+    /// One kept by hura cloud, which never sends its token back: whether it
+    /// has one there. Not stored, and not sent to hura-core.
+    public var tokenKept = false
+    /// One hura cloud connected through the tracker's own sign-in: who as
+    /// (`@octocat`, or a Jira site). Its token is renewed there, and
+    /// there is none to paste.
+    public var connected: String?
+
+    enum CodingKeys: String, CodingKey {
+        case source, token
+    }
 
     public init(source: TrackerSource, token: String?) {
         self.source = source
         self.token = token
     }
 
-    public var hasToken: Bool { !(token ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+    public var hasToken: Bool { tokenKept || !(token ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
 }
 
 /// Where the trackers live: the Keychain, this device only.

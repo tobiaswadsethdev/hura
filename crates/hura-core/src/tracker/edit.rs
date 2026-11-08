@@ -29,7 +29,7 @@ use serde_json::{Map, Value, json};
 use super::doc::from_adf;
 use super::issue::{Stage, is_key, stage_of};
 use super::markdown::{Markdown, to_adf, to_markdown};
-use super::{Kind, Stored, get, jira_auth, jira_site, send, string, urlencode};
+use super::{Kind, Stored, get, jira_api, jira_auth, send, string, urlencode};
 
 /// A ticket's edit screen.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -578,7 +578,7 @@ fn connect_any(stored: &Stored) -> Result<(String, String), String> {
         .as_deref()
         .filter(|t| !t.trim().is_empty())
         .ok_or_else(|| format!("{}: no token yet", source.name))?;
-    Ok((jira_site(source).to_string(), jira_auth(source, token)))
+    Ok((jira_api(source), jira_auth(source, token)))
 }
 
 #[cfg(test)]

@@ -37,12 +37,16 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod changes;
 pub mod doc;
 mod edit;
 mod issue;
 pub mod markdown;
 mod pull;
 mod pulls;
+pub mod request;
+#[cfg(feature = "ureq")]
+pub mod ureq;
 pub use edit::{
     Choice, EditField, EditForm, Editable, FieldChange, Transition, UserChoice, comment,
     delete_comment, edit_comment, edit_form, save, transition, transitions, users,
@@ -119,6 +123,14 @@ pub struct Source {
     /// Leave out the tickets you created and nobody assigned you. Pull
     /// requests you opened are kept: those are still waiting on something.
     pub hide_created: bool,
+    /// Jira only, connected through Atlassian's OAuth rather than an API
+    /// token: the site's cloud ID, which sends requests to
+    /// `api.atlassian.com/ex/jira/{id}` with the token as a bearer, and makes
+    /// `email` unneeded. Set by hura cloud, which holds the connection; no
+    /// client sends or shows it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub cloud_id: Option<String>,
     /// Jira only: named JQL queries read beside your own tickets.
     ///
     /// Not called `filters`, because that is what a file from before the
@@ -152,6 +164,7 @@ impl Default for Source {
             project: None,
             site: None,
             email: None,
+            cloud_id: None,
             hide_created: false,
             jql_filters: Vec::new(),
         }
@@ -180,6 +193,7 @@ impl Source {
             project: text(&self.project),
             site: text(&self.site),
             email: text(&self.email),
+            cloud_id: text(&self.cloud_id),
             hide_created: self.hide_created,
             jql_filters: self
                 .jql_filters
@@ -233,9 +247,10 @@ impl Source {
                 if self.site.is_none() {
                     return missing("site");
                 }
-                if self.email.is_none() {
+                if self.email.is_none() && self.cloud_id.is_none() {
                     // Jira Cloud's Basic auth is email + API token; a token
-                    // alone authenticates as nobody.
+                    // alone authenticates as nobody. Connected through OAuth,
+                    // the token says who on its own.
                     return missing("email");
                 }
                 None
@@ -465,6 +480,13 @@ pub struct Stored {
 pub struct Configured {
     pub source: Source,
     pub token_set: bool,
+    /// Connected through the tracker's own sign-in rather than a pasted
+    /// token, by hura cloud: who it is connected as: `@octocat` on GitHub,
+    /// the site (`acme.atlassian.net`) on Jira. There is no token to paste for one of these;
+    /// connecting again replaces it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub connected: Option<String>,
 }
 
 impl From<&Stored> for Configured {
@@ -472,6 +494,7 @@ impl From<&Stored> for Configured {
         Configured {
             token_set: s.token.as_deref().is_some_and(|t| !t.trim().is_empty()),
             source: s.source.clone(),
+            connected: None,
         }
     }
 }
@@ -954,7 +977,20 @@ fn jira_site(source: &Source) -> &str {
         .trim_end_matches('/')
 }
 
+/// Where Jira's REST API is for this tracker: the site itself with an API
+/// token, or Atlassian's gateway for the site with an OAuth token. Links for a
+/// browser stay on the site either way ([`jira_site`]).
+fn jira_api(source: &Source) -> String {
+    match source.cloud_id.as_deref() {
+        Some(id) => format!("https://api.atlassian.com/ex/jira/{id}"),
+        None => jira_site(source).to_string(),
+    }
+}
+
 fn jira_auth(source: &Source, token: &str) -> String {
+    if source.cloud_id.is_some() {
+        return format!("Bearer {token}");
+    }
     let email = source.email.as_deref().unwrap_or_default();
     format!(
         "Basic {}",
@@ -969,7 +1005,7 @@ fn jira_auth(source: &Source, token: &str) -> String {
 /// Also the cheapest question that says whether the site and the token work
 /// at all: a failure here is the answer for the search too.
 fn jira_me(source: &Source, token: &str) -> Result<Option<String>, String> {
-    let url = format!("{}/rest/api/3/myself", jira_site(source));
+    let url = format!("{}/rest/api/3/myself", jira_api(source));
     let body = get(
         &url,
         &jira_auth(source, token),
@@ -1032,13 +1068,13 @@ fn jira_search(
     me: Option<&str>,
     prefix: &str,
 ) -> Result<Vec<Task>, String> {
-    let site = jira_site(source);
+    let api = jira_api(source);
     // `/search/jql`, not `/search`: the older endpoint is deprecated on Jira
     // Cloud and answers 410 on newer sites. `comment` is what makes a new
     // comment noticeable without a request per issue, and `assignee` is what
     // says which group a ticket goes in.
     let url = format!(
-        "{site}/rest/api/3/search/jql?jql={}&fields=summary,status,issuetype,updated,comment,assignee&maxResults=100",
+        "{api}/rest/api/3/search/jql?jql={}&fields=summary,status,issuetype,updated,comment,assignee&maxResults=100",
         urlencode(jql)
     );
     let body = get(
@@ -2125,5 +2161,33 @@ mod tests {
         assert_eq!(Kind::parse("jira").unwrap(), Kind::Jira);
         let e = Kind::parse("linear").unwrap_err();
         assert!(e.contains("github") && e.contains("jira"), "{e}");
+    }
+
+    #[test]
+    fn a_jira_tracker_connected_through_oauth_goes_through_atlassians_gateway() {
+        let mut s = Source {
+            kind: Kind::Jira,
+            name: "work".into(),
+            site: Some("https://x.atlassian.net".into()),
+            ..Source::default()
+        };
+        assert!(s.problem().is_some(), "no email and no connection");
+        s.cloud_id = Some("abc-123".into());
+        assert_eq!(s.problem(), None, "the token says who");
+        assert_eq!(jira_api(&s), "https://api.atlassian.com/ex/jira/abc-123");
+        assert_eq!(jira_auth(&s, "t"), "Bearer t");
+        assert_eq!(
+            jira_site(&s),
+            "https://x.atlassian.net",
+            "links stay on the site"
+        );
+
+        // Never written out when it is not set, so no client's copy of a
+        // tracker changes shape.
+        let plain = Source {
+            cloud_id: None,
+            ..s.clone()
+        };
+        assert!(!serde_json::to_string(&plain).unwrap().contains("cloud_id"));
     }
 }
