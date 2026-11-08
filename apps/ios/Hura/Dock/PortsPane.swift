@@ -144,10 +144,13 @@ struct PortsPane: View {
                         open(row.port, host: row.host)
                     } label: {
                         Label(row.preview == nil ? "Preview" : "Open", systemImage: "safari")
+                            .labelStyle(.titleAndIcon)
+                            .lineLimit(1)
                     }
                     .buttonStyle(.bordered)
-                    .font(.caption)
+                    .controlSize(.small)
                     .fixedSize()
+                    .layoutPriority(1)
                 }
             }
             if let p = row.preview {
