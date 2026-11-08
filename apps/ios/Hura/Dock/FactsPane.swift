@@ -34,6 +34,7 @@ struct FactsPane: View {
                     if session.isWorktree {
                         LabeledContent("Runs") {
                             Label("On the server, not isolated", systemImage: "exclamationmark.shield")
+                                .labelStyle(.titleAndIcon)
                                 .foregroundStyle(.orange)
                         }
                         if let dir = session.workdir {
