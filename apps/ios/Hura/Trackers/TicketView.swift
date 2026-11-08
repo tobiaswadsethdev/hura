@@ -39,6 +39,8 @@ struct TicketView: View {
             }
         }
         .navigationTitle(task.key)
+        // A ticket has the whole screen; back is the way to the tabs.
+        .toolbar(.hidden, for: .tabBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

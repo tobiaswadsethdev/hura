@@ -57,6 +57,8 @@ struct PullView: View {
             }
         }
         .navigationTitle(pullName(pull))
+        // A pull request has the whole screen; back is the way to the tabs.
+        .toolbar(.hidden, for: .tabBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -465,7 +467,7 @@ private struct PullFilesSection: View {
             if let files {
                 ForEach(files.files) { f in
                     NavigationLink {
-                        PullFileDiffView(tracker: tracker, files: files, file: f)
+                        PullFileDiffView(tracker: tracker, files: files, file: f).toolbar(.hidden, for: .tabBar)
                     } label: {
                         HStack {
                             ChangeRow(file: ChangedFile(path: f.path, change: f.change))

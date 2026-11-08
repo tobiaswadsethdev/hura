@@ -105,4 +105,16 @@ struct WorkspaceTests {
         #expect(server.worktrees(in: server.projects[0]).map(\.name) == ["new", "old"])
         #expect(Set(server.unfiled.map(\.name)) == ["stray", "cli"])
     }
+
+    @Test @MainActor func aDeleteHidesTheSessionAtOnceAndBringsItBackIfItFails() async throws {
+        // Nothing listens on 127.0.0.1:1, so the delete itself fails.
+        let server = Server(record: ServerRecord(serverID: "h_aaaabbbbccccdddd", name: "studio", host: "127.0.0.1", port: "1",
+                                                 fingerprint: String(repeating: "ab", count: 32), token: "t"))
+        server.load(projects: [], sessions: [Session(name: "doomed", state: "idle"), Session(name: "kept", state: "idle")])
+        server.destroy("doomed")
+        #expect(server.sessions.map(\.name) == ["kept"])
+        for _ in 0..<100 where server.deleteFailure == nil { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(server.deleteFailure?.hasPrefix("doomed wasn't deleted") == true)
+        #expect(server.sessions.map(\.name) == ["doomed", "kept"])
+    }
 }

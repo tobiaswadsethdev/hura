@@ -33,6 +33,10 @@ struct ChatView: View {
     /// hura clones every session's repository here.
     private static let cwd = "/sandbox/repo"
     private var working: Bool { chat.activity == "running" }
+    /// The last thing Claude did is a tool call still waiting on its result.
+    private var callRunning: Bool {
+        if case let .tool(_, call)? = items.last { call.result == nil } else { false }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,8 +56,16 @@ struct ChatView: View {
                             if !chat.streaming.isEmpty {
                                 MarkdownText(text: chat.streaming).opacity(0.8)
                             }
-                            if working && chat.streaming.isEmpty && chat.pending.isEmpty {
-                                ProgressView().frame(maxWidth: .infinity, alignment: .leading)
+                            // Under whatever is being written, for the whole
+                            // turn, as on the desktop; not while a tool call
+                            // is running, whose card says so already. The word
+                            // only while there is nothing else to look at.
+                            if working && chat.pending.isEmpty && !callRunning {
+                                HStack(spacing: 6) {
+                                    WorkingDots(size: 22)
+                                    if chat.streaming.isEmpty { Text("working").font(.caption) }
+                                }
+                                .foregroundStyle(Color.working)
                             }
                             ChatRows(items: queued, cwd: Self.cwd, working: working, receipts: chat.receipts)
                             Color.clear.frame(height: 1).id("bottom")

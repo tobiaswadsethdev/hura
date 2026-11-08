@@ -73,6 +73,8 @@ struct WorktreeView: View {
         .navigationTitle(tab.map { $0.isAgent ? name : "\(name) · \($0.label)" } ?? name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
+        // A session has the whole screen; back is the way to the tabs.
+        .toolbar(.hidden, for: .tabBar)
         .navigationDestination(isPresented: $showingDock) {
             DockView(server: server, name: name)
         }
@@ -88,13 +90,6 @@ struct WorktreeView: View {
                     }
             }
             .presentationDetents([.medium, .large])
-        }
-        .confirmationDialog("Delete \(name)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete Worktree", role: .destructive, action: destroy)
-        } message: {
-            Text(session?.isWorktree == true
-                 ? "Its worktree on the server is deleted with its changes. A branch with commits on it is kept."
-                 : "Its sandbox is deleted, with everything in it that hasn't been pushed.")
         }
         .alert("Couldn't do that", isPresented: .constant(error != nil)) {
             Button("OK") { error = nil }
@@ -250,6 +245,15 @@ struct WorktreeView: View {
                 }
                 Section {
                     Button("Delete Worktree", role: .destructive) { confirmingDelete = true }
+                        // On the button, so it opens over it, and from the
+                        // details sheet as well as the screen.
+                        .confirmationDialog("Delete \(name)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                            Button("Delete Worktree", role: .destructive, action: destroy)
+                        } message: {
+                            Text(session.isWorktree
+                                 ? "Its worktree on the server is deleted with its changes. A branch with commits on it is kept."
+                                 : "Its sandbox is deleted, with everything in it that hasn't been pushed.")
+                        }
                 }
             } else {
                 ContentUnavailableView("Session not found", systemImage: "questionmark.circle",
@@ -328,14 +332,14 @@ struct WorktreeView: View {
         }
     }
 
+    /// Back to the list at once; the server goes on deleting it, and says
+    /// there if it couldn't.
     private func destroy() {
-        act {
-            chats.values.forEach { $0.stop() }
-            terminals.values.forEach { $0.stop() }
-            try await server.destroy(name)
-            showingDetails = false
-            dismiss()
-        }
+        chats.values.forEach { $0.stop() }
+        terminals.values.forEach { $0.stop() }
+        server.destroy(name)
+        showingDetails = false
+        dismiss()
     }
 
     private func act(_ work: @escaping () async throws -> Void) {

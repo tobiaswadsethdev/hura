@@ -58,7 +58,7 @@ struct ToolCard: View {
     @ViewBuilder
     private var status: some View {
         if call.result == nil {
-            if working { ProgressView().controlSize(.mini) }
+            if working { WorkingDots().foregroundStyle(Color.working) }
         } else if call.stopped {
             Text("stopped").font(.caption).foregroundStyle(.secondary)
         } else if call.failed {

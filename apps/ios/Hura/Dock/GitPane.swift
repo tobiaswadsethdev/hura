@@ -109,7 +109,7 @@ struct GitPane: View {
             Section {
                 ForEach(files, id: \.self) { f in
                     NavigationLink {
-                        FileDiffView(server: server, name: name, path: f.path, against: against)
+                        FileDiffView(server: server, name: name, path: f.path, against: against).toolbar(.hidden, for: .tabBar)
                     } label: {
                         ChangeRow(file: f)
                     }
@@ -122,7 +122,7 @@ struct GitPane: View {
                     .contextMenu {
                         Button(verb, systemImage: verb == "Stage" ? "plus" : "minus") { run(verb, [op(f.path)]) }
                         NavigationLink {
-                            FileDiffView(server: server, name: name, path: f.path, against: .base)
+                            FileDiffView(server: server, name: name, path: f.path, against: .base).toolbar(.hidden, for: .tabBar)
                         } label: {
                             Label("Diff Against Base", systemImage: "arrow.left.arrow.right")
                         }
