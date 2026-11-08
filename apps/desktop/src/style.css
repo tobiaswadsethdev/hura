@@ -1493,11 +1493,11 @@ main { position: relative; }
 .facts-task .ticket:hover { color: var(--text); }
 .facts-note { margin: 14px 0 0; color: var(--dimmer); font-size: 12px; }
 
-/* What it has spent: three tiles in a row, the value over its label, and the
+/* What it has done: two tiles in a row, the value over its label, and the
    context meter under them. The values are the window's sans at weight, not
    mono -- a figure read on its own, not a column of them. */
 .facts-spend { margin-top: 14px; }
-.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 .tile {
   display: flex;
   flex-direction: column;
@@ -3152,12 +3152,10 @@ main { position: relative; }
 .ports .error { margin-top: 8px; }
 
 /* ------------------------------------------------------------------------- */
-/* what each session is spending, and the total                              */
+/* what each session is doing                                                */
 /* ------------------------------------------------------------------------- */
 
 .wt-signals { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; }
-.wt-cost { font-family: var(--font-mono); font-size: 10.5px; color: var(--dimmer); font-variant-numeric: tabular-nums; }
-.worktree.on .wt-cost { color: var(--dim); }
 .wt-ports { display: inline-flex; color: var(--dim); }
 .wt-ports .lucide { width: 11px; height: 11px; }
 .wt-context { display: inline-flex; }
@@ -3167,27 +3165,9 @@ main { position: relative; }
    reading in the header that means the same thing about the account. */
 .wt-context.high .fill { stroke: var(--warn); }
 
-/* Pinned to the bottom of the sidebar, under however many projects. */
-.tree { display: flex; flex-direction: column; }
-.spend {
-  position: sticky;
-  bottom: 0;
-  margin-top: auto;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--line);
-  background: var(--surface);
-  font-size: 11px;
-  cursor: help;
-}
-.spend-total { font-family: var(--font-mono); font-size: 12px; color: var(--text); font-variant-numeric: tabular-nums; }
-.spend .hint { color: var(--dimmer); }
 
 /* One form, centred: the 568 pixels a field row measures, plus the padding. */
 .screen-inner.narrow { max-width: 612px; }
-.tree:has(.spend) { padding-bottom: 0; }
 .wt-ports.on { color: var(--ok); }
 
 /* Two lines once a port is forwarded: what it is, then where it goes. */

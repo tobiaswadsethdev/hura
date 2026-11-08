@@ -261,43 +261,9 @@ export function Tree({
             </section>
           );
         })}
-        <Spend groups={groups} polls={polls} />
       </nav>
     </div>
   );
-}
-
-/// What every session in the list has spent, together.
-///
-/// The per-session cost is in each row, and a row is where you look to decide
-/// about *that* session; the total is the question nobody can answer by
-/// adding up eleven rows in their head. Sessions that have not reported yet
-/// are left out rather than counted as zero, and the footer says how many
-/// that left in.
-function Spend({ groups, polls }: { groups: Group[]; polls: Record<string, Poll> }) {
-  const reported = groups
-    .flatMap((g) => g.worktrees)
-    .map((s) => ({ name: s.name, usage: polls[s.name]?.usage }))
-    .filter((r): r is { name: string; usage: Usage } => r.usage?.cost_usd != null);
-  if (reported.length === 0) return null;
-  const total = reported.reduce((sum, r) => sum + (r.usage.cost_usd ?? 0), 0);
-  const breakdown = [...reported]
-    .sort((a, b) => (b.usage.cost_usd ?? 0) - (a.usage.cost_usd ?? 0))
-    .map((r) => `${r.name}  ${money(r.usage.cost_usd)}`)
-    .join("\n");
-  return (
-    <footer className="spend" title={breakdown}>
-      <span className="spend-total">{money(total)}</span>
-      <span className="hint">
-        across {reported.length} session{reported.length === 1 ? "" : "s"}
-      </span>
-    </footer>
-  );
-}
-
-function money(usd: number | null): string {
-  if (usd === null) return "";
-  return usd >= 100 ? `$${Math.round(usd)}` : `$${usd.toFixed(2)}`;
 }
 
 /// How full the context is, as a ring: a percentage is the one number on the
@@ -405,11 +371,6 @@ function Worktree({
                 }
               >
                 <Ports />
-              </span>
-            )}
-            {usage?.cost_usd != null && (
-              <span className="wt-cost" title="spent by this session">
-                {money(usage.cost_usd)}
               </span>
             )}
             {usage && <Context usage={usage} />}

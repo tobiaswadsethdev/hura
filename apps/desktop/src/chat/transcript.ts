@@ -95,10 +95,6 @@ function seconds(ms: number | undefined): string {
   return ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
 }
 
-function dollars(usd: number | undefined): string {
-  return usd === undefined ? "" : `$${usd < 0.01 ? usd.toFixed(3) : usd.toFixed(2)}`;
-}
-
 /// Why an assistant message carries an error, in words.
 const ERRORS: Record<string, string> = {
   authentication_failed: "Claude Code is not logged in: this session has no Claude credential attached",
@@ -291,7 +287,7 @@ export function build(entries: ChatEntry[]): Built {
       }
       case "result": {
         const r = msg as ResultMessage;
-        const facts = [seconds(r.duration_ms), dollars(r.total_cost_usd)].filter(Boolean).join(" · ");
+        const facts = seconds(r.duration_ms);
         if (r.subtype === "success" && !r.is_error) {
           items.push({ kind: "turn", key, ok: true, text: facts, at });
         } else if (r.subtype === "error_during_execution") {

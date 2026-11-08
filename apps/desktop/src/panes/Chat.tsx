@@ -414,9 +414,6 @@ function Composer({
             {state?.context_percentage != null && (
               <span title="context used">ctx {Math.round(state.context_percentage)}%</span>
             )}
-            {state?.cost_usd != null && state.cost_usd > 0 && (
-              <span title="spent in this conversation">${state.cost_usd.toFixed(2)}</span>
-            )}
           </span>
           {working ? (
             <button className="chat-stop" title="stop this turn (Esc)" onClick={() => onCommand({ op: "interrupt" })}>
