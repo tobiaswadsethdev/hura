@@ -14,4 +14,5 @@ serde.workspace = true
 serde_json.workspace = true
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 sha2 = "0.11"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 tungstenite = { version = "0.30", default-features = false, features = ["rustls-tls-webpki-roots", "handshake"] }

@@ -39,6 +39,7 @@ mod previews;
 use hura_client::trackers::Trackers;
 use hura_client::{Incoming, Remote, Remotes, Sink};
 use hura_core::chat::ChatCommand;
+use hura_core::cloud::{Account as CloudAccount, Device as CloudDevice, Status as CloudStatus};
 use hura_core::comments::{Comment, NewComment};
 use hura_core::events::FeedEvent;
 use hura_core::endpoints::Route;
@@ -56,6 +57,7 @@ use hura_core::tracker::{Configured, Inbox, Source as TrackerSource};
 use hura_proto::stream::{Channel, ChannelId, ClientFrame, ServerFrame};
 use hura_proto::{FailureKind, GitOp, McpOp, Reply, Request};
 use serde::Serialize;
+use serde_json::json;
 use tauri::{Emitter as _, Manager as _};
 
 /// What a failed command looks like in the webview.
@@ -623,21 +625,34 @@ fn secret(server: String, name: String, value: Option<String>) -> Result<Integra
 /// The trackers this machine reads, as the window may see them: whether each
 /// has a token, never the token.
 ///
-/// **Kept on this machine, not the server's.** See `hura_client::trackers`:
-/// the tokens are logins to somebody's tickets and a server has no use for
-/// them, so a tracker is set up, stored and read entirely from here.
+/// **Kept on this machine, not the hura server's.** See
+/// `hura_client::trackers`: the tokens are logins to somebody's tickets and a
+/// server that hosts agents has no use for them, so a tracker is set up,
+/// stored and read from here. **Signed in to hura cloud**, the account's
+/// trackers instead, kept and read there, the same on every device.
 #[tauri::command(async)]
 fn trackers() -> Result<Vec<Configured>, Failed> {
+    if cloud().signed_in() {
+        return cloud().trackers().map_err(cloud_failed);
+    }
     Ok(load_trackers()?.views())
 }
 
 #[tauri::command(async)]
 fn add_tracker(tracker: TrackerSource, token: Option<String>) -> Result<Vec<Configured>, Failed> {
+    if cloud().signed_in() {
+        let source = checked_source(&tracker)?;
+        let token = token.as_deref().map(str::trim).filter(|t| !t.is_empty());
+        return cloud().add_tracker(&source, token).map_err(cloud_failed);
+    }
     change_trackers(|t| t.add(&tracker, token.as_deref()))
 }
 
 #[tauri::command(async)]
 fn set_tracker_token(name: String, token: String) -> Result<Vec<Configured>, Failed> {
+    if cloud().signed_in() {
+        return cloud().set_token(&name, token.trim()).map_err(cloud_failed);
+    }
     change_trackers(|t| t.set_token(&name, &token))
 }
 
@@ -645,12 +660,146 @@ fn set_tracker_token(name: String, token: String) -> Result<Vec<Configured>, Fai
 /// token stays where it is and is not sent back for this.
 #[tauri::command(async)]
 fn edit_tracker(name: String, tracker: TrackerSource) -> Result<Vec<Configured>, Failed> {
+    if cloud().signed_in() {
+        let source = checked_source(&tracker)?;
+        return cloud().edit_tracker(&name, &source).map_err(cloud_failed);
+    }
     change_trackers(|t| t.edit(&name, &tracker))
 }
 
 #[tauri::command(async)]
 fn forget_tracker(name: String) -> Result<Vec<Configured>, Failed> {
+    if cloud().signed_in() {
+        return cloud().forget_tracker(&name).map_err(cloud_failed);
+    }
     change_trackers(|t| t.forget(&name))
+}
+
+/// Trimmed, named and able to work, or why not: the check
+/// `hura_client::trackers` makes, made here before the service is asked so
+/// the answer reads the same.
+fn checked_source(source: &TrackerSource) -> Result<TrackerSource, Failed> {
+    let source = source.normalized();
+    match source.problem() {
+        Some(problem) => Err(failed(problem)),
+        None => Ok(source),
+    }
+}
+
+// hura cloud: signing this machine in, the account and its devices, and
+// moving this machine's trackers to it. Optional: signed out, nothing above
+// asks the service anything.
+
+fn cloud() -> &'static hura_client::cloud::Cloud {
+    static CLOUD: std::sync::OnceLock<hura_client::cloud::Cloud> = std::sync::OnceLock::new();
+    CLOUD.get_or_init(hura_client::cloud::Cloud::new)
+}
+
+fn cloud_failed(e: hura_client::cloud::Failure) -> Failed {
+    failed(e.message)
+}
+
+/// Who this machine is signed in as, or nothing: read from the session file,
+/// without asking the service.
+#[tauri::command(async)]
+fn cloud_status() -> Option<CloudStatus> {
+    cloud().session().map(|s| CloudStatus { email: s.email })
+}
+
+#[tauri::command(async)]
+fn cloud_send_code(email: String) -> Result<(), Failed> {
+    cloud().send_code(email.trim()).map_err(cloud_failed)
+}
+
+/// Sign this machine in with the emailed code, under its computer name.
+#[tauri::command(async)]
+fn cloud_verify(email: String, code: String) -> Result<CloudStatus, Failed> {
+    let code: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    let session = cloud()
+        .verify(email.trim(), &code, &computer_name(), std::env::consts::OS)
+        .map_err(cloud_failed)?;
+    Ok(CloudStatus {
+        email: session.email,
+    })
+}
+
+#[tauri::command(async)]
+fn cloud_sign_out() {
+    cloud().sign_out();
+}
+
+#[tauri::command(async)]
+fn cloud_account() -> Result<CloudAccount, Failed> {
+    cloud().account().map_err(cloud_failed)
+}
+
+#[tauri::command(async)]
+fn cloud_devices() -> Result<Vec<CloudDevice>, Failed> {
+    cloud().devices().map_err(cloud_failed)
+}
+
+#[tauri::command(async)]
+fn cloud_sign_out_device(id: String) -> Result<Vec<CloudDevice>, Failed> {
+    cloud().sign_out_device(&id).map_err(cloud_failed)?;
+    cloud().devices().map_err(cloud_failed)
+}
+
+/// While signed in, the trackers still kept on this machine: not read, and
+/// offered to be moved to the account.
+#[tauri::command(async)]
+fn local_trackers() -> Result<Vec<Configured>, Failed> {
+    if !cloud().signed_in() {
+        return Ok(Vec::new());
+    }
+    Ok(load_trackers()?.views())
+}
+
+/// Move this machine's trackers, tokens and all, to the account, and forget
+/// them here. One whose name the account already has stays, and the answer
+/// is what stayed.
+#[tauri::command(async)]
+fn move_trackers_to_cloud() -> Result<Vec<Configured>, Failed> {
+    let mut left = Vec::new();
+    for t in load_trackers()?.list() {
+        match cloud().add_tracker(&t.source, t.token.as_deref()) {
+            Ok(_) => {}
+            Err(e) if e.status == 409 => left.push(t.source.name.clone()),
+            Err(e) => return Err(cloud_failed(e)),
+        }
+    }
+    change_trackers(|t| {
+        for name in t
+            .list()
+            .iter()
+            .map(|s| s.source.name.clone())
+            .collect::<Vec<_>>()
+        {
+            if !left.contains(&name) {
+                t.forget(&name)?;
+            }
+        }
+        Ok(())
+    })
+}
+
+/// What a device is called in the account's list: the name this computer
+/// goes by.
+fn computer_name() -> String {
+    let ask = |program: &str, args: &[&str]| {
+        std::process::Command::new(program)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    if cfg!(target_os = "macos")
+        && let Some(name) = ask("scutil", &["--get", "ComputerName"])
+    {
+        return name;
+    }
+    ask("hostname", &[]).unwrap_or_else(|| "computer".into())
 }
 
 /// One change to the trackers file, under a lock: commands run on a pool, and
@@ -744,9 +893,15 @@ fn my_skills() -> Vec<String> {
 /// warning says so.
 #[tauri::command(async)]
 fn tickets(server: Option<String>) -> Result<Inbox, Failed> {
-    let trackers = load_trackers()?;
     let (prefix, warning) = branch_prefix(server.as_deref());
-    let mut inbox = hura_core::tracker::inbox(trackers.list(), &prefix);
+    let mut inbox = if cloud().signed_in() {
+        let answer = cloud()
+            .tracker(&serde_json::json!({ "op": "inbox", "prefix": prefix }))
+            .map_err(cloud_failed)?;
+        serde_json::from_value(answer).map_err(failed)?
+    } else {
+        hura_core::tracker::inbox(load_trackers()?.list(), &prefix)
+    };
     inbox.warnings.extend(warning);
     Ok(inbox)
 }
@@ -790,17 +945,30 @@ fn branch_prefix(server: Option<&str>) -> (String, Option<String>) {
     }
 }
 
-/// The tracker a ticket came from, by the name the screen knows it by.
-fn tracker_named(
-    trackers: &hura_client::trackers::Trackers,
-    name: &str,
-) -> Result<hura_core::tracker::Stored, Failed> {
-    trackers
-        .list()
-        .iter()
-        .find(|t| t.source.name == name)
-        .cloned()
-        .ok_or_else(|| failed(format!("no tracker called `{name}`")))
+/// One of hura-core's tracker requests (`hura_core::tracker::request`) on the
+/// tracker the screen names: on hura cloud when signed in, which reads the
+/// account's tracker by that name; otherwise here, with this machine's tracker
+/// and its token. The same request and the same answer either way.
+fn on_tracker<T: serde::de::DeserializeOwned>(
+    op: &str,
+    tracker: &str,
+    mut args: serde_json::Value,
+) -> Result<T, Failed> {
+    args["op"] = json!(op);
+    let answer = if cloud().signed_in() {
+        args["tracker"] = json!(tracker);
+        cloud().tracker(&args).map_err(cloud_failed)?
+    } else {
+        let stored = load_trackers()?
+            .list()
+            .iter()
+            .find(|t| t.source.name == tracker)
+            .cloned()
+            .ok_or_else(|| failed(format!("no tracker called `{tracker}`")))?;
+        args["tracker"] = serde_json::to_value(stored).map_err(failed)?;
+        hura_core::tracker::request::handle(&args).map_err(failed)?
+    };
+    serde_json::from_value(answer).map_err(failed)
 }
 
 // Changing a ticket. Each is one button somebody pressed: nothing here runs
@@ -811,8 +979,7 @@ fn tracker_named(
 /// control for each, with their values.
 #[tauri::command(async)]
 fn edit_form(tracker: String, key: String) -> Result<hura_core::tracker::EditForm, Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::edit_form(&stored, &key).map_err(failed)
+    on_tracker("edit_form", &tracker, json!({ "key": key }))
 }
 
 #[tauri::command(async)]
@@ -821,8 +988,7 @@ fn save_ticket(
     key: String,
     changes: Vec<hura_core::tracker::FieldChange>,
 ) -> Result<(), Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::save(&stored, &key, &changes).map_err(failed)
+    on_tracker("save", &tracker, json!({ "key": key, "changes": changes }))
 }
 
 /// Where the ticket can move from its current status.
@@ -831,32 +997,35 @@ fn transitions(
     tracker: String,
     key: String,
 ) -> Result<Vec<hura_core::tracker::Transition>, Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::transitions(&stored, &key).map_err(failed)
+    on_tracker("transitions", &tracker, json!({ "key": key }))
 }
 
 #[tauri::command(async)]
 fn transition(tracker: String, key: String, id: String) -> Result<(), Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::transition(&stored, &key, &id).map_err(failed)
+    on_tracker("transition", &tracker, json!({ "key": key, "id": id }))
 }
 
 #[tauri::command(async)]
 fn add_comment(tracker: String, key: String, markdown: String) -> Result<(), Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::comment(&stored, &key, &markdown).map_err(failed)
+    on_tracker(
+        "comment",
+        &tracker,
+        json!({ "key": key, "markdown": markdown }),
+    )
 }
 
 #[tauri::command(async)]
 fn edit_comment(tracker: String, key: String, id: String, markdown: String) -> Result<(), Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::edit_comment(&stored, &key, &id, &markdown).map_err(failed)
+    on_tracker(
+        "edit_comment",
+        &tracker,
+        json!({ "key": key, "id": id, "markdown": markdown }),
+    )
 }
 
 #[tauri::command(async)]
 fn delete_comment(tracker: String, key: String, id: String) -> Result<(), Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::delete_comment(&stored, &key, &id).map_err(failed)
+    on_tracker("delete_comment", &tracker, json!({ "key": key, "id": id }))
 }
 
 /// People to put in a person field, by the start of their name.
@@ -867,8 +1036,11 @@ fn users(
     query: String,
     assignable: bool,
 ) -> Result<Vec<hura_core::tracker::UserChoice>, Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::users(&stored, &key, &query, assignable).map_err(failed)
+    on_tracker(
+        "users",
+        &tracker,
+        json!({ "key": key, "query": query, "assignable": assignable }),
+    )
 }
 
 // A pull request, read in full and reviewed from here. Read and written from
@@ -878,8 +1050,7 @@ fn users(
 /// One pull request: its checks, its reviewers and its conversation.
 #[tauri::command(async)]
 fn pull(tracker: String, repo: String, id: String) -> Result<hura_core::tracker::PullDetail, Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::pull(&stored, &repo, &id).map_err(failed)
+    on_tracker("pull", &tracker, json!({ "repo": repo, "id": id }))
 }
 
 /// The files it changes, and the two commits it is measured between.
@@ -889,8 +1060,7 @@ fn pull_files(
     repo: String,
     id: String,
 ) -> Result<hura_core::tracker::PullFiles, Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::pull_files(&stored, &repo, &id).map_err(failed)
+    on_tracker("pull_files", &tracker, json!({ "repo": repo, "id": id }))
 }
 
 /// Both sides of one of its files, for the diff editor. `repo`, `base` and
@@ -903,8 +1073,11 @@ fn pull_file(
     head: String,
     file: hura_core::tracker::PullFile,
 ) -> Result<hura_core::git::FileDiff, Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::pull_file(&stored, &repo, &base, &head, &file).map_err(failed)
+    on_tracker(
+        "pull_file",
+        &tracker,
+        json!({ "repo": repo, "base": base, "head": head, "file": file }),
+    )
 }
 
 /// A comment on it, or a reply to one of its threads.
@@ -916,8 +1089,11 @@ fn pull_comment(
     body: String,
     thread: Option<String>,
 ) -> Result<(), Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::pull_comment(&stored, &repo, &id, &body, thread.as_deref()).map_err(failed)
+    on_tracker(
+        "pull_comment",
+        &tracker,
+        json!({ "repo": repo, "id": id, "body": body, "thread": thread }),
+    )
 }
 
 /// A review: approve, ask for changes, or one of Azure DevOps' votes.
@@ -929,8 +1105,11 @@ fn pull_vote(
     verdict: hura_core::tracker::PullVerdict,
     body: String,
 ) -> Result<(), Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::pull_vote(&stored, &repo, &id, verdict, &body).map_err(failed)
+    on_tracker(
+        "pull_vote",
+        &tracker,
+        json!({ "repo": repo, "id": id, "verdict": verdict, "body": body }),
+    )
 }
 
 /// Merge it now (Azure DevOps: complete it). `head` is the commit the window
@@ -944,9 +1123,11 @@ fn pull_merge(
     head: Option<String>,
     delete_branch: bool,
 ) -> Result<(), Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::pull_merge(&stored, &repo, &id, how, head.as_deref().unwrap_or_default(), delete_branch)
-        .map_err(failed)
+    on_tracker(
+        "pull_merge",
+        &tracker,
+        json!({ "repo": repo, "id": id, "how": how, "head": head, "delete_branch": delete_branch }),
+    )
 }
 
 /// Set it to merge itself once it can, or with `how` null, take that back:
@@ -959,21 +1140,18 @@ fn pull_auto_merge(
     how: Option<hura_core::tracker::PullMerge>,
     delete_branch: bool,
 ) -> Result<(), Failed> {
-    let stored = tracker_named(&load_trackers()?, &tracker)?;
-    hura_core::tracker::pull_auto_merge(&stored, &repo, &id, how, delete_branch).map_err(failed)
+    on_tracker(
+        "pull_auto_merge",
+        &tracker,
+        json!({ "repo": repo, "id": id, "how": how, "delete_branch": delete_branch }),
+    )
 }
 
 /// One ticket in full (description, comments, the people on it), read from
 /// this machine with the tracker's stored token, like the sidebar.
 #[tauri::command(async)]
 fn ticket(tracker: String, key: String) -> Result<hura_core::tracker::Issue, Failed> {
-    let trackers = load_trackers()?;
-    let stored = trackers
-        .list()
-        .iter()
-        .find(|t| t.source.name == tracker)
-        .ok_or_else(|| failed(format!("no tracker called `{tracker}`")))?;
-    hura_core::tracker::issue(stored, &key).map_err(failed)
+    on_tracker("issue", &tracker, json!({ "key": key }))
 }
 
 /// The editable defaults in the server's config file.
@@ -1244,6 +1422,15 @@ fn main() {
             my_skills,
             tickets,
             inbox_changes,
+            cloud_status,
+            cloud_send_code,
+            cloud_verify,
+            cloud_sign_out,
+            cloud_account,
+            cloud_devices,
+            cloud_sign_out_device,
+            local_trackers,
+            move_trackers_to_cloud,
             ticket,
             pull,
             pull_files,

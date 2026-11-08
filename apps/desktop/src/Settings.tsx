@@ -35,6 +35,7 @@ import { DEFAULTS, LIMITS, type Prefs } from "./prefs";
 import { Screen } from "./Screen";
 import { Pill } from "./Pill";
 import { Select } from "./Select";
+import { AccountSection } from "./Account";
 import { TrackersSection } from "./Trackers";
 
 export function SettingsScreen({
@@ -56,6 +57,10 @@ export function SettingsScreen({
   onClose: () => void;
 }) {
   const [view, setView] = useState<SettingsView | null>(null);
+  // Whether the trackers below are the hura account's; told by the account
+  // section once it has read the session.
+  const [signedIn, setSignedIn] = useState(false);
+  const [trackersVersion, setTrackersVersion] = useState(0);
   /// What the choosers are filled from. The same request the create form makes,
   /// reused rather than a second one: the policies and the credential providers
   /// this server has are one fact, and a settings screen listing a different
@@ -371,9 +376,23 @@ export function SettingsScreen({
         </div>
       </section>
 
+      <AccountSection
+        onChanged={(signedIn) => {
+          setSignedIn(signedIn);
+          // Someone else's list now: read again, and the sidebar with it.
+          setTrackersVersion((v) => v + 1);
+          void api.trackers().then(onTrackers, () => onTrackers([]));
+        }}
+      />
+
       {/* Scrolled to once the server's half has drawn above it, or it lands
           where the section was before that half pushed it down. */}
-      <TrackersSection focus={at === "trackers" && (view !== null || error !== null)} onChanged={onTrackers} />
+      <TrackersSection
+        key={trackersVersion}
+        signedIn={signedIn}
+        focus={at === "trackers" && (view !== null || error !== null)}
+        onChanged={onTrackers}
+      />
     </Screen>
   );
 }

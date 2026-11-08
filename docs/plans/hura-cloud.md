@@ -161,14 +161,19 @@ deleted.
     phone and the service run the same code.
   - [x] The Coolify deployment at `api.gethura.app`, behind the Cloudflare
     tunnel.
-- [ ] **3. The apps sign in.** Sign-in screens on both, the local and HTTPS
+- [x] **3. The apps sign in.** Sign-in screens on both, the local and HTTPS
   backends, uploading local trackers, and trackers and filters that are the
   same everywhere.
   - [x] The phone: an Account tab (signing in is never forced), the account
     and its devices, `TrackerCore.call` sending requests to the service
     when signed in, the account's trackers in place of the Keychain's, and
     moving the phone's own to the account.
-  - [ ] The desktop.
+  - [x] The desktop: an account section in settings with the same emailed
+    code, the devices, moving this computer's trackers to the account, and
+    every tracker command going to the service when signed in, through the
+    same `hura_core::tracker::request` either way. Signing in through the
+    browser and a `hura://` link waits for Sign in with Apple, which is
+    what needs it.
 - [ ] **4. Notifications from the service.** The scheduled reads, the phone
   through the relay (`tracker_change`), the desktop over a live connection.
   This is the phase that makes them timely.

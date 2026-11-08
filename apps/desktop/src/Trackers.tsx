@@ -3,7 +3,8 @@
 //
 // A section of the settings screen, under "this window", because a tracker is
 // kept on this computer, token included, and read from here. The server never
-// sees either. The sidebar on the right is what it feeds, and the sidebar's
+// sees either. Signed in to hura cloud (the account section above), the
+// trackers are the account's instead, kept and read there. The sidebar on the right is what it feeds, and the sidebar's
 // empty state is a button that brings you here.
 //
 // Every tracker answers the same question, what is assigned to you or created
@@ -23,9 +24,13 @@ import { Forget, Plus, Store, Tracker as TrackerGlyph } from "./icons";
 import { Select } from "./Select";
 
 export function TrackersSection({
+  signedIn,
   focus,
   onChanged,
 }: {
+  /// Whether these are the hura account's trackers rather than this
+  /// computer's.
+  signedIn: boolean;
   /// Scrolled to when the screen opens, because the sidebar's "add a tracker"
   /// is what opened it.
   focus: boolean;
@@ -73,8 +78,9 @@ export function TrackersSection({
     <section ref={section} className="setting-group panel trackers">
       <h3>trackers</h3>
       <p className="hint">
-        Where the sidebar's tickets and pull requests come from. Kept on this computer, token
-        included, and read from here. The server never sees either.
+        {signedIn
+          ? "Where the sidebar's tickets and pull requests come from. Kept in your hura account, the same on every device signed in to it; tokens are kept there encrypted and never sent back."
+          : "Where the sidebar's tickets and pull requests come from. Kept on this computer, token included, and read from here. The server never sees either."}
       </p>
       {error && <p className="error">{error}</p>}
       {trackers === null && !error && <Waiting />}
@@ -87,6 +93,7 @@ export function TrackersSection({
           onToken={(value) =>
             act(`tracker:${t.source.name}`, () => api.setTrackerToken(t.source.name, value))
           }
+          signedIn={signedIn}
           onForget={() =>
             void act(`tracker:${t.source.name}`, () => api.forgetTracker(t.source.name))
           }
@@ -96,6 +103,7 @@ export function TrackersSection({
         />
       ))}
       <NewTracker
+        signedIn={signedIn}
         busy={busy !== null}
         onAdd={(tracker, token) => act(`tracker:${tracker.name}`, () => api.addTracker(tracker, token))}
       />
@@ -141,13 +149,16 @@ function kindLabel(kind: TrackerKind): string {
 function TrackerRow({
   tracker,
   busy,
+  signedIn,
   onToken,
   onForget,
   onEdit,
 }: {
   tracker: ConfiguredTracker;
   busy: string | null;
-  /// Store or replace the token. Kept on this computer and never shown again.
+  signedIn: boolean;
+  /// Store or replace the token. Kept where the tracker is, and never shown
+  /// again.
   onToken: (value: string) => Promise<boolean>;
   onForget: () => void;
   /// Save what it shows. The token stays where it is.
@@ -188,7 +199,11 @@ function TrackerRow({
         <button
           className="quiet-icon danger"
           disabled={working}
-          title="remove this tracker and its token from this computer"
+          title={
+            signedIn
+              ? "remove this tracker and its token from your account"
+              : "remove this tracker and its token from this computer"
+          }
           onClick={onForget}
         >
           <Forget aria-label={`forget ${t.name}`} />
@@ -305,9 +320,11 @@ function Shows({
 ///
 /// Only what each kind needs, the required ones marked.
 function NewTracker({
+  signedIn,
   busy,
   onAdd,
 }: {
+  signedIn: boolean;
   busy: boolean;
   /// Answers whether it was taken. A rejected entry keeps what was typed:
   /// the reason is usually one field, and re-typing the rest would be the
@@ -411,7 +428,10 @@ function NewTracker({
       <Field label={TOKEN_LABEL[kind]} required>
         <input type="password" value={token} onChange={(e) => setToken(e.target.value)} />
       </Field>
-      <p className="hint indent">{TOKEN_HINT[kind]}</p>
+      <p className="hint indent">
+        {TOKEN_HINT[kind]}{" "}
+        {signedIn ? "Kept in your hura account, encrypted." : "Stored on this computer only."}
+      </p>
 
       <Field label="name">
         <input value={name} placeholder={kindLabel(kind)} onChange={(e) => setName(e.target.value)} />
@@ -468,9 +488,9 @@ const TOKEN_LABEL: Record<TrackerKind, string> = {
 };
 
 const TOKEN_HINT: Record<TrackerKind, string> = {
-  jira: "Created at id.atlassian.com → Security → API tokens. Stored on this computer only.",
+  jira: "Created at id.atlassian.com → Security → API tokens.",
   "azure-dev-ops":
-    "A personal access token with Work Items (read) for the tickets and Code (read) for the pull requests, or Code (read & write) to comment and vote on them. Stored on this computer only.",
+    "A personal access token with Work Items (read) for the tickets and Code (read) for the pull requests, or Code (read & write) to comment and vote on them.",
   "git-hub":
-    "A token that can read issues and pull requests, and write pull requests to comment and review. Stored on this computer only.",
+    "A token that can read issues and pull requests, and write pull requests to comment and review.",
 };
