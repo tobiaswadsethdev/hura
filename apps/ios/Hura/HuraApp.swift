@@ -151,7 +151,7 @@ struct LockView: View {
     var body: some View {
         // On the system background, as the launch screen is, so opening the
         // app goes from one to the other without a change of colour: the
-        // app's icon, which carries its name, and the way in.
+        // app's icon and the way in.
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
             VStack(spacing: 28) {
