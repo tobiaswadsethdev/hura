@@ -80,9 +80,15 @@ struct GitPane: View {
                 Text("Not on the remote yet").font(.caption).foregroundStyle(.secondary)
             }
             HStack {
-                remote("Fetch", "arrow.down.circle", .fetch)
+                // The desktop's glyphs: a cloud for the two that only talk to
+                // the remote, an arrow at a line for the two that move commits.
+                remote("Fetch", "icloud.and.arrow.down", .fetch)
                 remote("Pull", "arrow.down.to.line", .pull)
-                remote(s.upstream == nil ? "Publish" : "Push", "arrow.up.circle", .push)
+                if s.upstream == nil {
+                    remote("Publish", "icloud.and.arrow.up", .push)
+                } else {
+                    remote("Push", "arrow.up.to.line", .push)
+                }
             }
             .buttonStyle(.bordered)
             .font(.callout)
@@ -97,7 +103,14 @@ struct GitPane: View {
         Button {
             run(title, [op])
         } label: {
-            Label(title, systemImage: icon).frame(maxWidth: .infinity)
+            // Icon over title so a third of a phone's width fits "Publish" on
+            // one line, and all three buttons come out the same height.
+            VStack(spacing: 4) {
+                Image(systemName: icon).imageScale(.medium).frame(height: 20)
+                Text(title).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 2)
         }
         .disabled(running != nil)
     }
