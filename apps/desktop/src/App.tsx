@@ -544,35 +544,43 @@ export default function App() {
   // and the reason is shown instead.
   const gone = session?.state === "dead";
 
+  // The two asks below follow the name and not the record. The list is
+  // fetched again every few seconds and each fetch is a new object, so
+  // following `session` asked again on every refresh and threw away the answer
+  // still on its way. On a loaded host an answer takes longer than a refresh:
+  // the asks piled up in the sandbox, each a process of its own, and none
+  // landed.
+  const name = session?.name ?? null;
+
   // Asked once per worktree as it is selected. Not polled: a shell appears
   // because someone in this window asked for one, and paying an exec a second
   // to hear that nothing changed is what the stream exists to avoid.
   useEffect(() => {
-    if (!server || !session || preparing || gone || shells[session.name]) return;
+    if (!server || !name || preparing || gone || shells[name]) return;
     let live = true;
     api
-      .shells(server, session.name)
-      .then((list) => live && setShells((all) => ({ ...all, [session.name]: list })))
+      .shells(server, name)
+      .then((list) => live && setShells((all) => ({ ...all, [name]: list })))
       .catch(() => {});
     return () => {
       live = false;
     };
-  }, [server, session, preparing, gone, shells]);
+  }, [server, name, preparing, gone, shells]);
 
   // The conversations, asked once per worktree like the shells, and only of a
   // chat session: a terminal session has no host to ask.
   const chatSession = session?.interface === "chat";
   useEffect(() => {
-    if (!server || !session || !chatSession || preparing || gone || chats[session.name]) return;
+    if (!server || !name || !chatSession || preparing || gone || chats[name]) return;
     let live = true;
     api
-      .chats(server, session.name)
-      .then((list) => live && setChats((all) => ({ ...all, [session.name]: list.chats })))
+      .chats(server, name)
+      .then((list) => live && setChats((all) => ({ ...all, [name]: list.chats })))
       .catch(() => {});
     return () => {
       live = false;
     };
-  }, [server, session, chatSession, preparing, gone, chats]);
+  }, [server, name, chatSession, preparing, gone, chats]);
 
   const openTabs = session
     ? arrange(
