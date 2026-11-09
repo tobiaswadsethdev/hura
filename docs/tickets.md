@@ -104,9 +104,12 @@ GitHub means by a review request too. Azure DevOps keeps checks behind a request
 per pull request, so its rows have no checks mark, and its list has no time of
 last change, so its rows say when they were opened.
 
-GitHub, Azure DevOps and Jira are read over REST **by the desktop application,
-with tokens kept on the computer it runs on**. The server is not involved: it
-holds no tracker, no token and no ticket, and needs no setup for any of this.
+GitHub, Azure DevOps and Jira are read over REST **by [hura cloud](cloud.md),
+with the tokens your account keeps there**, so trackers need you signed in to
+it (the **account** section of the settings screen; the phone's Account tab).
+They are the same on every device signed in to the account. A hura server is
+not involved: it holds no tracker, no token and no ticket, and needs no setup
+for any of this.
 
 A tracker that could not be read says so at the top of the sidebar rather than
 leaving its rows quietly missing, which would look exactly like having nothing
@@ -142,9 +145,8 @@ them out, the **created by me** group is gone. A ticket you created that a
 filter matches is still in that filter. Pull requests you opened are not
 affected.
 
-Filters are kept with the tracker, in `trackers.json` beside its token, as
-`jql_filters`. The filters from before the sidebar (a `filters` list that
-replaced the default query) are a different thing and are still ignored.
+Filters are kept with the tracker in the account, beside its token, as
+`jql_filters`.
 
 ## REST here, MCP there
 
@@ -234,8 +236,10 @@ opens, saying so.
 
 ## Setting one up
 
-Trackers are the **trackers** section of the settings screen. With none set up,
-the sidebar says so, and its **add a tracker** opens the settings screen there.
+Trackers are the **trackers** section of the settings screen, under the
+account they are kept in. Signed out, the sidebar says trackers need a hura
+cloud account, and its **sign in** opens the settings screen there; signed in
+with none set up, its **add a tracker** does the same.
 
 | Tracker | Asks for | Token |
 | --- | --- | --- |
@@ -245,17 +249,16 @@ the sidebar says so, and its **add a tracker** opens the settings screen there.
 
 A **name** is optional, and only worth giving a second tracker of the same kind.
 
-The token is stored on this computer only (`%LOCALAPPDATA%\hura\trackers.json`
-on Windows, `~/.local/state/hura/trackers.json` on Linux, readable by you
-alone) and the window is never shown it again. A tracker whose token has
-expired has a field on its row to paste a new one; removing a tracker removes
-its token with it. A file written when trackers had filters still loads: the
-filters are ignored, and dropped the next time it is saved.
+The token is kept in your hura cloud account, encrypted, and never shown
+again. A tracker whose token has expired has a field on its row to paste a new
+one; removing a tracker removes its token with it. GitHub and Jira can also be
+**connected** through their own sign-in instead of a pasted token (see
+[cloud.md](cloud.md#connecting-a-tracker-through-its-own-sign-in)).
 
 ## Notifications
 
-The window reads the sidebar every three minutes, and on the refresh button in
-its header, and sends an OS notification when:
+hura cloud reads the account's trackers every minute or so, all day, and
+tells every device signed in to it when:
 
 * a ticket **changes status**: `PROJ-7 · To Do → In Progress`;
 * a ticket **gets a comment from somebody else**. Your own are never announced,
@@ -269,30 +272,25 @@ its header, and sends an OS notification when:
   **changes are asked for**.
 
 Other edits are deliberately left out: a notification for every re-estimate is
-one nobody reads by Friday. More than three changes at once (the window opening
-after a weekend) is one notification listing them.
+one nobody reads by Friday. More than three changes at once is one
+notification listing them.
 
-What was seen is kept in the window's own storage, so a ticket that moved while
-the window was closed is announced when it opens. The first read is the
-baseline and says nothing, and so is the first read of a tracker or a filter
+What was seen is kept with the account, so a change is announced once, on every
+device, and never twice. The first read is the baseline and says nothing, and so is the first read of a tracker or a filter
 you have just added. A tracker that could not be read is not a list of things
 that left it, and it coming back is not a list of arrivals. A filter that could
 not be read starts again from a baseline when it next answers.
 
-**The phone notifies too**, from its own reads with its own tokens: the same
-changes, in the same words, as notifications from the hura app. It is **Notify
-When They Change** on the app's trackers screen, off until you turn it on,
-because turning it on asks for permission. The app reads every three minutes
-while it is open, and in the background as often as iOS lets it (background
-app refresh, at most every fifteen minutes and often hours apart, less when
-the phone is low on battery and not at all if background refresh is off for
-hura). So a phone notification can come late, but the change is never missed:
-the next read finds it. No server and no relay is involved, and the tokens
-stay in the phone's Keychain.
+**The desktop** is told over a connection it keeps open to the service while
+its window is, as an OS notification, and reads the sidebar again. It is
+**notify when my tickets or pull requests change** on the settings screen.
+Turned off, the sidebar is still read every three minutes and on the refresh
+button in its header, because it is on screen; only the notifications stop.
 
-It is **notify when my tickets or pull requests change** on the settings
-screen. Turned off, the sidebar is still read on its timer, because it is on
-screen; only the notifications stop.
+**The phone** is told through the push relay, in the same words, as
+notifications from the hura app, whether or not the app is open. It is
+**Notify When They Change** on the app's trackers screen, off until you turn
+it on, because turning it on asks for permission.
 
 ## What a ticket becomes
 
@@ -357,8 +355,9 @@ rather than ignoring the pull request and making a new branch with its name.
 
 ## What it costs
 
-This computer holds a token that can read your tickets, in the same private
-state directory as the tokens for the servers it is paired with.
+Your hura cloud account holds a token that can read your tickets, encrypted
+with a key of the account's own (see [cloud.md](cloud.md)). Neither this
+computer nor the phone keeps one.
 
 A Jira API token acts as you, so it can do whatever your account can, and the
 window uses that to change tickets when you ask it to. On GitHub and Azure

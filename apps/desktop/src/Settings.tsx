@@ -44,6 +44,7 @@ export function SettingsScreen({
   onPrefs,
   at,
   onTrackers,
+  onSignedIn,
   onClose,
 }: {
   server: string;
@@ -54,12 +55,14 @@ export function SettingsScreen({
   at: "trackers" | null;
   /// The trackers after a change, so the sidebar reads them again.
   onTrackers: (trackers: ConfiguredTracker[]) => void;
+  /// Signed in to hura cloud or out, which is whether there are trackers.
+  onSignedIn: (signedIn: boolean) => void;
   onClose: () => void;
 }) {
   const [view, setView] = useState<SettingsView | null>(null);
-  // Whether the trackers below are the hura account's; told by the account
-  // section once it has read the session.
-  const [signedIn, setSignedIn] = useState(false);
+  // Whether there are trackers below, which need a hura cloud account; told
+  // by the account section once it has read the session.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [trackersVersion, setTrackersVersion] = useState(0);
   /// What the choosers are filled from. The same request the create form makes,
   /// reused rather than a second one: the policies and the credential providers
@@ -379,6 +382,7 @@ export function SettingsScreen({
       <AccountSection
         onChanged={(signedIn) => {
           setSignedIn(signedIn);
+          onSignedIn(signedIn);
           // Someone else's list now: read again, and the sidebar with it.
           setTrackersVersion((v) => v + 1);
           void api.trackers().then(onTrackers, () => onTrackers([]));

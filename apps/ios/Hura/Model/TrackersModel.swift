@@ -1,27 +1,21 @@
-import BackgroundTasks
 import HuraKit
 import Observation
 import SwiftUI
 import UserNotifications
 
-/// The trackers this phone reads, and what is yours on them.
+/// The account's trackers, and what is yours on them.
 ///
-/// **Signed out**, set up here and kept in this phone's Keychain, as the
-/// desktop keeps its own on its machine; no server holds a tracker or a
-/// token. **Signed in to hura cloud**, the account's trackers, kept there and
-/// read there (see `TrackerCore`), so they are the same on every device. A
-/// tracker added before signing in stays on this phone until it is moved to
-/// the account.
+/// Kept and read by hura cloud (see `TrackerCore`), so they are the same on
+/// every device. Signed out, there are none, and the screens that show them
+/// ask you to sign in.
 @MainActor
 @Observable
 final class TrackersModel {
     private(set) var trackers: [StoredTracker] = []
-    /// Whether `trackers` are the account's rather than this phone's.
-    private(set) var signedIn = false
-    /// While signed in, the trackers still in this phone's Keychain: not
-    /// read, and offered to be moved to the account.
-    private(set) var onPhone: [StoredTracker] = []
-    /// Signed in, the trackers hura cloud can connect through their own
+    /// Whether this phone is signed in to hura cloud, without which there
+    /// are no trackers.
+    private(set) var signedIn: Bool
+    /// The trackers hura cloud can connect through their own
     /// sign-in rather than a pasted token: `github`, `jira`.
     private(set) var connectable: Set<String> = []
     private(set) var inbox: Inbox?
@@ -35,36 +29,35 @@ final class TrackersModel {
     private(set) var notify = UserDefaults.standard.bool(forKey: "inbox.notify")
     /// A notification about the inbox was tapped: the app shows the Inbox tab.
     var showInbox = false
+    /// Signed out, the inbox's sign-in button was tapped: the app shows the
+    /// Account tab.
+    var showAccount = false
 
-    @ObservationIgnored private let store: TrackerStore
     @ObservationIgnored private let cloud: Cloud
-    /// The relay link, which signed in, hura cloud is told about so it can
-    /// say what changed: it reads the trackers all day, and the phone only
-    /// while iOS lets it.
+    /// The relay link, which hura cloud is told about so it can say what
+    /// changed: it reads the trackers all day.
     @ObservationIgnored private let push: PushManager?
     @ObservationIgnored private var loop: Task<Void, Never>?
     /// How often the inbox is read while the app is in front, as on the
     /// desktop.
     @ObservationIgnored private let every: Duration = .seconds(180)
 
-    init(store: TrackerStore = KeychainTrackerStore(), cloud: Cloud = .shared, push: PushManager? = nil) {
-        self.store = store
+    init(cloud: Cloud = .shared, push: PushManager? = nil) {
         self.cloud = cloud
         self.push = push
-        trackers = (try? store.load()) ?? []
+        // Read as it stands, so a signed-in phone never shows the sign-in
+        // prompt while the first read is on its way.
+        signedIn = cloud.stored != nil
     }
 
-    /// Which trackers are read: the account's when signed in, which another
-    /// device may have changed, and otherwise this phone's.
+    /// The account's trackers, which another device may have changed.
     func reload() async {
-        let local = (try? store.load()) ?? []
         signedIn = await cloud.isSignedIn
         guard signedIn else {
-            onPhone = []
-            trackers = local
+            trackers = []
+            inbox = nil
             return
         }
-        onPhone = local
         await linkCloud()
         await syncSeen()
         connectable = (try? await cloud.connectable()) ?? connectable
@@ -72,11 +65,11 @@ final class TrackersModel {
             trackers = try await cloud.trackers()
         } catch {
             lastError = error.localizedDescription
-            // Signed out from another device: back to this phone's own.
+            // Signed out from another device.
             if !(await cloud.isSignedIn) {
                 signedIn = false
-                onPhone = []
-                trackers = local
+                trackers = []
+                inbox = nil
             }
         }
     }
@@ -86,95 +79,40 @@ final class TrackersModel {
         try await cloud.connectURL(provider)
     }
 
-    /// Moves this phone's trackers, tokens and all, to the account, and
-    /// forgets them here. One whose name the account already has stays on
-    /// the phone, and is returned.
-    ///
-    /// Each is forgotten here as soon as the account has it, so a failure part
-    /// way leaves only those not yet moved, to move again, and never a copy of
-    /// one the account already holds.
-    @discardableResult
-    func moveToAccount() async throws -> [String] {
-        var kept: [String] = []
-        defer { onPhone = (try? store.load()) ?? onPhone }
-        for t in onPhone {
-            do {
-                trackers = try await cloud.addTracker(t.source, token: t.token)
-                try store.save(((try? store.load()) ?? []).filter { $0.source.name != t.source.name })
-            } catch let e as CloudError where e.status == 409 {
-                kept.append(t.source.name)
-            }
-        }
-        await refresh()
-        return kept
-    }
-
     func tracker(named name: String) -> StoredTracker? {
         trackers.first { $0.source.name == name }
     }
 
     // MARK: Changing the list
 
-    /// Checks the tracker with hura-core, as the desktop does before it keeps
-    /// one, and stores it with its token.
+    /// Adds one to the account, which checks it as the desktop does: a name
+    /// given when there is none, filters trimmed, and one that could not work
+    /// refused.
     func add(_ source: TrackerSource, token: String?) async throws {
-        let checked = try await TrackerCore.check(source)
-        guard tracker(named: checked.name) == nil else {
-            throw TrackerError(message: "There is already a tracker called “\(checked.name)”.")
-        }
         let t = token?.trimmingCharacters(in: .whitespacesAndNewlines)
         let token = (t?.isEmpty ?? true) ? nil : t
-        if signedIn {
-            trackers = try await cloud.addTracker(checked, token: token)
-        } else {
-            try save(trackers + [StoredTracker(source: checked, token: token)])
-        }
+        trackers = try await cloud.addTracker(source, token: token)
         await refresh()
     }
 
     func setToken(_ name: String, _ token: String) async throws {
         let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { throw TrackerError(message: "That token is empty.") }
-        if signedIn {
-            trackers = try await cloud.setToken(name, t)
-        } else {
-            try save(trackers.map { $0.source.name == name ? StoredTracker(source: $0.source, token: t) : $0 })
-        }
+        trackers = try await cloud.setToken(name, t)
         await refresh()
     }
 
-    /// Its filters, or whether it hides what you created: checked by
-    /// hura-core as when it was added, and kept with its token. Signed in,
-    /// the service checks it instead, which knows what a tracker connected
-    /// through its own sign-in needs: a Jira one has no email, and checked
-    /// here, would be refused for it.
+    /// Its filters, or whether it hides what you created: checked by the
+    /// service as when it was added, keeping its token.
     func edit(_ name: String, _ source: TrackerSource) async throws {
-        if signedIn {
-            trackers = try await cloud.editTracker(name, source)
-            await refresh()
-            return
-        }
-        let checked = try await TrackerCore.check(source)
-        guard checked.name == name else {
-            throw TrackerError(message: "A tracker can't be renamed; forget it and add it again.")
-        }
-        try save(trackers.map { $0.source.name == name ? StoredTracker(source: checked, token: $0.token) : $0 })
+        trackers = try await cloud.editTracker(name, source)
         await refresh()
     }
 
     func forget(_ name: String) async throws {
-        if signedIn {
-            trackers = try await cloud.forgetTracker(name)
-        } else {
-            try save(trackers.filter { $0.source.name != name })
-        }
+        trackers = try await cloud.forgetTracker(name)
         inbox?.tasks.removeAll { $0.tracker == name }
         inbox?.pulls.removeAll { $0.tracker == name }
-    }
-
-    private func save(_ list: [StoredTracker]) throws {
-        try store.save(list)
-        trackers = list
     }
 
     // MARK: Reading
@@ -206,10 +144,8 @@ final class TrackersModel {
         reading = true
         defer { reading = false }
         do {
-            let read = try await TrackerCore.inbox(trackers, prefix: "hura")
-            inbox = read
+            inbox = try await TrackerCore.inbox(prefix: "hura")
             lastError = nil
-            await announce(read)
         } catch {
             lastError = error.localizedDescription
         }
@@ -218,7 +154,8 @@ final class TrackersModel {
     // MARK: Notifications
 
     /// Turns tracker notifications on, asking for permission the first time,
-    /// or off.
+    /// or off. hura cloud sends them, through the relay, once it is linked
+    /// to this phone.
     func setNotify(_ on: Bool) async throws {
         if on {
             let allowed = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
@@ -228,26 +165,20 @@ final class TrackersModel {
         }
         notify = on
         UserDefaults.standard.set(on, forKey: "inbox.notify")
-        if on { scheduleBackgroundRead() } else { BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundTask) }
-        if signedIn {
-            if on {
-                // The relay needs this phone's device token, which iOS hands
-                // out once notifications are allowed.
-                UIApplication.shared.registerForRemoteNotifications()
-                await linkCloud()
-            } else if let push {
-                await push.disableCloud(cloud)
-            }
+        guard signedIn else { return }
+        if on {
+            // The relay needs this phone's device token, which iOS hands
+            // out once notifications are allowed.
+            UIApplication.shared.registerForRemoteNotifications()
+            await linkCloud()
+        } else if let push {
+            await push.disableCloud(cloud)
         }
     }
 
-    /// Whether hura cloud says what changed, in place of this phone noticing
-    /// for itself: signed in, with notifications on and the service linked.
-    var cloudNotifies: Bool { signedIn && notify && (push?.cloudLinked ?? false) }
-
     /// Signed in with notifications on: links hura cloud to this phone, or
     /// repairs the link. Until it can (no device token yet, the relay away),
-    /// the phone keeps noticing for itself.
+    /// nothing is announced.
     private func linkCloud() async {
         guard signedIn, notify, let push, push.device != nil else { return }
         do {
@@ -266,68 +197,6 @@ final class TrackersModel {
         await push?.disableCloud(cloud)
     }
 
-    /// Records a read, and says what changed since the last one. The
-    /// bookkeeping happens whether or not notifications are on, so turning
-    /// them on doesn't announce everything that happened while they were off.
-    private func announce(_ read: Inbox) async {
-        let defaults = UserDefaults.standard
-        // Kept under the key the snapshot had before hura-core took this
-        // over: it still reads what was written there.
-        let before = defaults.data(forKey: "inbox.snapshot").flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) }
-        guard let (after, changes) = try? await TrackerCore.changes(read, seen: before) else { return }
-        defaults.set(try? JSONEncoder().encode(after), forKey: "inbox.snapshot")
-        // Signed in and linked, hura cloud tells this phone, and telling it
-        // here too would say everything twice.
-        guard notify, !changes.isEmpty, !cloudNotifies else { return }
-        let center = UNUserNotificationCenter.current()
-        // Past three at once, one says how many: usually the phone was away
-        // for a weekend, and ten banners would be worse than one.
-        let toasts: [(title: String, body: String, change: InboxChange?)] = changes.count > 3
-            ? [("\(changes.count) changes in your tickets, filters and pull requests",
-                changes.map { "\($0.key) · \($0.what)" }.joined(separator: "\n"), nil)]
-            : changes.map { ("\($0.key) · \($0.what)", $0.title, $0) }
-        for toast in toasts {
-            let content = UNMutableNotificationContent()
-            content.title = toast.title
-            content.body = toast.body
-            content.sound = .default
-            content.threadIdentifier = "inbox"
-            var info: [String: String] = [:]
-            if let c = toast.change {
-                info = ["tracker": c.tracker, "id": c.id]
-            }
-            content.userInfo = ["inbox": info]
-            try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
-        }
-    }
-
-    // MARK: Reading in the background
-
-    /// What the background read is registered under: listed in Info.plist's
-    /// `BGTaskSchedulerPermittedIdentifiers`.
-    nonisolated static var backgroundTask: String { "\(Bundle.main.bundleIdentifier ?? "hura").inbox" }
-
-    /// Asks iOS to wake the app to read the trackers again. When is iOS's to
-    /// decide (not before fifteen minutes, and often later); the app being
-    /// opened reads at once regardless.
-    func scheduleBackgroundRead() {
-        guard notify, !trackers.isEmpty else { return }
-        let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTask)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
-        try? BGTaskScheduler.shared.submit(request)
-    }
-
-    /// One background read, then the next one asked for.
-    func readInBackground(_ task: BGAppRefreshTask) {
-        scheduleBackgroundRead()
-        let reading = Task { await refresh() }
-        task.expirationHandler = { reading.cancel() }
-        Task {
-            await reading.value
-            task.setTaskCompleted(success: !reading.isCancelled && lastError == nil)
-        }
-    }
-
     /// Waiting on you: tickets assigned to you and pull requests asking for
     /// your review.
     private var waiting: Set<String> {
@@ -340,18 +209,15 @@ final class TrackersModel {
     var unseenCount: Int { waiting.subtracting(seen).count }
 
     /// The inbox is on screen: what it shows has been seen. What stops
-    /// waiting is forgotten, so it counts again if it comes back.
-    ///
-    /// Signed in, the account's other devices are told, so their badges and
-    /// notifications clear too.
+    /// waiting is forgotten, so it counts again if it comes back. The
+    /// account's other devices are told, so their badges and notifications
+    /// clear too.
     func markSeen() {
         guard inbox != nil, seen != waiting else { return }
         seen = waiting
         UserDefaults.standard.set(Array(seen), forKey: "inbox.seen")
-        if signedIn {
-            let seen = seen
-            Task { try? await cloud.setSeen(seen) }
-        }
+        let seen = seen
+        Task { try? await cloud.setSeen(seen) }
     }
 
     /// What was seen on another of the account's devices: the badge follows

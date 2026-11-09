@@ -3,8 +3,8 @@
 // The service has an ordinary publicly trusted certificate, so this uses
 // URLSession and the system trust store, as the relay does.
 //
-// Signing in is optional. Without it, trackers and their tokens stay in this
-// phone's Keychain and are read from here, as they always were.
+// Trackers are hura cloud's: signed out, the phone has none. Everything else
+// (servers, sessions, chats) works without signing in.
 
 import Foundation
 
@@ -133,12 +133,19 @@ public actor Cloud {
 
     private let store: CloudSessionStore
     private let send: Send
-    private var session: CloudSession?
+    private var session: CloudSession? {
+        didSet { latest.set(session) }
+    }
     private var access: (token: String, until: Date)?
+    /// `session`, readable without waiting on the actor, so a screen can be
+    /// drawn signed in or out from its first frame rather than flashing the
+    /// other one while it asks.
+    private let latest = Latest()
 
     public init(store: CloudSessionStore, send: Send? = nil) {
         self.store = store
         session = try? store.load()
+        latest.set(session)
         self.send = send ?? {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 30
@@ -150,6 +157,8 @@ public actor Cloud {
     }
 
     public var current: CloudSession? { session }
+    /// The session as it stands, without waiting on the actor.
+    public nonisolated var stored: CloudSession? { latest.get() }
     public var isSignedIn: Bool { session != nil }
 
     // MARK: Signing in
@@ -324,7 +333,7 @@ public actor Cloud {
     }
 
     /// One of hura-core's tracker requests, on the account's trackers, as
-    /// `{"ok": ...}` or `{"error": ...}`: what the phone's own copy answers.
+    /// `{"ok": ...}` or `{"error": ...}`.
     func tracker(_ request: [String: JSONValue]) async throws -> JSONValue {
         let data = try await authorized("POST", "/v1/tracker", body: request)
         return try JSONDecoder().decode(JSONValue.self, from: data)
@@ -339,10 +348,7 @@ public actor Cloud {
             var connected: String?
         }
         return try JSONDecoder().decode([Configured].self, from: data).map {
-            var t = StoredTracker(source: $0.source, token: nil)
-            t.tokenKept = $0.token_set
-            t.connected = $0.connected
-            return t
+            StoredTracker(source: $0.source, hasToken: $0.token_set, connected: $0.connected)
         }
     }
 
@@ -405,4 +411,13 @@ public actor Cloud {
         }
         return data
     }
+}
+
+/// A session behind a lock, for `Cloud.stored`.
+private final class Latest: @unchecked Sendable {
+    private var session: CloudSession?
+    private let lock = NSLock()
+
+    func get() -> CloudSession? { lock.withLock { session } }
+    func set(_ s: CloudSession?) { lock.withLock { session = s } }
 }

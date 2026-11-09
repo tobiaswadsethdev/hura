@@ -13,7 +13,6 @@ import type { CloudStatus } from "./gen/CloudStatus";
 import type { Comment } from "./gen/Comment";
 import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
-import type { InboxChange } from "./gen/InboxChange";
 import type { Issue } from "./gen/Issue";
 import type { IssueImage } from "./gen/IssueImage";
 import type { PullDetail } from "./gen/PullDetail";
@@ -214,9 +213,9 @@ export const api = {
   forgetSkill: (server: string, name: string) =>
     invoke<Integrations>("forget_skill", { server, name }),
   mySkills: () => invoke<string[]>("my_skills"),
-  // Trackers live on *this* machine, tokens included, and are never sent to a
-  // server: the window reads tickets itself. Each change answers with the
-  // whole list, which says whether each has a token and never what it is.
+  // Trackers live in the hura cloud account, tokens included, and are never
+  // sent to a hura server. Each change answers with the whole list, which
+  // says whether each has a token and never what it is; signed out, none.
   trackers: () => invoke<ConfiguredTracker[]>("trackers"),
   addTracker: (tracker: Tracker, token: string | null) =>
     invoke<ConfiguredTracker[]>("add_tracker", { tracker, token }),
@@ -226,9 +225,9 @@ export const api = {
     invoke<ConfiguredTracker[]>("edit_tracker", { name, tracker }),
   forgetTracker: (name: string) => invoke<ConfiguredTracker[]>("forget_tracker", { name }),
 
-  // hura cloud, optional: signed in, the tracker calls above and below act on
-  // the account's trackers instead of this machine's. The session is kept on
-  // this machine by the Rust side; the window only ever sees who it is.
+  // hura cloud: the tracker calls above and below act on the account's
+  // trackers, and need it signed in. The session is kept on this machine by
+  // the Rust side; the window only ever sees who it is.
   cloudStatus: () => invoke<CloudStatus | null>("cloud_status"),
   cloudSendCode: (email: string) => invoke<void>("cloud_send_code", { email }),
   cloudVerify: (email: string, code: string) =>
@@ -237,14 +236,6 @@ export const api = {
   cloudAccount: () => invoke<CloudAccount>("cloud_account"),
   cloudDevices: () => invoke<CloudDevice[]>("cloud_devices"),
   cloudSignOutDevice: (id: string) => invoke<CloudDevice[]>("cloud_sign_out_device", { id }),
-  // While signed in, the trackers still kept on this machine, and moving them
-  // to the account; the answer is what stayed.
-  localTrackers: () => invoke<ConfiguredTracker[]>("local_trackers"),
-  moveTrackersToCloud: () => invoke<ConfiguredTracker[]>("move_trackers_to_cloud"),
-  // Whether hura cloud's stream of tracker changes is open: while it is, the
-  // service says what changed (as `tracker-changes` events) and the window
-  // does not announce what it finds itself.
-  cloudLive: () => invoke<boolean>("cloud_live"),
   // The inbox was looked at here, with these waiting (`tracker/id`): signed
   // in, the account's phones clear what they showed. Nothing signed out.
   cloudSetSeen: (items: string[]) => invoke<void>("cloud_set_seen", { items }),
@@ -253,14 +244,10 @@ export const api = {
   cloudConnectable: () => invoke<string[]>("cloud_connectable"),
   cloudConnect: (provider: string) => invoke<string>("cloud_connect", { provider }),
 
-  // What is yours on every tracker, tickets and pull requests, read from this
-  // machine. The server is asked only for its branch prefix, so a ticket
+  // What is yours on every tracker, tickets and pull requests, as hura cloud
+  // reads them; nothing while signed out. The server is asked only for its branch prefix, so a ticket
   // suggests the branch its session will get.
   tickets: (server: string | null) => invoke<Inbox>("tickets", { server }),
-  // What changed since the last read, worked out by the same code as on the
-  // phone. `seen` is whatever the last answer gave, kept as it was.
-  inboxChanges: (inbox: Inbox, seen: unknown) =>
-    invoke<{ seen: unknown; changes: InboxChange[] }>("inbox_changes", { inbox, seen }),
   // One of them in full, from the same place with the same token.
   ticket: (tracker: string, key: string) => invoke<Issue>("ticket", { tracker, key }),
   // One of its images, by the attachment id its document block carries.

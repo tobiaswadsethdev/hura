@@ -5,8 +5,8 @@ import Observation
 import UIKit
 
 /// This phone and hura cloud: signing in with an emailed code, the account
-/// and the devices signed in to it, and signing out. Optional: nothing else
-/// in the app waits on it, and signed out, everything works as it always did.
+/// and the devices signed in to it, and signing out. Optional for servers and
+/// sessions; the trackers are the account's, so signed out there are none.
 @MainActor
 @Observable
 final class AccountModel {
@@ -22,6 +22,10 @@ final class AccountModel {
 
     init(cloud: Cloud = .shared) {
         self.cloud = cloud
+        // The session kept from the last launch, read at once, so the
+        // Account tab opens on the account rather than flashing the sign-in
+        // form while `load` asks.
+        session = cloud.stored
     }
 
     /// The session as it stands, and when signed in, the account and its
@@ -56,8 +60,7 @@ final class AccountModel {
         error = nil
     }
 
-    /// Signs in with the code, then reads the account's trackers in place of
-    /// this phone's.
+    /// Signs in with the code, then reads the account's trackers.
     func verify(code: String, trackers: TrackersModel) async {
         guard let email = codeSentTo else { return }
         await working {
@@ -110,7 +113,7 @@ final class AccountModel {
         return account?.signIns.compactMap(\.email).first ?? "Apple ID"
     }
 
-    /// Signs this phone out, and goes back to the trackers kept on it.
+    /// Signs this phone out, which leaves it with no trackers.
     func signOut(trackers: TrackersModel) async {
         await trackers.leaveCloud()
         await working { await cloud.signOut() }

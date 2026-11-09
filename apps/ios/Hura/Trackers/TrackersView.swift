@@ -2,10 +2,9 @@ import AuthenticationServices
 import HuraKit
 import SwiftUI
 
-/// The trackers this phone reads: added with a token, changed (its token, its
-/// filters, whether it shows what you created), or forgotten. Kept in this
-/// phone's Keychain and sent nowhere but the tracker, or, signed in, kept in
-/// the hura account and the same on every device.
+/// The account's trackers: connected or added with a token, changed (its
+/// token, its filters, whether it shows what you created), or forgotten.
+/// Kept in the hura account and the same on every device.
 struct TrackersView: View {
     @Environment(TrackersModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -17,85 +16,89 @@ struct TrackersView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    if model.trackers.isEmpty {
-                        Text("None yet").foregroundStyle(.secondary)
-                    }
-                    ForEach(model.trackers, id: \.source.name) { t in
-                        Button { editing = t.source.name } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(t.source.name)
-                                    Text(where_(t.source)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    if !t.source.jqlFilters.isEmpty {
-                                        Text(t.source.jqlFilters.map(\.name).joined(separator: " · "))
-                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    }
-                                }
-                                Spacer()
-                                if let who = t.connected {
-                                    Text(t.hasToken ? who : "connect again")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(t.hasToken ? .green : .red)
-                                } else {
-                                    Text(t.hasToken ? "token stored" : "NO token")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(t.hasToken ? .green : .red)
-                                }
-                            }
-                        }
-                        .tint(.primary)
-                        .swipeActions {
-                            Button("Forget", role: .destructive) {
-                                Task {
-                                    do { try await model.forget(t.source.name) } catch { failed = error.localizedDescription }
-                                }
-                            }
-                        }
-                    }
-                    if model.signedIn {
-                        ForEach(["github", "jira"].filter(model.connectable.contains), id: \.self) { provider in
-                            Button {
-                                connect(provider)
-                            } label: {
-                                Label(provider == "github" ? "Connect GitHub" : "Connect Jira",
-                                      systemImage: "link")
-                            }
-                            .disabled(connecting != nil)
-                        }
-                    }
-                    Button(model.connectable.isEmpty || !model.signedIn ? "Add a Tracker" : "Add with a Token",
-                           systemImage: "plus") { adding = true }
-                } footer: {
-                    if model.signedIn {
-                        Text("Tickets assigned to you or created by you, a Jira tracker's own JQL filters, and pull requests you opened or that wait on you. Kept in your hura account and the same on every device signed in to it; their tokens are kept there, encrypted, and never sent back.")
-                    } else {
-                        Text("Tickets assigned to you or created by you, a Jira tracker's own JQL filters, and pull requests you opened or that wait on you. Read from this phone with its own tokens, which stay in its Keychain: no server holds them.")
-                    }
-                }
-                Section {
-                    Toggle("Notify When They Change", isOn: Binding(get: { model.notify }, set: { on in
-                        Task {
-                            do { try await model.setNotify(on) } catch { failed = error.localizedDescription }
-                        }
-                    }))
-                } footer: {
-                    Text("A ticket that changes status, gets a comment from somebody else, becomes yours or turns up in a filter, and a pull request that starts waiting on you or whose checks fail or review comes back. Read every three minutes while hura is open and now and then in the background, when iOS allows; in the background, that can be hours apart.")
-                }
+            if model.signedIn {
+                list
+            } else {
+                SignInForTrackers()
+                    .navigationTitle("Trackers")
+                    .navigationBarTitleDisplayMode(.inline)
             }
-            .navigationTitle("Trackers")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
-            .sheet(isPresented: $adding) { AddTrackerView() }
-            .sheet(item: Binding(get: { editing.flatMap(model.tracker(named:)).map(Named.init) },
-                                 set: { editing = $0?.tracker.source.name })) { n in
-                TrackerSheet(tracker: n.tracker)
-            }
-            .failure($failed)
         }
+    }
+
+    private var list: some View {
+        List {
+            Section {
+                if model.trackers.isEmpty {
+                    Text("None yet").foregroundStyle(.secondary)
+                }
+                ForEach(model.trackers, id: \.source.name) { t in
+                    Button { editing = t.source.name } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(t.source.name)
+                                Text(where_(t.source)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                if !t.source.jqlFilters.isEmpty {
+                                    Text(t.source.jqlFilters.map(\.name).joined(separator: " · "))
+                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                            if let who = t.connected {
+                                Text(t.hasToken ? who : "connect again")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(t.hasToken ? .green : .red)
+                            } else {
+                                Text(t.hasToken ? "token stored" : "NO token")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(t.hasToken ? .green : .red)
+                            }
+                        }
+                    }
+                    .tint(.primary)
+                    .swipeActions {
+                        Button("Forget", role: .destructive) {
+                            Task {
+                                do { try await model.forget(t.source.name) } catch { failed = error.localizedDescription }
+                            }
+                        }
+                    }
+                }
+                ForEach(["github", "jira"].filter(model.connectable.contains), id: \.self) { provider in
+                    Button {
+                        connect(provider)
+                    } label: {
+                        Label(provider == "github" ? "Connect GitHub" : "Connect Jira",
+                              systemImage: "link")
+                    }
+                    .disabled(connecting != nil)
+                }
+                Button(model.connectable.isEmpty ? "Add a Tracker" : "Add with a Token",
+                       systemImage: "plus") { adding = true }
+            } footer: {
+                Text("Tickets assigned to you or created by you, a Jira tracker's own JQL filters, and pull requests you opened or that wait on you. Kept in your hura account and the same on every device signed in to it; their tokens are kept there, encrypted, and never sent back.")
+            }
+            Section {
+                Toggle("Notify When They Change", isOn: Binding(get: { model.notify }, set: { on in
+                    Task {
+                        do { try await model.setNotify(on) } catch { failed = error.localizedDescription }
+                    }
+                }))
+            } footer: {
+                Text("A ticket that changes status, gets a comment from somebody else, becomes yours or turns up in a filter, and a pull request that starts waiting on you or whose checks fail or review comes back. hura cloud reads your trackers every minute or two and tells this iPhone, whether or not hura is open.")
+            }
+        }
+        .navigationTitle("Trackers")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+        }
+        .sheet(isPresented: $adding) { AddTrackerView() }
+        .sheet(item: Binding(get: { editing.flatMap(model.tracker(named:)).map(Named.init) },
+                             set: { editing = $0?.tracker.source.name })) { n in
+            TrackerSheet(tracker: n.tracker)
+        }
+        .failure($failed)
     }
 
     /// Signs in to the tracker in a browser sheet, and reads the trackers
@@ -298,7 +301,7 @@ private struct TrackerSheet: View {
                         Text("Token")
                     } footer: {
                         Text(tracker.hasToken
-                             ? (model.signedIn ? "Leave it empty to keep the one your account has." : "Leave it empty to keep the one this phone has.")
+                             ? "Leave it empty to keep the one your account has."
                              : "This tracker has no token yet.")
                     }
                 }

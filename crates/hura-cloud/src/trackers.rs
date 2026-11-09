@@ -5,11 +5,10 @@
 //! stored but never shown. Each change answers with the whole list, as
 //! [`Configured`], which says whether there is a token and never what it is.
 //!
-//! **Read with the same requests the phone makes** (`hura_core::tracker::
+//! **Read with hura-core's tracker requests** (`hura_core::tracker::
 //! request`), at `POST /v1/tracker`: where a request takes a tracker, it
 //! names one of the account's, and `inbox` reads all of them. The answer is
-//! `{"ok": ...}` or `{"error": ...}`, as hura-mobile answers, so a client
-//! switching to the service reads the same thing back.
+//! `{"ok": ...}` or `{"error": ...}`.
 
 use axum::Json;
 use axum::extract::{Path, State};

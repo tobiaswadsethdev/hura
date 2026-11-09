@@ -7,7 +7,7 @@
 #
 # Needs Xcode signed in to an account on the team in Config/Hura.xcconfig
 # (Xcode > Settings > Accounts), which is what -allowProvisioningUpdates and
-# the upload both use; xcodegen; and the Rust iOS targets build-core.sh needs.
+# the upload both use; and xcodegen.
 # App Store Connect gives the build its number. Once it has processed (a few
 # minutes; App Store Connect mails when it is done), the internal testers get
 # it without anything more being done.
@@ -30,9 +30,6 @@ if [ "${HURA_TESTFLIGHT_ANY_BRANCH:-}" != 1 ]; then
   fi
 fi
 
-# The archive is built from the Rust as it is now, not a stale framework from
-# the last time the tests ran.
-Tools/build-core.sh
 xcodegen --quiet
 
 work=$(mktemp -d)

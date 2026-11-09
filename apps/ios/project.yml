@@ -58,13 +58,9 @@ targets:
           - CFBundleURLName: hura-pair
             CFBundleURLSchemes: [hura]
         ITSAppUsesNonExemptEncryption: false
-        # The trackers are read now and then in the background, to notify
-        # when your tickets change (TrackersModel.scheduleBackgroundRead);
-        # and hura cloud wakes the app quietly when the inbox was looked at
-        # on another device, to clear what it showed (TrackersModel.syncSeen).
-        UIBackgroundModes: [fetch, remote-notification]
-        BGTaskSchedulerPermittedIdentifiers:
-          - $(PRODUCT_BUNDLE_IDENTIFIER).inbox
+        # hura cloud wakes the app quietly when the inbox was looked at on
+        # another device, to clear what it showed (TrackersModel.syncSeen).
+        UIBackgroundModes: [remote-notification]
         HuraRelayHost: $(HURA_RELAY_HOST)
         HuraKeychainGroup: $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
     entitlements:

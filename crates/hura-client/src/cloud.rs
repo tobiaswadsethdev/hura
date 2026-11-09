@@ -2,12 +2,11 @@
 //! and its devices, and the trackers kept there. The Rust half of the iOS
 //! app's `Cloud`, for the desktop application.
 //!
-//! **Optional.** Without a session, trackers are kept and read on this
-//! machine (see [`crate::trackers`]); with one, the account's are, on the
-//! service, and are the same on every device signed in to it.
+//! **Trackers need it.** They are kept and read on the service, the same on
+//! every device signed in to the account; without a session there are none.
 //!
 //! **The session is a file**, `cloud.json` in [`state::dir`], written
-//! owner-only like `trackers.json`: it holds the refresh token, which this
+//! owner-only like `remotes.json`: it holds the refresh token, which this
 //! machine keeps until it signs out. Access tokens last an hour and are only
 //! ever held in memory.
 

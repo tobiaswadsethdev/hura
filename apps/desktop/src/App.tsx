@@ -49,7 +49,7 @@ import type { PullRequest } from "./gen/PullRequest";
 import type { Task } from "./gen/Task";
 import type { Poll } from "./gen/Poll";
 import { onSessions, reset as resetNotifications } from "./notify";
-import { onCloudChanges, onInbox } from "./inboxNotify";
+import { onCloudChanges } from "./inboxNotify";
 import { close, nextChannelId, open } from "./stream";
 import { NewProjectDialog } from "./NewProject";
 import { NewWorktreeDialog } from "./NewWorktree";
@@ -429,16 +429,18 @@ export default function App() {
     onSessions(live, prefs.notify);
   }, [live, prefs.notify]);
 
-  // What is yours on your trackers, for the sidebar and for what has changed
-  // in it, on one timer. Minutes rather than the session list's seconds: every
-  // read is a few searches against somebody else's API, and a ticket that
-  // moved two minutes ago is news enough. The first read on start is the
-  // notifications' baseline, or catches up with what moved while the window
-  // was closed.
+  // What is yours on your trackers, for the sidebar, on one timer. Minutes
+  // rather than the session list's seconds: every read is a few searches
+  // against somebody else's API, and hura cloud says sooner when something
+  // changed (below), which reads it again.
   //
-  // Not gated on a server: the trackers are this machine's. A server only
-  // lends its branch prefix to the suggested branch names, so the read waits
-  // for the list of servers to say which one that is.
+  // Not gated on a server: the trackers are the hura cloud account's, and
+  // signed out there are none. A server only lends its branch prefix to the
+  // suggested branch names, so the read waits for the list of servers to say
+  // which one that is.
+  /// Whether this computer is signed in to hura cloud. `null` until the
+  /// session file has been read.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [inbox, setInbox] = useState<Inbox | null>(null);
   const [inboxError, setInboxError] = useState<string | null>(null);
   const [inboxReading, setInboxReading] = useState(false);
@@ -464,9 +466,6 @@ export default function App() {
         (v) => {
           setInbox(v);
           setInboxError(null);
-          // Inside the one read at a time, so the next cannot compare with
-          // what this one has not saved yet.
-          return onInbox(v, notifyTickets.current).then(() => {});
         },
         (e) => setInboxError(messageOf(e)),
       )
@@ -477,15 +476,27 @@ export default function App() {
   }, [server]);
   const ready = servers !== null;
   useEffect(() => {
-    if (!ready) return;
+    api.cloudStatus().then(
+      (s) => setSignedIn(s !== null),
+      () => setSignedIn(false),
+    );
+  }, []);
+  useEffect(() => {
+    if (!ready || signedIn === null) return;
+    if (!signedIn) {
+      setTrackers([]);
+      setInbox(null);
+      setInboxError(null);
+      return;
+    }
     api.trackers().then(setTrackers, () => setTrackers([]));
     readInbox();
     const timer = setInterval(readInbox, INBOX_POLL_MS);
     return () => clearInterval(timer);
-  }, [ready, readInbox]);
+  }, [ready, signedIn, readInbox]);
 
-  // Signed in to hura cloud, what it finds on the trackers arrives as it
-  // finds it: said, and the sidebar read again so it shows the same thing.
+  // What hura cloud finds on the trackers arrives as it finds it: said, and
+  // the sidebar read again so it shows the same thing.
   useEffect(() => {
     const off = listen<InboxChange[]>("tracker-changes", (e) => {
       onCloudChanges(e.payload, notifyTickets.current);
@@ -1056,6 +1067,7 @@ export default function App() {
               setTrackers(list);
               readInbox();
             }}
+            onSignedIn={setSignedIn}
             onClose={() => setScreen(null)}
           />
         )}
@@ -1082,6 +1094,7 @@ export default function App() {
           reading={inboxReading}
           error={inboxError}
           trackers={trackers}
+          signedIn={signedIn}
           sessions={live}
           projects={projects}
           currentProject={session?.project ?? null}

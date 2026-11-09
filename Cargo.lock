@@ -1033,15 +1033,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hura-mobile"
-version = "0.39.0"
-dependencies = [
- "hura-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "hura-proto"
 version = "0.39.0"
 dependencies = [

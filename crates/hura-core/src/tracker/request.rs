@@ -1,10 +1,9 @@
 //! The tracker functions as JSON requests: `{"op": "issue", "tracker": ...,
 //! "key": "PROJ-7"}` in, the function's answer out.
 //!
-//! **One surface for every client that cannot call these functions
-//! directly**: the iOS app, through `hura-mobile`'s C function, and hura
-//! cloud's `POST /v1/tracker`, which puts the account's own tracker where the
-//! request names it. The arguments and answers are the tracker module's serde
+//! **The surface the apps read trackers through**: hura cloud's
+//! `POST /v1/tracker`, which puts the account's own tracker where the request
+//! names it, for the desktop and the iOS app alike. The arguments and answers are the tracker module's serde
 //! types, already shared with the desktop's TypeScript; a request names its
 //! function and its arguments, and nothing else is described twice.
 //!
