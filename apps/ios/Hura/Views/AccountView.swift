@@ -152,8 +152,11 @@ private struct SignedIn: View {
             }
         }
         .refreshable { await account.load() }
-        .confirmationDialog("Sign out of hura cloud?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+        .alert("Sign out of hura cloud?", isPresented: $confirmSignOut) {
+            Button("Cancel", role: .cancel) {}
             Button("Sign Out", role: .destructive) { Task { await account.signOut(trackers: trackers) } }
+        } message: {
+            Text("This iPhone stops showing your trackers until you sign in again.")
         }
     }
 }
