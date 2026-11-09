@@ -1,73 +1,93 @@
 /* The window's surfaces, named for what they mean rather than what they are,
    so the one place to change the theme is here.
 
-   The palette is Orca's, which is to say shadcn's neutral scale: a near-black
-   page with raised panels on it, and *borders made of the foreground* rather
-   than of a grey. That second part is the whole trick, and worth stating
-   because it is not obvious from a screenshot -- a line at 7% white over any
-   of these surfaces reads as the same line, so a panel can be raised, sunken
-   or flat without three separate border colours to keep in sync. Every hover
-   and selected state below is the same idea at a different alpha.
+   The palette is macOS's own dark appearance, taken from the system colours
+   rather than imitated: label greys at the alphas AppKit uses, separators as
+   foreground at an alpha, and the system hues for the five states. The aim is
+   a window that sits beside Finder and Xcode without looking like a web page
+   that wandered in -- which mostly means *less*: no borders where a change of
+   surface already says it, one accent, and type in SF Pro rather than in a
+   monospace face pretending to be chrome.
 
-   What replaced the amber: nothing, deliberately. It was the accent *and* the
-   warning, so a rate limit at 81% and the wordmark were the same colour and
-   neither meant anything. Chrome is now neutral -- near-white on near-black,
-   emphasis by contrast -- and the hues are kept for the four things that are
-   genuinely states: working, needs-you, good, bad. `--warn` is amber still,
-   because an unsandboxed session is a warning and there is no neutral way to
-   say so. */
+   **Borders and fills are the foreground at an alpha**, the trick this file
+   has always used: a line at 9% white over any of these surfaces reads as the
+   same line, so a panel can be raised, sunken or translucent without three
+   border colours to keep in sync. Every hover and selected state below is the
+   same idea at a different alpha.
+
+   **One accent, and it is the user's.** macOS lets you pick an accent colour
+   in System Settings and every native app follows it; WebKit exposes it as
+   `-apple-system-control-accent`, so this window does too. It is for focus,
+   the primary action and the lit control -- never for an agent's state. The
+   iOS app has no such setting and uses the system's blue, which is what this
+   is too until somebody picks another. */
 :root {
-  --bg: #0a0a0a;
-  /* Panels: the sidebar, the dock, a dialog. Raised, not tinted. */
-  --surface: #171717;
-  --surface-2: #262626;
-  /* Where text is entered or code is shown: below the panel, which is to say
-     the page showing through it. Deliberately the same value as `--bg` and
-     kept as its own name -- an input is sunken *relative to the panel it is
-     on*, and a theme that raised the panels further would move this with them
-     rather than with the page. Pure black was the first attempt and is too
-     hard a step down from `--surface`. */
-  --sunken: #0a0a0a;
+  /* The content area: the editor, the dock, a screen. What the window is
+     *made of* behind the translucent sidebar and toolbar. */
+  --bg: #1e1e1e;
+  /* Panels that are not the window's material: a popover, a raised card, the
+     dock where there is no vibrancy to show. */
+  --surface: #252527;
+  --surface-2: #2c2c2e;
+  /* Where text is entered or code is shown. A step *below* the content rather
+     than the old pure black, which next to these greys read as a hole. */
+  --sunken: #161617;
+  /* The sidebar and the toolbar. Opaque here, for the platforms that paint
+     their own; on macOS `html.mac` makes them transparent instead, and the
+     window's sidebar material shows through. */
+  --chrome: #262628;
 
-  --text: #fafafa;
-  --dim: #a1a1a1;
-  /* Third rank: a hint under a label, a count beside a name. Still legible on
-     `--surface`, which `--dim` at half opacity would not be. */
-  --dimmer: #6f6f6f;
+  --text: rgb(255 255 255 / 0.88);
+  --dim: rgb(235 235 245 / 0.6);
+  /* Third rank: a hint under a label, a count beside a name. */
+  --dimmer: rgb(235 235 245 / 0.36);
 
-  /* Foreground at an alpha, which is what every line and fill in the window
-     actually is. See the note above. */
-  --line: rgb(255 255 255 / 0.07);
-  --line-strong: rgb(255 255 255 / 0.15);
-  --hover: rgb(255 255 255 / 0.045);
-  --selected: rgb(255 255 255 / 0.1);
-  --selected-line: rgb(255 255 255 / 0.18);
-  --ring: #a1a1a1;
+  --line: rgb(255 255 255 / 0.09);
+  --line-strong: rgb(255 255 255 / 0.16);
+  --hover: rgb(255 255 255 / 0.06);
+  --selected: rgb(255 255 255 / 0.11);
+  --selected-line: rgb(255 255 255 / 0.16);
+  /* A border under the pointer: a control saying it can be pressed. Not the
+     ring, which is the accent and means focus. */
+  --hover-line: rgb(255 255 255 / 0.28);
 
-  /* A filled button, and the ink on it. Near-white rather than a hue: the only
-     thing in the window loud enough to be the primary action is contrast. */
-  --primary: #e5e5e5;
-  --primary-ink: #171717;
+  /* systemBlue, which is also what the accent is unless the user has chosen
+     another. Overridden below where the engine can name the real one. */
+  --accent: #0a84ff;
+  --accent-ink: #fff;
+  /* The focus ring, AppKit's: the accent, wide and soft. */
+  --ring: color-mix(in srgb, var(--accent) 55%, transparent);
 
-  /* The states. Four hues, and nothing else in the window may use them: a
-     colour that means "an agent is working" cannot also decorate a heading. */
-  --working: #eab308;
-  --attention: #c084fc;
-  --ok: #34d399;
-  --bad: #ff6568;
-  --warn: #eab308;
+  /* A filled button. The accent, as a default button is in any Mac app. */
+  --primary: var(--accent);
+  --primary-ink: var(--accent-ink);
 
-  /* 10px, Orca's `--radius`. Panels and cards take the full radius; controls
-     take `--r-sm`, because a 10px corner on a 20px button is a lozenge. */
+  /* The states, in the system's own hues. Nothing in the window may use these
+     for anything else: a colour that means "an agent is working" cannot also
+     decorate a heading. */
+  --working: #ffd60a;
+  --attention: #bf5af2;
+  --ok: #30d158;
+  --bad: #ff453a;
+  --warn: #ff9f0a;
+
+  /* Controls take 6px, as AppKit's do; cards and popovers 10; sheets 14. */
+  --r-lg: 14px;
   --r: 10px;
   --r-md: 8px;
   --r-sm: 6px;
 
-  /* Chrome is set in the UI font and content in the mono one, and the split is
-     by what the text *is* rather than where it sits: a label, a heading and a
-     sentence are prose; a branch, a path, a hostname, a diff count and a
-     session's name are identifiers, and an identifier in a proportional font
-     is one you cannot compare against the next one down.
+  /* Elevation, for the things that float: a menu, a popover, a sheet. A
+     hairline ring plus a soft drop, which is how AppKit draws a window. */
+  --float-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.6),
+    inset 0 0.5px 0 rgb(255 255 255 / 0.12),
+    0 12px 32px rgb(0 0 0 / 0.45);
+
+  /* Chrome is set in the UI font and content in the mono one. Content means
+     code: a terminal, a diff, a file, a command to copy. A branch name in the
+     sidebar is a *label* and is set as one, as Xcode and Tower do -- the old
+     rule of monospacing every identifier made the chrome read like a log.
 
      **`system-ui` is deliberately not in this list**, which is the opposite of
      the usual advice. On the Linux box this was built on, fontconfig resolves
@@ -80,20 +100,27 @@
          AdwaitaMono-Regular.ttf: "Adwaita Mono" "Regular"
 
      Naming the platform faces instead costs one line and cannot go wrong that
-     way: Segoe UI on WebView2, the Apple faces where they exist, then the four
-     that a Linux desktop actually ships. */
+     way: the Apple faces first, since that is the look, then Segoe UI on
+     WebView2, then the four that a Linux desktop actually ships. */
   --font-ui:
-    "Segoe UI Variable Text", "Segoe UI", -apple-system, "SF Pro Text",
+    -apple-system, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI",
     "Adwaita Sans", Cantarell, Ubuntu, "Noto Sans", Roboto, "Liberation Sans",
     "Helvetica Neue", Arial, sans-serif;
   /* Named for the same reason, though `ui-monospace` has never been the one
      that misresolves -- a monospace generic that picks a monospace face is the
      case that works. */
   --font-mono:
-    ui-monospace, "Cascadia Mono", "SF Mono", "JetBrains Mono", "Adwaita Mono",
+    ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", "Adwaita Mono",
     "Liberation Mono", Menlo, Consolas, monospace;
 
   color-scheme: dark;
+}
+
+/* The user's own accent colour, where WebKit on macOS can name it. Guarded,
+   because an engine that does not know the keyword would drop the whole
+   declaration and leave `--accent` unset rather than falling back. */
+@supports (color: -apple-system-control-accent) {
+  :root { --accent: -apple-system-control-accent; }
 }
 
 * { box-sizing: border-box; }
@@ -146,26 +173,27 @@ body { user-select: none; }
 :is(pre, code, .terminal, .monaco, .panel .log, .traffic .subject, .traffic .reason, .ep-host, .fact-value, .facts-task p,
     .policy .host, .error, .empty) { user-select: text; }
 
-/* One focus ring for the window, and a visible one. Keyboard focus was
-   previously whatever the engine drew, which on WebKitGTK is nothing on a
-   button with a custom background -- so the tab order existed but could not be
-   seen. `:focus-visible` rather than `:focus` keeps it off the mouse path.
+/* One focus ring for the window, and a visible one: AppKit's, the accent at
+   half strength and three pixels wide. Keyboard focus was once whatever the
+   engine drew, which on WebKitGTK is nothing on a button with a custom
+   background. `:focus-visible` rather than `:focus` keeps it off the mouse
+   path.
 
    Outline and offset only. A `border-radius` here looks like it would round
    the ring, and instead sets the *element's* radius for as long as it has
    focus: tabbing onto a worktree card snapped its corners from 10px to 6px
    and back. An outline already follows whatever radius the element has. */
 :focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
+  outline: 3px solid var(--ring);
+  outline-offset: 0;
 }
 
-/* Scrollbars, borrowed wholesale from Orca and worth it: the thumb is drawn
-   inside a transparent border and clipped to the padding box, so a 12px
-   scrollbar shows a 6px thumb that floats clear of the content instead of a
-   full-width trough with a groove down it. `scrollbar-width`/`-color` are the
-   standard properties and the only ones WebKitGTK honours; the `::-webkit-`
-   rules are for WebView2, which is what the Windows build runs on. */
+/* Scrollbars, as macOS draws overlay ones: the thumb is drawn inside a
+   transparent border and clipped to the padding box, so a 12px scrollbar
+   shows a 6px thumb that floats clear of the content instead of a full-width
+   trough with a groove down it. `scrollbar-width`/`-color` are the standard
+   properties and the only ones WebKitGTK honours; the `::-webkit-` rules are
+   for WebKit on macOS and for WebView2. */
 .scrollbar-sleek {
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
@@ -184,74 +212,77 @@ body { user-select: none; }
 
 .app { display: flex; flex-direction: column; height: 100%; }
 
-/* The title bar.
+/* The window's own material, on macOS. The window is transparent there (see
+   `tauri.macos.conf.json`), so everything between it and the sidebar and the
+   toolbar has to be too -- and everything that is *content* paints `--bg`
+   itself, below. Elsewhere `--chrome` is an opaque grey that plays the same
+   part. */
+html.mac, html.mac body, html.mac #root { background: transparent; }
+html.mac { --chrome: transparent; }
+
+/* The toolbar.
 
    Scoped to the direct child of `.app` rather than left as a bare `header`,
    because four other things in this window are also `<header>` elements -- a
    project row in the tree, and the strip at the top of the files, git and diff
    panes -- and an unscoped rule here reached all of them and had to be undone
-   in each. */
+   in each.
+
+   52 pixels, a Mac window's unified toolbar. On macOS it is also the title
+   bar: the traffic lights sit inset at its left, the space they need is kept
+   clear, and the bar itself is the drag region (`data-tauri-drag-region` in
+   `App.tsx`). No rule under it: the content below is a different surface, and
+   that edge is the line. */
 .app > header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 12px;
-  height: 40px;
+  gap: 12px;
+  padding: 0 12px 0 16px;
+  height: 52px;
+  background: var(--chrome);
   border-bottom: 1px solid var(--line);
-  background: var(--surface);
   flex: none;
 }
+html.mac .app > header { padding-left: 86px; border-bottom-color: rgb(0 0 0 / 0.35); }
 .app > header .mark {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
   margin-left: -6px;
-  padding: 3px 6px;
+  padding: 3px 7px;
   background: none;
   border: none;
   border-radius: var(--r-sm);
   color: var(--text);
   font: inherit;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: -0.01em;
   cursor: pointer;
   transition: background-color 150ms;
 }
 .app > header .mark:hover { background: var(--hover); }
 .app > header .mark.on { background: var(--selected); }
-.mark-version { font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; color: var(--dimmer); letter-spacing: 0; }
+.mark-version { font-size: 11px; font-weight: 400; color: var(--dimmer); font-variant-numeric: tabular-nums; }
 
-/* A newer release, said in the header. Neutral like everything that is not an
-   agent's state: the four state hues are spoken for. */
+/* A newer release, said in the toolbar. In the accent, as the one thing on the
+   bar asking to be pressed. */
 .update-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   height: 22px;
-  padding: 0 8px 0 6px;
-  border: 1px solid var(--line-strong);
+  padding: 0 9px 0 7px;
+  border: none;
   border-radius: 999px;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--text);
-  font-family: var(--font-mono);
+  font: inherit;
   font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
 }
-.update-badge:hover { border-color: var(--ring); }
-.update-badge.bad { color: var(--bad); }
-/* The account's rate-limit windows, in the header because that is whose they
-   are. Amber past 80%: it is the number that decides whether starting another
-   session is a good idea. */
-.app > header .limit {
-  color: var(--dim);
-  font-size: 11px;
-  font-family: var(--font-mono);
-  padding: 1px 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-}
-.app > header .limit.high { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-
+.update-badge:hover { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.update-badge.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 16%, transparent); }
 /* Between the readings and the buttons, and allowed to be cut rather than to
    push them off the edge: the destinations are the one thing in this strip that
    must always be reachable. */
@@ -266,28 +297,30 @@ body { user-select: none; }
 
 /* Where the window goes. Five icons, no words -- `App.tsx` argues the case.
 
-   Unbordered, which is the change that made an icon-only strip work at all: a
-   box around each of five 14-pixel glyphs turned the header into a row of
-   buttons competing with the wordmark, where the same five glyphs floating on
-   the surface read as one quiet group. The lit one carries a fill instead, so
-   the strip says where you are with the only treatment left. */
+   One capsule around the lot, as a Mac toolbar groups its buttons: a box
+   around each of five 14-pixel glyphs turned the bar into a row of buttons
+   competing with the wordmark, where one shared shape reads as one quiet
+   group. The lit one carries a fill, so the strip says where you are. */
 .destinations {
   display: flex;
   align-items: center;
   gap: 2px;
   margin-left: auto;
+  padding: 2px;
   flex: none;
+  border-radius: 999px;
+  background: var(--hover);
 }
 .dest {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 26px;
+  width: 32px;
+  height: 28px;
   flex: none;
   background: none;
   border: none;
-  border-radius: var(--r-sm);
+  border-radius: 999px;
   color: var(--dim);
   font: inherit;
   cursor: pointer;
@@ -303,8 +336,8 @@ body { user-select: none; }
   width: 1px;
   height: 16px;
   flex: none;
-  margin: 0 5px;
-  background: var(--line);
+  margin: 0 3px;
+  background: var(--line-strong);
 }
 
 main { display: flex; flex: 1; min-height: 0; }
@@ -315,9 +348,22 @@ main { display: flex; flex: 1; min-height: 0; }
    tmux. See the note in `App.tsx`, which is where that actually matters.
 
    `[hidden]` needs saying because `display: flex` beats the attribute's own
-   `display: none` from the UA stylesheet. */
+   `display: none` from the UA stylesheet.
+
+   Transparent, because the sidebar is in it and the sidebar is the window's
+   material on macOS; every other pane paints `--bg` itself. */
 .workspace { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .workspace[hidden] { display: none; }
+/* The page that stands in for a worktree: content, so it fills the middle and
+   paints it, rather than floating centred on the material. */
+.workspace > .empty.page {
+  flex: 1;
+  align-self: stretch;
+  justify-content: center;
+  max-width: none;
+  margin: 0;
+  background: var(--bg);
+}
 
 /* ------------------------------------------------------------------------- */
 /* the screens: the integrations, the servers, the settings                  */
@@ -330,36 +376,34 @@ main { display: flex; flex: 1; min-height: 0; }
   flex-direction: column;
   background: var(--bg);
 }
-/* Taller than the header above it and than the tab strips beside it, and that
-   is the point: it is the only bar in the window that names a whole page, and
-   matching the 36px of a tab strip made a screen look like a fourth pane. */
+/* A large title, as a Mac settings pane has: the only heading in the window
+   that names a whole page, so it is the one that gets to be big. On the
+   content, not on a bar of its own -- a bar would make a screen look like a
+   fourth pane. */
 .screen-head {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: none;
-  height: 44px;
-  padding: 0 12px 0 16px;
+  height: 56px;
+  padding: 0 14px 0 24px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface);
 }
-/* The same glyph as the header button that opened this, in the same rank of
-   grey. The pairing is what teaches the strip above. */
-.screen-mark { color: var(--dim); }
+/* The same glyph as the toolbar button that opened this. The pairing is what
+   teaches the strip above. */
+.screen-mark { color: var(--accent); width: 18px; height: 18px; }
 .screen-head h1 {
   flex: 1;
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   letter-spacing: -0.01em;
 }
 .screen-body { flex: 1; min-height: 0; overflow-y: auto; }
 /* Measured, not full-width. Every hint on these screens is a sentence, and the
    integrations screen is mostly sentences; run across a 2560-pixel display
-   they are lines nobody finishes. 940 is a touch over the 760 the modal had,
-   which is the width these rows were written for, plus the room the scrim was
-   wasting on either side. */
-.screen-inner { max-width: 940px; margin: 0 auto; padding: 16px 22px 48px; }
+   they are lines nobody finishes. */
+.screen-inner { max-width: 760px; margin: 0 auto; padding: 20px 24px 56px; }
 
 /* ------------------------------------------------------------------------- */
 /* the tree: projects, and the worktrees in them                             */
@@ -368,63 +412,61 @@ main { display: flex; flex: 1; min-height: 0; }
 /* The width is an inline style from the window's preferences -- see
    `prefs.ts`. `flex: none` is what makes it stick: without it the sidebar
    would be a flex item with a *basis*, and the middle would take width back
-   off it the moment a long branch name turned up. */
+   off it the moment a long branch name turned up.
+
+   The window's material on macOS (see `html.mac`), an opaque grey elsewhere.
+   The line down its edge is darker than the rest on macOS, because it is the
+   edge of the material against the content rather than a rule between two
+   panels. */
 .sidebar {
   flex: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
   border-right: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--chrome);
 }
+html.mac .sidebar { border-right-color: rgb(0 0 0 / 0.35); }
 .tree {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 6px 0 24px;
+  padding: 8px 0 24px;
 }
 
-.tree .group { margin-bottom: 6px; }
+.tree .group { margin-bottom: 10px; }
 
-/* The worktrees of one project, indented under it.
-   The rule down the indent is the load-bearing part rather than the offset:
-   the project headers are sticky, so once a long list has scrolled the header
-   above a card is not that card's project, and this line is what still
-   connects it to the one it belongs to. Drawn as a border on this element and
-   not as a background on each card, so it runs unbroken through the gaps
-   between them -- a dashed run of segments is what a per-row treatment looks
-   like.
-   The offset lands the cards under the *label* of the project above rather
-   than under its twisty, which is the alignment that makes the indent read as
-   containment and not as a second column. There is no padding beside the
-   border on purpose: the card already carries a 4px margin, and paying for the
-   gap twice costs four pixels of the name -- which in a 260px sidebar is a
-   branch that truncates one character sooner on every row. */
-.group-body {
-  margin-left: 12px;
-  border-left: 1px solid var(--line);
-}
+/* The worktrees of one project. No rule down the indent, as a Mac sidebar has
+   none: the project headers are sticky *within their group*, so the header
+   above a row is always that row's project, and the section heading is what
+   says whose it is. */
+.group-body { margin: 0; }
 
-/* The project's row. Sticky, so scrolling a long list never leaves you
-   looking at worktrees without knowing whose. */
+/* The project's row: a sidebar section heading, as Finder's "Favorites" is.
+   Small, semibold and secondary -- it names the rows under it rather than
+   being one of them. Sticky, so scrolling a long list never leaves you looking
+   at worktrees without knowing whose; blurred rather than painted, so on the
+   material it does not cut a grey band across it. */
 .group-head {
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 28px;
-  padding: 0 6px 0 4px;
+  height: 26px;
+  padding: 0 10px 0 10px;
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--surface);
+  background: var(--chrome);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
 }
-/* Everything except the actions: the twisty, the name, the count. One button,
+/* Everything except the actions: the name, the count, the twisty. One button,
    so the whole width of the row collapses the group -- a 14-pixel chevron is a
    target you have to aim at. */
 .group-toggle {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   background: none;
@@ -433,38 +475,41 @@ main { display: flex; flex: 1; min-height: 0; }
   color: inherit;
   font: inherit;
   text-align: left;
-  padding: 2px 4px;
+  padding: 2px 6px;
   cursor: pointer;
-  transition: background-color 150ms;
 }
-.group-toggle:hover { background: var(--hover); }
-.group-twist { color: var(--dimmer); flex: none; }
+/* The twisty after the name and only on hover, as Finder draws it: a column
+   of chevrons down the left of every section is chrome nobody reads. Shown
+   while focused too, or the keyboard cannot see what it is toggling. */
+.group-twist { color: var(--dimmer); flex: none; order: 3; width: 12px; height: 12px; }
+@media (hover: hover) {
+  .group-twist { opacity: 0; transition: opacity 120ms; }
+  .group-head:hover .group-twist, .group-toggle:focus-visible .group-twist { opacity: 1; }
+}
 .group-label {
   min-width: 0;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text);
+  color: var(--dimmer);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A group that is not a project reads as a heading, not as a place you can
-   act -- there is nothing here to act on. */
-.group-label.loose { color: var(--dim); font-weight: 500; font-family: var(--font-mono); }
+/* A group that is not a project: a folder, said as one. There is nothing here
+   to act on, and the weight says so. */
+.group-label.loose { font-weight: 500; }
 .group-count {
   flex: none;
   color: var(--dimmer);
   font-size: 11px;
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
 /* The project's controls, out of the way until wanted.
-   Orca's reveal, and the mechanism is the interesting part: the buttons
-   collapse to *zero width* rather than to zero opacity, so they take no space
-   from the project name until the pointer is in the group. Transitioning
-   `max-width` alongside the opacity is what keeps that from being a jump. */
+   The buttons collapse to *zero width* rather than to zero opacity, so they
+   take no space from the project name until the pointer is in the group.
+   Transitioning `max-width` alongside the opacity is what keeps that from
+   being a jump. */
 .group-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 @media (hover: hover) {
   .group-actions {
@@ -485,8 +530,8 @@ main { display: flex; flex: 1; min-height: 0; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   flex: none;
   background: none;
   border: none;
@@ -496,48 +541,43 @@ main { display: flex; flex: 1; min-height: 0; }
   cursor: pointer;
   transition: background-color 150ms, color 150ms;
 }
-.quiet-icon:hover { background: var(--line); color: var(--text); }
+.quiet-icon:hover { background: var(--hover); color: var(--text); }
 /* Forgetting a project, discarding a file. Red on hover only: the button is
    not a warning sitting on screen, it is a warning at the moment you reach
    for it. */
 .quiet-icon.danger:hover { color: var(--bad); }
 
-/* An empty project, inside `.group-body` -- so the indent is already paid for
-   by the rule that draws the line, and this is only the offset a card
-   carries. Lands the glyph under the first column of the rows it stands in
-   for rather than against the rule. */
-.group-body > .empty.row { padding-left: 10px; }
+/* An empty project: one row, lined up with the state column of the rows it
+   stands in for. */
+.group-body > .empty.row { padding-left: 20px; }
 
 
-/* One worktree.
-   A card, not a row: bordered, inset from the sidebar's edge, and carrying a
-   1px *transparent* border at rest so that selecting it colours a border that
-   was already there instead of adding one and moving every row below by a
-   pixel. The transition covers exactly the three properties the states differ
-   in. */
-/* The row that holds the card. Its actions are in its context menu, so the
-   card keeps the whole width. */
+/* The row that holds the worktree. Its actions are in its context menu, so the
+   worktree keeps the whole width. */
 .worktree-row {
   display: flex;
   align-items: center;
   position: relative;
 }
 
+/* One worktree: a sidebar row, as Mail's mailboxes are. Inset from the edges
+   and rounded, with the selection a fill and nothing else -- no border and no
+   shadow, which on a translucent surface read as a card stuck to glass. */
 .worktree {
   display: flex;
   align-items: flex-start;
-  gap: 7px;
-  width: calc(100% - 8px);
-  margin: 1px 4px;
-  padding: 5px 8px 6px 6px;
+  gap: 8px;
+  width: calc(100% - 20px);
+  margin: 0 10px 1px;
+  padding: 6px 8px 7px 6px;
   text-align: left;
   background: none;
-  border: 1px solid transparent;
-  border-radius: var(--r);
+  border: none;
+  border-radius: var(--r-md);
   color: inherit;
   font: inherit;
   cursor: pointer;
-  transition: background-color 200ms, border-color 200ms, box-shadow 200ms;
+  transition: background-color 120ms;
 }
 /* Guarded, because on a touch screen `:hover` sticks to whatever was tapped
    last and leaves a row looking selected when it is not. */
@@ -545,14 +585,7 @@ main { display: flex; flex: 1; min-height: 0; }
   .worktree:hover { background: var(--hover); }
   .worktree.on:hover { background: var(--selected); }
 }
-.worktree.on {
-  background: var(--selected);
-  border-color: var(--selected-line);
-  /* Barely a shadow, and the point of it is not depth: it separates the
-     selected card from the one directly beneath it, which a fill alone at this
-     contrast does not. */
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
-}
+.worktree.on { background: var(--selected); }
 
 /* The state's column. Fixed width and aligned to the first line of text, so
    the names of eleven worktrees line up whatever their agents are doing --
@@ -562,42 +595,42 @@ main { display: flex; flex: 1; min-height: 0; }
 .wt-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wt-name {
   min-width: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 18px;
   font-weight: 500;
-  letter-spacing: -0.01em;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The second line: what branch, how far along, how old. All of it dim and all
-   of it monospace -- these are identifiers and numbers you compare down the
-   column, and none of them is the thing you are looking for when you scan the
-   list. */
+/* The second line: what branch, how far along, how old. Secondary, as a
+   mailbox's subtitle is, and in the UI face -- a branch here is a label you
+   recognise, not code you copy -- with tabular figures so the counts still
+   line up down the column. */
 .wt-meta {
   display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
   color: var(--dim);
-  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 16px;
+  font-variant-numeric: tabular-nums;
 }
-.wt-branch-icon { color: var(--dimmer); flex: none; width: 11px; height: 11px; }
 .wt-branch { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Pushed to the right and never squeezed: the diff and the age are short, and
-   the branch is the one thing on the line that can afford to be cut. */
-.wt-stat { flex: none; margin-left: auto; display: flex; gap: 4px; font-variant-numeric: tabular-nums; }
+/* Pushed to the right and never squeezed: the pull request and the diff are
+   short, and the branch is the one thing on the line that can afford to be
+   cut. Whichever comes first takes the push. */
+.wt-pull, .wt-stat { margin-left: auto; }
+.wt-pull + .wt-stat { margin-left: 0; }
+.wt-stat { flex: none; display: flex; gap: 4px; }
 .wt-stat .added { color: var(--ok); }
 .wt-stat .removed { color: var(--bad); }
-.wt-stat .untracked { color: var(--dimmer); }
-.wt-age { flex: none; color: var(--dimmer); font-variant-numeric: tabular-nums; }
-/* With no diff yet there is nothing to push the age over, so it does it. */
-.wt-stat + .wt-age { margin-left: 0; }
-.wt-branch + .wt-age, .wt-pull + .wt-age { margin-left: auto; }
+.wt-stat .untracked { color: var(--dim); }
+/* The age, at the end of the name's line as a message's date is. After the
+   signals, which carry the push to the right. */
+.wt-age { flex: none; color: var(--dimmer); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* ------------------------------------------------------------------------- */
 /* what an agent is doing, as one mark                                       */
@@ -651,13 +684,13 @@ main { display: flex; flex: 1; min-height: 0; }
 /* the editor area: tabs, and whatever is open                               */
 /* ------------------------------------------------------------------------- */
 
-.editor { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.editor { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
 .tabs {
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 0 8px;
-  height: 36px;
+  height: 38px;
   border-bottom: 1px solid var(--line);
   flex: none;
   overflow-x: auto;
@@ -670,7 +703,7 @@ main { display: flex; flex: 1; min-height: 0; }
 .tabs .tab {
   display: inline-flex;
   align-items: center;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   transition: background-color 150ms;
   flex: none;
 }
@@ -691,9 +724,9 @@ main { display: flex; flex: 1; min-height: 0; }
   border-radius: var(--r-sm);
   color: var(--dim);
   font: inherit;
-  font-family: var(--font-mono);
   font-size: 12px;
-  padding: 5px 10px;
+  font-weight: 500;
+  padding: 4px 11px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -722,7 +755,7 @@ main { display: flex; flex: 1; min-height: 0; }
   color: var(--dim);
   margin-left: 2px;
 }
-.tabs > .add:hover { background: var(--line); color: var(--text); }
+.tabs > .add:hover { background: var(--hover); color: var(--text); }
 /* Every tab stays mounted -- see Tabs.tsx -- so the inactive ones are hidden
    rather than removed, and `hidden` alone loses to `display: flex`. */
 /* Why a failed worktree failed, between the tabs and whatever is open. */
@@ -832,14 +865,14 @@ main { display: flex; flex: 1; min-height: 0; }
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--bg);
   min-height: 0;
 }
 .dock-tabs {
   display: flex;
   gap: 2px;
   padding: 0 8px;
-  height: 36px;
+  height: 38px;
   align-items: center;
   border-bottom: 1px solid var(--line);
   flex: none;
@@ -864,7 +897,9 @@ main { display: flex; flex: 1; min-height: 0; }
   transition: background-color 150ms, color 150ms;
 }
 .dock-tabs button:hover { background: var(--hover); color: var(--text); }
-.dock-tabs button.on { color: var(--text); background: var(--selected); }
+/* The lit one in the accent and nothing else, as Xcode's inspector tabs are:
+   five glyphs in a row read as one control when only the colour moves. */
+.dock-tabs button.on { color: var(--accent); }
 .dock-body { flex: 1; overflow-y: auto; padding: 10px 12px; min-height: 0; }
 
 /* ------------------------------------------------------------------------- */
@@ -881,7 +916,7 @@ main { position: relative; }
   flex-direction: column;
   min-height: 0;
   border-left: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--bg);
 }
 /* As tall as the dock's strip beside it, so the two headers read as one line
    across the top of the right side. */
@@ -890,16 +925,24 @@ main { position: relative; }
   align-items: center;
   gap: 8px;
   flex: none;
-  height: 36px;
-  padding: 0 8px 0 14px;
+  height: 38px;
+  padding: 0 8px 0 12px;
   border-bottom: 1px solid var(--line);
 }
-/* Tickets or pull requests, one at a time. The one shown has its word; the
-   other is its mark and its count. */
+/* Tickets or pull requests, one at a time, as two equal segments: each its
+   mark, its word and its count. Only the selected one used to have its word,
+   which made two halves of one control look like two different things. Both
+   words and both counts need about 320 pixels of sidebar, and the sidebar can
+   be dragged down to 240, so narrower than that *both* drop their word
+   together -- the marks and the tooltips still say which is which. */
 .inbox-views { min-width: 0; }
 .inbox-views button { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; white-space: nowrap; }
 .inbox-views .lucide { width: 13px; height: 13px; flex: none; }
-.inbox-views-count { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--dimmer); }
+.inbox { container: inbox / inline-size; }
+@container inbox (max-width: 319px) {
+  .inbox-views-label { display: none; }
+}
+.inbox-views-count { font-variant-numeric: tabular-nums; color: var(--dimmer); }
 .inbox-views button.on .inbox-views-count { color: var(--dim); }
 .inbox-reading { color: var(--dimmer); font-size: 12px; }
 .inbox-tools { margin-left: auto; display: inline-flex; gap: 2px; }
@@ -922,7 +965,6 @@ main { position: relative; }
   margin-left: auto;
   color: var(--dimmer);
   font-size: 11px;
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   text-transform: none;
   letter-spacing: 0;
@@ -981,10 +1023,10 @@ main { position: relative; }
   .inbox-row:hover { background: var(--hover); }
   .inbox-row.on:hover { background: var(--selected); }
 }
-.inbox-row:focus-visible { outline: none; border-color: var(--ring); }
+.inbox-row:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .inbox-row.on { background: var(--selected); border-color: var(--selected-line); }
 .inbox-row-top { display: flex; align-items: center; gap: 6px; min-width: 0; line-height: 18px; }
-.inbox-key { flex: none; font-family: var(--font-mono); font-size: 11.5px; color: var(--text); }
+.inbox-key { flex: none; font-variant-numeric: tabular-nums; font-size: 11.5px; color: var(--text); }
 .inbox-out { flex: none; width: 11px; height: 11px; color: var(--dimmer); }
 .inbox-type { min-width: 0; font-size: 11px; color: var(--dimmer); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inbox-status {
@@ -1095,9 +1137,8 @@ main { position: relative; }
   border-radius: var(--r-sm);
   color: var(--dim);
   font: inherit;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
   font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
   cursor: pointer;
 }
 .inbox-rail-count:hover { background: var(--hover); color: var(--text); }
@@ -1147,7 +1188,7 @@ main { position: relative; }
 .files .label {
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 13px;
 }
 .files .loading, .files .error { padding: 2px 6px; margin: 0; color: var(--dim); font-size: 12px; }
@@ -1157,7 +1198,7 @@ main { position: relative; }
 /* ------------------------------------------------------------------------- */
 
 .git { min-height: 0; padding-bottom: 16px; }
-/* The branch as the sidebar writes it: the glyph, then the name in mono. The
+/* The branch as the sidebar writes it: the glyph, then the name. The
    remote operations sit at the far end as the ports pane's tools do -- quiet
    icons, revealed by their hover and not by a box. They used to be boxed, on
    the argument that a control that acts should look unlike one that only
@@ -1172,7 +1213,7 @@ main { position: relative; }
 .git-branch-glyph { color: var(--dim); }
 .git .branch {
   color: var(--text);
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 13px;
   min-width: 0;
   overflow: hidden;
@@ -1243,7 +1284,7 @@ main { position: relative; }
 .commit textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .commit .go { padding: 4px 10px 4px 8px; }
 .commit .go .n {
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-weight: 500;
   opacity: 0.6;
 }
@@ -1268,14 +1309,12 @@ main { position: relative; }
   color: var(--dim);
   font: inherit;
   font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: 600;
   cursor: pointer;
 }
 .changes .section-toggle:hover { color: var(--text); }
 .changes .section-toggle .lucide { color: var(--dimmer); }
-.changes .count { color: var(--dimmer); font-family: var(--font-mono); letter-spacing: 0; }
+.changes .count { color: var(--dimmer); font-variant-numeric: tabular-nums; letter-spacing: 0; }
 @media (hover: hover) {
   .changes h3 .quiet-icon { opacity: 0; transition: opacity 120ms, background-color 150ms, color 150ms; }
   .changes:hover h3 .quiet-icon, .changes h3:focus-within .quiet-icon { opacity: 1; }
@@ -1309,7 +1348,7 @@ main { position: relative; }
 .change .label {
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 13px;
 }
 .change.dir .label { color: var(--text); }
@@ -1372,14 +1411,20 @@ main { position: relative; }
   border-radius: var(--r-sm);
   color: var(--primary-ink);
   font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 14px;
+  white-space: nowrap;
+  /* AppKit's default button: a faint highlight along the top edge and a
+     shadow under it, which is what makes a fill read as a button rather than
+     a coloured rectangle. */
+  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.25), 0 1px 2px rgb(0 0 0 / 0.25);
   cursor: pointer;
-  transition: background-color 150ms, opacity 150ms;
+  transition: filter 150ms, opacity 150ms;
 }
-.go:hover:not(:disabled) { background: #ffffff; }
-.go:disabled { background: var(--surface-2); color: var(--dimmer); cursor: default; }
+.go:hover:not(:disabled) { filter: brightness(1.1); }
+.go:active:not(:disabled) { filter: brightness(0.9); }
+.go:disabled { background: var(--hover); color: var(--dimmer); box-shadow: none; cursor: default; }
 
 /* ------------------------------------------------------------------------- */
 /* one file's diff, and the review on it                                     */
@@ -1455,16 +1500,14 @@ main { position: relative; }
   align-items: baseline;
   gap: 8px;
   margin: 18px 0 6px;
-  font-size: 10.5px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--dimmer);
 }
-:is(.facts-pane, .policy) h4 .count { text-transform: none; letter-spacing: 0; font-family: var(--font-mono); }
+:is(.facts-pane, .policy) h4 .count { text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }
 
 /* A fact: glyph, label, value. The sidebar's grammar -- a glyph in front of
-   a mono value -- with the label between them, because unlike a branch name
+   a value -- with the label between them, because unlike a branch name
    in a card, `node, rust` does not say what it is. */
 .fact {
   display: grid;
@@ -1503,7 +1546,7 @@ main { position: relative; }
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 0.04);
   border-radius: var(--r-md);
 }
 .tile-value { color: var(--text); font-size: 15px; font-weight: 600; line-height: 20px; white-space: nowrap; }
@@ -1513,7 +1556,9 @@ main { position: relative; }
 .tile-label { color: var(--dimmer); font-size: 11px; }
 .meter-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; }
 .meter-label { color: var(--dim); width: 52px; flex: none; }
-.meter-value { color: var(--text); font-family: var(--font-mono); white-space: nowrap; }
+/* A fixed column, right-aligned, so the bars of the context and the limits
+   end at one edge whatever is said after each figure. */
+.meter-value { flex: none; width: 92px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* The fill carries the warning -- neutral, then yellow past 70, red past 90 --
    on a track of its own hue, so the state reads along the whole bar and not
    only where it is filled. */
@@ -1613,13 +1658,11 @@ main { position: relative; }
   align-items: baseline;
   gap: 6px;
   margin: 4px 0 4px 8px;
-  font-size: 10.5px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--dimmer);
 }
-.traffic h4 .count { font-family: var(--font-mono); letter-spacing: 0; }
+.traffic h4 .count { font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .traffic section + section { margin-top: 6px; }
 
 /* Two readings of one feed. A pair of tabs drawn as one control, because they
@@ -1628,23 +1671,30 @@ main { position: relative; }
   display: inline-flex;
   padding: 2px;
   gap: 2px;
-  background: var(--sunken);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  background: rgb(0 0 0 / 0.22);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 0.5px var(--line);
 }
 .segmented button {
   background: none;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--dim);
   font: inherit;
   font-size: 11px;
+  font-weight: 500;
   padding: 2px 10px;
   cursor: pointer;
   transition: background-color 120ms, color 120ms;
 }
 .segmented button:hover { color: var(--text); }
-.segmented button.on { background: var(--selected); color: var(--text); }
+/* The chosen segment is raised out of the track, as AppKit draws it: a lighter
+   surface and a shadow under it, not merely a tint. */
+.segmented button.on {
+  background: rgb(255 255 255 / 0.16);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3), inset 0 0.5px 0 rgb(255 255 255 / 0.1);
+}
 
 .traffic-filters { display: flex; gap: 4px; flex-wrap: wrap; }
 .chip {
@@ -1663,7 +1713,7 @@ main { position: relative; }
 }
 .chip:hover { border-color: var(--line-strong); color: var(--text); }
 .chip.on { background: var(--selected); border-color: var(--selected-line); color: var(--text); }
-.chip .n { font-family: var(--font-mono); color: var(--dimmer); font-variant-numeric: tabular-nums; }
+.chip .n { font-variant-numeric: tabular-nums; color: var(--dimmer); }
 .chip.bad .n { color: var(--bad); }
 .chip.ok .n { color: var(--ok); }
 .traffic-none { color: var(--dimmer); margin: 8px 2px; }
@@ -1835,7 +1885,7 @@ main { position: relative; }
   font-family: var(--font-mono);
   font-size: 12px;
 }
-.change-path input:focus { outline: none; border-color: var(--ring); }
+.change-path input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .change-path input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--bad) 60%, transparent); }
 .change-problem { flex-basis: 100%; padding-left: 90px; color: var(--bad); font-size: 11px; }
 .change-path .change-widen { flex: none; font-size: 11px; padding: 2px 6px; }
@@ -1912,11 +1962,12 @@ main { position: relative; }
   align-items: center;
   gap: 6px;
   min-width: 0;
-  padding: 3px 7px 3px 8px;
-  background: var(--sunken);
+  padding: 3px 7px 3px 9px;
+  background: rgb(255 255 255 / 0.1);
   color: var(--text);
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
+  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.1), 0 0.5px 1px rgb(0 0 0 / 0.3);
   font: inherit;
   font-size: 12px;
   text-align: left;
@@ -1924,8 +1975,8 @@ main { position: relative; }
   transition: border-color 120ms, color 120ms;
 }
 .select-trigger:hover:not(:disabled) { border-color: var(--line-strong); color: var(--text); }
-.select-trigger[aria-expanded="true"] { border-color: var(--ring); }
-.select-trigger:focus-visible { outline: none; border-color: var(--ring); }
+.select-trigger[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.select-trigger:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .select-trigger:disabled { color: var(--dimmer); cursor: default; }
 .select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .select-chevron { flex: none; color: var(--dim); width: 12px; height: 12px; }
@@ -1939,26 +1990,30 @@ main { position: relative; }
   max-height: min(320px, calc(100vh - 12px));
   overflow-y: auto;
   margin: 0;
-  padding: 4px;
+  padding: 5px;
   list-style: none;
-  background: var(--surface-2);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-md);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+  background: rgb(40 40 42 / 0.82);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(24px) saturate(1.8);
+  border: none;
+  border-radius: var(--r);
+  box-shadow: var(--float-shadow);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: 13px;
   outline: none;
 }
 .select-list li {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 10px 5px 6px;
-  border-radius: var(--r-sm);
+  padding: 3px 10px 3px 6px;
+  border-radius: 5px;
   color: var(--text);
   cursor: pointer;
 }
-.select-list li.active { background: var(--selected); }
+/* The row under the pointer, in the accent, as every Mac menu draws it. */
+.select-list li.active { background: var(--accent); color: var(--accent-ink); }
+.select-list li.active :is(.select-tick, .select-hint) { color: inherit; }
 .select-tick { width: 14px; flex: none; display: inline-flex; color: var(--text); }
 .select-label { flex: none; white-space: nowrap; }
 .select-list li.chosen .select-label { font-weight: 600; }
@@ -1982,12 +2037,14 @@ main { position: relative; }
   z-index: 1000;
   min-width: 190px;
   max-width: 320px;
-  padding: 4px;
-  background: var(--surface-2);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-md);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
-  font-size: 12px;
+  padding: 5px;
+  background: rgb(40 40 42 / 0.82);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(24px) saturate(1.8);
+  border: none;
+  border-radius: var(--r);
+  box-shadow: var(--float-shadow);
+  font-size: 13px;
   outline: none;
 }
 .context-menu button {
@@ -1995,23 +2052,28 @@ main { position: relative; }
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 5px 8px;
+  padding: 3px 8px;
   background: none;
   border: none;
-  border-radius: var(--r-sm);
+  border-radius: 5px;
   color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
+/* The row under the pointer, in the accent, as every Mac menu draws it. */
 .context-menu button:hover:not(:disabled), .context-menu button:focus-visible {
-  background: var(--selected);
+  background: var(--accent);
+  color: var(--accent-ink);
   outline: none;
 }
+.context-menu button:hover:not(:disabled) :is(.context-icon, .context-hint),
+.context-menu button:focus-visible :is(.context-icon, .context-hint) { color: inherit; }
 .context-menu button:disabled { color: var(--dimmer); cursor: default; }
 .context-menu button.danger { color: var(--bad); }
 .context-menu button.danger:hover:not(:disabled), .context-menu button.danger:focus-visible {
-  background: color-mix(in srgb, var(--bad) 16%, transparent);
+  background: var(--bad);
+  color: #fff;
 }
 .context-icon { width: 14px; display: inline-flex; flex: none; color: var(--dim); }
 .context-menu button.danger .context-icon { color: inherit; }
@@ -2023,10 +2085,9 @@ main { position: relative; }
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--dimmer);
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
 }
-.context-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+.context-sep { height: 1px; margin: 5px 8px; background: var(--line-strong); }
 
 /* Shared by every pane that can be waiting or broken. */
 .loading { color: var(--dim); font-size: 12px; }
@@ -2044,7 +2105,7 @@ main { position: relative; }
      dialog, since a fixed element with an automatic z-index is on the same
      layer as everything else. */
   z-index: 100;
-  background: rgb(0 0 0 / 0.6);
+  background: rgb(0 0 0 / 0.4);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -2054,41 +2115,43 @@ main { position: relative; }
 .dialog {
   width: 620px;
   max-width: 100%;
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r);
-  padding: 16px 18px 18px;
-  /* The one real shadow in the window. A dialog is the only thing here that is
-     genuinely above everything else. */
-  box-shadow: 0 16px 48px rgb(0 0 0 / 0.55);
+  background: var(--surface-2);
+  border: none;
+  border-radius: var(--r-lg);
+  padding: 20px 22px 20px;
+  /* A sheet: the floating edge every popover has, and a deeper drop, because
+     it is the one thing genuinely above everything else. */
+  box-shadow: var(--float-shadow), 0 24px 64px rgb(0 0 0 / 0.4);
 }
 /* A question, which is a narrower thing than a form. */
 .dialog.narrow { width: 420px; }
-.confirm-body { margin: 0; font-size: 12px; color: var(--text); line-height: 1.5; }
+.confirm-body { margin: 0; font-size: 13px; color: var(--dim); line-height: 1.45; }
 .confirm-body code { font-size: 12px; }
-.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 /* The button that does the irreversible thing wears the colour of what it
    does, rather than the primary colour of a button you are meant to press. */
 .go.danger { background: var(--bad); color: var(--surface); }
 .go.danger:hover:not(:disabled) { background: var(--bad); filter: brightness(1.15); }
 
 .dialog-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.dialog-head h2 { font-size: 14px; font-weight: 600; margin: 0; flex: 1; }
+.dialog-head h2 { font-size: 15px; font-weight: 700; margin: 0; flex: 1; }
 :is(.dialog, .screen) .quiet {
-  background: none;
+  background: rgb(255 255 255 / 0.1);
   border: none;
   border-radius: var(--r-sm);
-  color: var(--dim);
+  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.1), 0 0.5px 1px rgb(0 0 0 / 0.3);
+  color: var(--text);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-  padding: 3px 7px;
+  padding: 3px 10px;
+  white-space: nowrap;
   transition: background-color 150ms, color 150ms;
 }
-:is(.dialog, .screen) .quiet:hover { background: var(--hover); color: var(--text); }
+:is(.dialog, .screen) .quiet:hover { background: rgb(255 255 255 / 0.16); }
 
 :is(.dialog, .screen) input, :is(.dialog, .screen) textarea, :is(.dialog, .screen) .select-trigger {
-  background: var(--sunken);
+  background: rgb(0 0 0 / 0.2);
   color: var(--text);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
@@ -2097,12 +2160,14 @@ main { position: relative; }
   font-size: 12px;
   width: 100%;
 }
-/* An identifier, so monospace -- a repository URL, a branch, a secret's name.
-   The textareas are prose and stay in the UI font. */
-:is(.dialog, .screen) :is(input, .select-trigger) { font-family: var(--font-mono); }
+/* Fields are in the UI face, as every Mac form is -- an email address or a
+   repository URL in a monospace face reads as a terminal that wandered into a
+   form. The few that hold code (a JQL filter, a markdown body) set the mono
+   face themselves. */
 :is(.dialog, .screen) :is(input, textarea, .select-trigger):focus {
   outline: none;
-  border-color: var(--ring);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 :is(.dialog, .screen) textarea { resize: vertical; }
 
@@ -2119,7 +2184,7 @@ main { position: relative; }
   cursor: pointer;
   font-size: 12px;
 }
-:is(.dialog, .screen) .tick input { width: auto; accent-color: var(--primary); }
+:is(.dialog, .screen) .tick input { width: auto; accent-color: var(--accent); }
 :is(.dialog, .screen) .hint { color: var(--dimmer); font-size: 12px; }
 
 /* A section of a screen: a heading, a hint, and rows. Shared by the trackers, the
@@ -2132,11 +2197,9 @@ main { position: relative; }
 .panel { margin-top: 18px; }
 .panel h3 {
   margin: 0;
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--dim);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
 }
 .panel > .hint { margin: 3px 0 8px; max-width: 66ch; }
 
@@ -2149,7 +2212,7 @@ main { position: relative; }
   border-top: 1px solid var(--line);
   font-size: 12px;
 }
-.panel .row-name { min-width: 130px; font-family: var(--font-mono); }
+.panel .row-name { min-width: 130px; font-weight: 500; }
 .panel .row .hint { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel .row-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 /* Inputs in a row are sized, not stretched: `.dialog input` is 100% wide,
@@ -2161,6 +2224,12 @@ main { position: relative; }
 .panel .row .yes { color: var(--ok); }
 .panel .row .no { color: var(--bad); }
 .panel .row .quiet-icon { margin-left: 4px; }
+/* The account's devices: the name over what it is and when it was seen, and
+   the button that signs it out at the end. */
+.panel .row.device { flex-wrap: nowrap; }
+.device-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.device-text .row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-text .hint { font-size: 11px; }
 
 /* A ticket's type, beside its key in the panel's header. */
 .ticket-type { font-size: 11px; color: var(--dimmer); }
@@ -2181,7 +2250,7 @@ main { position: relative; }
 }
 .ticket-panel:focus { outline: none; }
 .ticket-panel-head { display: flex; align-items: center; gap: 8px; }
-.ticket-panel-key { font-family: var(--font-mono); font-size: 12px; color: var(--dim); }
+.ticket-panel-key { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--dim); }
 .ticket-panel-tools { margin-left: auto; display: inline-flex; gap: 2px; }
 .ticket-panel-tools a.quiet-icon { text-decoration: none; }
 .ticket-panel-title { margin: -6px 0 0; font-size: 16px; font-weight: 600; line-height: 1.35; color: var(--text); }
@@ -2253,12 +2322,10 @@ main { position: relative; }
 .ticket-section h3 {
   margin: 0 0 8px;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--dim);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
-.ticket-section h3 .count { color: var(--dimmer); font-family: var(--font-mono); }
+.ticket-section h3 .count { color: var(--dimmer); font-variant-numeric: tabular-nums; }
 .ticket-section > .hint { margin: 0 0 8px; color: var(--dimmer); font-size: 11px; }
 .ticket-section { padding-top: 12px; border-top: 1px solid var(--line); }
 
@@ -2302,7 +2369,7 @@ main { position: relative; }
   padding: 5px 10px;
   cursor: pointer;
 }
-.ticket-panel .quiet:hover:not(:disabled) { color: var(--text); border-color: var(--ring); }
+.ticket-panel .quiet:hover:not(:disabled) { color: var(--text); border-color: var(--hover-line); }
 .ticket-panel .quiet:disabled { opacity: 0.5; cursor: default; }
 .ticket-panel .quiet .lucide { width: 12px; height: 12px; }
 
@@ -2373,7 +2440,7 @@ main { position: relative; }
 }
 .pull-tabs button:hover { color: var(--text); }
 .pull-tabs button.on { color: var(--text); border-bottom-color: var(--text); }
-.pull-tabs .count { font-family: var(--font-mono); font-size: 10.5px; color: var(--dimmer); }
+.pull-tabs .count { font-variant-numeric: tabular-nums; font-size: 10.5px; color: var(--dimmer); }
 /* The tabs' own rule is the first section's top. */
 .pull-tabs + .ticket-section, .pull-tabs + .pull-file { padding-top: 0; border-top: 0; }
 
@@ -2560,7 +2627,7 @@ main { position: relative; }
    grammar the session list uses. `crashing` is the loud one: it is the state
    that used to read as `running`, because Docker reports a container it is
    restarting as up. */
-.mcp-state { font-size: 11px; min-width: 66px; font-family: var(--font-mono); }
+.mcp-state { font-size: 11px; min-width: 66px; font-variant-numeric: tabular-nums; }
 .mcp-state.running { color: var(--ok); }
 .mcp-state.crashing, .mcp-state.detached { color: var(--bad); font-weight: 600; }
 .mcp-state.stopped, .mcp-state.absent { color: var(--warn); }
@@ -2571,7 +2638,7 @@ main { position: relative; }
 .panel .tracker-kind {
   font-size: 11px;
   min-width: 84px;
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   color: var(--dim);
 }
 /* The add form: labelled fields in the settings grid, under the trackers it
@@ -2595,7 +2662,7 @@ main { position: relative; }
 /* hura cloud, above the trackers: the sign-in fields in the settings grid,
    then who is signed in, the trackers not yet moved, and the devices. */
 .panel.account h4 { margin: 14px 0 4px; font-size: 12px; font-weight: 500; color: var(--text); }
-.panel.account > label > .value { padding-top: 6px; font-size: 12px; font-family: var(--font-mono); }
+.panel.account > label > .value { padding-top: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .panel.account .setting-actions { max-width: 568px; }
 .panel.account .setting-actions .hint { margin-right: auto; }
 .panel.account > .setting-group { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line-strong); }
@@ -2668,20 +2735,34 @@ main { position: relative; }
 /* ------------------------------------------------------------------------- */
 
 /* One section, with the heading grammar the integrations screen already uses
-   -- small, uppercase, dim -- so the two screens read as one application. The
-   rule above each is what separates "new sessions", "this server" and "this
-   window", which is the only structure this screen has and the one that says
-   who owns each answer. */
+   -- a plain semibold title -- so the two screens read as one application.
+   What separates "new sessions", "this server" and "this window" is the only
+   structure this screen has and the one that says who owns each answer: a
+   rule above each where the section is bare, and on a screen the inset panel
+   each is drawn in (below). */
 .setting-group { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 .setting-group:first-of-type { margin-top: 10px; padding-top: 0; border-top: none; }
 .setting-group h3 {
   margin: 0;
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--dim);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
 }
+
+/* On a screen, each section is an inset group, as System Settings draws one:
+   a rounded panel a shade off the page, with its title inside at the top. The
+   rule that used to separate sections is the panel's edge now. Sections only
+   -- the form for a new tracker is a `div` inside one, and a card inside a
+   card is a box nobody asked for. */
+.screen section:is(.setting-group, .panel) {
+  margin-top: 16px;
+  padding: 14px 18px 16px;
+  border: none;
+  border-radius: var(--r);
+  background: rgb(255 255 255 / 0.035);
+  box-shadow: inset 0 0 0 0.5px var(--line);
+}
+.screen section:is(.setting-group, .panel):first-of-type { margin-top: 4px; padding-top: 14px; }
 .setting-group > .hint { margin: 4px 0 10px; max-width: 68ch; }
 /* `.dialog > label` is the grid that lines the labels up, and these are one
    level further in. Same columns, so a field in a section sits under a field
@@ -2704,14 +2785,6 @@ main { position: relative; }
 .setting-group > label.tick + .hint.indent { padding-left: 22px; }
 .setting-group fieldset { margin-top: 14px; }
 .setting-group fieldset .hint { margin: 6px 0 0; max-width: 70ch; }
-
-/* A number, its unit and the range it may take. One line, and the range is
-   there because a field that silently clamps what you typed is a field that
-   looks broken. */
-.pixels { display: flex; align-items: center; gap: 7px; }
-.pixels input { width: 84px; text-align: right; }
-.pixels .unit { color: var(--dim); font-size: 12px; font-family: var(--font-mono); }
-.pixels .range { color: var(--dimmer); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* The save row. The path is the part that matters most and takes the slack:
    this screen writes a file on another machine, and saying which one is the
@@ -2761,7 +2834,7 @@ main { position: relative; }
    never present. */
 .paired { list-style: none; margin: 0; padding: 0; }
 .paired li { display: flex; align-items: center; gap: 10px; padding: 3px 0; font-size: 12px; }
-.paired .name { min-width: 110px; font-family: var(--font-mono); }
+.paired .name { min-width: 110px; font-variant-numeric: tabular-nums; }
 .paired .address { color: var(--dim); flex: 1; overflow-wrap: anywhere; font-family: var(--font-mono); }
 
 
@@ -2942,7 +3015,7 @@ main { position: relative; }
 .about-hero { display: flex; align-items: baseline; gap: 10px; margin: 8px 0 18px; }
 .about-mark { font-size: 26px; font-weight: 700; letter-spacing: -0.03em; }
 .version-chip {
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--dim);
   padding: 2px 7px;
@@ -3080,7 +3153,7 @@ main { position: relative; }
   color: var(--dim);
   cursor: text;
 }
-.chip-field:focus-within { border-color: var(--ring); }
+.chip-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .chip-field > .lucide { flex: none; }
 .dialog .chip-field :is(input, .select-trigger) {
   flex: 1;
@@ -3108,13 +3181,12 @@ main { position: relative; }
   background: none;
   color: var(--dim);
   font: inherit;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   cursor: pointer;
   transition: background-color 150ms, color 150ms, border-color 150ms;
 }
-.pill:hover { color: var(--text); border-color: var(--ring); }
-.pill.on { background: var(--selected); border-color: var(--selected-line); color: var(--text); padding-left: 7px; }
+.pill:hover { color: var(--text); border-color: var(--hover-line); }
+.pill.on { background: color-mix(in srgb, var(--accent) 24%, transparent); border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--text); padding-left: 7px; }
 .pill .lucide { width: 12px; height: 12px; }
 /* Shown, not chosen: no border to press. */
 .pill.fixed { cursor: default; border-color: transparent; background: var(--surface-2); color: var(--dim); }
@@ -3125,7 +3197,7 @@ main { position: relative; }
 .drift { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--warn); cursor: help; }
 .drift .lucide { flex: none; }
 .new-session-foot .keys { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--dimmer); padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; }
-.pill:focus-visible, .update-badge:focus-visible, .app > header .mark:focus-visible { outline: 1px solid var(--ring); outline-offset: 1px; }
+.pill:focus-visible, .update-badge:focus-visible, .app > header .mark:focus-visible { outline: 3px solid var(--ring); outline-offset: 0; }
 
 /* ------------------------------------------------------------------------- */
 /* the ports pane                                                            */
@@ -3145,7 +3217,7 @@ main { position: relative; }
   background: var(--surface-2);
   border: 1px solid var(--line-strong);
   color: var(--text);
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 8.5px;
   line-height: 10px;
   text-align: center;
@@ -3167,9 +3239,9 @@ main { position: relative; }
   font-family: var(--font-mono);
   font-size: 12px;
 }
-.port-add input:focus { outline: none; border-color: var(--ring); }
+.port-add input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .port-add .quiet { background: none; border: 1px solid var(--line-strong); border-radius: var(--r-sm); color: var(--dim); font: inherit; font-size: 12px; padding: 0 10px; cursor: pointer; }
-.port-add .quiet:hover:not(:disabled) { color: var(--text); border-color: var(--ring); }
+.port-add .quiet:hover:not(:disabled) { color: var(--text); border-color: var(--hover-line); }
 .port-add .quiet:disabled { opacity: 0.5; cursor: default; }
 .ports .error { margin-top: 8px; }
 
@@ -3182,10 +3254,9 @@ main { position: relative; }
 .wt-ports .lucide { width: 11px; height: 11px; }
 .wt-context { display: inline-flex; }
 .wt-context .track { fill: none; stroke: var(--line-strong); stroke-width: 1.5; }
-.wt-context .fill { fill: none; stroke: var(--dim); stroke-width: 1.5; stroke-linecap: round; }
-/* Near the top is where the agent compacts. `--warn`, like the rate-limit
-   reading in the header that means the same thing about the account. */
-.wt-context.high .fill { stroke: var(--warn); }
+/* Only drawn near the top, which is where the agent compacts: `--warn`,
+   because it is a warning about what happens next. */
+.wt-context .fill { fill: none; stroke: var(--warn); stroke-width: 1.5; stroke-linecap: round; }
 
 
 /* One form, centred: the 568 pixels a field row measures, plus the padding. */
@@ -3204,7 +3275,7 @@ main { position: relative; }
 .port-forward .dot { color: var(--line-strong); }
 .ports .owner.guessed::after { content: " ?"; color: var(--dimmer); }
 .procs { margin-top: 12px; }
-.procs h4 { margin: 0 0 4px 6px; font-size: 10.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: var(--dimmer); }
+.procs h4 { margin: 0 0 4px 6px; font-size: 11px; font-weight: 600; color: var(--dimmer); }
 .procs ul { list-style: none; margin: 0; padding: 0; }
 .procs li { display: flex; flex-direction: row; align-items: center; gap: 8px; height: 26px; padding: 0 4px 0 6px; border-radius: var(--r-sm); font-size: 11.5px; }
 .procs li:hover { background: var(--hover); }
@@ -3348,7 +3419,7 @@ main { position: relative; }
   cursor: pointer;
 }
 .chat-agent-close:hover { background: var(--hover); color: var(--text); }
-.chat-agent-facts { margin: 0; padding: 0 14px; color: var(--dimmer); font-family: var(--font-mono); font-size: 11px; }
+.chat-agent-facts { margin: 0; padding: 0 14px; color: var(--dimmer); font-variant-numeric: tabular-nums; font-size: 11px; }
 .chat-agent-now { margin: 6px 14px 0; color: var(--working); font-size: 12px; }
 .chat-agent-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-top: 8px; }
 .chat-agent-scroll > .chat-thinking { margin: 0 14px; }
@@ -3384,9 +3455,10 @@ main { position: relative; }
 .chat-prompt {
   align-self: flex-end;
   max-width: 85%;
-  padding: 8px 12px;
-  background: var(--surface-2);
-  border-radius: var(--r);
+  padding: 7px 13px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: 18px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -3440,7 +3512,7 @@ main { position: relative; }
 /* One tool call. Bordered like a card elsewhere in the window, quiet at rest:
    most of them are reading, and a transcript of loud boxes is one where the
    agent's words get lost between them. */
-.chat-tool { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.chat-tool { border-radius: var(--r); background: rgb(255 255 255 / 0.045); }
 .chat-tool-head {
   display: flex;
   align-items: center;
@@ -3449,7 +3521,7 @@ main { position: relative; }
   padding: 5px 10px 5px 6px;
   text-align: left;
   font-size: 12px;
-  border-radius: var(--r-md);
+  border-radius: var(--r);
 }
 .chat-tool-head:hover { background: var(--hover); color: var(--text); }
 /* The verb and the subject share a baseline; the chevron and the mark are
@@ -3548,11 +3620,13 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   align-self: flex-end;
   margin: -4px 0 4px;
   color: var(--dimmer);
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
 }
 .chat-turn.bad { color: var(--bad); }
-/* Under your message: when it was sent, and whether Claude has read it. */
+/* Under your message: when it was sent, and whether Claude has read it. One
+   grey whatever the state -- the ticks say which, one or two, and a time that
+   brightened on being read made a queued message's look dimmed instead. */
 .chat-receipt {
   align-self: flex-end;
   display: inline-flex;
@@ -3560,10 +3634,9 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   gap: 4px;
   margin: -6px 0 0;
   color: var(--dimmer);
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
 }
-.chat-receipt.read { color: var(--dim); }
 .chat-divider {
   display: flex;
   align-items: center;
@@ -3644,13 +3717,13 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   padding: 8px 20px 14px;
 }
 .chat-box {
-  background: var(--sunken);
+  background: var(--surface);
   border: 1px solid var(--line-strong);
-  border-radius: var(--r);
+  border-radius: 18px;
   cursor: text;
   transition: border-color 120ms;
 }
-.chat-box:focus-within { border-color: var(--ring); }
+.chat-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .chat-box textarea {
   display: block;
   width: 100%;
@@ -3672,17 +3745,17 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   padding: 3px 6px;
   background: none;
   border-color: transparent;
+  box-shadow: none;
   color: var(--dim);
 }
 .select-trigger.chat-select:hover:not(:disabled),
 .select-trigger.chat-select[aria-expanded="true"] { background: var(--hover); border-color: transparent; color: var(--text); }
-.select-trigger.chat-select:focus-visible { border-color: var(--ring); }
+.select-trigger.chat-select:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .chat-facts {
   display: inline-flex;
   gap: 10px;
   margin: 0 8px 0 auto;
   color: var(--dimmer);
-  font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -3734,7 +3807,7 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   color: var(--text);
   cursor: pointer;
 }
-.chat-send { width: 28px; height: 26px; padding: 0; }
+.chat-send { width: 26px; height: 26px; padding: 0; border-radius: 50%; }
 .chat-commands {
   position: absolute;
   bottom: calc(100% - 4px);

@@ -32,7 +32,7 @@ struct InboxView: View {
         List {
             if let inbox = trackers.inbox {
                 ForEach(inbox.warnings, id: \.self) { w in
-                    Label(w, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                    Label(w, glyph: .warning).font(.caption).foregroundStyle(.orange)
                 }
                 switch showing {
                 case .tickets:
@@ -40,7 +40,10 @@ struct InboxView: View {
                     ForEach(filterNames, id: \.self) { name in
                         tickets(inbox, title: name) { $0.filters.contains(name) }
                     }
-                    if trackers.trackers.contains(where: { !$0.source.hideCreated }) {
+                    // Only with something in it: hidden on one tracker, the
+                    // group stayed, empty, while another still had it on.
+                    if trackers.trackers.contains(where: { !$0.source.hideCreated }),
+                       inbox.tasks.contains(where: { $0.relation == "created" }) {
                         tickets(inbox, title: "Created by me") { $0.relation == "created" }
                     }
                 case .pulls:
@@ -55,7 +58,7 @@ struct InboxView: View {
         .overlay {
             if trackers.trackers.isEmpty {
                 ContentUnavailableView {
-                    Label("No trackers", systemImage: "tray")
+                    Label("No trackers", glyph: .tracker)
                 } description: {
                     Text("Add GitHub, Azure DevOps or Jira to see your tickets and pull requests here, on every device signed in to your account.")
                 } actions: {
@@ -66,10 +69,10 @@ struct InboxView: View {
             } else if let inbox = trackers.inbox {
                 switch showing {
                 case .tickets where inbox.tasks.isEmpty:
-                    ContentUnavailableView("No tickets", systemImage: "checkmark.circle",
+                    ContentUnavailableView("No tickets", image: Glyph.passing.name,
                                            description: Text("Read from \(inbox.read.joined(separator: ", "))."))
                 case .pulls where inbox.pulls.isEmpty:
-                    ContentUnavailableView("No pull requests", systemImage: "checkmark.circle",
+                    ContentUnavailableView("No pull requests", image: Glyph.passing.name,
                                            description: Text(inbox.pullsRead.isEmpty
                                                ? "Pull requests come from GitHub and Azure DevOps trackers."
                                                : "Read from \(inbox.pullsRead.joined(separator: ", "))."))
@@ -95,7 +98,7 @@ struct InboxView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { settings = true } label: { Label("Trackers", systemImage: "gearshape") }
+                Button { settings = true } label: { Label("Trackers", glyph: .settings) }
             }
             if trackers.reading {
                 ToolbarItem(placement: .status) { ProgressView() }
@@ -158,7 +161,7 @@ struct InboxView: View {
     @ViewBuilder
     private func rowMenu(_ on: (server: String, name: String)?, url: String, copy: String) -> some View {
         if let on {
-            Button("Go to \(on.name)", systemImage: "arrow.right.circle") {
+            Button("Go to \(on.name)", glyph: .goTo) {
                 model.pendingRoute = [.server(on.server), .session(serverID: on.server, name: on.name)]
             }
         }
@@ -210,19 +213,19 @@ struct TicketRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text(task.key).font(.caption.monospaced().weight(.semibold)).foregroundStyle(.secondary)
+                Text(task.key).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Text(task.status).font(.caption2).padding(.horizontal, 6).padding(.vertical, 1)
                     .background(Color.secondary.opacity(0.15), in: Capsule())
                 Spacer()
                 if let session {
-                    Label(session, systemImage: "arrow.triangle.branch").font(.caption2).foregroundStyle(.green).lineLimit(1)
+                    Label(session, glyph: .branch).font(.caption2).foregroundStyle(.green).lineLimit(1)
                 }
             }
             Text(task.title).font(.callout).lineLimit(2)
             HStack(spacing: 8) {
                 Text(task.tracker)
                 if let n = task.comments, n > 0 {
-                    Label("\(n)", systemImage: task.lastCommentMine ? "bubble.left" : "bubble.left.fill")
+                    Label("\(n)", glyph: task.lastCommentMine ? .comment : .commentNew)
                 }
                 if let who = task.lastCommenter, !task.lastCommentMine { Text("last: \(who)") }
             }
@@ -239,19 +242,19 @@ struct PullRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text(pullName(pull)).font(.caption.monospaced().weight(.semibold)).foregroundStyle(.secondary)
+                Text(pullName(pull)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 if pull.draft { Text("draft").font(.caption2).foregroundStyle(.secondary) }
-                if pull.conflicts { Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(.orange) }
+                if pull.conflicts { Image(glyph: .warning).font(.caption2).foregroundStyle(.orange) }
                 checks
                 Spacer()
                 if let session {
-                    Label(session, systemImage: "arrow.triangle.branch").font(.caption2).foregroundStyle(.green).lineLimit(1)
+                    Label(session, glyph: .branch).font(.caption2).foregroundStyle(.green).lineLimit(1)
                 }
             }
             Text(pull.title).font(.callout).lineLimit(2)
             HStack(spacing: 8) {
                 Text(pull.author)
-                Text("\(pull.branch) → \(pull.base)").font(.caption2.monospaced()).lineLimit(1)
+                Text("\(pull.branch) → \(pull.base)").font(.caption2).lineLimit(1)
                 if let r = pull.review { Text(reviewWord(r)) }
             }
             .font(.caption2)
@@ -262,9 +265,9 @@ struct PullRow: View {
     @ViewBuilder
     private var checks: some View {
         switch pull.checks {
-        case "passing": Image(systemName: "checkmark.circle.fill").font(.caption2).foregroundStyle(.green)
-        case "failing": Image(systemName: "xmark.circle.fill").font(.caption2).foregroundStyle(.red)
-        case "pending": Image(systemName: "clock.fill").font(.caption2).foregroundStyle(.yellow)
+        case "passing": Image(glyph: .passing).font(.caption2).foregroundStyle(.green)
+        case "failing": Image(glyph: .failing).font(.caption2).foregroundStyle(.red)
+        case "pending": Image(glyph: .pending).font(.caption2).foregroundStyle(.yellow)
         default: EmptyView()
         }
     }
@@ -322,7 +325,7 @@ struct StartWorkView: View {
                             } label: {
                                 VStack(alignment: .leading) {
                                     Text(p.name)
-                                    Text(p.repo).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(p.repo).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                             }
                             .tint(.primary)
@@ -354,7 +357,7 @@ struct SignInForTrackers: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label("Sign in for trackers", systemImage: "person.crop.circle")
+            Label("Sign in for trackers", glyph: .account)
         } description: {
             Text("Your tickets and pull requests from GitHub, Azure DevOps and Jira come through your hura account, which keeps the trackers and reads them all day, so they are the same on every device and you hear about a change on time.")
         } actions: {

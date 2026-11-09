@@ -129,7 +129,7 @@ struct PortsPane: View {
         let live = row.preview != nil || row.forward != nil
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(live ? .green : .secondary)
+                Image(glyph: .ports).foregroundStyle(live ? .green : .secondary)
                 // Not "\(row.port)", which a Text formats as a number: 5 173.
                 Text(String(row.port)).font(.body.monospaced().weight(.medium))
                 Text(!row.listening ? "not listening" : row.owner.map { short($0.command) } ?? "")
@@ -164,10 +164,10 @@ struct PortsPane: View {
                 Button("Copy Address", systemImage: "doc.on.doc") { UIPasteboard.general.string = p.url.absoluteString }
             }
             if live {
-                Button("Stop Forwarding", systemImage: "stop.circle") { stopPreview(row.port) }
+                Button("Stop Forwarding", glyph: .stopForwarding) { stopPreview(row.port) }
             }
             if row.owner != nil {
-                Button("Stop the Process…", systemImage: "xmark.octagon", role: .destructive) { killing = row }
+                Button("Stop the Process…", glyph: .kill, role: .destructive) { killing = row }
             }
         }
         .swipeActions {

@@ -138,7 +138,7 @@ enum ChatItem: Identifiable, Equatable {
 
 /// How a tool call is labelled: an SF Symbol, a verb and what it acts on.
 struct ToolLabel: Equatable {
-    var icon: String
+    var icon: Glyph
     var verb: String
     var subject: String
 
@@ -147,26 +147,26 @@ struct ToolLabel: Equatable {
         let path = input["file_path"]?.string ?? input["path"]?.string ?? input["notebook_path"]?.string
         let shown = path.map { relative($0, to: cwd) } ?? ""
         switch call.name {
-        case "Bash": return ToolLabel(icon: "terminal", verb: "Run", subject: input["description"]?.string ?? input["command"]?.string ?? "")
-        case "Read": return ToolLabel(icon: "doc.text", verb: "Read", subject: shown)
-        case "Edit", "MultiEdit": return ToolLabel(icon: "pencil", verb: "Edit", subject: shown)
-        case "Write": return ToolLabel(icon: "doc.badge.plus", verb: "Write", subject: shown)
-        case "NotebookEdit": return ToolLabel(icon: "pencil", verb: "Edit notebook", subject: shown)
-        case "Glob": return ToolLabel(icon: "magnifyingglass", verb: "Find files", subject: input["pattern"]?.string ?? "")
-        case "Grep": return ToolLabel(icon: "magnifyingglass", verb: "Search", subject: input["pattern"]?.string ?? "")
-        case "WebFetch": return ToolLabel(icon: "globe", verb: "Fetch", subject: input["url"]?.string ?? "")
-        case "WebSearch": return ToolLabel(icon: "globe", verb: "Search the web", subject: input["query"]?.string ?? "")
-        case "Task", "Agent": return ToolLabel(icon: "person.2", verb: "Agent", subject: input["description"]?.string ?? "")
-        case "SubagentHandback": return ToolLabel(icon: "arrowshape.turn.up.left", verb: "Report", subject: "")
-        case "TodoWrite": return ToolLabel(icon: "checklist", verb: "Update todos", subject: "")
-        case "ExitPlanMode": return ToolLabel(icon: "list.bullet.clipboard", verb: "Plan", subject: "")
-        case "AskUserQuestion": return ToolLabel(icon: "questionmark.bubble", verb: "Ask", subject: "")
+        case "Bash": return ToolLabel(icon: .agentTerminal, verb: "Run", subject: input["description"]?.string ?? input["command"]?.string ?? "")
+        case "Read": return ToolLabel(icon: .fileText, verb: "Read", subject: shown)
+        case "Edit", "MultiEdit": return ToolLabel(icon: .edit, verb: "Edit", subject: shown)
+        case "Write": return ToolLabel(icon: .fileNew, verb: "Write", subject: shown)
+        case "NotebookEdit": return ToolLabel(icon: .edit, verb: "Edit notebook", subject: shown)
+        case "Glob": return ToolLabel(icon: .search, verb: "Find files", subject: input["pattern"]?.string ?? "")
+        case "Grep": return ToolLabel(icon: .search, verb: "Search", subject: input["pattern"]?.string ?? "")
+        case "WebFetch": return ToolLabel(icon: .web, verb: "Fetch", subject: input["url"]?.string ?? "")
+        case "WebSearch": return ToolLabel(icon: .web, verb: "Search the web", subject: input["query"]?.string ?? "")
+        case "Task", "Agent": return ToolLabel(icon: .agent, verb: "Agent", subject: input["description"]?.string ?? "")
+        case "SubagentHandback": return ToolLabel(icon: .reply, verb: "Report", subject: "")
+        case "TodoWrite": return ToolLabel(icon: .todos, verb: "Update todos", subject: "")
+        case "ExitPlanMode": return ToolLabel(icon: .plan, verb: "Plan", subject: "")
+        case "AskUserQuestion": return ToolLabel(icon: .question, verb: "Ask", subject: "")
         default:
             let parts = call.name.components(separatedBy: "__")
             if parts.count >= 3, parts[0] == "mcp" {
-                return ToolLabel(icon: "puzzlepiece.extension", verb: parts[1], subject: parts[2...].joined(separator: "__"))
+                return ToolLabel(icon: .integrations, verb: parts[1], subject: parts[2...].joined(separator: "__"))
             }
-            return ToolLabel(icon: "wrench.and.screwdriver", verb: call.name, subject: shown)
+            return ToolLabel(icon: .tool, verb: call.name, subject: shown)
         }
     }
 

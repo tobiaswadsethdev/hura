@@ -388,7 +388,10 @@ function dayName(at: number): string {
 }
 
 /// When a message was sent, and what has become of it: in the sandbox, waiting
-/// behind the turn in progress, or read.
+/// behind the turn in progress, or read. One tick for sent and two for read,
+/// as a messaging app has them; waiting behind a turn is the one tick too,
+/// said in words only on hover -- "queued" beside a tick that already means
+/// "not read yet" was the same fact twice.
 function Receipt({ at, read, receipts }: { at: number; read: number | null; receipts: Receipts }) {
   const full = new Date(at).toLocaleString();
   if (receipts === "off") {
@@ -400,7 +403,7 @@ function Receipt({ at, read, receipts }: { at: number; read: number | null; rece
   }
   if (read !== null) {
     return (
-      <p className="chat-receipt read" title={`sent ${full}, read ${new Date(read).toLocaleString()}`}>
+      <p className="chat-receipt" title={`sent ${full}, read ${new Date(read).toLocaleString()}`}>
         {clock(at)}
         <Read aria-label="read" />
       </p>
@@ -410,8 +413,7 @@ function Receipt({ at, read, receipts }: { at: number; read: number | null; rece
   return (
     <p className="chat-receipt" title={queued ? `sent ${full}; Claude takes it when this turn is done` : `sent ${full}`}>
       {clock(at)}
-      {queued && <span>queued</span>}
-      <Delivered aria-label="sent" />
+      <Delivered aria-label={queued ? "queued" : "sent"} />
     </p>
   );
 }

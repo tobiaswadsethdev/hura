@@ -58,15 +58,19 @@ struct ChatRows: View {
                         PictureView(picture: picture, maxHeight: 200)
                     }
                     ForEach(prompt.files, id: \.self) { name in
-                        Label(name, systemImage: "doc")
+                        Label(name, glyph: .file)
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if !prompt.text.isEmpty {
                         Text(prompt.text)
                             .textSelection(.enabled)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.accentColor.opacity(0.35), in: RoundedRectangle(cornerRadius: 16))
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 7)
+                            // A message bubble, as Messages and the desktop
+                            // draw what you sent: the accent, solid, and white
+                            // on it.
+                            .foregroundStyle(.white)
+                            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
                     ReceiptLine(prompt: prompt, receipts: receipts, working: working)
                 }
@@ -136,7 +140,10 @@ struct ThinkingView: View {
 }
 
 /// Under your message: when it was sent, and what has become of it: in the
-/// sandbox, waiting behind the turn in progress, or read.
+/// sandbox, waiting behind the turn in progress, or read. One tick for sent and
+/// two for read, as the desktop draws them; waiting behind a turn is the one
+/// tick too, and "Queued" beside it said "not read yet" a second time, so it
+/// is only what VoiceOver reads.
 struct ReceiptLine: View {
     let prompt: Prompt
     let receipts: Bool
@@ -147,14 +154,15 @@ struct ReceiptLine: View {
             if let sent = prompt.sent { Text(sent, format: .dateTime.hour().minute()) }
             if receipts {
                 if prompt.read != nil {
-                    Image(systemName: "checkmark.circle.fill").accessibilityLabel("Read")
+                    Image(glyph: .read).accessibilityLabel("Read")
                 } else {
-                    if working { Text("Queued") }
-                    Image(systemName: "checkmark.circle").accessibilityLabel("Sent")
+                    Image(glyph: .sent).accessibilityLabel(working ? "Queued" : "Sent")
                 }
             }
         }
         .font(.caption2)
-        .foregroundStyle(prompt.read != nil ? .secondary : .tertiary)
+        // One grey whatever the state: the ticks say which. A time that
+        // brightened on being read made a queued message's look dimmed.
+        .foregroundStyle(.tertiary)
     }
 }

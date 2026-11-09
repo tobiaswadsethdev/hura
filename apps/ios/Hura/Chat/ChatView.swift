@@ -8,6 +8,10 @@ import SwiftUI
 /// answered with a button.
 struct ChatView: View {
     let chat: Chat
+    /// The sandbox is still being made. The conversation cannot be reached
+    /// until it is, and that is not news: the chat says what is happening, so
+    /// a banner saying the server cannot be reached would be a false alarm.
+    var preparing = false
     @State private var draft = ""
     @State private var sending = false
     /// What was just sent, and when: the keyboard commits a pending
@@ -40,8 +44,8 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if case let .offline(why) = chat.phase {
-                Label(why, systemImage: "wifi.slash")
+            if !preparing, case let .offline(why) = chat.phase {
+                Label(why, glyph: .offline)
                     .font(.footnote)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
@@ -212,7 +216,7 @@ struct ChatView: View {
                 }
             } label: {
                 Label(Self.modes.first { $0.value == (chat.mode ?? "auto") }?.label ?? (chat.mode ?? "Auto"),
-                      systemImage: "shield.lefthalf.filled")
+                      glyph: .policy)
             }
             if !chat.models.isEmpty {
                 Menu {
@@ -224,7 +228,7 @@ struct ChatView: View {
                         }
                     }
                 } label: {
-                    Label(chat.model.map(modelName) ?? chat.models[0].displayName, systemImage: "cpu")
+                    Label(chat.model.map(modelName) ?? chat.models[0].displayName, glyph: .model)
                 }
             }
             if !chat.efforts.isEmpty {
@@ -238,7 +242,7 @@ struct ChatView: View {
                         }
                     }
                 } label: {
-                    Label(chat.effort.map(Self.effortName) ?? "Effort", systemImage: "brain")
+                    Label(chat.effort.map(Self.effortName) ?? "Effort", glyph: .effort)
                 }
             }
             Spacer()
@@ -263,7 +267,7 @@ struct ChatView: View {
             if chat.takesFiles {
                 Menu {
                     Button("Photo Library", systemImage: "photo.on.rectangle") { choosingPhotos = true }
-                    Button("Files", systemImage: "folder") { choosingFiles = true }
+                    Button("Files", glyph: .folder) { choosingFiles = true }
                 } label: {
                     Image(systemName: "plus.circle.fill").font(.system(size: 30))
                 }

@@ -26,7 +26,7 @@ struct NewProjectView: View {
                 if let listing {
                     if listing.repos.isEmpty {
                         ContentUnavailableView {
-                            Label("No repositories", systemImage: "folder")
+                            Label("No repositories", glyph: .folder)
                         } description: {
                             Text("Nothing in \(listing.roots.isEmpty ? "any configured root" : listing.roots.joined(separator: ", ")). `repo_roots` in the server's config file is where it looks.")
                         }
@@ -81,9 +81,9 @@ private struct RepoRow: View {
             HStack {
                 Text(repo.name).font(.body.weight(.medium)).foregroundStyle(.primary)
                 Spacer()
-                Text(repo.branch ?? "detached").font(.caption.monospaced()).foregroundStyle(.secondary)
+                Text(repo.branch ?? "detached").font(.caption).foregroundStyle(.secondary)
             }
-            Text(repo.display).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+            Text(repo.display).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             // A checkout with no origin has nothing for the sandbox to clone.
             Text(repo.origin ?? "No origin, so it can't be cloned")
                 .font(.caption2.monospaced())

@@ -15,14 +15,14 @@ struct DockView: View {
         case facts = "Facts"
 
         var id: String { rawValue }
-        var icon: String {
+        var icon: Glyph {
             switch self {
-            case .files: "folder"
-            case .git: "arrow.triangle.branch"
-            case .events: "waveform.path.ecg"
-            case .policy: "shield.lefthalf.filled"
-            case .ports: "point.3.connected.trianglepath.dotted"
-            case .facts: "info.circle"
+            case .files: .files
+            case .git: .branch
+            case .events: .events
+            case .policy: .policy
+            case .ports: .ports
+            case .facts: .info
             }
         }
     }
@@ -42,7 +42,7 @@ struct DockView: View {
         VStack(spacing: 0) {
             Picker("Pane", selection: $pane) {
                 ForEach(panes) { p in
-                    Image(systemName: p.icon).accessibilityLabel(p.rawValue).tag(p)
+                    Image(glyph: p.icon).accessibilityLabel(p.rawValue).tag(p)
                 }
             }
             .pickerStyle(.segmented)
@@ -90,7 +90,7 @@ struct Loaded<T, Content: View>: View {
         if let value {
             content(value)
         } else if let error {
-            ContentUnavailableView("Couldn't read it", systemImage: "exclamationmark.triangle", description: Text(error))
+            ContentUnavailableView("Couldn't read it", image: Glyph.warning.name, description: Text(error))
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }

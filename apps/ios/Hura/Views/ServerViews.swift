@@ -7,7 +7,7 @@ struct ServerRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "shippingbox")
+            Image(glyph: .server)
                 .font(.title2)
                 .foregroundStyle(.tint)
                 .frame(width: 34)
@@ -81,7 +81,7 @@ struct ServerView: View {
                 }
             } else if let problem = server.problem {
                 Section {
-                    Label(problem, systemImage: "exclamationmark.triangle")
+                    Label(problem, glyph: .warning)
                         .font(.subheadline)
                         .foregroundStyle(.orange)
                 }
@@ -108,7 +108,7 @@ struct ServerView: View {
             if server.state == .online, server.projects.isEmpty, server.sessions.isEmpty {
                 Section {
                     ContentUnavailableView {
-                        Label("No projects", systemImage: "folder")
+                        Label("No projects", glyph: .folder)
                     } description: {
                         Text("A project is a repository on this server that you start worktrees from.")
                     } actions: {
@@ -123,14 +123,14 @@ struct ServerView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button { addingProject = true } label: { Label("New Project", systemImage: "folder.badge.plus") }
+                    Button { addingProject = true } label: { Label("New Project", glyph: .newProject) }
                     if !server.projects.isEmpty {
                         Menu {
                             ForEach(server.projects) { p in
                                 Button(p.name) { creatingIn = p }
                             }
                         } label: {
-                            Label("New Worktree", systemImage: "arrow.triangle.branch")
+                            Label("New Worktree", glyph: .branch)
                         }
                     }
                 } label: {
@@ -140,9 +140,9 @@ struct ServerView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("Integrations", systemImage: "puzzlepiece.extension") { screen = .integrations }
-                    Button("Settings", systemImage: "gearshape") { screen = .settings }
-                    Button("About", systemImage: "info.circle") { screen = .about }
+                    Button("Integrations", glyph: .integrations) { screen = .integrations }
+                    Button("Settings", glyph: .settings) { screen = .settings }
+                    Button("About", glyph: .info) { screen = .about }
                 } label: {
                     Label("Server", systemImage: "ellipsis.circle")
                 }
@@ -226,11 +226,11 @@ private struct ProjectHeader: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.name).font(.subheadline.weight(.semibold)).textCase(nil)
-                Text(project.repo).font(.caption2.monospaced()).textCase(nil).lineLimit(1).truncationMode(.middle)
+                Text(project.repo).font(.caption2).textCase(nil).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
             Menu {
-                Button("Forget Project", systemImage: "folder.badge.minus", role: .destructive, action: forget)
+                Button("Forget Project", glyph: .forgetProject, role: .destructive, action: forget)
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -243,35 +243,45 @@ struct SessionRow: View {
     let report: AgentReport?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: session.isChat ? "bubble.left.and.text.bubble.right" : "terminal")
-                    .foregroundStyle(.secondary)
-                Text(session.name).font(.body.weight(.medium))
-                if session.isWorktree {
-                    Image(systemName: "exclamationmark.shield")
-                        .foregroundStyle(.orange)
-                        .accessibilityLabel("Worktree on the server, not isolated")
+        // The desktop sidebar's row, as a message in Mail is laid out: the
+        // name, and under it the branch -- or, when there is something to say
+        // instead, what the agent is waiting on or why it failed. The state
+        // and the age are columns either side, centred on the two lines
+        // rather than hung off the first, which on a phone's taller rows left
+        // them looking pinned to the top.
+        HStack(alignment: .center, spacing: 10) {
+            StateMark(state: liveState(session, report))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(session.name).font(.body.weight(.medium)).lineLimit(1)
+                    if session.isWorktree {
+                        Image(glyph: .unsandboxed)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .accessibilityLabel("Worktree on the server, not isolated")
+                    }
                 }
-                Spacer()
-                StatusBadge(status: agentStatus(session, report))
+                if let failure = session.failure, ["failed", "dead"].contains(session.state) {
+                    Text(failure)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                } else if let prompt = report?.state == "waiting" ? (report?.prompt ?? report?.detail) : nil {
+                    Text(prompt)
+                        .font(.caption)
+                        .foregroundStyle(.purple)
+                        .lineLimit(2)
+                } else if !session.workBranch.isEmpty {
+                    Text(session.workBranch)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
-            if let failure = session.failure, ["failed", "dead"].contains(session.state) {
-                Text(failure)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-            } else if let prompt = report?.state == "waiting" ? (report?.prompt ?? report?.detail) : nil {
-                Text(prompt)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.orange)
-                    .lineLimit(2)
-            } else if !session.workBranch.isEmpty {
-                Text(session.workBranch)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            Spacer(minLength: 8)
+            Text(age(session.createdAt))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.tertiary)
         }
     }
 }

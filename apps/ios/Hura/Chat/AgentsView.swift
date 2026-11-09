@@ -46,7 +46,7 @@ struct AgentStatus: View {
     var body: some View {
         switch agent.status {
         case "running": WorkingDots().foregroundStyle(Color.working)
-        case "completed": Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case "completed": Image(glyph: .passing).foregroundStyle(.green)
         default: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
         }
     }

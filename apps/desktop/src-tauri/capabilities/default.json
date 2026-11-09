@@ -1,12 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the window is allowed to ask the Rust side for. Commands defined by this application are permitted by being defined; the core plugins are not, and listening for events is one of them -- without this the streaming half is denied, and the only place that is said is the webview's own console. Opening a link is allowed for web and mail addresses only, so a link in a ticket cannot ask the system to open a file or run a handler. The clipboard is text only, for the terminal's copy and paste.",
+  "description": "What the window is allowed to ask the Rust side for. Commands defined by this application are permitted by being defined; the core plugins are not, and listening for events is one of them -- without this the streaming half is denied, and the only place that is said is the webview's own console. Opening a link is allowed for web and mail addresses only, so a link in a ticket cannot ask the system to open a file or run a handler. The clipboard is text only, for the terminal's copy and paste. The window can be dragged and zoomed from its toolbar, which on macOS is where the title bar was.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:event:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
     "notification:default",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",

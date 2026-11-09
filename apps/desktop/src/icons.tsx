@@ -53,6 +53,7 @@ import {
   CircleArrowUp,
   CircleCheck,
   CircleQuestionMark,
+  CircleUserRound,
   CircleX,
   CircleDashed,
   CloudDownload,
@@ -107,8 +108,8 @@ import {
   ShieldOff,
   Sparkles,
   Square,
+  Tag,
   Terminal as TerminalGlyph,
-  Ticket,
   TriangleAlert,
   Trash,
   Undo2,
@@ -161,6 +162,7 @@ export const NewProject = FolderPlus;
 export const Integrations = Plug;
 export const Servers = ServerGlyph;
 export const Settings = SettingsGlyph;
+export const Account = CircleUserRound;
 /// Versions, updates and links. Opened from the wordmark rather than the
 /// strip, but headed by this glyph like every other screen.
 export const About = BadgeInfo;
@@ -216,7 +218,9 @@ export const Restart = RotateCw;
 /// confirmation.
 export const Store = Save;
 export const Secret = KeyRound;
-export const Tracker = Ticket;
+/// A ticket, and the trackers they come from: a tag, as a label on a piece of
+/// work. The ticket stub it replaced turned to noise at 14 pixels.
+export const Tracker = Tag;
 // A pull request, and one still a draft: the forge's own two marks for them.
 export const PullRequest = GitPullRequest;
 export const PullDraft = GitPullRequestDraft;

@@ -11,15 +11,16 @@
 // rather than hidden or forced into one. `hura new` is not going away, and a
 // worktree started from it should still be reachable here.
 //
-// The shape of a row is Orca's, and deliberately: a card rather than a line,
-// inset from the edge, with the agent's state in a fixed column to the left of
-// the name and the facts about the branch on a second line under it. A line
-// per session is the right thing when a session is a name; it stops being
-// right once a session is a name, a state, a branch, a diff and an age, which
-// on one line is five columns fighting over 240 pixels. What the card buys is
-// that the state and the name are the only things at full contrast, so the list
-// is scannable without being read -- see `style.css`, where every surface
-// treatment on it lives.
+// The shape of a row is a Mail message's, and deliberately: two lines, with
+// the agent's state in a fixed column to the left. The name and how old it is
+// on the first, as a message's sender and date; the branch and how far it has
+// got on the second, as its subject. A line per session is the right thing
+// when a session is a name; it stops being right once a session is a name, a
+// state, a branch, a diff and an age, which on one line is five columns
+// fighting over 240 pixels. Only the state and the name are at full contrast,
+// so the list is scannable without being read, and anything that is not
+// needed on every row -- the context meter, the files not yet added -- appears
+// only when it says something.
 
 import { useState } from "react";
 
@@ -266,18 +267,21 @@ export function Tree({
   );
 }
 
-/// How full the context is, as a ring: a percentage is the one number on the
-/// row that is about to *matter* -- near the top of it the agent compacts and
-/// forgets -- and a ring says "nearly full" without being read.
+/// How full the context is, as a ring, once it is nearly full: near the top
+/// the agent compacts and forgets, and a ring says so without being read.
+/// Below that it is not drawn at all -- a small ring on every row read as
+/// eleven loading spinners, and a context a third full is not news.
+const CONTEXT_HIGH = 80;
+
 function Context({ usage }: { usage: Usage }) {
   const pct = usage.context_used_percentage;
-  if (pct === null) return null;
+  if (pct === null || pct < CONTEXT_HIGH) return null;
   const r = 5;
   const c = 2 * Math.PI * r;
   const filled = Math.max(0, Math.min(100, pct)) / 100;
   const of = usage.context_size ? ` of ${Math.round(usage.context_size / 1000)}k` : "";
   return (
-    <span className={`wt-context${pct >= 80 ? " high" : ""}`} title={`context ${Math.round(pct)}%${of}`}>
+    <span className="wt-context" title={`context ${Math.round(pct)}% full${of}`}>
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
         <circle cx="6" cy="6" r={r} className="track" />
         <circle
@@ -375,11 +379,15 @@ function Worktree({
             )}
             {usage && <Context usage={usage} />}
           </span>
+          <span className="wt-age" title="how long this worktree has existed">
+            {age(s.created_at)}
+          </span>
         </span>
 
         <span className="wt-meta">
-          <Branch className="wt-branch-icon" />
-          <span className="wt-branch">{s.work_branch}</span>
+          <span className="wt-branch" title={s.work_branch}>
+            {s.work_branch}
+          </span>
           {/* Inside the row's button, so a span and not a button of its own:
               a click on it opens the pull request instead of selecting the
               worktree, and the row's menu has the same for the keyboard. */}
@@ -398,9 +406,6 @@ function Worktree({
             </span>
           )}
           {stat && <Stat stat={stat} />}
-          <span className="wt-age" title="how long this worktree has existed">
-            {age(s.created_at)}
-          </span>
         </span>
       </span>
     </button>
@@ -408,24 +413,33 @@ function Worktree({
   );
 }
 
-/// How far this worktree has diverged, in the three numbers the poll already
-/// pays for. Rendered as spans rather than one string so the added and removed
-/// counts can be coloured the way they are everywhere else in the window, and
-/// suppressed entirely when all three are zero: `+0/-0` is a fact nobody needs
-/// on eleven rows at once.
+/// How far this worktree has diverged: lines added and removed, coloured the
+/// way they are everywhere else in the window, and nothing at all when there is
+/// nothing -- `+0 −0` is a fact nobody needs on eleven rows at once.
+///
+/// Files not yet added are in the tooltip rather than on the row: `?3` was git's
+/// shorthand and nobody else's. They are said on the row only when they are all
+/// there is, as "3 new", because a row with no diff would otherwise claim the
+/// agent had done nothing.
 function Stat({ stat }: { stat: DiffStat }) {
-  if (stat.added === 0 && stat.removed === 0 && stat.untracked === 0) return null;
+  const lines = stat.added > 0 || stat.removed > 0;
+  if (!lines && stat.untracked === 0) return null;
+  const said = [
+    stat.added > 0 && `${stat.added} ${plural(stat.added, "line")} added`,
+    stat.removed > 0 && `${stat.removed} removed`,
+    stat.untracked > 0 && `${stat.untracked} new ${plural(stat.untracked, "file")} not yet added`,
+  ].filter(Boolean);
   return (
-    <span className="wt-stat" title="against the base branch">
+    <span className="wt-stat" title={`${said.join(", ")}, against the base branch`}>
       {stat.added > 0 && <span className="added">+{stat.added}</span>}
       {stat.removed > 0 && <span className="removed">−{stat.removed}</span>}
-      {stat.untracked > 0 && (
-        <span className="untracked" title={`${stat.untracked} untracked`}>
-          ?{stat.untracked}
-        </span>
-      )}
+      {!lines && <span className="untracked">{stat.untracked} new</span>}
     </span>
   );
+}
+
+function plural(n: number, word: string): string {
+  return n === 1 ? word : `${word}s`;
 }
 
 /// Relative, not absolute: the question the tree answers is "how long has this

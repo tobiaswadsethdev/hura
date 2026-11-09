@@ -72,14 +72,20 @@ const GROUPS: { key: string; relation: Relation; label: string }[] = [
 
 /// The tickets' groups: yours, then each JQL filter by name in the order the
 /// trackers list them (two trackers' filters of one name are one group), then
-/// what you created, when any tracker still shows it.
+/// what you created -- when a tracker still shows it *and* there is something
+/// in it. Hiding it on one tracker left the group on screen, empty, whenever
+/// another tracker (a GitHub one with no issues of yours, say) still had it on;
+/// an empty "assigned to me" is news, an empty "created by me" is not.
 function ticketGroups(
   trackers: ConfiguredTracker[] | null,
+  tasks: Task[],
 ): { key: string; label: string; holds: (t: Task) => boolean }[] {
   const filters = [
     ...new Set((trackers ?? []).flatMap((t) => t.source.jql_filters.map((f) => f.name))),
   ];
-  const created = trackers === null || trackers.some((t) => !t.source.hide_created);
+  const created =
+    (trackers === null || trackers.some((t) => !t.source.hide_created)) &&
+    tasks.some((t) => t.relation === "created");
   return [
     { key: "assigned", label: "assigned to me", holds: (t) => t.relation === "assigned" },
     ...filters.map((name) => ({
@@ -213,9 +219,7 @@ export function InboxBar({
               onClick={() => onView(v)}
             >
               <Mark />
-              {/* The word on the one shown; the other is its mark and its
-                  count, which is what fits beside the tools at 240 pixels. */}
-              {view === v && <span>{label}</span>}
+              <span className="inbox-views-label">{label}</span>
               {inbox !== null && <span className="inbox-views-count">{count}</span>}
             </button>
           ))}
@@ -269,7 +273,7 @@ export function InboxBar({
             </button>
           </Empty>
         ) : view === "tickets" ? (
-          ticketGroups(trackers).map((g) => {
+          ticketGroups(trackers, tasks).map((g) => {
             const key = `tickets:${g.key}`;
             const rows = tasks.filter(g.holds);
             return (

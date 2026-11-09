@@ -121,7 +121,7 @@ public final class Server: Identifiable {
         } catch TransportError.pinMismatch {
             state = .offline("The server's certificate has changed. Pair it again.")
         } catch {
-            state = .offline("Unreachable. Is Tailscale connected?")
+            state = .offline("Can't reach the server.")
         }
     }
 

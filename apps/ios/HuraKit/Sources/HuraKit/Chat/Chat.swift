@@ -470,7 +470,7 @@ public final class Chat {
             }
         } catch let e as TransportError {
             phase = .offline(e == .unauthorized ? ServerError.unauthorized.localizedDescription
-                                                : "Unreachable. Is Tailscale connected?")
+                                                : "Can't reach the server.")
         } catch {
             phase = .offline(error.localizedDescription)
         }

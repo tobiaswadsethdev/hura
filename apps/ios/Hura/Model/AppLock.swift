@@ -17,6 +17,14 @@ final class AppLock {
 
     func unlock() async {
         guard isLocked, !isAuthenticating else { return }
+        #if DEBUG
+        // `-HuraNoLock YES` at launch, for a simulator driven without hands:
+        // see `pairFromLaunchArguments`.
+        if UserDefaults.standard.bool(forKey: "HuraNoLock") {
+            isLocked = false
+            return
+        }
+        #endif
         isAuthenticating = true
         defer { isAuthenticating = false }
         let context = LAContext()

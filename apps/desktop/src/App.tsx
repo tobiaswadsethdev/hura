@@ -35,6 +35,7 @@ import {
   NoServer,
   Servers,
   Settings,
+  Account,
   Working,
 } from "./icons";
 import { InboxBar, pullProjects, pullSession, samePull } from "./Inbox";
@@ -55,6 +56,7 @@ import { NewProjectDialog } from "./NewProject";
 import { NewWorktreeDialog } from "./NewWorktree";
 import { DEFAULTS, LIMITS, usePrefs } from "./prefs";
 import { SettingsScreen } from "./Settings";
+import { AccountScreen } from "./Account";
 import { PullPanel, type PullStart } from "./Pull";
 import { TicketPanel } from "./Ticket";
 import { Split } from "./Split";
@@ -70,16 +72,21 @@ import { Select } from "./Select";
 ///
 /// `null` is the workspace, rather than a `"workspace"` member, and the
 /// asymmetry is deliberate: the workspace is not a screen you navigate to, it
-/// is what the window *is* when nothing is over it. Writing it as one of five
+/// is what the window *is* when nothing is over it. Writing it as one of six
 /// equal names would invite code that tears it down to show another, which is
 /// the one thing that must not happen -- the terminals live in it.
-type Screen = "integrations" | "servers" | "settings" | "about";
+type Screen = "integrations" | "servers" | "account" | "settings" | "about";
 
 /// How often your tickets and pull requests are read. See the effect that
 /// uses it.
 const INBOX_POLL_MS = 3 * 60_000;
 
 const MAC = navigator.userAgent.includes("Mac");
+
+/// How often the worktree list is re-read, and the events feed with it. Fixed
+/// rather than a preference: it was one, and three seconds was the answer
+/// everybody left it at.
+const REFRESH_MS = 3000;
 
 /// Fold or unfold the sidebar of tickets and pull requests, from anywhere.
 /// With Shift, because Ctrl+T on its own is a terminal's: bash and readline
@@ -392,9 +399,9 @@ export default function App() {
     // last one's say nothing about them.
     resetNotifications();
     void refresh();
-    const timer = setInterval(() => void refresh(), prefs.refreshMs);
+    const timer = setInterval(() => void refresh(), REFRESH_MS);
     return () => clearInterval(timer);
-  }, [refresh, prefs.refreshMs]);
+  }, [refresh]);
 
   /// Pairing from the window, which used to be a terminal and a restart.
   ///
@@ -682,44 +689,49 @@ export default function App() {
   // is going to tell anybody to type `hurad pair`.
   //
   // The servers screen is reachable from here and from nowhere else at this
-  // point -- there is no header yet, because a header of destinations that all
-  // need a server would be five disabled buttons.
+  // point -- the toolbar is empty, because a toolbar of destinations that all
+  // need a server would be five disabled buttons. It is there at all because
+  // on macOS it is the title bar: the traffic lights sit in it, and it is the
+  // one place the window can be dragged by.
   if (servers !== null && servers.length === 0) {
-    return screen === "servers" ? (
-      <ServersScreen
-        servers={[]}
-        onClose={() => setScreen(null)}
-        onPaired={paired}
-        onForgot={forgot}
-      />
-    ) : (
+    return (
       <div className="app">
-        <Empty size="page" icon={NoServer} note="no server paired">
-          <pre>
-            hurad serve{"\n"}
-            hurad pair desktop --host 127.0.0.1
-          </pre>
-          {/* Without --host the string carries the machine's own hostname,
-              which on a Debian-family box resolves to 127.0.1.1 while the
-              server is bound to 127.0.0.1 -- a connection refused from a
-              server that is running perfectly well. */}
-          <p className="hint">
-            <code>--host</code> is the address this window should dial, and
-            leaving it out is the usual reason a paired server cannot be
-            reached.
-          </p>
-          <button className="go" onClick={() => setScreen("servers")}>
-            <Servers />
-            paste a pairing string
-          </button>
-        </Empty>
+        <header data-tauri-drag-region />
+        {screen === "servers" ? (
+          <ServersScreen
+            servers={[]}
+            onClose={() => setScreen(null)}
+            onPaired={paired}
+            onForgot={forgot}
+          />
+        ) : (
+          <Empty size="page" icon={NoServer} note="no server paired">
+            <pre>
+              hurad serve{"\n"}
+              hurad pair desktop --host 127.0.0.1
+            </pre>
+            {/* Without --host the string carries the machine's own hostname,
+                which on a Debian-family box resolves to 127.0.1.1 while the
+                server is bound to 127.0.0.1 -- a connection refused from a
+                server that is running perfectly well. */}
+            <p className="hint">
+              <code>--host</code> is the address this window should dial, and
+              leaving it out is the usual reason a paired server cannot be
+              reached.
+            </p>
+            <button className="go" onClick={() => setScreen("servers")}>
+              <Servers />
+              paste a pairing string
+            </button>
+          </Empty>
+        )}
       </div>
     );
   }
 
   return (
     <div className="app">
-      <header>
+      <header data-tauri-drag-region>
         {/* The wordmark is the way to the about screen, and carries the
             version so "which build is this" is never more than a glance. */}
         <button
@@ -756,29 +768,13 @@ export default function App() {
             options={servers.map((s) => ({ value: s.name, label: s.name, hint: s.address }))}
           />
         )}
-        {/* The rate-limit windows are the *account's*, not this session's --
-            two sessions on one account report the same numbers -- so they sit
-            in the header rather than beside a worktree. The reading is
-            whichever session last reported one; there is no source for it other
-            than an agent's own status line. */}
-        {(selected ? polls[selected]?.usage : undefined)?.windows.map((w) => (
-          <span
-            key={w.label}
-            className={`limit${w.used_percentage >= 80 ? " high" : ""}`}
-            title={
-              w.resets_at ? `resets ${new Date(w.resets_at * 1000).toLocaleString()}` : undefined
-            }
-          >
-            {w.label} {Math.round(w.used_percentage)}%
-          </span>
-        ))}
         {error && <span className="error">{error}</span>}
 
         {/* The window's five buttons, and the words are gone from all of them.
             The old row read `inbox`, `new project`, `integrations`, `servers`,
             `settings` -- about 210 pixels of label for five things that are
             pressed once each per sitting, in a 40-pixel strip that is also
-            where a rate-limit reading and an error message have to fit.
+            where an error message has to fit.
 
             The note that used to sit here said an icon-only toolbar is a quiz,
             and it was right about the failure mode and wrong about the
@@ -820,6 +816,13 @@ export default function App() {
             onClose={() => setScreen(null)}
           />
           <Destination
+            icon={Account}
+            label="account"
+            on={screen === "account"}
+            onOpen={() => setScreen("account")}
+            onClose={() => setScreen(null)}
+          />
+          <Destination
             icon={Settings}
             label="settings"
             on={screen === "settings"}
@@ -850,9 +853,9 @@ export default function App() {
         <div className="workspace" hidden={screen !== null}>
           {/* The widths are inline styles rather than CSS variables, and that
               is the point of doing it this way: they are *values*, one per
-              sidebar, and the handle beside each writes the same number the
-              settings screen does. A `--tree-width` on the root would be a
-              third place for the same fact to live. */}
+              sidebar, kept in the window's preferences and written by the
+              handle beside each. A `--tree-width` on the root would be a
+              second place for the same fact to live. */}
           <Tree
             width={prefs.treeWidth}
             groups={groups}
@@ -1003,7 +1006,7 @@ export default function App() {
                 session={session}
                 usage={(selected ? polls[selected]?.usage : undefined) ?? null}
                 listening={(selected ? polls[selected]?.ports : undefined) ?? []}
-                refreshMs={prefs.refreshMs}
+                refreshMs={REFRESH_MS}
                 onOpenFile={(path) => openTab(session.name, { kind: "file", path })}
                 onOpenDiff={(path, against: Against) =>
                   openTab(session.name, { kind: "filediff", path, against })
@@ -1067,9 +1070,14 @@ export default function App() {
               setTrackers(list);
               readInbox();
             }}
-            onSignedIn={setSignedIn}
+            signedIn={signedIn}
+            onSignIn={() => setScreen("account")}
             onClose={() => setScreen(null)}
           />
+        )}
+
+        {screen === "account" && (
+          <AccountScreen onChanged={setSignedIn} onClose={() => setScreen(null)} />
         )}
 
         {/* Beside the workspace and beside every screen, which is the point
@@ -1105,7 +1113,13 @@ export default function App() {
           onShut={(inboxShut) => setPrefs({ inboxShut })}
           onView={(inboxView) => setPrefs({ inboxView })}
           onRefresh={readInbox}
+          // Signed out, the way to trackers is signing in; signed in, it is
+          // adding one.
           onSetup={() => {
+            if (signedIn === false) {
+              setScreen("account");
+              return;
+            }
             setSettingsAt("trackers");
             setScreen("settings");
           }}
