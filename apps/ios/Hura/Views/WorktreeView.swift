@@ -135,7 +135,7 @@ struct WorktreeView: View {
         switch tab {
         case let .chat(conv):
             if let c = chats[conv] {
-                ChatView(chat: c)
+                ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? ""))
                     .environment(\.readPicture) { [server, name] path in
                         try? await server.api.file(name, path: path).image
                     }
@@ -150,7 +150,7 @@ struct WorktreeView: View {
         if session?.isLive == true {
             ToolbarItem(placement: .primaryAction) {
                 Button { showingDock = true } label: {
-                    Label("Files, Git and Policy", systemImage: "sidebar.right")
+                    Label("Files, Git and Policy", glyph: .dock)
                 }
             }
         }
@@ -159,19 +159,19 @@ struct WorktreeView: View {
                 Menu {
                     Picker("Open", selection: Binding(get: { tab ?? home }, set: { switchTo($0) })) {
                         ForEach(tabs, id: \.self) { t in
-                            Label(t.label, systemImage: icon(t)).tag(t)
+                            Label(t.label, glyph: icon(t)).tag(t)
                         }
                     }
                     Divider()
                     if session.isChat {
-                        Button("New Conversation", systemImage: "plus.bubble") { newConversation() }
+                        Button("New Conversation", glyph: .newConversation) { newConversation() }
                     }
-                    Button("New Shell", systemImage: "apple.terminal") { newShell() }
+                    Button("New Shell", glyph: .shell) { newShell() }
                     if let tab, !tab.isAgent {
                         Button("Close \(tab.label)", systemImage: "xmark", role: .destructive) { close(tab) }
                     }
                     Divider()
-                    Button("Details", systemImage: "info.circle") { showingDetails = true }
+                    Button("Details", glyph: .info) { showingDetails = true }
                 } label: {
                     Label("Tabs", systemImage: tabs.count > 1 ? "square.on.square" : "ellipsis.circle")
                 }
@@ -179,11 +179,11 @@ struct WorktreeView: View {
         }
     }
 
-    private func icon(_ t: WorkTab) -> String {
+    private func icon(_ t: WorkTab) -> Glyph {
         switch t {
-        case .chat: "bubble.left.and.text.bubble.right"
-        case .terminal(nil): "terminal"
-        case .terminal: "apple.terminal"
+        case .chat: .chat
+        case .terminal(nil): .agentTerminal
+        case .terminal: .shell
         }
     }
 
@@ -196,10 +196,10 @@ struct WorktreeView: View {
                 Section {
                     LabeledContent("State") { StatusBadge(status: agentStatus(session, report)) }
                     if !session.workBranch.isEmpty {
-                        LabeledContent("Branch") { Text(session.workBranch).font(.footnote.monospaced()) }
+                        LabeledContent("Branch") { Text(session.workBranch).font(.footnote) }
                     }
                     LabeledContent("Base") {
-                        Text(session.baseBranch ?? "default branch").font(.footnote.monospaced())
+                        Text(session.baseBranch ?? "default branch").font(.footnote)
                     }
                     if let project = session.project { LabeledContent("Project", value: project) }
                     LabeledContent("Agent", value: session.isChat ? "Chat" : "Terminal")
@@ -240,7 +240,7 @@ struct WorktreeView: View {
                 }
                 Section {
                     LabeledContent("Repository") {
-                        Text(session.repo).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle)
+                        Text(session.repo).font(.caption).lineLimit(1).truncationMode(.middle)
                     }
                 }
                 Section {
@@ -256,7 +256,7 @@ struct WorktreeView: View {
                         }
                 }
             } else {
-                ContentUnavailableView("Session not found", systemImage: "questionmark.circle",
+                ContentUnavailableView("Session not found", image: Glyph.waiting.name,
                                        description: Text(server.state == .online ? "It may have been removed." : server.state.label))
             }
         }

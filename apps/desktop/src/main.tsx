@@ -12,6 +12,13 @@ import "./style.css";
 
 // Before the first render: the correction is a stylesheet rule keyed on a class
 // on <html>, and adding it afterwards would paint the window wrong once.
+// On macOS the window has no title bar of its own: the toolbar sits where it
+// was, with the traffic lights inset into it, and the window is transparent so
+// the sidebar and toolbar can show the system's material through them. See
+// `tauri.macos.conf.json`. Elsewhere the window keeps its native frame and
+// paints every surface itself.
+if (navigator.userAgent.includes("Mac")) document.documentElement.classList.add("mac");
+
 markUntrustedMetrics();
 routeLinks();
 watchForUpdates();

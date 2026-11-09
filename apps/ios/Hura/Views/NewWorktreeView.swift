@@ -72,14 +72,14 @@ struct NewWorktreeView: View {
         case let .ticket(t)?:
             Section {
                 LabeledContent(t.key) { Text(t.title).lineLimit(2) }
-                LabeledContent("Branch") { Text(branch).font(.footnote.monospaced()) }
+                LabeledContent("Branch") { Text(branch).font(.footnote) }
             } header: {
                 Text("From a ticket")
             }
         case let .pull(p, review)?:
             Section {
                 LabeledContent(pullName(p)) { Text(p.title).lineLimit(2) }
-                LabeledContent("Branch") { Text(p.branch).font(.footnote.monospaced()) }
+                LabeledContent("Branch") { Text(p.branch).font(.footnote) }
             } header: {
                 Text("From a pull request")
             } footer: {
@@ -110,7 +110,7 @@ struct NewWorktreeView: View {
                 if worktree {
                     Label("A git worktree on the server, not isolated. The agent runs there as the server's user, "
                           + "with its files, credentials and network, and no policy.",
-                          systemImage: "exclamationmark.shield")
+                          glyph: .unsandboxed)
                         .foregroundStyle(.orange)
                 } else {
                     Text("Its own VM, under a network policy.")
@@ -195,15 +195,15 @@ struct NewWorktreeView: View {
             Section {
                 if facts.uncommitted > 0 {
                     Label("\(facts.uncommitted) uncommitted change\(facts.uncommitted == 1 ? "" : "s") in the checkout won't be in the worktree.",
-                          systemImage: "exclamationmark.triangle")
+                          glyph: .warning)
                 }
                 if let n = facts.unpushed, n > 0 {
                     Label("\(n) unpushed commit\(n == 1 ? "" : "s") won't be either: the sandbox clones the remote.",
-                          systemImage: "exclamationmark.triangle")
+                          glyph: .warning)
                 }
                 if !facts.baseOnRemote {
                     Label("The checkout's branch isn't on the remote, so the worktree starts from the default branch.",
-                          systemImage: "info.circle")
+                          glyph: .info)
                 }
             }
             .font(.footnote)

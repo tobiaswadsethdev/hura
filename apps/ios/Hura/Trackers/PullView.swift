@@ -38,14 +38,14 @@ struct PullView: View {
                         Text(d.state).font(.caption.weight(.semibold))
                             .foregroundStyle(d.state == "open" ? .green : d.state == "merged" ? .purple : .secondary)
                         if d.draft { Text("draft").font(.caption) }
-                        if d.conflicts { Label("conflicts", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
+                        if d.conflicts { Label("conflicts", glyph: .warning).font(.caption).foregroundStyle(.orange) }
                         Spacer()
                         if let a = d.additions, let r = d.deletions {
-                            Text("+\(a)").foregroundStyle(.green).font(.caption.monospaced())
-                            Text("−\(r)").foregroundStyle(.red).font(.caption.monospaced())
+                            Text("+\(a)").foregroundStyle(.green).font(.caption.monospacedDigit())
+                            Text("−\(r)").foregroundStyle(.red).font(.caption.monospacedDigit())
                         }
                     }
-                    LabeledContent("Branch") { Text("\(d.branch) → \(d.base)").font(.caption.monospaced()) }
+                    LabeledContent("Branch") { Text("\(d.branch) → \(d.base)").font(.caption) }
                     if let a = d.author { LabeledContent("Author", value: a.me ? "\(a.name) (you)" : a.name) }
                     ForEach(d.warnings, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
                 }
@@ -78,17 +78,17 @@ struct PullView: View {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     if !pull.fork, detail?.state ?? "open" == "open" {
-                        Button("Work on It", systemImage: "hammer") { starting = .pull(pull, review: false) }
-                        Button("Review It", systemImage: "eye") { starting = .pull(pull, review: true) }
+                        Button("Work on It", glyph: .workOn) { starting = .pull(pull, review: false) }
+                        Button("Review It", glyph: .review) { starting = .pull(pull, review: true) }
                     }
                     if let d = detail, !d.offers.isEmpty {
-                        Button("Give a Review…", systemImage: "checkmark.seal") { voting = true }
+                        Button("Give a Review…", glyph: .approve) { voting = true }
                     }
                     if let d = detail, let m = d.merging, !m.methods.isEmpty, !d.draft {
                         let words = MergeWords(kind: d.kind)
-                        Button("\(words.now)…", systemImage: "arrow.triangle.merge") { merging = .now }
+                        Button("\(words.now)…", glyph: .merge) { merging = .now }
                         if m.auto == nil, m.canAuto {
-                            Button("\(words.auto)…", systemImage: "clock.arrow.circlepath") { merging = .auto }
+                            Button("\(words.auto)…", glyph: .autoMerge) { merging = .auto }
                         }
                     }
                     Button("Open in the Browser", systemImage: "safari") { openURL(URL(string: pull.url)!) }
@@ -155,7 +155,7 @@ struct PullView: View {
             Section("Checks") {
                 ForEach(Array(d.checks.enumerated()), id: \.offset) { _, c in
                     HStack {
-                        Image(systemName: checkIcon(c.state)).foregroundStyle(checkColor(c.state))
+                        Image(glyph: checkIcon(c.state)).foregroundStyle(checkColor(c.state))
                         Text(c.name).font(.callout)
                         if c.required { Text("required").font(.caption2).foregroundStyle(.secondary) }
                         Spacer()
@@ -204,7 +204,7 @@ struct PullView: View {
         Section {
             if let auto = m.auto {
                 VStack(alignment: .leading, spacing: 3) {
-                    Label(words.isSet, systemImage: "clock.arrow.circlepath").foregroundStyle(.green)
+                    Label(words.isSet, glyph: .autoMerge).foregroundStyle(.green)
                     let parts = [auto.by.map { "by \($0.me ? "you" : $0.name)" },
                                  auto.method.map(words.method),
                                  auto.deleteBranch ? "deletes the branch" : nil].compactMap { $0 }
@@ -221,7 +221,7 @@ struct PullView: View {
                 Text("This account can't merge it.").font(.callout).foregroundStyle(.secondary)
             } else {
                 if d.conflicts {
-                    Label("It conflicts with \(d.base), so it can't merge as it stands.", systemImage: "exclamationmark.triangle")
+                    Label("It conflicts with \(d.base), so it can't merge as it stands.", glyph: .warning)
                         .font(.callout).foregroundStyle(.orange)
                 }
                 HStack {
@@ -276,12 +276,12 @@ struct PullView: View {
         }
     }
 
-    private func checkIcon(_ s: String) -> String {
+    private func checkIcon(_ s: String) -> Glyph {
         switch s {
-        case "passing": "checkmark.circle.fill"
-        case "failing": "xmark.circle.fill"
-        case "pending": "clock.fill"
-        default: "minus.circle"
+        case "passing": .passing
+        case "failing": .failing
+        case "pending": .pending
+        default: .skipped
         }
     }
 
@@ -487,7 +487,7 @@ private struct PullFilesSection: View {
                             ChangeRow(file: ChangedFile(path: f.path, change: f.change))
                             Spacer()
                             if let a = f.additions, let d = f.deletions {
-                                Text("+\(a) −\(d)").font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                Text("+\(a) −\(d)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -521,7 +521,7 @@ private struct PullFileDiffView: View {
     var body: some View {
         Loaded(value: diff, error: error) { diff in
             if diff.binary {
-                ContentUnavailableView("Binary file", systemImage: "doc.questionmark",
+                ContentUnavailableView("Binary file", image: Glyph.binary.name,
                                        description: Text("There's no diff to show."))
             } else if let model {
                 VStack(spacing: 0) {

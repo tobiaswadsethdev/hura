@@ -25,7 +25,7 @@ struct PairView: View {
                 }
                 if let error {
                     Section {
-                        Label(error, systemImage: "exclamationmark.triangle")
+                        Label(error, glyph: .warning)
                             .foregroundStyle(.red)
                     }
                 }

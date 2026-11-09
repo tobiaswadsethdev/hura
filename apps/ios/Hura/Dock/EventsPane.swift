@@ -98,7 +98,7 @@ struct EventsPane: View {
     private func endpointLabel(_ g: EndpointGroup, s: Standing, denied: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(systemName: denied ? "xmark.shield.fill" : "checkmark.shield.fill")
+                Image(glyph: denied ? .block : .allow)
                     .foregroundStyle(denied ? .red : .green)
                 Text(g.endpoint).font(.callout.monospaced()).lineLimit(1).truncationMode(.middle)
                 Spacer()
@@ -151,26 +151,26 @@ struct EventsPane: View {
         let s = standing(endpoint)
         if denied, !s.whole {
             if !requests.isEmpty {
-                Button(requests.count == 1 ? "Allow This Path…" : "Allow These Paths…", systemImage: "checkmark.shield") {
+                Button(requests.count == 1 ? "Allow This Path…" : "Allow These Paths…", glyph: .allow) {
                     asking = Asking(kind: .allow, endpoint: endpoint, requests: requests, scope: .paths)
                 }
                 Button("Allow the Whole Host…") { asking = Asking(kind: .allow, endpoint: endpoint, requests: requests, scope: .host) }
             } else {
-                Button("Allow in This Session", systemImage: "checkmark.shield") { quick(endpoint, everywhere: false) }
-                Button("Allow in Every New Session Too", systemImage: "checkmark.shield") { quick(endpoint, everywhere: true) }
+                Button("Allow in This Session", glyph: .allow) { quick(endpoint, everywhere: false) }
+                Button("Allow in Every New Session Too", glyph: .allow) { quick(endpoint, everywhere: true) }
                 Button("Allow Only Some Paths…") { asking = Asking(kind: .allow, endpoint: endpoint, requests: [], scope: .paths) }
                 if s.watch == nil {
                     // Refused before it said what it wanted; reading its
                     // requests is what makes the next try say.
-                    Button("Show the Paths It Asks For", systemImage: "eye") { watch(endpoint) }
+                    Button("Show the Paths It Asks For", glyph: .review) { watch(endpoint) }
                 }
             }
         }
         if let id = s.watch {
-            Button("Stop Reading Its Requests", systemImage: "eye.slash") { change { try await $0.removeRule(name, id: id) } }
+            Button("Stop Reading Its Requests", glyph: .stopWatching) { change { try await $0.removeRule(name, id: id) } }
         }
         if s.open, !s.denied {
-            Button("Block…", systemImage: "xmark.shield", role: .destructive) {
+            Button("Block…", glyph: .block, role: .destructive) {
                 asking = Asking(kind: .block, endpoint: endpoint, requests: [])
             }
         }

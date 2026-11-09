@@ -64,7 +64,7 @@ public enum PairingError: Error, LocalizedError, Equatable {
         case .notHurad: "Something answered at that address, but it isn't hurad."
         case .pinMismatch: "The server's certificate doesn't match the pairing string. Nothing was sent."
         case .tokenRefused: "The server doesn't accept this token. Run `hurad pair` again for a new one."
-        case let .unreachable(why): "Couldn't reach the server: \(why). Is Tailscale connected?"
+        case let .unreachable(why): "Couldn't reach the server: \(why)."
         }
     }
 }

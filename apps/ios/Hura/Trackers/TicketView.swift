@@ -47,7 +47,7 @@ struct TicketView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Button("Start a Worktree", systemImage: "play") { starting = .ticket(task) }
+                    Button("Start a Worktree", glyph: .start) { starting = .ticket(task) }
                     if readsHere {
                         Button("Edit Fields", systemImage: "pencil") { editing = true }
                     }

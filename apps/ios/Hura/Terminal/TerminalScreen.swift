@@ -18,7 +18,7 @@ struct TerminalScreen: View {
         VStack(spacing: 0) {
             switch channel.phase {
             case let .offline(why), let .closed(why):
-                Label(why, systemImage: channel.phase == .closed(why) ? "xmark.circle" : "wifi.slash")
+                Label(why, glyph: channel.phase == .closed(why) ? .closed : .offline)
                     .font(.footnote)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)

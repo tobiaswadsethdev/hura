@@ -79,7 +79,7 @@ struct AttachedStrip: View {
                 .frame(width: 56, height: 56)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         } else {
-            Label(f.name, systemImage: "doc")
+            Label(f.name, glyph: .file)
                 .font(.caption)
                 .lineLimit(1)
                 .frame(maxWidth: 160, minHeight: 56)

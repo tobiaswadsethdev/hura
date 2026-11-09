@@ -21,17 +21,12 @@ import { useCallback, useEffect, useState } from "react";
 const KEY = "hura.prefs";
 
 export type Prefs = {
-  /// The sidebars, in pixels. Also what dragging their edges writes -- there is
-  /// one number and two ways to set it, rather than a drag the settings screen
-  /// disagrees with.
+  /// The sidebars, in pixels: what dragging their edges writes, and what
+  /// double-clicking one puts back to the default.
   treeWidth: number;
   dockWidth: number;
   /// The sidebar of your tickets and pull requests, on the far right.
   inboxWidth: number;
-  /// How often the worktree list is re-read, in milliseconds. A round trip to a
-  /// server that may be a continent away, which is the reason this is worth a
-  /// preference at all: three seconds is right on a LAN and wrong over a VPN.
-  refreshMs: number;
   /// Whether the OS is told when an agent starts waiting.
   ///
   /// On by default, because it is the largest thing this window has over a
@@ -59,9 +54,9 @@ export type InboxView = "tickets" | "pulls";
 
 /// The bounds, and the reasons.
 ///
-/// Named rather than inlined because the drag handles and the settings screen
-/// both clamp to them, and a drag that could reach a width the settings screen
-/// refuses would be two answers to how narrow a sidebar may be.
+/// Named rather than inlined because both the drag handles and `sanitize`
+/// clamp to them, and a stored width a handle could never have reached would be
+/// two answers to how narrow a sidebar may be.
 export const LIMITS = {
   // 180 is where a worktree card stops being able to show a name and a branch
   // on two lines; past 560 the tree is wider than the diff beside it.
@@ -72,13 +67,6 @@ export const LIMITS = {
   // 240 still fits a key, a status and a title's first words; past 520 it is
   // taking the width a diff needs, for rows that are two lines tall.
   inboxWidth: { min: 240, max: 520 },
-  // The ceiling is the config file's own -- past a minute the list has stopped
-  // being live and the window would be better closed. The floor is *not*: the
-  // file allows 250ms because there it scaled an exec inside a sandbox on this
-  // machine, and this is two requests to a server that may be a continent
-  // away. Four `Ls` a second down a VPN is a preference nobody should be able
-  // to set by holding an arrow key.
-  refreshMs: { min: 500, max: 60_000 },
 } as const;
 
 export const DEFAULTS: Prefs = {
@@ -87,7 +75,6 @@ export const DEFAULTS: Prefs = {
   treeWidth: 260,
   dockWidth: 400,
   inboxWidth: 300,
-  refreshMs: 3000,
   notify: true,
   notifyTickets: true,
   inboxOpen: true,
@@ -116,7 +103,6 @@ export function sanitize(stored: unknown): Prefs {
     treeWidth: number(raw.treeWidth, LIMITS.treeWidth, DEFAULTS.treeWidth),
     dockWidth: number(raw.dockWidth, LIMITS.dockWidth, DEFAULTS.dockWidth),
     inboxWidth: number(raw.inboxWidth, LIMITS.inboxWidth, DEFAULTS.inboxWidth),
-    refreshMs: number(raw.refreshMs, LIMITS.refreshMs, DEFAULTS.refreshMs),
     notify: typeof raw.notify === "boolean" ? raw.notify : DEFAULTS.notify,
     notifyTickets:
       typeof raw.notifyTickets === "boolean" ? raw.notifyTickets : DEFAULTS.notifyTickets,
@@ -145,8 +131,7 @@ function read(): Prefs {
 ///
 /// One hook used in one place -- `App` -- and passed down, rather than a store
 /// each component reads: the widths are laid out by the grid in `App`, and two
-/// components holding their own copy is how a drag and the settings screen
-/// start disagreeing.
+/// components holding their own copy is how two of them start disagreeing.
 export function usePrefs(): [Prefs, (change: Partial<Prefs>) => void] {
   const [prefs, setPrefs] = useState<Prefs>(read);
 

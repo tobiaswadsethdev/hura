@@ -110,12 +110,12 @@ struct IntegrationsView: View {
                     ProgressView()
                 } else if s.managed {
                     if s.state == "running" {
-                        Button("Restart", systemImage: "arrow.clockwise") { mcp(s, "restart") }
+                        Button("Restart", glyph: .restart) { mcp(s, "restart") }
                             .labelStyle(.iconOnly)
-                        Button("Stop", systemImage: "stop.fill") { mcp(s, "stop") }
+                        Button("Stop", glyph: .stop) { mcp(s, "stop") }
                             .labelStyle(.iconOnly)
                     } else {
-                        Button("Start", systemImage: "play.fill") { mcp(s, "start") }
+                        Button("Start", glyph: .start) { mcp(s, "start") }
                             .labelStyle(.iconOnly)
                     }
                 }
@@ -141,7 +141,7 @@ struct IntegrationsView: View {
     private func secretRow(_ s: NamedSecret) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(s.name).font(.callout.monospaced())
+                Text(s.name).font(.callout)
                 Text(s.usedBy.isEmpty ? "Nothing uses it" : "Used by \(s.usedBy.joined(separator: ", "))")
                     .font(.caption).foregroundStyle(.secondary)
             }

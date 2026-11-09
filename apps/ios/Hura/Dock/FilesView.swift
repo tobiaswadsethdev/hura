@@ -31,7 +31,7 @@ struct DirView: View {
                         // Pushed over a session, which hides the tabs.
                         .toolbar(.hidden, for: .tabBar)
                     } label: {
-                        Label(e.name, systemImage: e.dir ? "folder" : icon(e.name))
+                        Label(e.name, glyph: e.dir ? .folder : icon(e.name))
                     }
                     .contextMenu {
                         Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = full }
@@ -58,12 +58,12 @@ struct DirView: View {
     }
 }
 
-func icon(_ file: String) -> String {
+func icon(_ file: String) -> Glyph {
     switch (file as NSString).pathExtension.lowercased() {
-    case "md", "txt": "doc.text"
-    case "json", "toml", "yaml", "yml", "lock": "doc.badge.gearshape"
-    case "png", "jpg", "jpeg", "gif", "svg", "webp": "photo"
-    default: "doc.plaintext"
+    case "md", "txt": .fileText
+    case "json", "toml", "yaml", "yml", "lock": .fileConfig
+    case "png", "jpg", "jpeg", "gif", "svg", "webp": .fileImage
+    default: .file
     }
 }
 
@@ -88,7 +88,7 @@ struct FileView: View {
                     .padding()
                 }
             } else if file.binary {
-                ContentUnavailableView("Binary file", systemImage: "doc.questionmark",
+                ContentUnavailableView("Binary file", image: Glyph.binary.name,
                                        description: Text("\(file.bytes) bytes, so there's nothing to show."))
             } else {
                 VStack(spacing: 0) {

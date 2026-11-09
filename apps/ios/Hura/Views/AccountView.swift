@@ -166,7 +166,7 @@ private struct DeviceRow: View {
 
     var body: some View {
         HStack {
-            Image(systemName: icon).foregroundStyle(.secondary).frame(width: 24)
+            Image(glyph: icon).foregroundStyle(.secondary).frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(device.name)
                 Text(device.current ? "This device" : "Last seen \(device.lastSeenAt.formatted(.relative(presentation: .named)))")
@@ -175,11 +175,11 @@ private struct DeviceRow: View {
         }
     }
 
-    private var icon: String {
+    private var icon: Glyph {
         switch device.platform {
-        case "ios": "iphone"
-        case "macos": "laptopcomputer"
-        default: "desktopcomputer"
+        case "ios": .phone
+        case "macos": .laptop
+        default: .desktop
         }
     }
 }

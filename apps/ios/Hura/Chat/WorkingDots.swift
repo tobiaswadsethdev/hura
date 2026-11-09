@@ -70,6 +70,6 @@ struct WorkingDots: View {
 }
 
 extension Color {
-    /// The desktop's `--working`.
-    static let working = Color(red: 0xEA / 255, green: 0xB3 / 255, blue: 0x08 / 255)
+    /// The desktop's `--working`, which is the system's yellow.
+    static let working = Color.yellow
 }

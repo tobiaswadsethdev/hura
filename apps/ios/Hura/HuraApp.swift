@@ -17,14 +17,14 @@ struct HuraApp: App {
             ZStack {
                 TabView(selection: $tab) {
                     ServerListView(pendingPairURL: $pendingPairURL)
-                        .tabItem { Label("Servers", systemImage: "shippingbox") }
+                        .tabItem { Label("Servers", glyph: .server) }
                         .tag(0)
                     InboxView()
-                        .tabItem { Label("Inbox", systemImage: "tray") }
+                        .tabItem { Label("Inbox", glyph: .inbox) }
                         .badge(trackers.unseenCount)
                         .tag(1)
                     AccountView()
-                        .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                        .tabItem { Label("Account", glyph: .account) }
                         .tag(2)
                 }
                 .onChange(of: tab) { if tab == 1 { trackers.markSeen() } }
@@ -65,6 +65,9 @@ struct HuraApp: App {
                 model.resumeAll()
                 trackers.resume()
                 await lock.unlock()
+                #if DEBUG
+                await pairFromLaunchArguments()
+                #endif
             }
             .onOpenURL { url in
                 // A hura:// pairing string opens the pairing screen; nothing
@@ -91,34 +94,96 @@ struct HuraApp: App {
     }
 }
 
+#if DEBUG
+extension HuraApp {
+    /// Debug builds only: pair with the server a launch argument names, and
+    /// sign in to the hura cloud another names, with no screen to confirm
+    /// either on --
+    ///
+    ///     xcrun simctl launch <device> dev.tobiaswadseth.hura.ios \
+    ///         -HuraPair 'hura://127.0.0.1:18555/<token>#<fingerprint>' \
+    ///         -HuraCloud http://127.0.0.1:18556 -HuraNoLock YES
+    ///
+    /// so the app can be looked at in a simulator against stand-ins
+    /// (`Tools/fake-hurad.py` is both) with nothing to tap. The pairing is the
+    /// real one -- the certificate is pinned and the token checked -- only the
+    /// confirmation is skipped; the sign-in is the emailed-code one, with a
+    /// code the stand-in takes.
+    ///
+    /// `-HuraOpen inbox` or `account` opens that tab; `server` the first
+    /// server's list, and a session's name that session, by the same route a
+    /// tapped notification takes.
+    @MainActor
+    func pairFromLaunchArguments() async {
+        let defaults = UserDefaults.standard
+        if let raw = defaults.string(forKey: "HuraPair"),
+           let pairing = try? PairingString(raw),
+           let record = try? await Pairing.pair(pairing) {
+            _ = try? model.add(record)
+        }
+        if let raw = defaults.string(forKey: "HuraCloud"), let base = URL(string: raw),
+           await Cloud.shared.current?.base != base {
+            await Cloud.shared.signOut()
+            _ = try? await Cloud.shared.verify(email: "you@example.com", code: "000000",
+                                              deviceName: UIDevice.current.name, base: base)
+            await account.load()
+            await trackers.refresh()
+        }
+        guard let open = defaults.string(forKey: "HuraOpen") else { return }
+        // After the first frame: a screen only hears a change made while it is
+        // on screen, and at launch it is not yet.
+        try? await Task.sleep(for: .milliseconds(500))
+        switch open {
+        case "inbox": tab = 1
+        case "account": tab = 2
+        default:
+            guard let server = model.servers.first else { return }
+            let id = server.record.serverID
+            model.pendingRoute = open == "server" ? [.server(id)] : [.server(id), .session(serverID: id, name: open)]
+        }
+    }
+}
+#endif
+
 struct LockView: View {
     let lock: AppLock
 
     var body: some View {
+        // On the system background, as the launch screen is, so opening the
+        // app goes from one to the other without a change of colour: the
+        // app's icon, which carries its name, and the way in.
         ZStack {
-            Color("LaunchBackground").ignoresSafeArea()
-            VStack(spacing: 20) {
-                Image(systemName: "shippingbox.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(.tint)
-                Text("hura")
-                    .font(.largeTitle.weight(.semibold))
-                    .foregroundStyle(.white)
+            Color(.systemBackground).ignoresSafeArea()
+            VStack(spacing: 28) {
+                Image("Logo")
+                    .resizable()
+                    .frame(width: 112, height: 112)
+                    .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+                    // A hairline, as iOS draws round a dark icon on black,
+                    // or its edge is lost; nothing on white.
+                    .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous)
+                        .strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+                    .accessibilityLabel("hura")
                 if lock.isLocked {
-                    Button {
-                        Task { await lock.unlock() }
-                    } label: {
-                        Label("Unlock", systemImage: "faceid")
-                            .frame(minWidth: 160)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(lock.isAuthenticating)
-                    if let error = lock.lastError {
-                        Text(error)
-                            .font(.footnote)
-                            .foregroundStyle(.white.opacity(0.7))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
+                    VStack(spacing: 12) {
+                        Button {
+                            Task { await lock.unlock() }
+                        } label: {
+                            Label("Unlock", systemImage: "faceid")
+                                .frame(minWidth: 180)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.large)
+                        .disabled(lock.isAuthenticating)
+                        if let error = lock.lastError {
+                            Text(error)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
                     }
                 }
             }

@@ -23,7 +23,7 @@ struct GitPane: View {
                 let s = answer.status
                 if s.staged.isEmpty && s.unstaged.isEmpty {
                     Section {
-                        Label("Nothing to commit", systemImage: "checkmark.circle").foregroundStyle(.green)
+                        Label("Nothing to commit", glyph: .passing).foregroundStyle(.green)
                     }
                 } else {
                     Section {
@@ -33,7 +33,7 @@ struct GitPane: View {
                             run("commit", [.commit(message)])
                         } label: {
                             Label(s.staged.isEmpty ? "Stage something first" : "Commit \(s.staged.count)",
-                                  systemImage: "checkmark.seal")
+                                  glyph: .commit)
                         }
                         .disabled(running != nil || s.staged.isEmpty
                             || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -65,13 +65,13 @@ struct GitPane: View {
         let s = answer.status
         Section {
             HStack {
-                Label(s.branch, systemImage: "arrow.triangle.branch").font(.body.monospaced())
+                Label(s.branch, glyph: .branch).font(.body)
                 Spacer()
                 if running != nil { ProgressView() }
             }
             if let up = s.upstream {
                 HStack(spacing: 10) {
-                    Text("→ \(up)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                    Text("→ \(up)").font(.caption).foregroundStyle(.secondary)
                     if s.ahead > 0 { Text("\(s.ahead) ahead").font(.caption).foregroundStyle(.blue) }
                     if s.behind > 0 { Text("\(s.behind) behind").font(.caption).foregroundStyle(.orange) }
                     if s.ahead == 0 && s.behind == 0 { Text("in sync").font(.caption).foregroundStyle(.secondary) }
@@ -82,12 +82,12 @@ struct GitPane: View {
             HStack {
                 // The desktop's glyphs: a cloud for the two that only talk to
                 // the remote, an arrow at a line for the two that move commits.
-                remote("Fetch", "icloud.and.arrow.down", .fetch)
-                remote("Pull", "arrow.down.to.line", .pull)
+                remote("Fetch", .fetch, .fetch)
+                remote("Pull", .pull, .pull)
                 if s.upstream == nil {
-                    remote("Publish", "icloud.and.arrow.up", .push)
+                    remote("Publish", .publish, .push)
                 } else {
-                    remote("Push", "arrow.up.to.line", .push)
+                    remote("Push", .push, .push)
                 }
             }
             .buttonStyle(.bordered)
@@ -99,14 +99,14 @@ struct GitPane: View {
         }
     }
 
-    private func remote(_ title: String, _ icon: String, _ op: GitOp) -> some View {
+    private func remote(_ title: String, _ icon: Glyph, _ op: GitOp) -> some View {
         Button {
             run(title, [op])
         } label: {
             // Icon over title so a third of a phone's width fits "Publish" on
             // one line, and all three buttons come out the same height.
             VStack(spacing: 4) {
-                Image(systemName: icon).imageScale(.medium).frame(height: 20)
+                Image(glyph: icon).imageScale(.medium).frame(height: 20)
                 Text(title).lineLimit(1).minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
@@ -137,7 +137,7 @@ struct GitPane: View {
                         NavigationLink {
                             FileDiffView(server: server, name: name, path: f.path, against: .base).toolbar(.hidden, for: .tabBar)
                         } label: {
-                            Label("Diff Against Base", systemImage: "arrow.left.arrow.right")
+                            Label("Diff Against Base", glyph: .diff)
                         }
                         Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = f.path }
                         if against == .worktree {
@@ -181,7 +181,7 @@ struct GitPane: View {
                         comments = try await server.api.comments(name)
                     }
                 } label: {
-                    Label("Send Review to the Agent", systemImage: "paperplane")
+                    Label("Send Review to the Agent", glyph: .sendReview)
                 }
             } header: {
                 Text("Review · \(comments.count)")
@@ -296,7 +296,7 @@ struct FileDiffView: View {
     var body: some View {
         Loaded(value: diff, error: error) { diff in
             if diff.binary {
-                ContentUnavailableView("Binary file", systemImage: "doc.questionmark",
+                ContentUnavailableView("Binary file", image: Glyph.binary.name,
                                        description: Text("There's no diff to show."))
             } else if let model {
                 VStack(spacing: 0) {
@@ -334,7 +334,7 @@ struct FileDiffView: View {
                     }
                     Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = path }
                 } label: {
-                    Label("Compare", systemImage: "arrow.left.arrow.right")
+                    Label("Compare", glyph: .diff)
                 }
             }
         }
@@ -376,7 +376,7 @@ struct FileDiffView: View {
         let remarks = line.kind != .removed ? mine.filter { $0.line == line.new } : []
         ForEach(remarks) { c in
             HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "text.bubble.fill").foregroundStyle(.blue)
+                Image(glyph: .reviewComment).foregroundStyle(.blue)
                 // A width of its own when the diff scrolls sideways: there is
                 // no edge for the text to wrap at.
                 Text(c.body)

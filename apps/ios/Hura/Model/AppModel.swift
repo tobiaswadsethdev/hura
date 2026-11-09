@@ -220,7 +220,7 @@ final class AppModel {
         } catch let e as ServerError {
             await notifyNotSent(target, title: failed, why: e.localizedDescription)
         } catch {
-            await notifyNotSent(target, title: failed, why: "Couldn't reach \(server.record.name). Is Tailscale connected?")
+            await notifyNotSent(target, title: failed, why: "Couldn't reach \(server.record.name).")
         }
     }
 

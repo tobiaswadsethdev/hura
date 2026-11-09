@@ -79,7 +79,7 @@ struct PolicyPane: View {
         // as right-clicking does on the desktop.
         Menu {
             if !readOnly, !denied {
-                Button("Block…", systemImage: "xmark.shield", role: .destructive) { blocking = endpoint }
+                Button("Block…", glyph: .block, role: .destructive) { blocking = endpoint }
             }
             if !readOnly {
                 ForEach(rules) { r in
@@ -159,7 +159,7 @@ struct PolicyPane: View {
             Button("Copy Endpoint", systemImage: "doc.on.doc") { UIPasteboard.general.string = endpoint }
         } label: {
             HStack {
-                Image(systemName: allow ? "checkmark.shield" : "xmark.shield").foregroundStyle(allow ? .green : .red)
+                Image(glyph: allow ? .allow : .block).foregroundStyle(allow ? .green : .red)
                 Text(endpoint).font(.callout.monospaced())
                 Spacer()
                 if busy == endpoint { ProgressView() } else { Text(here).font(.caption).foregroundStyle(.secondary) }

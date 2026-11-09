@@ -116,7 +116,7 @@ public final class TerminalChannel {
                 }
             }
         } catch let e as TransportError {
-            phase = e.isPermanent ? .closed(e.localizedDescription) : .offline("Unreachable. Is Tailscale connected?")
+            phase = e.isPermanent ? .closed(e.localizedDescription) : .offline("Can't reach the server.")
         } catch {
             phase = .offline(error.localizedDescription)
         }

@@ -24,16 +24,16 @@ struct FactsPane: View {
                 Section("Worktree") {
                     LabeledContent("Branch") {
                         VStack(alignment: .trailing) {
-                            Text(session.workBranch).font(.footnote.monospaced())
+                            Text(session.workBranch).font(.footnote)
                             Text("from \(session.baseBranch ?? "the remote's default")").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     LabeledContent("Repository") {
-                        Text(repoName(session.repo)).font(.footnote.monospaced())
+                        Text(repoName(session.repo)).font(.footnote)
                     }
                     if session.isWorktree {
                         LabeledContent("Runs") {
-                            Label("On the server, not isolated", systemImage: "exclamationmark.shield")
+                            Label("On the server, not isolated", glyph: .unsandboxed)
                                 .labelStyle(.titleAndIcon)
                                 .foregroundStyle(.orange)
                         }
@@ -41,12 +41,12 @@ struct FactsPane: View {
                             LabeledContent("Directory") { Text(dir).font(.footnote.monospaced()) }
                         }
                     } else if !session.sandbox.isEmpty {
-                        LabeledContent("Sandbox") { Text(session.sandbox).font(.footnote.monospaced()) }
+                        LabeledContent("Sandbox") { Text(session.sandbox).font(.footnote) }
                     }
                 }
                 Section("Given") {
                     LabeledContent("Agent") {
-                        Text([session.agent, usage?.model].compactMap { $0 }.joined(separator: " · ")).font(.footnote.monospaced())
+                        Text([session.agent, usage?.model].compactMap { $0 }.joined(separator: " · ")).font(.footnote)
                     }
                     LabeledContent("Policy", value: session.policy ?? "none recorded")
                     LabeledContent("Toolchains", value: list(session.toolchains))
@@ -92,8 +92,10 @@ struct FactsPane: View {
                 Text("Spending shows here once the agent has reported.").foregroundStyle(.secondary)
             }
         }
-        // The account's, not this session's: what the desktop shows in its
-        // header beside the worktree.
+        // The account's limits as this session's agent last reported them --
+        // here, beside the session they came from, as the desktop's facts
+        // pane shows them, rather than anywhere that would pass them off as
+        // current.
         if let windows = usage?.windows, !windows.isEmpty {
             Section("Account limits") {
                 ForEach(windows, id: \.label) { w in

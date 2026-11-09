@@ -40,10 +40,9 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
         )}
       </section>
 
-      {/* What this session has done, which is the half of the status line
-          payload that *is* about the session -- the rate-limit windows beside
-          it in the header are the account's. `null` until the agent's status
-          line has run once. */}
+      {/* What this session has done, and the account's limits as this
+          session's agent last saw them. `null` until the agent's status line
+          has run once. */}
       {usage ? <Spend usage={usage} /> : <p className="facts-note">Progress shows here once the agent has reported.</p>}
 
       <section>
@@ -99,7 +98,8 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
   );
 }
 
-/// The two numbers, and the context meter under them.
+/// The two numbers, and the meters under them: the context, and the account's
+/// limits as this session last saw them.
 function Spend({ usage }: { usage: Usage }) {
   const context = usage.context_used_percentage;
   return (
@@ -125,25 +125,71 @@ function Spend({ usage }: { usage: Usage }) {
           rather than a figure, and it turns yellow, then red, as it fills:
           the warning is the point of it. */}
       {context !== null && (
-        <div className="meter-row">
-          <span className="meter-label">context</span>
-          <span
-            className={`meter ${context >= 90 ? "bad" : context >= 70 ? "warn" : ""}`}
-            role="meter"
-            aria-label="context used"
-            aria-valuenow={Math.round(context)}
-            aria-valuemin={0}
-            aria-valuemax={100}
-          >
-            <span style={{ width: `${Math.min(100, Math.max(0, context))}%` }} />
-          </span>
-          <span className="meter-value">
-            {Math.round(context)}%
-            {usage.context_size ? <span className="quiet"> of {Math.round(usage.context_size / 1000)}k</span> : null}
-          </span>
-        </div>
+        <Meter
+          label="context"
+          name="context used"
+          pct={context}
+          tone={context >= 90 ? "bad" : context >= 70 ? "warn" : ""}
+        >
+          {usage.context_size ? <span className="quiet"> of {Math.round(usage.context_size / 1000)}k</span> : null}
+        </Meter>
       )}
+      {/* The account's rate-limit windows, here and nowhere else: as *this*
+          session's agent last reported them, beside the session they came
+          from. They used to sit in the toolbar as though they were the
+          window's, which an idle session's day-old reading made a claim about
+          now that nobody could check -- and a session can run on a provider
+          that has no such windows at all. Orange past 80%, the reading that
+          decides whether starting another session is a good idea. */}
+      {usage.windows.map((w) => (
+        <Meter
+          key={w.label}
+          label={w.label}
+          name={`${w.label} limit used`}
+          pct={w.used_percentage}
+          tone={w.used_percentage >= 80 ? "warn" : ""}
+          title={w.resets_at ? `resets ${new Date(w.resets_at * 1000).toLocaleString()}` : undefined}
+        />
+      ))}
     </section>
+  );
+}
+
+/// One percentage as a bar, its label before it and the figure after.
+function Meter({
+  label,
+  name,
+  pct,
+  tone,
+  title,
+  children,
+}: {
+  label: string;
+  /// What a screen reader calls it.
+  name: string;
+  pct: number;
+  tone: "" | "warn" | "bad";
+  title?: string;
+  /// Said after the figure, quieter.
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="meter-row" title={title}>
+      <span className="meter-label">{label}</span>
+      <span
+        className={`meter ${tone}`}
+        role="meter"
+        aria-label={name}
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <span style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
+      </span>
+      <span className="meter-value">
+        {Math.round(pct)}%{children}
+      </span>
+    </div>
   );
 }
 

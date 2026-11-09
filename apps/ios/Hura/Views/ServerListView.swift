@@ -25,7 +25,7 @@ struct ServerListView: View {
             .overlay {
                 if model.servers.isEmpty {
                     ContentUnavailableView {
-                        Label("No servers", systemImage: "shippingbox")
+                        Label("No servers", glyph: .server)
                     } description: {
                         Text("Run `hurad pair phone --host <address>` on the machine running hurad, then scan the code it shows.")
                     } actions: {

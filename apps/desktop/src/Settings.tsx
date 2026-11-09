@@ -1,17 +1,19 @@
-// The settings screen: what a new session starts with, how this window looks,
-// and the trackers the sidebar of tickets and pull requests reads.
+// The settings screen: what a new session starts with, when this window
+// notifies you, and the trackers the sidebar of tickets and pull requests reads.
+// Signing in to hura cloud, which the trackers need, is the account screen's.
 //
 // Two halves, and the split between them is the only structure this screen
 // has -- because it is the only structure that matters. **Who owns the answer.**
 // A branch prefix names the work branch of every session on the server,
 // including the ones `hura new` starts from a terminal, so it is a line in the
-// server's config file and this screen edits that file. How wide the sidebars
-// are is nobody's business but this window's, and two people looking at the
-// same server from two machines would otherwise fight over one number.
+// server's config file and this screen edits that file. Whether this machine
+// pings you when an agent waits is nobody's business but this window's, and two
+// people looking at the same server from two machines would otherwise fight
+// over one switch.
 //
 // So the top half says which file it writes and the bottom half says the values
 // never leave the machine. A settings screen that mixed the two silently would
-// be one where changing a width asked permission from a server, and where
+// be one where muting a notification asked permission from a server, and where
 // changing a branch prefix appeared to work and then didn't for the CLI.
 //
 // **Written on save, not on keystroke.** Every other screen in this window acts
@@ -19,8 +21,11 @@
 // every command is not somewhere to land a half-typed branch name, and the
 // server refuses a policy that is not a template -- an error per character
 // while somebody types `feature-work` is not a form, it is a fight. The window
-// half is immediate, because it has nothing to validate against and the point
-// of a width is seeing it.
+// half is immediate, because a checkbox has nothing to validate against.
+//
+// The sidebars' widths and the refresh interval used to be fields here too.
+// The widths are set by dragging a sidebar's edge (double-click resets it),
+// and the interval is fixed: four number boxes for things nobody changed.
 
 import { useEffect, useState } from "react";
 
@@ -31,11 +36,10 @@ import type { NewOptions } from "./gen/NewOptions";
 import type { Settings } from "./gen/Settings";
 import type { SettingsView } from "./gen/SettingsView";
 import { Settings as SettingsGlyph } from "./icons";
-import { DEFAULTS, LIMITS, type Prefs } from "./prefs";
+import type { Prefs } from "./prefs";
 import { Screen } from "./Screen";
 import { Pill } from "./Pill";
 import { Select } from "./Select";
-import { AccountSection } from "./Account";
 import { TrackersSection } from "./Trackers";
 
 export function SettingsScreen({
@@ -44,7 +48,8 @@ export function SettingsScreen({
   onPrefs,
   at,
   onTrackers,
-  onSignedIn,
+  signedIn,
+  onSignIn,
   onClose,
 }: {
   server: string;
@@ -56,14 +61,13 @@ export function SettingsScreen({
   /// The trackers after a change, so the sidebar reads them again.
   onTrackers: (trackers: ConfiguredTracker[]) => void;
   /// Signed in to hura cloud or out, which is whether there are trackers.
-  onSignedIn: (signedIn: boolean) => void;
+  /// `null` until the window has read the session.
+  signedIn: boolean | null;
+  /// To the account screen, from the trackers section signed out.
+  onSignIn: () => void;
   onClose: () => void;
 }) {
   const [view, setView] = useState<SettingsView | null>(null);
-  // Whether there are trackers below, which need a hura cloud account; told
-  // by the account section once it has read the session.
-  const [signedIn, setSignedIn] = useState<boolean | null>(null);
-  const [trackersVersion, setTrackersVersion] = useState(0);
   /// What the choosers are filled from. The same request the create form makes,
   /// reused rather than a second one: the policies and the credential providers
   /// this server has are one fact, and a settings screen listing a different
@@ -310,46 +314,6 @@ export function SettingsScreen({
         <h3>this window</h3>
         <p className="hint">Stored on this machine only.</p>
 
-        <label>
-          <span>projects width</span>
-          <Pixels
-            value={prefs.treeWidth}
-            limit={LIMITS.treeWidth}
-            onChange={(treeWidth) => onPrefs({ treeWidth })}
-          />
-        </label>
-
-        <label>
-          <span>dock width</span>
-          <Pixels
-            value={prefs.dockWidth}
-            limit={LIMITS.dockWidth}
-            onChange={(dockWidth) => onPrefs({ dockWidth })}
-          />
-        </label>
-
-        <label>
-          <span>tickets width</span>
-          <Pixels
-            value={prefs.inboxWidth}
-            limit={LIMITS.inboxWidth}
-            onChange={(inboxWidth) => onPrefs({ inboxWidth })}
-          />
-        </label>
-        <p className="hint indent">Or drag a sidebar's edge; double-click to reset.</p>
-
-        <label>
-          <span>refresh</span>
-          <Pixels
-            value={prefs.refreshMs}
-            limit={LIMITS.refreshMs}
-            unit="ms"
-            step={250}
-            onChange={(refreshMs) => onPrefs({ refreshMs })}
-          />
-        </label>
-        <p className="hint indent">How often the worktree list is re-read. Raise it over a VPN.</p>
-
         <label className="tick">
           <input
             type="checkbox"
@@ -359,113 +323,35 @@ export function SettingsScreen({
           <span>notify when an agent needs me</span>
         </label>
 
-        <label className="tick">
-          <input
-            type="checkbox"
-            checked={prefs.notifyTickets}
-            onChange={(e) => onPrefs({ notifyTickets: e.target.checked })}
-          />
-          <span>notify when my tickets or pull requests change</span>
-        </label>
-        <p className="hint indent">
-          A status moved, somebody else's comment, a ticket newly yours, a review asked of you, and
-          your pull requests' checks and reviews. Checked every few minutes.
-        </p>
-
-        <div className="setting-actions">
-          <button className="quiet" onClick={() => onPrefs(DEFAULTS)}>
-            back to defaults
-          </button>
-        </div>
+        {/* Signed in only: signed out there are no trackers, so nothing that
+            could change, and a switch for it is a question about nothing. */}
+        {signedIn && (
+          <>
+            <label className="tick">
+              <input
+                type="checkbox"
+                checked={prefs.notifyTickets}
+                onChange={(e) => onPrefs({ notifyTickets: e.target.checked })}
+              />
+              <span>notify when my tickets or pull requests change</span>
+            </label>
+            <p className="hint indent">
+              A status moved, somebody else's comment, a ticket newly yours, a review asked of you,
+              and your pull requests' checks and reviews. Checked every few minutes.
+            </p>
+          </>
+        )}
       </section>
-
-      <AccountSection
-        onChanged={(signedIn) => {
-          setSignedIn(signedIn);
-          onSignedIn(signedIn);
-          // Someone else's list now: read again, and the sidebar with it.
-          setTrackersVersion((v) => v + 1);
-          void api.trackers().then(onTrackers, () => onTrackers([]));
-        }}
-      />
 
       {/* Scrolled to once the server's half has drawn above it, or it lands
           where the section was before that half pushed it down. */}
       <TrackersSection
-        key={trackersVersion}
+        key={String(signedIn)}
         signedIn={signedIn}
+        onSignIn={onSignIn}
         focus={at === "trackers" && (view !== null || error !== null)}
         onChanged={onTrackers}
       />
     </Screen>
-  );
-}
-
-/// A number with a unit and a range, held as text while it is being typed.
-///
-/// `<input type="number">` was the first attempt and is the wrong control here:
-/// clearing it to retype produces `""`, which is not a number, and a parent
-/// holding the real value re-renders the field back to what it was mid-edit --
-/// so `260` cannot be turned into `320` without selecting it all first. The text
-/// stays local and only a value inside the range is committed upward.
-function Pixels({
-  value,
-  limit,
-  unit = "px",
-  step = 10,
-  onChange,
-}: {
-  value: number;
-  limit: { min: number; max: number };
-  unit?: string;
-  step?: number;
-  onChange: (value: number) => void;
-}) {
-  const [text, setText] = useState(String(value));
-
-  // The value can also change from a drag, and the field has to follow it --
-  // this and the sidebar's edge are two ways to set one number.
-  //
-  // Safe against what it looks like, which is an effect that overwrites what
-  // somebody is typing: `value` only moves when `commit` below runs or when
-  // the handle is dragged, so `18` on the way to `180` never reaches the
-  // parent and never comes back.
-  useEffect(() => {
-    setText(String(value));
-  }, [value]);
-
-  const commit = (raw: string) => {
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) return;
-    onChange(Math.min(limit.max, Math.max(limit.min, Math.round(parsed))));
-  };
-
-  return (
-    <span className="pixels">
-      <input
-        value={text}
-        inputMode="numeric"
-        onChange={(e) => setText(e.target.value)}
-        // On blur and on Enter, not on change: `18` on the way to `180` is
-        // below the floor and would be clamped to it under the cursor.
-        onBlur={() => commit(text)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit(text);
-            return;
-          }
-          const by = e.key === "ArrowUp" ? step : e.key === "ArrowDown" ? -step : 0;
-          if (by !== 0) {
-            e.preventDefault();
-            onChange(Math.min(limit.max, Math.max(limit.min, value + by)));
-          }
-        }}
-      />
-      <span className="unit">{unit}</span>
-      <span className="range">
-        {limit.min}–{limit.max}
-      </span>
-    </span>
   );
 }

@@ -151,6 +151,20 @@ as `production`. The relay needs to know which, and the app tells it.
 
 ## Trying it in the simulator
 
+To look at the app with no server, `Tools/fake-hurad.py` stands in for one: a
+few projects and sessions in every state, and a conversation to scroll
+through. It prints the launch command that pairs a Debug build with it, with
+nothing to tap:
+
+```sh
+python3 Tools/fake-hurad.py
+xcrun simctl launch booted dev.tobiaswadseth.hura.ios \
+  -HuraPair 'hura://127.0.0.1:18555/fake-token#…' -HuraNoLock YES -HuraOpen server
+```
+
+`-HuraOpen <session>` goes straight to a session's screen instead. All three
+arguments are read by Debug builds only.
+
 The simulator can't receive real pushes, but it can show one sent with
 `simctl`:
 
@@ -172,8 +186,19 @@ allowed to show notifications first.
 HURA_PAIRING="$(hurad pair kit --host 127.0.0.1 | grep hura://)" swift test --filter LiveTests
 ```
 
+## Icons
+
+hura's own icons are Lucide, the set the desktop draws in, so a branch or a
+ticket is the same mark on both; standard iOS controls keep Apple's symbols.
+`Hura/Views/Glyph.swift` names each one, and `Tools/lucide-symbols.sh` makes
+them into custom symbols in `Hura/Assets.xcassets/Lucide` (it needs npm and
+`brew install swiftdraw`). Add a case to `Glyph`, run the script, and check in
+what it writes.
+
 ## The icon
 
 `Hura/Assets.xcassets/AppIcon.appiconset/icon-1024.png` is made from the
 desktop application's icon by `Tools/make-icon.swift`, which crops it to a
-full-bleed square, as iOS wants.
+full-bleed square, as iOS wants. The lock screen shows it too, from
+`Logo.imageset`, which is the same image made small:
+`sips -Z 336 Hura/Assets.xcassets/AppIcon.appiconset/icon-1024.png --out Hura/Assets.xcassets/Logo.imageset/logo@3x.png`.

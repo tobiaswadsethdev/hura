@@ -19,7 +19,7 @@ struct ToolCard: View {
                 withAnimation(.snappy) { expanded = !isOpen }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: label.icon)
+                    Image(glyph: label.icon)
                         .frame(width: 18)
                         .foregroundStyle(.secondary)
                     Text(label.verb).fontWeight(.semibold)
@@ -213,8 +213,8 @@ struct TodoList: View {
                             .strikethrough(status == "completed")
                             .foregroundStyle(status == "completed" ? .secondary : .primary)
                     } icon: {
-                        Image(systemName: status == "completed" ? "checkmark.circle.fill"
-                              : status == "in_progress" ? "circle.dotted.circle" : "circle")
+                        Image(glyph: status == "completed" ? .passing
+                              : status == "in_progress" ? .doing : .todo)
                             .foregroundStyle(status == "completed" ? .green : .secondary)
                     }
                     .font(.subheadline)

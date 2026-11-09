@@ -35,7 +35,7 @@ private struct PermissionForm: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+            Image(glyph: .permission).foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 4) {
                 Text(ask.summary).font(.subheadline.weight(.semibold))
                 if let d = ask.description, !d.isEmpty, !ask.summary.contains(d) {
@@ -161,7 +161,7 @@ private struct QuestionsForm: View {
 
     var body: some View {
         let qs = questions
-        Label("Claude has a question", systemImage: "questionmark.bubble.fill")
+        Label("Claude has a question", glyph: .question)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.orange)
         ForEach(Array(qs.enumerated()), id: \.offset) { _, q in
@@ -236,7 +236,7 @@ private struct PlanForm: View {
     @FocusState private var typing: Bool
 
     var body: some View {
-        Label("Claude has a plan", systemImage: "list.bullet.clipboard.fill")
+        Label("Claude has a plan", glyph: .plan)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.orange)
         ScrollView {

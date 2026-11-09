@@ -1,10 +1,10 @@
 // Where your tickets and pull requests come from: each tracker, its token, and
 // the form that adds one.
 //
-// A section of the settings screen, under the account section, because a
-// tracker is kept in the hura cloud account, token included, and read there,
-// the same on every device. A hura server never sees either. Signed out there
-// are none, and this says to sign in. The sidebar on the right is what it
+// A section of the settings screen. A tracker is kept in the hura cloud
+// account, token included, and read there, the same on every device; a hura
+// server never sees either. Signed out there are none, and this says to sign
+// in, with the way to the account screen where that is done. The sidebar on the right is what it
 // feeds, and the sidebar's empty state is a button that brings you here.
 //
 // Every tracker answers the same question, what is assigned to you or created
@@ -26,12 +26,15 @@ import { Select } from "./Select";
 
 export function TrackersSection({
   signedIn,
+  onSignIn,
   focus,
   onChanged,
 }: {
   /// Whether this computer is signed in to hura cloud, which keeps the
-  /// trackers. `null` until the account section has read the session.
+  /// trackers. `null` until the window has read the session.
   signedIn: boolean | null;
+  /// To the account screen, to sign in.
+  onSignIn: () => void;
   /// Scrolled to when the screen opens, because the sidebar's "add a tracker"
   /// is what opened it.
   focus: boolean;
@@ -117,10 +120,17 @@ export function TrackersSection({
         {signedIn === null ? (
           <Waiting />
         ) : (
-          <p className="hint">
-            Where the sidebar's tickets and pull requests come from. They are kept in your hura cloud
-            account: sign in above to add one.
-          </p>
+          <>
+            <p className="hint">
+              Where the sidebar's tickets and pull requests come from. They are kept in your hura
+              cloud account: sign in to add one.
+            </p>
+            <div className="setting-actions">
+              <button className="go" onClick={onSignIn}>
+                sign in
+              </button>
+            </div>
+          </>
         )}
       </section>
     );
