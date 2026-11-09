@@ -360,6 +360,8 @@ public struct TrackerIssue: Decodable, Equatable, Sendable {
     public var updated: String?
     public var due: String?
     public var description: JSONValue
+    /// The project's own fields that have a value, by name.
+    public var custom: [CustomField]
     public var comments: [IssueComment]
     public var commentsTotal: Int
 
@@ -368,9 +370,42 @@ public struct TrackerIssue: Decodable, Equatable, Sendable {
         public var title: String
     }
 
+    public struct CustomField: Decodable, Equatable, Identifiable, Sendable {
+        public var id: String
+        public var name: String
+        public var value: String
+        /// Rich text, to draw instead of `value`; an empty array otherwise.
+        public var doc: JSONValue
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tracker = try c.decode(String.self, forKey: .tracker)
+        kind = try c.decode(String.self, forKey: .kind)
+        key = try c.decode(String.self, forKey: .key)
+        title = try c.decode(String.self, forKey: .title)
+        url = try c.decode(String.self, forKey: .url)
+        status = try c.decode(String.self, forKey: .status)
+        stage = try c.decode(String.self, forKey: .stage)
+        itemType = try c.decode(String.self, forKey: .itemType)
+        priority = try c.decodeIfPresent(String.self, forKey: .priority)
+        assignee = try c.decodeIfPresent(IssuePerson.self, forKey: .assignee)
+        reporter = try c.decodeIfPresent(IssuePerson.self, forKey: .reporter)
+        labels = try c.decode([String].self, forKey: .labels)
+        parent = try c.decodeIfPresent(Parent.self, forKey: .parent)
+        created = try c.decodeIfPresent(String.self, forKey: .created)
+        updated = try c.decodeIfPresent(String.self, forKey: .updated)
+        due = try c.decodeIfPresent(String.self, forKey: .due)
+        description = try c.decode(JSONValue.self, forKey: .description)
+        // Absent from a core older than custom fields.
+        custom = try c.decodeIfPresent([CustomField].self, forKey: .custom) ?? []
+        comments = try c.decode([IssueComment].self, forKey: .comments)
+        commentsTotal = try c.decode(Int.self, forKey: .commentsTotal)
+    }
+
     enum CodingKeys: String, CodingKey {
         case tracker, kind, key, title, url, status, stage, priority, assignee, reporter, labels, parent, created, updated,
-             due, description, comments
+             due, description, custom, comments
         case itemType = "item_type"
         case commentsTotal = "comments_total"
     }
@@ -635,6 +670,23 @@ extension TrackerCore {
 
     public static func issue(_ t: StoredTracker, key: String) async throws -> TrackerIssue {
         try decode(try await call("issue", ["tracker": json(t), "key": .string(key)]), as: TrackerIssue.self)
+    }
+
+    /// One of a ticket's images, by the attachment id its document block
+    /// carries: fetched with the tracker's token, which Jira wants for it.
+    public static func image(_ t: StoredTracker, id: String) async throws -> Data {
+        struct Image: Decodable { var mime: String; var data: String }
+        let image = try decode(try await call("attachment", ["tracker": json(t), "id": .string(id)]), as: Image.self)
+        guard let data = Data(base64Encoded: image.data) else {
+            throw TrackerError(message: "the image did not come back whole")
+        }
+        return data
+    }
+
+    /// An image in a pull request's text, by the URL it names there: fetched
+    /// through the tracker, and only from the forge's own image hosts.
+    public static func pullImage(_ t: StoredTracker, url: String) async throws -> Picture {
+        try decode(try await call("pull_image", ["tracker": json(t), "url": .string(url)]), as: Picture.self)
     }
 
     public static func editForm(_ t: StoredTracker, key: String) async throws -> EditForm {

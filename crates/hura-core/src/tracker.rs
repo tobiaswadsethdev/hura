@@ -42,6 +42,7 @@ pub mod doc;
 mod edit;
 mod issue;
 pub mod markdown;
+mod pictures;
 mod pull;
 mod pulls;
 pub mod request;
@@ -52,8 +53,10 @@ pub use edit::{
     delete_comment, edit_comment, edit_form, save, transition, transitions, users,
 };
 pub use issue::{
-    Issue, IssueComment, Parent as IssueParent, Person as IssuePerson, Stage as IssueStage, issue,
+    CustomField as IssueCustomField, Image as IssueImage, Issue, IssueComment,
+    Parent as IssueParent, Person as IssuePerson, Stage as IssueStage, attachment, issue,
 };
+pub use pictures::pull_image;
 pub use pull::{
     PullAutoMerge, PullCheck, PullCheckState, PullComment, PullDetail, PullFile, PullFiles,
     PullMerge, PullMerging, PullReviewer, PullState, PullThread, PullVerdict, pull,
@@ -1299,14 +1302,14 @@ pub struct HttpRequest {
 }
 
 /// Something that can send an [`HttpRequest`] and answer with the status and
-/// the body.
+/// the body, as bytes: most answers are JSON, but an attachment is an image.
 ///
 /// `curl` is how the desktop and the command line send them, and needs no
 /// such thing. A platform that cannot run a program -- iOS -- brings its own
 /// client and installs it once with [`use_transport`]; everything above this
 /// layer, and how an answer is read, is the same either way.
 pub trait Transport: Send + Sync {
-    fn send(&self, request: &HttpRequest) -> Result<(u16, String), String>;
+    fn send(&self, request: &HttpRequest) -> Result<(u16, Vec<u8>), String>;
 }
 
 static TRANSPORT: std::sync::OnceLock<Box<dyn Transport>> = std::sync::OnceLock::new();
@@ -1325,15 +1328,51 @@ fn curl(
     headers: &[&str],
     body: Option<(&str, &str, &str)>,
 ) -> Result<serde_json::Value, String> {
+    let (code, body) = raw(url, auth, JSON, headers, body)?;
+    answer(&String::from_utf8_lossy(&body), code)
+}
+
+/// The most an attachment fetched here may be. A screenshot is a few hundred
+/// kilobytes; this is for the one somebody pasted from a 5K display.
+pub const ATTACHMENT_LIMIT: usize = 20 * 1024 * 1024;
+
+/// The body of a `GET` as it came, for what is not JSON: an attachment.
+fn get_bytes(url: &str, auth: &str) -> Result<Vec<u8>, String> {
+    let (code, body) = raw(url, auth, "*/*", &[], None)?;
+    if !(200..300).contains(&code) {
+        // A refusal is JSON, or prose, like any other.
+        return answer(&String::from_utf8_lossy(&body), code).map(|_| Vec::new());
+    }
+    if body.len() > ATTACHMENT_LIMIT {
+        return Err(format!(
+            "it is more than {} MB, too large to show here",
+            ATTACHMENT_LIMIT / 1024 / 1024
+        ));
+    }
+    Ok(body)
+}
+
+/// One request, through the installed transport when there is one, and
+/// otherwise through curl: its status and its body.
+fn raw(
+    url: &str,
+    auth: &str,
+    accept: &str,
+    headers: &[&str],
+    body: Option<(&str, &str, &str)>,
+) -> Result<(u16, Vec<u8>), String> {
     let Some(transport) = TRANSPORT.get() else {
-        return run_curl(url, auth, headers, body);
+        return run_curl(url, auth, accept, headers, body);
     };
     let mut lines = vec![
-        auth_header(auth),
-        format!("Accept: {JSON}"),
+        format!("Accept: {accept}"),
         // GitHub refuses a request with no user agent.
         "User-Agent: hura".to_string(),
     ];
+    // None for a URL that is signed, or public.
+    if !auth.is_empty() {
+        lines.insert(0, auth_header(auth));
+    }
     lines.extend(headers.iter().map(|h| h.to_string()));
     let (method, body) = match body {
         Some((method, body, content_type)) => {
@@ -1351,11 +1390,10 @@ fn curl(
         body,
         timeout: TIMEOUT.parse().unwrap_or(20),
     };
-    let (code, body) = transport.send(&request)?;
-    answer(&body, code)
+    transport.send(&request)
 }
 
-/// One request, with the credential on stdin.
+/// One request, with the credential on stdin: its status and its body.
 ///
 /// `-K -` makes curl read its configuration from standard input, which is how
 /// the url and the `Authorization` header stay out of the argument list -- and
@@ -1369,17 +1407,23 @@ fn curl(
 fn run_curl(
     url: &str,
     auth: &str,
+    accept: &str,
     headers: &[&str],
     body: Option<(&str, &str, &str)>,
-) -> Result<serde_json::Value, String> {
+) -> Result<(u16, Vec<u8>), String> {
     use std::io::Write as _;
     use std::process::{Command, Stdio};
 
     let mut config = String::new();
     config.push_str(&format!("url = {}\n", quote(url)));
-    config.push_str(&format!("header = {}\n", quote(&auth_header(auth))));
+    if !auth.is_empty() {
+        config.push_str(&format!("header = {}\n", quote(&auth_header(auth))));
+    }
     // Every one of these APIs answers JSON and some of them need to be told.
-    config.push_str(&format!("header = {}\n", quote(&format!("Accept: {JSON}"))));
+    config.push_str(&format!(
+        "header = {}\n",
+        quote(&format!("Accept: {accept}"))
+    ));
     // GitHub refuses a request with no user agent, with a 403 that says so in
     // prose.
     config.push_str("user-agent = \"hura\"\n");
@@ -1388,6 +1432,8 @@ fn run_curl(
     }
     config.push_str("silent\nshow-error\nlocation\n");
     config.push_str(&format!("max-time = {TIMEOUT}\n"));
+    // Refused before it is read, when the size is said up front.
+    config.push_str(&format!("max-filesize = {}\n", ATTACHMENT_LIMIT + 1));
     // The status code, after the body, on its own line.
     config.push_str("write-out = \"\\n%{http_code}\"\n");
     if let Some((method, body, content_type)) = body {
@@ -1436,7 +1482,22 @@ fn run_curl(
             String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
-    interpret(&String::from_utf8_lossy(&out.stdout))
+    split_status(out.stdout)
+}
+
+/// Split the body from the status line curl appended. The body may be an
+/// image, so this is bytes: everything up to the last newline.
+fn split_status(mut stdout: Vec<u8>) -> Result<(u16, Vec<u8>), String> {
+    let at = stdout
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .ok_or("the request produced nothing at all")?;
+    let code = String::from_utf8_lossy(&stdout[at + 1..])
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    stdout.truncate(at);
+    Ok((code, stdout))
 }
 
 /// Split the body from the status line curl appended, and read one as the other
@@ -1444,11 +1505,10 @@ fn run_curl(
 ///
 /// Separate from the request so every status the trackers answer with can be
 /// asserted on without a network.
+#[cfg(test)]
 fn interpret(stdout: &str) -> Result<serde_json::Value, String> {
-    let (body, code) = stdout
-        .rsplit_once('\n')
-        .ok_or("the request produced nothing at all")?;
-    answer(body, code.trim().parse().unwrap_or(0))
+    let (code, body) = split_status(stdout.as_bytes().to_vec())?;
+    answer(&String::from_utf8_lossy(&body), code)
 }
 
 /// Read an answer as its status asks for: the JSON of a success, and the
@@ -2025,6 +2085,17 @@ mod tests {
         // line of it beats saying nothing.
         let e = interpret("<html><head><title>Sign in</title>\n203").unwrap_err();
         assert!(e.contains("203") || e.contains("html"), "{e}");
+    }
+
+    /// An image has newlines and bytes that are not UTF-8 in it; only the
+    /// last line is the status.
+    #[test]
+    fn a_binary_body_keeps_its_bytes() {
+        let mut out = vec![0x89, b'P', b'N', b'G', b'\n', 0xff, 0x00];
+        out.extend_from_slice(b"\n200");
+        let (code, body) = split_status(out).unwrap();
+        assert_eq!(code, 200);
+        assert_eq!(body, [0x89, b'P', b'N', b'G', b'\n', 0xff, 0x00]);
     }
 
     /// Everything interpolated into a curl config is attacker-influenced in the

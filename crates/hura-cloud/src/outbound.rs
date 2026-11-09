@@ -24,7 +24,7 @@ use hura_core::tracker::{HttpRequest, Transport};
 pub struct Public(pub Ureq);
 
 impl Transport for Public {
-    fn send(&self, request: &HttpRequest) -> Result<(u16, String), String> {
+    fn send(&self, request: &HttpRequest) -> Result<(u16, Vec<u8>), String> {
         allowed(&request.url)?;
         self.0.send(request)
     }

@@ -5,16 +5,25 @@
 // window. A link is an anchor only when the Rust side kept its `href`, which it
 // does for `http`, `https` and `mailto` and nothing else.
 
+import { createContext, useContext, useEffect, useState } from "react";
+
+import { api, messageOf } from "./api";
 import type { DocBlock } from "./gen/DocBlock";
 import type { DocInline } from "./gen/DocInline";
 
-export function Doc({ blocks }: { blocks: DocBlock[] }) {
+// The tracker a document's images are attachments of. Without one, an image
+// is named, as it always was.
+const DocTracker = createContext<string | null>(null);
+
+export function Doc({ blocks, tracker = null }: { blocks: DocBlock[]; tracker?: string | null }) {
   return (
-    <div className="doc">
-      {blocks.map((b, i) => (
-        <Block key={i} block={b} />
-      ))}
-    </div>
+    <DocTracker.Provider value={tracker}>
+      <div className="doc">
+        {blocks.map((b, i) => (
+          <Block key={i} block={b} />
+        ))}
+      </div>
+    </DocTracker.Provider>
   );
 }
 
@@ -112,7 +121,11 @@ function Block({ block: b }: { block: DocBlock }) {
         </div>
       );
     case "attachment":
-      return <p className="doc-attachment">attachment: {b.name}</p>;
+      return b.image ? (
+        <Picture id={b.image} name={b.name} />
+      ) : (
+        <p className="doc-attachment">attachment: {b.name}</p>
+      );
     case "card":
       return (
         <p>
@@ -122,6 +135,55 @@ function Block({ block: b }: { block: DocBlock }) {
         </p>
       );
   }
+}
+
+// Each image once per window, as a `data:` URL: the same screenshot is quoted
+// in comment after comment. A failure is forgotten, so reopening the ticket
+// asks again.
+const pictures = new Map<string, Promise<string>>();
+
+function picture(tracker: string, id: string): Promise<string> {
+  const key = `${tracker}\u0000${id}`;
+  let found = pictures.get(key);
+  if (!found) {
+    found = api.ticketImage(tracker, id).then((i) => `data:${i.mime};base64,${i.data}`);
+    found.catch(() => pictures.delete(key));
+    pictures.set(key, found);
+  }
+  return found;
+}
+
+function Picture({ id, name }: { id: string; name: string }) {
+  const tracker = useContext(DocTracker);
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!tracker) return;
+    let live = true;
+    setSrc(null);
+    setFailed(null);
+    picture(tracker, id).then(
+      (s) => live && setSrc(s),
+      (e) => live && setFailed(messageOf(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [tracker, id]);
+
+  if (src) {
+    return (
+      <p className="doc-image">
+        <img src={src} alt={name} title={name} />
+      </p>
+    );
+  }
+  const said = !tracker ? `attachment: ${name}` : failed ? `image: ${name} (not read)` : `image: ${name}…`;
+  return (
+    <p className="doc-attachment" title={failed ?? undefined}>
+      {said}
+    </p>
+  );
 }
 
 function Inlines({ content }: { content: DocInline[] }) {

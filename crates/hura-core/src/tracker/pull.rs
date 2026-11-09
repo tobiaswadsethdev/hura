@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::issue::Person;
+use super::pictures;
 use super::{AzureMe, JSON, Kind, Source, Stored, azure_auth, azure_me, get, post, send, string};
 use crate::git::{Change, FileDiff};
 
@@ -736,7 +737,7 @@ fn connect<'a>(stored: &'a Stored, id: &str) -> Result<(&'a Source, &'a str), St
     Ok((&stored.source, token))
 }
 
-fn token_of(stored: &Stored) -> Result<&str, String> {
+pub(super) fn token_of(stored: &Stored) -> Result<&str, String> {
     let source = &stored.source;
     if source.kind == Kind::Jira {
         return Err("Jira has no pull requests".into());
@@ -833,7 +834,7 @@ const GITHUB_PULL: &str = r#"query($owner: String!, $name: String!, $number: Int
   viewer { login }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      number title url body state isDraft mergeable
+      number title url body bodyHTML state isDraft mergeable
       createdAt updatedAt headRefName baseRefName headRefOid isCrossRepository viewerDidAuthor
       additions deletions changedFiles
       viewerCanEnableAutoMerge
@@ -847,13 +848,22 @@ const GITHUB_PULL: &str = r#"query($owner: String!, $name: String!, $number: Int
         ... on CheckRun { name status conclusion detailsUrl isRequired(pullRequestNumber: $number) checkSuite { workflowRun { workflow { name } } } }
         ... on StatusContext { context state targetUrl description isRequired(pullRequestNumber: $number) }
       } } } } } }
-      comments(last: 100) { totalCount nodes { databaseId author { login ... on User { name } } body createdAt } }
-      reviews(last: 100) { totalCount nodes { state body submittedAt author { login ... on User { name } } } }
+      comments(last: 100) { totalCount nodes { databaseId author { login ... on User { name } } body bodyHTML createdAt } }
+      reviews(last: 100) { totalCount nodes { state body bodyHTML submittedAt author { login ... on User { name } } } }
       reviewThreads(last: 100) { totalCount nodes { isResolved isOutdated path line originalLine viewerCanReply
-        comments(first: 50) { nodes { databaseId author { login ... on User { name } } body createdAt } } } }
+        comments(first: 50) { nodes { databaseId author { login ... on User { name } } body bodyHTML createdAt } } } }
     }
   }
 }"#;
+
+/// A body's Markdown, with its images where the clients can fetch them: as
+/// Markdown rather than HTML tags, and signed where GitHub signs them.
+fn github_body(v: &Value) -> String {
+    pictures::html_images(&pictures::signed(
+        &string(v, "body"),
+        &string(v, "bodyHTML"),
+    ))
+}
 
 /// The pull request's node id, which the auto-merge mutations address it by.
 const GITHUB_PULL_ID: &str = r#"query($owner: String!, $name: String!, $number: Int!) {
@@ -1092,7 +1102,7 @@ fn parse_github(data: &Value, source: &Source) -> Result<PullDetail, String> {
 
     let comment = |c: &Value| PullComment {
         author: c.get("author").and_then(|a| github_person(a, &viewer)),
-        body: string(c, "body"),
+        body: github_body(c),
         created: text_of(c, "createdAt"),
     };
     let mut conversation: Vec<PullThread> = Vec::new();
@@ -1113,7 +1123,7 @@ fn parse_github(data: &Value, source: &Source) -> Result<PullDetail, String> {
     }
     for r in nodes(p, "reviews") {
         let state = string(r, "state");
-        let body = string(r, "body");
+        let body = github_body(r);
         // A review that only commented, with nothing of its own, is the
         // envelope its threads came in: the threads are below.
         if (state == "COMMENTED" || state == "PENDING") && body.trim().is_empty() {
@@ -1208,7 +1218,7 @@ fn parse_github(data: &Value, source: &Source) -> Result<PullDetail, String> {
         base: string(p, "baseRefName"),
         created: text_of(p, "createdAt"),
         updated: text_of(p, "updatedAt"),
-        body: string(p, "body"),
+        body: github_body(p),
         additions: u32_of(p, "additions"),
         deletions: u32_of(p, "deletions"),
         changed_files: u32_of(p, "changedFiles"),
@@ -1704,7 +1714,7 @@ fn parse_azure(
         base: refs("targetRefName"),
         created: text_of(pr, "creationDate"),
         updated: text_of(pr, "closedDate"),
-        body: string(pr, "description"),
+        body: pictures::html_images(&string(pr, "description")),
         additions: None,
         deletions: None,
         changed_files: None,
@@ -1788,7 +1798,7 @@ fn azure_thread(t: &Value, me: &AzureMe) -> Option<PullThread> {
         .filter(|c| !system(c))
         .map(|c| PullComment {
             author: c.get("author").and_then(|a| azure_person(a, me)),
-            body: string(c, "content"),
+            body: pictures::html_images(&string(c, "content")),
             created: text_of(c, "publishedDate"),
         })
         .collect();

@@ -2197,6 +2197,8 @@ main { position: relative; }
 }
 .ticket-fields dt { color: var(--dim); }
 .ticket-fields dd { margin: 0; min-width: 0; color: var(--text); }
+/* A project's own fields: names and values of any length, and rich text. */
+.ticket-fields .ticket-custom { align-self: start; overflow-wrap: anywhere; }
 .ticket-labels { display: flex; flex-wrap: wrap; gap: 4px; }
 .ticket-labels .tag {
   padding: 0 7px;
@@ -2526,6 +2528,13 @@ main { position: relative; }
 .doc th { background: var(--surface-2); font-weight: 600; }
 .doc :is(th, td) > :last-child { margin-bottom: 0; }
 .doc-attachment { color: var(--dimmer); font-style: italic; }
+.doc-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
 .doc-mention {
   padding: 0 4px;
   border-radius: 4px;

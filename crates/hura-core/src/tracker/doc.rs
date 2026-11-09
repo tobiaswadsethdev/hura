@@ -7,7 +7,8 @@
 //! anyone who can comment on a ticket controls, and a webview that injects it
 //! is a webview that runs it. A typed tree has no such door: every node is one
 //! of the shapes below, a link is a link only if it is `http`, `https` or
-//! `mailto`, and an image is its name.
+//! `mailto`, and an image is its name -- and, once the ticket's attachments
+//! say which one it is, an id the client asks this side for the bytes of.
 //!
 //! Read generously. ADF grows node types, and a description that used one this
 //! does not know must still read: an unknown block keeps whatever text is
@@ -61,10 +62,14 @@ pub enum Block {
     Table {
         rows: Vec<Vec<Cell>>,
     },
-    /// An image or a file. Named rather than shown: fetching it needs the
-    /// tracker's credentials, and the window loads nothing from the network.
+    /// An image or a file. The window loads nothing from the network and
+    /// fetching it needs the tracker's credentials, so it is named here, and
+    /// an image the ticket has as an attachment carries that attachment's id
+    /// for the client to ask for: see `tracker::attachment`.
     Attachment {
         name: String,
+        #[serde(default)]
+        image: Option<String>,
     },
     /// A link drawn as a card. Shown as the link.
     Card {
@@ -277,11 +282,13 @@ fn block(node: &Value, depth: usize, out: &mut Vec<Block>) {
                     name: attr_str(media, "alt")
                         .or_else(|| attr_str(media, "name"))
                         .unwrap_or_else(|| "attachment".into()),
+                    image: None,
                 });
             }
         }
         "media" => out.push(Block::Attachment {
             name: attr_str(node, "alt").unwrap_or_else(|| "attachment".into()),
+            image: None,
         }),
         "blockCard" | "embedCard" => {
             if let Some(url) = attr_str(node, "url").and_then(|u| safe(&u)) {
@@ -546,7 +553,8 @@ mod tests {
         assert_eq!(
             blocks[1],
             Block::Attachment {
-                name: "screenshot.png".into()
+                name: "screenshot.png".into(),
+                image: None,
             }
         );
     }

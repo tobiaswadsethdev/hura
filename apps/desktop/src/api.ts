@@ -15,6 +15,7 @@ import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
 import type { InboxChange } from "./gen/InboxChange";
 import type { Issue } from "./gen/Issue";
+import type { IssueImage } from "./gen/IssueImage";
 import type { PullDetail } from "./gen/PullDetail";
 import type { PullMerge } from "./gen/PullMerge";
 import type { PullFile } from "./gen/PullFile";
@@ -262,6 +263,8 @@ export const api = {
     invoke<{ seen: unknown; changes: InboxChange[] }>("inbox_changes", { inbox, seen }),
   // One of them in full, from the same place with the same token.
   ticket: (tracker: string, key: string) => invoke<Issue>("ticket", { tracker, key }),
+  // One of its images, by the attachment id its document block carries.
+  ticketImage: (tracker: string, id: string) => invoke<IssueImage>("ticket_image", { tracker, id }),
   // Changing a Jira ticket, with the same token: its fields, its status, its
   // comments. Each answers with nothing; the ticket is read again after.
   editForm: (tracker: string, key: string) => invoke<EditForm>("edit_form", { tracker, key }),
@@ -286,6 +289,8 @@ export const api = {
   // `pullFiles` answered, which on Azure DevOps names the repository by id.
   pull: (tracker: string, repo: string, id: string) =>
     invoke<PullDetail>("pull", { tracker, repo, id }),
+  // An image in a pull request's text, by the URL it names there.
+  pullImage: (tracker: string, url: string) => invoke<IssueImage>("pull_image", { tracker, url }),
   pullFiles: (tracker: string, repo: string, id: string) =>
     invoke<PullFiles>("pull_files", { tracker, repo, id }),
   pullFile: (tracker: string, files: PullFiles, file: PullFile) =>

@@ -6,13 +6,15 @@
 // why it is the renderer rather than a parser feeding `innerHTML`. Links are
 // anchors only for the three schemes the window opens; anything else is its
 // text. An image is drawn only when it is a file in the working copy, read
-// through the server like any other: the window loads nothing from the
-// network on an agent's say-so.
+// through the server like any other, or -- in a pull request's text -- one of
+// the forge's own images, read through the tracker: the window loads nothing
+// from the network on anybody's say-so.
 
 import { createContext, memo, useContext, useEffect, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { api } from "./api";
 import type { Picture } from "./gen/Picture";
 
 /// Reads a working-copy path as an image, for the session a reply is about.
@@ -32,20 +34,40 @@ export function workingPath(src: string): string | null {
   return path && !path.startsWith("/") ? decodeURI(path) : null;
 }
 
+/// The tracker a pull request's text is from, whose images it reads them
+/// through. Absent everywhere else.
+const Forge = createContext<string | null>(null);
+
+// Each image once per window: a pull request is read again on every refresh,
+// and its images with it. A failure is forgotten, so the next read asks again.
+const forgePictures = new Map<string, Promise<Picture>>();
+
+function forgePicture(tracker: string, url: string): Promise<Picture> {
+  const key = `${tracker}\u0000${url}`;
+  let found = forgePictures.get(key);
+  if (!found) {
+    found = api.pullImage(tracker, url);
+    found.catch(() => forgePictures.delete(key));
+    forgePictures.set(key, found);
+  }
+  return found;
+}
+
 function Img({ src, alt }: { src?: string; alt?: string }) {
   const read = useContext(Pictures);
+  const forge = useContext(Forge);
   const path = src ? workingPath(src) : null;
+  const url = forge && src?.startsWith("https://") ? src : null;
   const [picture, setPicture] = useState<Picture | null>(null);
   useEffect(() => {
-    if (!read || !path) return;
+    const reading = path && read ? read(path) : url && forge ? forgePicture(forge, url) : null;
+    if (!reading) return;
     let live = true;
-    read(path)
-      .then((p) => live && setPicture(p ?? null))
-      .catch(() => {});
+    reading.then((p) => live && setPicture(p ?? null)).catch(() => {});
     return () => {
       live = false;
     };
-  }, [read, path]);
+  }, [read, path, forge, url]);
   if (!picture) return <>{alt ? `[${alt}]` : null}</>;
   return <img className="doc-img" src={`data:${picture.mime};base64,${picture.data}`} alt={alt ?? path ?? ""} />;
 }
@@ -75,12 +97,15 @@ const components: Components = {
   img: ({ src, alt }) => <Img src={typeof src === "string" ? src : undefined} alt={alt} />,
 };
 
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+/// `forge`: the tracker a pull request's text is from, for its images.
+export const Markdown = memo(function Markdown({ text, forge = null }: { text: string; forge?: string | null }) {
   return (
-    <div className="doc">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} skipHtml>
-        {text}
-      </ReactMarkdown>
-    </div>
+    <Forge.Provider value={forge}>
+      <div className="doc">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} skipHtml>
+          {text}
+        </ReactMarkdown>
+      </div>
+    </Forge.Provider>
   );
 });

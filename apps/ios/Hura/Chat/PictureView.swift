@@ -13,6 +13,10 @@ extension EnvironmentValues {
         get { self[ReadPictureKey.self] }
         set { self[ReadPictureKey.self] = newValue }
     }
+
+    /// Reads an https image a pull request's text names, through its tracker.
+    /// Unset everywhere else: an image at a URL is its alt text.
+    @Entry var readForgePicture: (@MainActor (String) async -> Picture?)?
 }
 
 /// An image, fitted to the width it is given and no taller than `maxHeight`.
@@ -103,6 +107,7 @@ struct MarkdownPicture: View {
     let alt: String
     let src: String
     @Environment(\.readPicture) private var read
+    @Environment(\.readForgePicture) private var readForge
     @State private var picture: Picture?
     @State private var tried = false
 
@@ -113,9 +118,14 @@ struct MarkdownPicture: View {
             Text(alt.isEmpty ? src : "[\(alt)]")
                 .foregroundStyle(.secondary)
                 .task(id: src) {
-                    guard !tried, let read, let path = Picture.workingPath(src) else { return }
-                    tried = true
-                    picture = await read(path)
+                    guard !tried else { return }
+                    if let read, let path = Picture.workingPath(src) {
+                        tried = true
+                        picture = await read(path)
+                    } else if let readForge, src.hasPrefix("https://") {
+                        tried = true
+                        picture = await readForge(src)
+                    }
                 }
         }
     }

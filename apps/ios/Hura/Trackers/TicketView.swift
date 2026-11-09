@@ -27,6 +27,8 @@ struct TicketView: View {
         Group {
             if readsHere {
                 Loaded(value: issue, error: error) { issue in content(issue) }
+                    // Its documents' images are attachments of this tracker's.
+                    .environment(\.docTracker, stored)
             } else {
                 List {
                     header
@@ -113,6 +115,16 @@ struct TicketView: View {
                 if !issue.labels.isEmpty { LabeledContent("Labels", value: issue.labels.joined(separator: ", ")) }
                 if let parent = issue.parent { LabeledContent("Parent", value: "\(parent.key) \(parent.title)") }
                 if let due = issue.due { LabeledContent("Due", value: due) }
+                ForEach(issue.custom) { f in
+                    if case let .array(blocks) = f.doc, !blocks.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(f.name).foregroundStyle(.secondary)
+                            DocView(blocks: f.doc)
+                        }
+                    } else {
+                        LabeledContent(f.name, value: f.value)
+                    }
+                }
             }
             Section("Description") {
                 DocView(blocks: issue.description)
@@ -256,11 +268,63 @@ struct CommentEditor: View {
     }
 }
 
+extension EnvironmentValues {
+    /// The tracker a document's images are attachments of. Without one, an
+    /// image is named rather than shown.
+    @Entry var docTracker: StoredTracker?
+}
+
+/// An image in a ticket's text, fetched through the core with the tracker's
+/// token. Each one once per launch: the same screenshot is quoted in comment
+/// after comment.
+struct DocImage: View {
+    let tracker: StoredTracker
+    let id: String
+    let name: String
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    @MainActor private static var cache: [String: UIImage] = [:]
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: image.size.width)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .accessibilityLabel(name)
+            } else if failed {
+                Label("\(name) (not read)", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Label(name, systemImage: "photo").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .task(id: id) { await load() }
+    }
+
+    private func load() async {
+        let key = "\(tracker.source.name)\u{0}\(id)"
+        if let cached = Self.cache[key] {
+            image = cached
+            return
+        }
+        guard let data = try? await TrackerCore.image(tracker, id: id), let loaded = UIImage(data: data) else {
+            failed = true
+            return
+        }
+        Self.cache[key] = loaded
+        image = loaded
+    }
+}
+
 /// hura-core's reading of a Jira document: paragraphs, headings, lists, code,
 /// quotes, panels, tables. Drawn plainly; what has no form here says what it
 /// was.
 struct DocView: View {
     let blocks: JSONValue
+    @Environment(\.docTracker) private var tracker
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -329,7 +393,11 @@ struct DocView: View {
                 }
             })
         case "attachment":
-            return AnyView(Label(b["name"]?.string ?? "attachment", systemImage: "paperclip").font(.caption))
+            let name = b["name"]?.string ?? "attachment"
+            if let id = b["image"]?.string, let tracker {
+                return AnyView(DocImage(tracker: tracker, id: id, name: name))
+            }
+            return AnyView(Label(name, systemImage: "paperclip").font(.caption))
         case "card":
             let url = b["url"]?.string ?? ""
             return AnyView(Link(url, destination: URL(string: url) ?? URL(string: "about:blank")!).font(.caption))

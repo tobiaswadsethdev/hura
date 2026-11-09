@@ -32,7 +32,7 @@ impl Ureq {
 }
 
 impl Transport for Ureq {
-    fn send(&self, r: &HttpRequest) -> Result<(u16, String), String> {
+    fn send(&self, r: &HttpRequest) -> Result<(u16, Vec<u8>), String> {
         let timeout = Duration::from_secs(r.timeout);
         let mut builder = ureq::http::Request::builder()
             .method(r.method.as_str())
@@ -55,11 +55,13 @@ impl Transport for Ureq {
             .run(request)
             .map_err(|e| format!("the request failed: {e}"))?;
         let status = response.status().as_u16();
-        let mut body = String::new();
+        // One byte past the limit, so that too large is told from just right.
+        let mut body = Vec::new();
         response
             .body_mut()
             .as_reader()
-            .read_to_string(&mut body)
+            .take(super::ATTACHMENT_LIMIT as u64 + 1)
+            .read_to_end(&mut body)
             .map_err(|e| format!("could not read the answer: {e}"))?;
         Ok((status, body))
     }

@@ -1227,6 +1227,21 @@ fn ticket(tracker: String, key: String) -> Result<hura_core::tracker::Issue, Fai
     on_tracker("issue", &tracker, json!({ "key": key }))
 }
 
+/// One of a ticket's images, by the attachment id its document carries. The
+/// bytes come through here because Jira wants the token for them and the
+/// window loads nothing from the network.
+#[tauri::command(async)]
+fn ticket_image(tracker: String, id: String) -> Result<hura_core::tracker::IssueImage, Failed> {
+    on_tracker("attachment", &tracker, json!({ "id": id }))
+}
+
+/// An image in a pull request's text, by the URL it names: fetched through
+/// the tracker, and only from the forge's own image hosts.
+#[tauri::command(async)]
+fn pull_image(tracker: String, url: String) -> Result<hura_core::tracker::IssueImage, Failed> {
+    on_tracker("pull_image", &tracker, json!({ "url": url }))
+}
+
 /// The editable defaults in the server's config file.
 ///
 /// The server's own file, not a preference of this window's, and the split is
@@ -1510,6 +1525,8 @@ fn main() {
             cloud_set_seen,
             cloud_connect,
             ticket,
+            ticket_image,
+            pull_image,
             pull,
             pull_files,
             pull_file,

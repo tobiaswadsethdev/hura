@@ -125,8 +125,12 @@ impl Http for Ureq {
             .run(request)
             .map_err(|e| format!("could not reach hura cloud: {e}"))?;
         let status = response.status().as_u16();
+        // Past ureq's ten megabytes: a ticket's image comes back in base64,
+        // a third larger than the most an attachment may be.
         let text = response
             .body_mut()
+            .with_config()
+            .limit(64 * 1024 * 1024)
             .read_to_string()
             .map_err(|e| format!("could not read hura cloud's answer: {e}"))?;
         Ok((status, text))

@@ -55,6 +55,8 @@ pub fn handle(request: &Value) -> Result<Value, String> {
             Ok(json!({ "seen": seen, "changes": changes }))
         }
         "issue" => to_value(super::issue(&stored()?, arg("key")?)?),
+        // One of a ticket's images, by the id its document block carries.
+        "attachment" => to_value(super::attachment(&stored()?, arg("id")?)?),
         "edit_form" => to_value(super::edit_form(&stored()?, arg("key")?)?),
         "save" => {
             let changes: Vec<FieldChange> = field(request, "changes")?;
@@ -77,6 +79,8 @@ pub fn handle(request: &Value) -> Result<Value, String> {
             request["assignable"].as_bool().unwrap_or(false),
         )?),
         "pull" => to_value(super::pull(&stored()?, arg("repo")?, arg("id")?)?),
+        // An image in a pull request's text, by the URL it names.
+        "pull_image" => to_value(super::pull_image(&stored()?, arg("url")?)?),
         "pull_files" => to_value(super::pull_files(&stored()?, arg("repo")?, arg("id")?)?),
         "pull_file" => {
             let file: PullFile = field(request, "file")?;
