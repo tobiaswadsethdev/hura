@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| [install.md](install.md) | prerequisites, Docker Sandboxes, credentials, `hurad` itself, and the desktop application on Linux and Windows |
+| [install.md](install.md) | prerequisites, Docker Sandboxes, credentials, `hurad` itself, and the desktop application on Linux, Windows and macOS |
 | [desktop.md](desktop.md) | the desktop workspace: projects and worktrees, files, git, the editor, the review |
 | [configuration.md](configuration.md) | `~/.config/hura/config.toml`, and which default wins |
 | [policy.md](policy.md) | the rules being enforced, the audit feed, and acting on a denial |

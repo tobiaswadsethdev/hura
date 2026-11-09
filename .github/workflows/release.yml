@@ -1,7 +1,8 @@
 name: Release
 
 # Tag a version and this publishes the binary `install.sh` and `hurad update`
-# download, plus the Windows desktop installer.
+# download, plus the desktop application's Windows installers and Mac disk
+# image.
 #
 # The tag is normally not made by hand: `tag.yml` bumps the seven files that
 # carry the version, tags the commit that holds them, and pushes the tag, which
@@ -350,12 +351,163 @@ jobs:
           # a broken release.
           if-no-files-found: warn
 
+  # The desktop application for a Mac, as a disk image: Apple silicon, the one
+  # Mac architecture `hurad` itself is released for.
+  #
+  # Signed with a Developer ID and notarised when the secrets for both are
+  # there, so it opens like any downloaded app. Without them it is still
+  # built, ad-hoc signed -- an Apple silicon binary has to be signed somehow
+  # to run at all -- and macOS asks once, under Privacy & Security, before it
+  # will open it. Conditional for the same reasons as the Windows certificate:
+  # a fork or a maintainer without an Apple Developer account can still cut a
+  # release.
+  #
+  # The secrets:
+  #   APPLE_CERTIFICATE           a "Developer ID Application" certificate and
+  #                               its key, exported as .p12, base64
+  #   APPLE_CERTIFICATE_PASSWORD  the .p12's password
+  #   APPLE_API_KEY_ID, APPLE_API_ISSUER, APPLE_API_KEY
+  #                               an App Store Connect API key (its id, the
+  #                               issuer, and the .p8's contents), which is
+  #                               what notarisation is asked with
+  #
+  # No self-update yet: the updater plugin is compiled in on Windows only, so
+  # there are no updater artifacts to make here and none are asked for.
+  desktop-macos:
+    name: desktop (macos)
+    runs-on: macos-latest
+    env:
+      HAS_SIGNING_CERT: >-
+        ${{ secrets.APPLE_CERTIFICATE != ''
+            && secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+      HAS_NOTARY_KEY: >-
+        ${{ secrets.APPLE_API_KEY_ID != ''
+            && secrets.APPLE_API_ISSUER != ''
+            && secrets.APPLE_API_KEY != '' }}
+    steps:
+      # The tag, explicitly: see the Windows job.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check the tag looks like a version
+        run: |
+          case "$TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) echo "building $TAG" ;;
+            *) echo "TAG=$TAG is not a vX.Y.Z tag"; exit 1 ;;
+          esac
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          key: desktop-macos
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # The version in the bundle is the one Finder shows, so it is the tag's.
+      - name: Take the version from the tag
+        run: |
+          set -eu
+          conf=apps/desktop/src-tauri/tauri.conf.json
+          jq --arg v "${TAG#v}" '.version = $v' "$conf" > "$conf.new"
+          mv "$conf.new" "$conf"
+          jq -r .version "$conf"
+
+      # Into a keychain of the job's own, and the identity read back out of it
+      # rather than configured: the name in a secret and the certificate in
+      # another are two things to keep in step, and only one is visible.
+      #
+      # Never verified against a real certificate at the time of writing --
+      # there was none to test with. The unsigned path is the one verified.
+      - name: Import the signing certificate
+        if: env.HAS_SIGNING_CERT == 'true'
+        id: cert
+        env:
+          SIGNING_CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          SIGNING_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -eu
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$SIGNING_CERT" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$SIGNING_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -n 1)
+          [ -n "$identity" ] || { echo "no Developer ID Application identity in the certificate"; exit 1; }
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          IDENTITY: ${{ steps.cert.outputs.identity }}
+          NOTARY_KEY: ${{ secrets.APPLE_API_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -eu
+          npm --prefix apps/desktop ci
+
+          # One `--config` object built with `jq`, as on Windows.
+          overrides='{"bundle":{"createUpdaterArtifacts":false}}'
+          if [ -n "${IDENTITY:-}" ]; then
+            overrides=$(printf '%s' "$overrides" | jq --arg i "$IDENTITY" '.bundle.macOS.signingIdentity = $i')
+            # Tauri notarises after signing when these are in its
+            # environment, and staples the ticket to the app.
+            if [ "$HAS_NOTARY_KEY" = "true" ]; then
+              key="$RUNNER_TEMP/AuthKey.p8"
+              printf '%s' "$NOTARY_KEY" > "$key"
+              export APPLE_API_KEY="$NOTARY_KEY_ID" APPLE_API_ISSUER="$NOTARY_ISSUER" APPLE_API_KEY_PATH="$key"
+            else
+              echo "signed, but no notarisation key: Gatekeeper will still ask"
+            fi
+          else
+            echo "no signing certificate; building ad-hoc signed"
+            overrides=$(printf '%s' "$overrides" | jq '.bundle.macOS.signingIdentity = "-"')
+          fi
+          echo "$overrides"
+          npm --prefix apps/desktop run tauri -- build --bundles app,dmg --config "$overrides"
+
+      # Renamed and checksummed as the rest are.
+      - name: Package
+        run: |
+          set -eu
+          bundle=apps/desktop/src-tauri/target/release/bundle
+          mkdir -p dist
+          for dmg in "$bundle"/dmg/*.dmg; do
+            cp "$dmg" "dist/hura-desktop-${TAG}-aarch64-apple-darwin.dmg"
+          done
+          cd dist
+          shasum -a 256 *.dmg > desktop-macos.sha256
+          cat desktop-macos.sha256
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hura-desktop-macos
+          path: |
+            dist/hura-desktop-${{ env.TAG }}-aarch64-apple-darwin.dmg
+            dist/desktop-macos.sha256
+          if-no-files-found: error
+
   publish:
     name: Publish the release
-    needs: [build, desktop]
+    needs: [build, desktop, desktop-macos]
     runs-on: ubuntu-latest
     steps:
-      # `merge-multiple`, because the three build jobs upload three artifacts
+      # `merge-multiple`, because the build jobs upload an artifact each
       # and what the steps below want is one directory with everything in it.
       #
       # On v8 a digest mismatch between what the server holds and what arrives
@@ -394,6 +546,7 @@ jobs:
             echo "dist/*.tar.gz"
             echo "dist/*.msi"
             echo "dist/*.exe"
+            echo "dist/*.dmg"
             echo "dist/SHA256SUMS"
             # `|| true` because `set -e` would take the false branch of a `&&`
             # as a failed step, which is a very silly way to lose a release.

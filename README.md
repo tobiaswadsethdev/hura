@@ -145,9 +145,9 @@ binary, and the swap happens at the next start rather than under a live session
 to install; it never installs unasked.
 
 **The window is installed separately, and can be on another machine.** On Linux
-it is built from the tree; on Windows it is an installer from the [releases
-page](https://github.com/tobiaswadsethdev/hura/releases) and is all that side
-needs -- it pairs with a server from its own screen, so there is no `hurad` to
+it is built from the tree; on Windows and on a Mac it is an installer from the
+[releases page](https://github.com/tobiaswadsethdev/hura/releases) and is all
+that side needs -- it pairs with a server from its own screen, so there is no `hurad` to
 install there. Both are [docs/install.md](docs/install.md#the-desktop-application).
 
 `hurad doctor` is the one to run when something looks wrong. It checks the
@@ -213,7 +213,7 @@ See [docs/toolchains.md](docs/toolchains.md).
 
 |                                            |                                                                       |
 | ------------------------------------------ | --------------------------------------------------------------------- |
-| [Install](docs/install.md)                 | prerequisites, Docker Sandboxes, credentials, `hurad`, and the window on Linux and Windows |
+| [Install](docs/install.md)                 | prerequisites, Docker Sandboxes, credentials, `hurad`, and the window on Linux, Windows and macOS |
 | [The desktop app](docs/desktop.md)         | projects and worktrees, files, git, the editor, and the review        |
 | [The server](docs/server.md)               | `hurad`, pairing a client on another machine, WSL, what a token is worth |
 | [Configuration](docs/configuration.md)     | `~/.config/hura/config.toml`, and which default wins                   |

@@ -274,9 +274,38 @@ restart* downloads it, checks it against a signature made when the release was
 built, runs the installer and relaunches. It never does that without being
 clicked -- see [desktop.md](desktop.md#keeping-it-current).
 
-Windows only, because Windows is the only platform with an installer to
-replace: the Linux window is built from the tree, so there is nothing for an
-updater to fetch.
+Windows only for now: the Linux window is built from the tree, so there is
+nothing for an updater to fetch, and the Mac one below does not update itself
+yet.
+
+### macOS
+
+Apple silicon, from the [releases
+page](https://github.com/tobiaswadsethdev/hura/releases):
+
+```
+hura-desktop-vX.Y.Z-aarch64-apple-darwin.dmg
+```
+
+Open it and drag hura into Applications. It is in the release's `SHA256SUMS`
+like everything else there:
+
+```sh
+shasum -a 256 hura-desktop-vX.Y.Z-aarch64-apple-darwin.dmg
+```
+
+**A release built without an Apple Developer ID is not notarised**, and macOS
+will not open a downloaded app that is not without asking: the first launch says
+it cannot check hura, and *System Settings → Privacy & Security → Open Anyway*
+is the answer, once. The release workflow signs and notarises the app when the
+repository's secrets have a Developer ID certificate (`APPLE_CERTIFICATE`, a
+base64 `.p12`, and `APPLE_CERTIFICATE_PASSWORD`) and an App Store Connect API
+key to notarise with (`APPLE_API_KEY_ID`, `APPLE_API_ISSUER`, and the `.p8`'s
+contents as `APPLE_API_KEY`), and skips both when they are not there.
+
+It does not update itself yet: a newer release is a new disk image. Building it
+from the tree instead is the same `npm run tauri build` as on Linux, with Xcode's
+command-line tools in place of the GTK libraries.
 
 **If the server is in WSL**, which is the case this was built for, the address
 the window dials depends on how WSL is networked -- mirrored means
