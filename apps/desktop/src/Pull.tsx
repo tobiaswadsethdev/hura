@@ -345,7 +345,7 @@ function Overview({
     <>
       <section className="ticket-section">
         <h3>description</h3>
-        {d.body.trim() ? <Markdown text={d.body} /> : <Nobody>no description</Nobody>}
+        {d.body.trim() ? <Markdown text={d.body} forge={d.tracker} /> : <Nobody>no description</Nobody>}
       </section>
 
       <section className="ticket-section">
@@ -677,6 +677,7 @@ function Conversation({
         {d.conversation.map((t, i) => (
           <Entry
             key={`${t.id}:${t.at}:${i}`}
+            tracker={d.tracker}
             thread={t}
             working={working}
             onReply={(body) => onComment(body, t.id)}
@@ -717,10 +718,12 @@ function Conversation({
 /// A resolved thread starts shut, showing where it was and who started it:
 /// it was settled, and a long review is mostly settled threads.
 function Entry({
+  tracker,
   thread: t,
   working,
   onReply,
 }: {
+  tracker: string;
   thread: PullThread;
   working: string | null;
   onReply: (body: string) => Promise<boolean>;
@@ -739,7 +742,7 @@ function Entry({
               {ago(c.created)}
             </span>
           </div>
-          <Markdown text={c.body} />
+          <Markdown text={c.body} forge={tracker} />
         </div>
       ))}
     </>
@@ -759,7 +762,7 @@ function Entry({
           </div>
         )}
         {t.verdict
-          ? t.comments.map((c, i) => <Markdown key={i} text={c.body} />)
+          ? t.comments.map((c, i) => <Markdown key={i} text={c.body} forge={tracker} />)
           : comments}
       </li>
     );

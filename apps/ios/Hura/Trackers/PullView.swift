@@ -5,6 +5,12 @@ import SwiftUI
 /// conversation (with replies), a review to give, merging it now or once it
 /// can, and its files. Read with
 /// the tracker's own token, as the desktop reads it.
+/// A pull request's images, once per launch: it is read again on every
+/// refresh, and its images with it.
+@MainActor enum PullPictures {
+    static var cache: [String: Picture] = [:]
+}
+
 struct PullView: View {
     let pull: PullRequestSummary
     @Binding var starting: WorkOrigin?
@@ -55,6 +61,14 @@ struct PullView: View {
                     PullFilesSection(tracker: stored, pull: pull)
                 }
             }
+        }
+        // Its text's images are the forge's, read through the tracker.
+        .environment(\.readForgePicture) { [stored] url in
+            guard let stored else { return nil }
+            if let cached = PullPictures.cache[url] { return cached }
+            let picture = try? await TrackerCore.pullImage(stored, url: url)
+            PullPictures.cache[url] = picture
+            return picture
         }
         .navigationTitle(pullName(pull))
         // A pull request has the whole screen; back is the way to the tabs.

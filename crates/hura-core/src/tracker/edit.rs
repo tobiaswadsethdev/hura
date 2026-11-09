@@ -308,7 +308,7 @@ fn user(value: &Value) -> Option<UserChoice> {
 }
 
 /// Any value, as the words a person would read it as.
-fn shown(value: &Value) -> String {
+pub(super) fn shown(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
         Value::String(s) => s.clone(),

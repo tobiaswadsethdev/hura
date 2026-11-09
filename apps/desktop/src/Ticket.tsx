@@ -12,7 +12,7 @@
 // Beside the board rather than over it, because the board is where you were:
 // picking the next card should not mean closing this one first.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { api, messageOf } from "./api";
 import { Doc } from "./Doc";
@@ -250,6 +250,16 @@ export function TicketPanel({
                 <dd>{issue.due}</dd>
               </>
             )}
+            {issue.custom.map((f) => (
+              <Fragment key={f.id}>
+                <dt className="ticket-custom" title={f.name}>
+                  {f.name.toLowerCase()}
+                </dt>
+                <dd className="ticket-custom">
+                  {f.doc.length > 0 ? <Doc blocks={f.doc} tracker={task.tracker} /> : f.value}
+                </dd>
+              </Fragment>
+            ))}
             <dt>created</dt>
             <dd title={issue.created ?? undefined}>{ago(issue.created) ?? "unknown"}</dd>
             <dt>updated</dt>
@@ -259,7 +269,7 @@ export function TicketPanel({
           <section className="ticket-section">
             <h3>description</h3>
             {issue.description.length > 0 ? (
-              <Doc blocks={issue.description} />
+              <Doc blocks={issue.description} tracker={task.tracker} />
             ) : (
               <Nobody>no description</Nobody>
             )}
@@ -352,7 +362,7 @@ export function TicketPanel({
                       </div>
                     </div>
                   ) : (
-                    <Doc blocks={c.body} />
+                    <Doc blocks={c.body} tracker={task.tracker} />
                   )}
                 </li>
               ))}
