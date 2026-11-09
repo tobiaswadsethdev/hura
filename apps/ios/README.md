@@ -198,7 +198,9 @@ what it writes.
 ## The icon
 
 `Hura/Assets.xcassets/AppIcon.appiconset/icon-1024.png` is made from the
-desktop application's icon by `Tools/make-icon.swift`, which crops it to a
-full-bleed square, as iOS wants. The lock screen shows it too, from
+desktop application's icon, `../desktop/src-tauri/icons/icon.svg`, by
+`Tools/make-icon.swift`, which squares the tile's corners and crops it to a
+full-bleed square, as iOS wants:
+`swift Tools/make-icon.swift ../desktop/src-tauri/icons/icon.svg Hura/Assets.xcassets/AppIcon.appiconset/icon-1024.png`. The lock screen shows it too, from
 `Logo.imageset`, which is the same image made small:
 `sips -Z 336 Hura/Assets.xcassets/AppIcon.appiconset/icon-1024.png --out Hura/Assets.xcassets/Logo.imageset/logo@3x.png`.

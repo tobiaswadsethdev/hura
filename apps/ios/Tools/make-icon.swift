@@ -1,38 +1,38 @@
 // Makes the app icon from the desktop application's: iOS wants 1024 × 1024,
 // square and opaque, and rounds the corners itself, so the desktop icon's
-// own rounded tile is cropped close and laid on its background colour.
+// tile is drawn with square corners and cropped to fill the square.
 //
-//   swift Tools/make-icon.swift ../desktop/src-tauri/icons/icon.png Hura/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+//   swift Tools/make-icon.swift ../desktop/src-tauri/icons/icon.svg Hura/Assets.xcassets/AppIcon.appiconset/icon-1024.png
 
 import AppKit
 import CoreGraphics
 
 let args = CommandLine.arguments
-guard args.count == 3,
-      let source = NSImage(contentsOfFile: args[1])?.cgImage(forProposedRect: nil, context: nil, hints: nil)
-else {
-    FileHandle.standardError.write(Data("usage: make-icon.swift <icon.png> <out.png>\n".utf8))
+guard args.count == 3, var svg = try? String(contentsOfFile: args[1], encoding: .utf8) else {
+    FileHandle.standardError.write(Data("usage: make-icon.swift <icon.svg> <out.png>\n".utf8))
     exit(1)
 }
 
+// The tile is `<rect id="tile" … rx="…">`; with its corners squared there is
+// nothing behind them to match.
+guard let tile = svg.range(of: #"<rect id="tile"[^>]*>"#, options: .regularExpression) else {
+    FileHandle.standardError.write(Data("make-icon.swift: no <rect id=\"tile\"> in \(args[1])\n".utf8))
+    exit(1)
+}
+svg.replaceSubrange(tile, with: svg[tile].replacingOccurrences(of: #" rx="[^"]*""#, with: "", options: .regularExpression))
+let source = NSImage(data: Data(svg.utf8))!
+
+// The tile spans 100…924 of the icon's 1024: macOS's grid, with a margin
+// for the shadow. Drawn so the tile fills the square, a little past its
+// edge, whose antialiasing would otherwise be a dark hairline round it.
 let size = 1024
+let scale = CGFloat(size) / 820
 let space = CGColorSpace(name: CGColorSpace.sRGB)!
 let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0, space: space,
                     bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
-
-// The tile's colour, read from its middle-left edge, inside the rounding.
-let rep = NSBitmapImageRep(cgImage: source)
-let w = source.width, h = source.height
-let edge = rep.colorAt(x: w * 8 / 100, y: h / 2)!.usingColorSpace(.sRGB)!
-ctx.setFillColor(edge.cgColor)
-ctx.fill(CGRect(x: 0, y: 0, width: size, height: size))
-
-// Crop inside the tile, past its edge (about 4.5% in); what is left of its
-// rounded corners falls under the corners iOS rounds off.
-let inset = CGFloat(w) * 0.10
-let crop = source.cropping(to: CGRect(x: inset, y: inset, width: CGFloat(w) - 2 * inset, height: CGFloat(h) - 2 * inset))!
-ctx.interpolationQuality = .high
-ctx.draw(crop, in: CGRect(x: 0, y: 0, width: size, height: size))
+NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+NSGraphicsContext.current!.imageInterpolation = .high
+source.draw(in: NSRect(x: -102 * scale, y: -102 * scale, width: CGFloat(size) * scale, height: CGFloat(size) * scale))
 
 let out = NSBitmapImageRep(cgImage: ctx.makeImage()!)
 try! out.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: args[2]))
