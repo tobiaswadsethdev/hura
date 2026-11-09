@@ -25,16 +25,14 @@ the sandbox over the paired connection, and shown in Safari's in-app browser.
 
 The Inbox tab is what is yours on GitHub, Azure DevOps and Jira: tickets
 assigned to you or created by you, a section for each of a Jira tracker's JQL
-filters, and pull requests you opened or that wait on your review. When they
-change, the app can notify you as the desktop does, from its own reads: every
-three minutes while it is open, and by background app refresh otherwise
-([docs/tickets.md](../../docs/tickets.md#notifications)). A Jira ticket opens in full, to move its status, edit its
-fields and comment; a pull request opens with its checks, reviewers and
-conversation, to reply, give a review, and read its files. Either starts a
-worktree, on the branch the desktop would give it. Trackers are set up on the
-phone and their tokens stay in its Keychain: they are read by hura-core's own
-tracker code, built for iOS from [`crates/hura-mobile`](../../crates/hura-mobile),
-so no server holds a tracker or a token.
+filters, and pull requests you opened or that wait on your review. The
+trackers are kept in a hura account ([docs/cloud.md](../../docs/cloud.md)),
+which reads them all day with hura-core's own tracker code and tells the phone
+through the relay when they change; signed out, the tab asks you to sign in. A
+Jira ticket opens in full, to move its status, edit its fields and comment; a
+pull request opens with its checks, reviewers and conversation, to reply, give
+a review, and read its files. Either starts a worktree, on the branch the
+desktop would give it.
 
 A server's menu has its integrations (MCP servers to start, restart or stop,
 the secrets they're given, and the skills new sessions get), its settings
@@ -55,14 +53,6 @@ covers the `hurad` side.
 You need Xcode 16 or newer and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 (`brew install xcodegen`). The project is generated from `project.yml`, and the
 `.xcodeproj` is not checked in.
-
-The app links hura-core's tracker client, built from Rust. Build it once,
-and again after changing the Rust:
-
-```sh
-rustup target add aarch64-apple-ios aarch64-apple-ios-sim
-apps/ios/Tools/build-core.sh    # makes HuraKit/Build/HuraCore.xcframework
-```
 
 ```sh
 cd apps/ios
@@ -94,7 +84,7 @@ git switch main && git pull
 apps/ios/Tools/testflight.sh
 ```
 
-The script rebuilds the Rust core, regenerates the project, archives a
+The script regenerates the project, archives a
 Release build and uploads it with `Config/ExportOptions.plist`. It refuses a
 branch other than `main` or a checkout with uncommitted changes
 (`HURA_TESTFLIGHT_ANY_BRANCH=1` overrides both).

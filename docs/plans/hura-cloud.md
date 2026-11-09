@@ -32,7 +32,8 @@ does both things and can use webhooks later where they help.
 **This reverses a principle.** [tickets.md](../tickets.md) says the server holds
 no tracker, no token and no ticket, and the tracker module says the same. That
 stays true of `hurad`. It stops being true of hura as a whole for anyone who
-signs in, which is why local-only stays (below).
+signs in, and since local-only mode was dropped (below), for anyone who uses
+trackers at all.
 
 ## Decisions
 
@@ -40,7 +41,7 @@ signs in, which is why local-only stays (below).
 |---|---|
 | Who it is for | You, for now. Others later, possibly as a paid subscription, so it is built for many accounts from the first table |
 | Where it runs | The dedicated server, under Coolify |
-| Local-only mode | Kept. Without signing in, trackers and tokens stay on the device and are read from there, as today |
+| Local-only mode | Dropped on 2026-11-09: trackers live only on the service, and signed out, an app has none. Someone who will not hand a token over can run their own `hura-cloud`. (Kept at first, while the service was new.) |
 | Signing in | Sign in with Apple, and a sign-in that needs no Apple device (an emailed code, passkeys later) |
 | Domain | `gethura.app` |
 | Mail | Resend, with `gethura.app` already verified there as a sending domain |
@@ -71,8 +72,8 @@ now, and what many accounts want later. Coolify's scheduled backups to S3 cover
 it.
 
 **Self-hostable**, since it is the same image configured by environment. That
-is the third choice for someone who will not hand a token over: local-only,
-their own `hura-cloud`, or the hosted one.
+is the choice for someone who will not hand a token over: their own
+`hura-cloud` rather than the hosted one.
 
 **`hurad` is not involved.** Sessions and sandboxes stay on your machines and
 pairing stays device to device; the service is about trackers.
@@ -197,6 +198,11 @@ deleted.
   - [x] "Seen" shared between devices: kept per account, set by whichever
     device last looked at its inbox, and the other phones woken by a
     background push (`inbox_seen`) to clear their badge and notifications.
+- [x] **Trackers only on the service.** Local-only mode dropped: the
+  desktop's `trackers.json`, the phone's Keychain trackers, `crates/hura-mobile`
+  and the apps' own reads and change detection are gone, and signed out the
+  apps say trackers need an account. Notifications come only from the
+  service.
 - [ ] **6. Ready for others.** The master key in a KMS, monitoring, rate
   limits, export and deletion, plans enforced, billing.
 

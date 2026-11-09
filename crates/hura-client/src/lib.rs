@@ -19,7 +19,6 @@
 pub mod cloud;
 mod http;
 mod pin;
-pub mod trackers;
 mod ws;
 
 pub use ws::{Incoming, Sink, Stream};

@@ -41,6 +41,12 @@ struct HuraApp: App {
                         trackers.showInbox = false
                     }
                 }
+                .onChange(of: trackers.showAccount) { _, show in
+                    if show {
+                        tab = 2
+                        trackers.showAccount = false
+                    }
+                }
                 // Covers the content while locked, and whenever the app isn't
                 // active so the app switcher snapshot shows nothing.
                 if lock.isLocked || scenePhase != .active {
@@ -78,7 +84,6 @@ struct HuraApp: App {
                 lock.lock()
                 model.suspendAll()
                 trackers.suspend()
-                trackers.scheduleBackgroundRead()
             default:
                 break
             }

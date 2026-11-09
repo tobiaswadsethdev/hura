@@ -81,6 +81,18 @@ struct CloudTests {
 
     /// An access token the service refuses is renewed with the refresh token,
     /// and the request made again.
+    /// The session can be read without waiting on the actor, so a screen
+    /// drawn at launch knows at once whether the phone is signed in.
+    @Test func theSessionIsReadableAtOnceFromLaunchToSignOut() async throws {
+        let service = Service()
+        let (cloud, store) = try await signedInCloud(service)
+        #expect(cloud.stored?.email == "me@example.com")
+        #expect(Cloud(store: store, send: service.send).stored?.email == "me@example.com", "kept from the last launch")
+        service.on("POST /v1/sign-out", 204, "")
+        await cloud.signOut()
+        #expect(cloud.stored == nil)
+    }
+
     @Test func aRefusedAccessTokenIsRenewedOnce() async throws {
         let service = Service()
         let (cloud, _) = try await signedInCloud(service)
@@ -110,42 +122,28 @@ struct CloudTests {
         service.on("GET /v1/trackers", 200, #"[{"source":{"kind":"git-hub","name":"gh"},"token_set":true},{"source":{"kind":"jira","name":"work","site":"https://x.atlassian.net","email":"a@b.c"},"token_set":false}]"#)
         let trackers = try await cloud.trackers()
         #expect(trackers.map(\.hasToken) == [true, false])
-        #expect(trackers.allSatisfy { $0.token == nil })
-        // Kept locally, `tokenKept` is not written down.
-        let encoded = String(decoding: try JSONEncoder().encode(trackers[0]), as: UTF8.self)
-        #expect(!encoded.contains("tokenKept"))
     }
 
-    /// Signed in, a tracker request goes to the service with the tracker
-    /// named rather than sent; what needs no tracker is answered here.
+    /// A tracker request goes to the service, with the tracker named.
     @Test func trackerRequestsGoToTheServiceWhenSignedIn() async throws {
         let service = Service()
         let (cloud, _) = try await signedInCloud(service)
         service.on("POST /v1/tracker", 200, #"{"ok":{"tasks":[],"pulls":[],"warnings":["gh: no token yet"],"read":[],"pulls_read":[],"filters_read":[]}}"#)
-        let mine = StoredTracker(source: TrackerSource(kind: "git-hub", name: "gh"), token: "ghp_local")
+        let mine = StoredTracker(source: TrackerSource(kind: "git-hub", name: "gh"), hasToken: true)
 
         let inbox = try await TrackerCore.$cloud.withValue(cloud) {
-            try await TrackerCore.inbox([mine], prefix: "hura")
+            try await TrackerCore.inbox(prefix: "hura")
         }
         #expect(inbox.warnings == ["gh: no token yet"])
         let asked = try #require(service.requests("POST /v1/tracker").first)
         #expect(service.body(asked)?["op"]?.string == "inbox")
-        #expect(service.body(asked)?["trackers"] == nil, "the service reads its own")
 
         service.on("POST /v1/tracker", 200, #"{"error":"no tracker called `gh`"}"#)
         await #expect(throws: TrackerError.self) {
             try await TrackerCore.$cloud.withValue(cloud) { _ = try await TrackerCore.issue(mine, key: "1") }
         }
         let issue = try #require(service.requests("POST /v1/tracker").last)
-        #expect(service.body(issue)?["tracker"]?.string == "gh", "named, and no token sent")
-        #expect(!String(decoding: issue.httpBody ?? Data(), as: UTF8.self).contains("ghp_local"))
-
-        let before = service.sent.count
-        let branch = try await TrackerCore.$cloud.withValue(cloud) {
-            try await TrackerCore.branch(prefix: "hura", key: "P-1", title: "Add it")
-        }
-        #expect(branch.hasPrefix("hura/P-1"))
-        #expect(service.sent.count == before, "answered here")
+        #expect(service.body(issue)?["tracker"]?.string == "gh", "named")
     }
 
     /// A Keychain that refuses the session must not leave a device on the

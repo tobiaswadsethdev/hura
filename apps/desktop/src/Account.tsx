@@ -1,11 +1,9 @@
 // hura cloud, from the settings screen: signing this computer in with an
-// emailed code, and once in, the account, the devices signed in to it, and
-// the trackers still kept on this computer.
+// emailed code, and once in, the account and the devices signed in to it.
 //
-// Optional, and never in the way: signed out, trackers are kept and read on
-// this computer as they always were, and nothing here asks the service
-// anything. Signed in, the trackers section below is the account's, the same
-// on every device.
+// Trackers need it: they are kept and read on the account, the same on every
+// device, and the trackers section below is empty until this computer signs
+// in. Everything else in hura works signed out.
 
 import { useEffect, useRef, useState } from "react";
 
@@ -14,14 +12,12 @@ import { Waiting } from "./Empty";
 import type { CloudAccount } from "./gen/CloudAccount";
 import type { CloudDevice } from "./gen/CloudDevice";
 import type { CloudStatus } from "./gen/CloudStatus";
-import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
 import { Forget } from "./icons";
 
 export function AccountSection({
   onChanged,
 }: {
-  /// Signed in or out, or trackers moved: the trackers to show now, which
-  /// are someone else's list than before.
+  /// Signed in or out: whether there are trackers to show now.
   onChanged: (signedIn: boolean) => void;
 }) {
   // `undefined` until the session file has been read.
@@ -41,7 +37,7 @@ export function AccountSection({
       <h3>account</h3>
       {status === undefined && <Waiting />}
       {status === null && <SignIn onSignedIn={changed} />}
-      {status && <SignedIn status={status} onSignedOut={() => changed(null)} onMoved={() => onChanged(true)} />}
+      {status && <SignedIn status={status} onSignedOut={() => changed(null)} />}
     </section>
   );
 }
@@ -77,9 +73,8 @@ function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
   return (
     <>
       <p className="hint">
-        Sign in to hura cloud to keep your trackers and their filters in one place, the same on
-        every device you sign in on. Optional: without an account, trackers stay on this computer,
-        as they do now.
+        Sign in to hura cloud to use trackers: your tickets and pull requests, kept in one place
+        and the same on every device you sign in on, with notifications when they change.
       </p>
       {sentTo === null ? (
         <>
@@ -152,23 +147,16 @@ function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
   );
 }
 
-/// Who this computer is signed in as, its trackers not yet moved, and the
-/// account's devices.
+/// Who this computer is signed in as, and the account's devices.
 function SignedIn({
   status,
   onSignedOut,
-  onMoved,
 }: {
   status: CloudStatus;
   onSignedOut: () => void;
-  onMoved: () => void;
 }) {
   const [account, setAccount] = useState<CloudAccount | null>(null);
   const [devices, setDevices] = useState<CloudDevice[] | null>(null);
-  const [local, setLocal] = useState<ConfiguredTracker[]>([]);
-  // What stayed on this computer at the last move, because the account
-  // already had a tracker by that name.
-  const [kept, setKept] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Read through a ref: a new callback each render is not a reason to ask
@@ -178,12 +166,11 @@ function SignedIn({
 
   useEffect(() => {
     let live = true;
-    Promise.all([api.cloudAccount(), api.cloudDevices(), api.localTrackers()]).then(
-      ([a, d, l]) => {
+    Promise.all([api.cloudAccount(), api.cloudDevices()]).then(
+      ([a, d]) => {
         if (!live) return;
         setAccount(a);
         setDevices(d);
-        setLocal(l);
       },
       async (e) => {
         if (!live) return;
@@ -222,33 +209,6 @@ function SignedIn({
         </label>
       )}
 
-      {local.length > 0 && (
-        <div className="setting-group">
-          <h4>on this computer only</h4>
-          <p className="hint">
-            {kept.length > 0
-              ? `Your account already has a tracker called ${kept.join(", ")}, so this computer's stays here. Forget one of them to move it.`
-              : `${local.map((t) => t.source.name).join(", ")}: added before you signed in, so not read while you are. Moving sends them and their tokens to hura cloud, which keeps the tokens encrypted, and this computer forgets them.`}
-          </p>
-          <div className="setting-actions">
-            <button
-              className="go"
-              disabled={busy !== null}
-              onClick={() =>
-                void act("move", async () => {
-                  const left = await api.moveTrackersToCloud();
-                  setLocal(left);
-                  setKept(left.map((t) => t.source.name));
-                  onMoved();
-                })
-              }
-            >
-              {busy === "move" ? "moving…" : "move to my account"}
-            </button>
-          </div>
-        </div>
-      )}
-
       <h4>devices</h4>
       {devices === null && !error && <Waiting />}
       {devices?.map((d) => (
@@ -275,7 +235,7 @@ function SignedIn({
 
       <div className="setting-actions">
         <span className="hint">
-          Signing out goes back to the trackers kept on this computer. Your account keeps its own.
+          Signed out, this computer has no trackers. Your account keeps them for when you sign in again.
         </span>
         <button
           className="quiet danger"

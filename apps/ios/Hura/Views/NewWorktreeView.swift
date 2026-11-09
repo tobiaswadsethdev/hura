@@ -255,7 +255,7 @@ struct NewWorktreeView: View {
             // The branch under this server's prefix, which is what a session
             // here will be given.
             let prefix = (try? await server.api.settings()).map { $0.settings.branchPrefix ?? $0.defaultBranchPrefix } ?? "hura"
-            branch = (try? await TrackerCore.branch(prefix: prefix, key: t.key, title: t.title)) ?? t.branch
+            branch = ticketBranch(prefix: prefix, key: t.key, title: t.title)
         case let .pull(p, review)?:
             task = pullTask(p, review: review)
             branch = p.branch

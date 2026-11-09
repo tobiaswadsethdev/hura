@@ -1,4 +1,3 @@
-import BackgroundTasks
 import HuraKit
 import UIKit
 import UserNotifications
@@ -52,7 +51,7 @@ enum NotificationCategories {
 
 /// Owns the models so notification callbacks, which can arrive before any
 /// view exists (an answer launches the app in the background), have them at
-/// hand, and so does a background read of the trackers.
+/// hand, and so does hura cloud waking the app to say the inbox was seen.
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     let model: AppModel
     let trackers: TrackersModel
@@ -70,12 +69,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         NotificationCategories.register()
-        // Registered before launch finishes, as BGTaskScheduler requires.
-        let trackers = trackers
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: TrackersModel.backgroundTask, using: .main) { task in
-            guard let task = task as? BGAppRefreshTask else { return task.setTaskCompleted(success: false) }
-            MainActor.assumeIsolated { trackers.readInBackground(task) }
-        }
         Task { await model.registerForPushIfAllowed() }
         return true
     }
@@ -110,9 +103,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        // A change on a tracker, which the app noticed itself or hura cloud
-        // told it (marked by the extension, or not when it couldn't run): to
-        // the inbox.
+        // A change on a tracker, which hura cloud told it (marked by the
+        // extension, or not when it couldn't run): to the inbox.
         let info = response.notification.request.content.userInfo
         if info["inbox"] != nil || (info["hura"] as? [String: Any])?["kind"] as? String == "tracker_change" {
             await MainActor.run { trackers.showInbox = true }

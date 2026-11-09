@@ -19,85 +19,92 @@ struct InboxView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if let inbox = trackers.inbox {
-                    ForEach(inbox.warnings, id: \.self) { w in
-                        Label(w, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
-                    }
-                    switch showing {
-                    case .tickets:
-                        tickets(inbox, title: "Assigned to me") { $0.relation == "assigned" }
-                        ForEach(filterNames, id: \.self) { name in
-                            tickets(inbox, title: name) { $0.filters.contains(name) }
-                        }
-                        if trackers.trackers.contains(where: { !$0.source.hideCreated }) {
-                            tickets(inbox, title: "Created by me") { $0.relation == "created" }
-                        }
-                    case .pulls:
-                        pulls(inbox.pulls.filter(\.reviewRequested), title: "Waiting on my review")
-                        pulls(inbox.pulls.filter { !$0.reviewRequested }, title: "My pull requests")
-                    }
-                }
-                if let e = trackers.lastError {
-                    Text(e).font(.caption).foregroundStyle(.red)
-                }
+            if trackers.signedIn {
+                list
+            } else {
+                SignInForTrackers()
+                    .navigationTitle("Inbox")
             }
-            .overlay {
-                if trackers.trackers.isEmpty {
-                    ContentUnavailableView {
-                        Label("No trackers", systemImage: "tray")
-                    } description: {
-                        Text(trackers.signedIn
-                             ? "Add GitHub, Azure DevOps or Jira to see your tickets and pull requests here, on every device signed in to your account."
-                             : "Add GitHub, Azure DevOps or Jira to see your tickets and pull requests here. The token stays on this phone.")
-                    } actions: {
-                        Button("Add a Tracker") { settings = true }.buttonStyle(.borderedProminent)
-                    }
-                } else if trackers.inbox == nil {
-                    ProgressView()
-                } else if let inbox = trackers.inbox {
-                    switch showing {
-                    case .tickets where inbox.tasks.isEmpty:
-                        ContentUnavailableView("No tickets", systemImage: "checkmark.circle",
-                                               description: Text("Read from \(inbox.read.joined(separator: ", "))."))
-                    case .pulls where inbox.pulls.isEmpty:
-                        ContentUnavailableView("No pull requests", systemImage: "checkmark.circle",
-                                               description: Text(inbox.pullsRead.isEmpty
-                                                   ? "Pull requests come from GitHub and Azure DevOps trackers."
-                                                   : "Read from \(inbox.pullsRead.joined(separator: ", "))."))
-                    default:
-                        EmptyView()
-                    }
-                }
-            }
-            .navigationTitle("Inbox")
-            // The switch is the bar's title, so the rows scroll under the
-            // bar's own material rather than showing through a control
-            // pinned beneath it; the tab still says Inbox.
-            .navigationBarTitleDisplayMode(.inline)
-            .refreshable { await trackers.refresh() }
-            .toolbar {
-                if !trackers.trackers.isEmpty {
-                    ToolbarItem(placement: .principal) {
-                        Picker("Showing", selection: $showing) {
-                            Text(label("Tickets", trackers.inbox?.tasks.count)).tag(Showing.tickets)
-                            Text(label("Pull Requests", trackers.inbox?.pulls.count)).tag(Showing.pulls)
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button { settings = true } label: { Label("Trackers", systemImage: "gearshape") }
-                }
-                if trackers.reading {
-                    ToolbarItem(placement: .status) { ProgressView() }
-                }
-            }
-            .navigationDestination(for: TrackerTask.self) { TicketView(task: $0, starting: $starting) }
-            .navigationDestination(for: PullRequestSummary.self) { PullView(pull: $0, starting: $starting) }
-            .sheet(isPresented: $settings) { TrackersView() }
-            .sheet(item: $starting) { origin in StartWorkView(origin: origin) }
         }
+    }
+
+    private var list: some View {
+        List {
+            if let inbox = trackers.inbox {
+                ForEach(inbox.warnings, id: \.self) { w in
+                    Label(w, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                }
+                switch showing {
+                case .tickets:
+                    tickets(inbox, title: "Assigned to me") { $0.relation == "assigned" }
+                    ForEach(filterNames, id: \.self) { name in
+                        tickets(inbox, title: name) { $0.filters.contains(name) }
+                    }
+                    if trackers.trackers.contains(where: { !$0.source.hideCreated }) {
+                        tickets(inbox, title: "Created by me") { $0.relation == "created" }
+                    }
+                case .pulls:
+                    pulls(inbox.pulls.filter(\.reviewRequested), title: "Waiting on my review")
+                    pulls(inbox.pulls.filter { !$0.reviewRequested }, title: "My pull requests")
+                }
+            }
+            if let e = trackers.lastError {
+                Text(e).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .overlay {
+            if trackers.trackers.isEmpty {
+                ContentUnavailableView {
+                    Label("No trackers", systemImage: "tray")
+                } description: {
+                    Text("Add GitHub, Azure DevOps or Jira to see your tickets and pull requests here, on every device signed in to your account.")
+                } actions: {
+                    Button("Add a Tracker") { settings = true }.buttonStyle(.borderedProminent)
+                }
+            } else if trackers.inbox == nil {
+                ProgressView()
+            } else if let inbox = trackers.inbox {
+                switch showing {
+                case .tickets where inbox.tasks.isEmpty:
+                    ContentUnavailableView("No tickets", systemImage: "checkmark.circle",
+                                           description: Text("Read from \(inbox.read.joined(separator: ", "))."))
+                case .pulls where inbox.pulls.isEmpty:
+                    ContentUnavailableView("No pull requests", systemImage: "checkmark.circle",
+                                           description: Text(inbox.pullsRead.isEmpty
+                                               ? "Pull requests come from GitHub and Azure DevOps trackers."
+                                               : "Read from \(inbox.pullsRead.joined(separator: ", "))."))
+                default:
+                    EmptyView()
+                }
+            }
+        }
+        .navigationTitle("Inbox")
+        // The switch is the bar's title, so the rows scroll under the
+        // bar's own material rather than showing through a control
+        // pinned beneath it; the tab still says Inbox.
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await trackers.refresh() }
+        .toolbar {
+            if !trackers.trackers.isEmpty {
+                ToolbarItem(placement: .principal) {
+                    Picker("Showing", selection: $showing) {
+                        Text(label("Tickets", trackers.inbox?.tasks.count)).tag(Showing.tickets)
+                        Text(label("Pull Requests", trackers.inbox?.pulls.count)).tag(Showing.pulls)
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { settings = true } label: { Label("Trackers", systemImage: "gearshape") }
+            }
+            if trackers.reading {
+                ToolbarItem(placement: .status) { ProgressView() }
+            }
+        }
+        .navigationDestination(for: TrackerTask.self) { TicketView(task: $0, starting: $starting) }
+        .navigationDestination(for: PullRequestSummary.self) { PullView(pull: $0, starting: $starting) }
+        .sheet(isPresented: $settings) { TrackersView() }
+        .sheet(item: $starting) { origin in StartWorkView(origin: origin) }
     }
 
     /// A segment's name, and how many it holds once that is known.
@@ -335,6 +342,27 @@ struct StartWorkView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
+        }
+    }
+}
+
+/// Signed out, in place of the inbox and the trackers: they are kept in a
+/// hura account, so there are none without one.
+struct SignInForTrackers: View {
+    @Environment(TrackersModel.self) private var trackers
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("Sign in for trackers", systemImage: "person.crop.circle")
+        } description: {
+            Text("Your tickets and pull requests from GitHub, Azure DevOps and Jira come through your hura account, which keeps the trackers and reads them all day, so they are the same on every device and you hear about a change on time.")
+        } actions: {
+            Button("Sign In") {
+                trackers.showAccount = true
+                dismiss()
+            }
+            .buttonStyle(.borderedProminent)
         }
     }
 }

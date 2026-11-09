@@ -1,5 +1,5 @@
 //! What a request that failed answers: a status, and `{"error": "..."}` in
-//! words a person can be shown, the shape hura-mobile answers in.
+//! words a person can be shown.
 
 use axum::Json;
 use axum::http::StatusCode;

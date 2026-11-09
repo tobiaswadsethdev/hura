@@ -102,6 +102,7 @@ export function InboxBar({
   reading,
   error,
   trackers,
+  signedIn,
   sessions,
   projects,
   currentProject,
@@ -132,11 +133,14 @@ export function InboxBar({
   inbox: Inbox | null;
   /// A read is in flight.
   reading: boolean;
-  /// Why the last read could not be made at all: the trackers file would not
-  /// load, say. A tracker that could not be read is a warning in `inbox`.
+  /// Why the last read could not be made at all: hura cloud did not answer,
+  /// say. A tracker that could not be read is a warning in `inbox`.
   error: string | null;
-  /// The trackers set up on this machine. `null` until they have been read.
+  /// The hura cloud account's trackers. `null` until they have been read.
   trackers: ConfiguredTracker[] | null;
+  /// Whether this computer is signed in to hura cloud, which trackers need.
+  /// `null` until that is known.
+  signedIn: boolean | null;
   sessions: Session[];
   projects: Project[];
   /// The selected worktree's project, which is the likeliest answer to where
@@ -252,7 +256,13 @@ export function InboxBar({
           </div>
         )}
 
-        {none ? (
+        {signedIn === false ? (
+          <Empty icon={Tracker} note="trackers need a hura cloud account">
+            <button className="go" onClick={onSetup}>
+              sign in
+            </button>
+          </Empty>
+        ) : none ? (
           <Empty icon={Tracker} note="no trackers yet">
             <button className="go" onClick={onSetup}>
               add a tracker

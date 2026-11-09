@@ -3,8 +3,8 @@ import HuraKit
 import SwiftUI
 
 /// The Account tab: signing in to hura cloud when signed out, and the
-/// account and its devices when signed in. Never in the way: without an
-/// account, trackers stay on this phone and everything works as before.
+/// account and its devices when signed in. Servers and sessions need no
+/// account; the trackers are kept in one.
 struct AccountView: View {
     @Environment(AccountModel.self) private var account
     @Environment(TrackersModel.self) private var trackers
@@ -62,7 +62,7 @@ private struct SignInForm: View {
                 if account.codeSentTo != nil {
                     Text("The code works for ten minutes, once.")
                 } else {
-                    Text("Your trackers and their filters, kept in one place and the same on every device you sign in on. Optional: without an account, trackers stay on this phone, as they do now.")
+                    Text("Your trackers and their filters, kept in one place, the same on every device you sign in on, and read all day so you hear about a change on time. Servers and sessions work without an account.")
                 }
             }
             if account.codeSentTo == nil {
@@ -118,14 +118,11 @@ private struct SignInForm: View {
     }
 }
 
-/// The account, the trackers still on this phone, and the devices.
+/// The account and its devices.
 private struct SignedIn: View {
     @Environment(AccountModel.self) private var account
     @Environment(TrackersModel.self) private var trackers
     @State private var confirmSignOut = false
-    @State private var moving = false
-    @State private var moveError: String?
-    @State private var kept: [String] = []
 
     var body: some View {
         List {
@@ -133,26 +130,6 @@ private struct SignedIn: View {
                 LabeledContent("Signed in as", value: account.name)
                 if let plan = account.account?.plan {
                     LabeledContent("Plan", value: plan.capitalized)
-                }
-            }
-            if !trackers.onPhone.isEmpty {
-                Section {
-                    ForEach(trackers.onPhone, id: \.source.name) { t in
-                        Text(t.source.name)
-                    }
-                    if moving {
-                        ProgressView().frame(maxWidth: .infinity)
-                    } else {
-                        Button("Move to My Account", systemImage: "icloud.and.arrow.up", action: move)
-                    }
-                } header: {
-                    Text("On this iPhone only")
-                } footer: {
-                    if !kept.isEmpty {
-                        Text("Your account already has a tracker called \(kept.joined(separator: ", ")), so this iPhone's stays here. Forget one of them, here or in the account, to move it.")
-                    } else {
-                        Text("Added before you signed in, so not read while you are. Moving them sends them and their tokens to hura cloud, which keeps the tokens encrypted, and this iPhone forgets them.")
-                    }
                 }
             }
             Section("Devices") {
@@ -168,24 +145,15 @@ private struct SignedIn: View {
             Section {
                 Button("Sign Out", role: .destructive) { confirmSignOut = true }
             } footer: {
-                Text("This iPhone goes back to the trackers kept on it. Your account keeps its trackers for your other devices.")
+                Text("This iPhone stops showing your trackers. Your account keeps them for your other devices.")
             }
-            if let error = account.error ?? moveError {
+            if let error = account.error {
                 Section { Text(error).foregroundStyle(.red).font(.callout) }
             }
         }
         .refreshable { await account.load() }
         .confirmationDialog("Sign out of hura cloud?", isPresented: $confirmSignOut, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) { Task { await account.signOut(trackers: trackers) } }
-        }
-    }
-
-    private func move() {
-        moving = true
-        moveError = nil
-        Task {
-            defer { moving = false }
-            do { kept = try await trackers.moveToAccount() } catch { moveError = error.localizedDescription }
         }
     }
 }

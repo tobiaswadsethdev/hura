@@ -1,10 +1,9 @@
 import Foundation
-import HuraCoreFFI
 
-// Tickets and pull requests: what is yours on each tracker. Read by this
-// phone with this phone's tokens, through hura-core's own tracker code
-// (crates/hura-mobile), exactly as the desktop reads them on its machine. No
-// server holds a tracker or a token.
+// Tickets and pull requests: what is yours on each tracker. Read by hura
+// cloud, which keeps the account's trackers and their tokens and runs
+// hura-core's own tracker code on them, exactly as for the desktop. Signed
+// out, there are no trackers.
 
 /// What hura-core's tracker code answered, or why it couldn't.
 public struct TrackerError: Error, LocalizedError, Equatable {
@@ -17,46 +16,25 @@ public struct TrackerError: Error, LocalizedError, Equatable {
     public var errorDescription: String? { message }
 }
 
-/// hura-core's tracker functions, one JSON request at a time.
-///
-/// **Two places to run them.** Signed out, in this process, through
-/// hura-mobile, with the tracker and its token from the Keychain. Signed in to
-/// hura cloud, on the service, which holds the account's trackers: the same
-/// request, with the tracker named rather than sent. The answer is the same
-/// either way, so nothing above this knows which it was.
+/// hura-core's tracker functions, one JSON request at a time, run by hura
+/// cloud on the account's trackers (`POST /v1/tracker`). A request names its
+/// tracker; the service has the rest.
 public enum TrackerCore {
-    /// Where requests go when signed in. A task-local so a test can point it
-    /// at a service of its own.
+    /// Where requests go. A task-local so a test can point it at a service
+    /// of its own.
     @TaskLocal public static var cloud: Cloud = .shared
 
-    /// What needs no tracker, and so is answered here whether signed in or
-    /// not.
-    static let local: Set<String> = ["check", "branch", "changes"]
-
-    /// Runs `op` with `args`: on hura cloud when signed in, otherwise off the
-    /// main thread here, where the call blocks until the tracker answers.
+    /// Runs `op` with `args` on hura cloud.
     public static func call(_ op: String, _ args: [String: JSONValue] = [:]) async throws -> JSONValue {
         var request = args
         request["op"] = .string(op)
-        if !local.contains(op), await cloud.isSignedIn {
-            if let name = request["tracker"]?["source"]?["name"]?.string {
-                request["tracker"] = .string(name)
-            }
-            request["trackers"] = nil
-            return try answer(try await cloud.tracker(request))
+        guard await cloud.isSignedIn else {
+            throw TrackerError(message: "Sign in to hura cloud to use trackers.")
         }
-        let body = try String(decoding: JSONEncoder().encode(JSONValue.object(request)), as: UTF8.self)
-        let answer: String = await Task.detached(priority: .userInitiated) {
-            body.withCString { ptr in
-                guard let out = hura_tracker(ptr) else { return #"{"error":"no answer"}"# }
-                defer { hura_free(out) }
-                return String(cString: out)
-            }
-        }.value
-        return try self.answer(try JSONDecoder().decode(JSONValue.self, from: Data(answer.utf8)))
+        return try answer(try await cloud.tracker(request))
     }
 
-    /// `{"ok": ...}` or `{"error": ...}`, from either place.
+    /// `{"ok": ...}` or `{"error": ...}`.
     private static func answer(_ v: JSONValue) throws -> JSONValue {
         if let e = v["error"]?.string { throw TrackerError(message: e) }
         return v["ok"] ?? .null
@@ -146,62 +124,21 @@ public struct JqlFilter: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-/// A tracker and its token, as the Keychain keeps it. The token goes to
-/// hura-core for one call at a time and is never shown.
-public struct StoredTracker: Codable, Equatable, Sendable {
+/// One of the account's trackers. hura cloud keeps its token and never
+/// sends it back: `hasToken` says whether there is one.
+public struct StoredTracker: Equatable, Sendable {
     public var source: TrackerSource
-    public var token: String?
-    /// One kept by hura cloud, which never sends its token back: whether it
-    /// has one there. Not stored, and not sent to hura-core.
-    public var tokenKept = false
+    public var hasToken: Bool
     /// One hura cloud connected through the tracker's own sign-in: who as
     /// (`@octocat`, or a Jira site). Its token is renewed there, and
     /// there is none to paste.
     public var connected: String?
 
-    enum CodingKeys: String, CodingKey {
-        case source, token
-    }
-
-    public init(source: TrackerSource, token: String?) {
+    public init(source: TrackerSource, hasToken: Bool = false, connected: String? = nil) {
         self.source = source
-        self.token = token
+        self.hasToken = hasToken
+        self.connected = connected
     }
-
-    public var hasToken: Bool { tokenKept || !(token ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
-}
-
-/// Where the trackers live: the Keychain, this device only.
-public protocol TrackerStore: Sendable {
-    func load() throws -> [StoredTracker]
-    func save(_ trackers: [StoredTracker]) throws
-}
-
-public struct KeychainTrackerStore: TrackerStore {
-    let items: KeychainItems
-
-    /// In the app's own group, out of the one the notification extension
-    /// shares: nothing but the app needs a tracker token.
-    public init(service: String = "dev.tobiaswadseth.hura.trackers") {
-        items = KeychainItems(service: service, accessGroup: nil)
-    }
-
-    public func load() throws -> [StoredTracker] {
-        guard let data = try items.get(account: "trackers") else { return [] }
-        return try JSONDecoder().decode([StoredTracker].self, from: data)
-    }
-
-    public func save(_ trackers: [StoredTracker]) throws {
-        try items.set(JSONEncoder().encode(trackers), account: "trackers")
-    }
-}
-
-public final class InMemoryTrackerStore: TrackerStore, @unchecked Sendable {
-    private var trackers: [StoredTracker] = []
-    private let lock = NSLock()
-    public init() {}
-    public func load() throws -> [StoredTracker] { lock.withLock { trackers } }
-    public func save(_ t: [StoredTracker]) throws { lock.withLock { trackers = t } }
 }
 
 // MARK: The inbox
@@ -650,33 +587,64 @@ public struct PullFiles: Codable, Equatable, Sendable {
     public var truncated: Bool
 }
 
+// MARK: Branches
+
+/// The branch a ticket's worktree gets under `prefix`: `prefix/KEY-the-title`,
+/// the key keeping its case (commit hooks and people both look for
+/// `PROJ-123`) and the title cut at a dash to forty characters. hura-core's
+/// `tracker::branch`, which names the branches in an inbox, in Swift, so
+/// the phone can name one for a server's prefix without asking.
+public func ticketBranch(prefix: String, key: String, title: String) -> String {
+    var key = Substring(key.trimmingCharacters(in: .whitespacesAndNewlines))
+    while key.first == "#" { key = key.dropFirst() }
+    let bare = key.replacingOccurrences(of: " ", with: "")
+    let rest = branchSlug(title)
+    let stem = rest.isEmpty ? bare : "\(bare)-\(truncateAtDash(rest, 40))"
+    let p = prefix.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    return p.isEmpty ? stem : "\(p)/\(stem)"
+}
+
+/// Lowercase ASCII letters and digits, a dash for each run of anything else.
+private func branchSlug(_ s: String) -> String {
+    var out = ""
+    for c in s.unicodeScalars {
+        if c.isASCII, CharacterSet.alphanumerics.contains(c) {
+            out.unicodeScalars.append(contentsOf: String(c).lowercased().unicodeScalars)
+        } else if !out.hasSuffix("-") {
+            out.append("-")
+        }
+    }
+    return out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+}
+
+/// Cut to `max` characters, back to the last dash before it. The slug is
+/// ASCII, so characters are bytes, as in hura-core.
+private func truncateAtDash(_ s: String, _ max: Int) -> String {
+    guard s.count > max else { return s }
+    let cut = String(s.prefix(max))
+    if let i = cut.lastIndex(of: "-"), i > cut.startIndex {
+        return String(cut[..<i])
+    }
+    return cut.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+}
+
 // MARK: Calls
 
 extension TrackerCore {
-    /// The source trimmed and named, or why it wouldn't work.
-    public static func check(_ source: TrackerSource) async throws -> TrackerSource {
-        try decode(try await call("check", ["source": json(source)]), as: TrackerSource.self)
-    }
-
-    /// Every tracker's tickets and pull requests, one after another.
-    public static func inbox(_ trackers: [StoredTracker], prefix: String) async throws -> Inbox {
-        try decode(try await call("inbox", ["trackers": json(trackers), "prefix": .string(prefix)]), as: Inbox.self)
-    }
-
-    /// The branch a ticket's worktree gets under `prefix`.
-    public static func branch(prefix: String, key: String, title: String) async throws -> String {
-        try await call("branch", ["prefix": .string(prefix), "key": .string(key), "title": .string(title)]).string ?? ""
+    /// Every one of the account's trackers' tickets and pull requests.
+    public static func inbox(prefix: String) async throws -> Inbox {
+        try decode(try await call("inbox", ["prefix": .string(prefix)]), as: Inbox.self)
     }
 
     public static func issue(_ t: StoredTracker, key: String) async throws -> TrackerIssue {
-        try decode(try await call("issue", ["tracker": json(t), "key": .string(key)]), as: TrackerIssue.self)
+        try decode(try await call("issue", ["tracker": .string(t.source.name), "key": .string(key)]), as: TrackerIssue.self)
     }
 
     /// One of a ticket's images, by the attachment id its document block
     /// carries: fetched with the tracker's token, which Jira wants for it.
     public static func image(_ t: StoredTracker, id: String) async throws -> Data {
         struct Image: Decodable { var mime: String; var data: String }
-        let image = try decode(try await call("attachment", ["tracker": json(t), "id": .string(id)]), as: Image.self)
+        let image = try decode(try await call("attachment", ["tracker": .string(t.source.name), "id": .string(id)]), as: Image.self)
         guard let data = Data(base64Encoded: image.data) else {
             throw TrackerError(message: "the image did not come back whole")
         }
@@ -686,57 +654,57 @@ extension TrackerCore {
     /// An image in a pull request's text, by the URL it names there: fetched
     /// through the tracker, and only from the forge's own image hosts.
     public static func pullImage(_ t: StoredTracker, url: String) async throws -> Picture {
-        try decode(try await call("pull_image", ["tracker": json(t), "url": .string(url)]), as: Picture.self)
+        try decode(try await call("pull_image", ["tracker": .string(t.source.name), "url": .string(url)]), as: Picture.self)
     }
 
     public static func editForm(_ t: StoredTracker, key: String) async throws -> EditForm {
-        try decode(try await call("edit_form", ["tracker": json(t), "key": .string(key)]), as: EditForm.self)
+        try decode(try await call("edit_form", ["tracker": .string(t.source.name), "key": .string(key)]), as: EditForm.self)
     }
 
     public static func save(_ t: StoredTracker, key: String, changes: [FieldChange]) async throws {
-        _ = try await call("save", ["tracker": json(t), "key": .string(key), "changes": json(changes)])
+        _ = try await call("save", ["tracker": .string(t.source.name), "key": .string(key), "changes": json(changes)])
     }
 
     public static func transitions(_ t: StoredTracker, key: String) async throws -> [IssueTransition] {
-        try decode(try await call("transitions", ["tracker": json(t), "key": .string(key)]), as: [IssueTransition].self)
+        try decode(try await call("transitions", ["tracker": .string(t.source.name), "key": .string(key)]), as: [IssueTransition].self)
     }
 
     public static func transition(_ t: StoredTracker, key: String, id: String) async throws {
-        _ = try await call("transition", ["tracker": json(t), "key": .string(key), "id": .string(id)])
+        _ = try await call("transition", ["tracker": .string(t.source.name), "key": .string(key), "id": .string(id)])
     }
 
     public static func comment(_ t: StoredTracker, key: String, markdown: String) async throws {
-        _ = try await call("comment", ["tracker": json(t), "key": .string(key), "markdown": .string(markdown)])
+        _ = try await call("comment", ["tracker": .string(t.source.name), "key": .string(key), "markdown": .string(markdown)])
     }
 
     public static func editComment(_ t: StoredTracker, key: String, id: String, markdown: String) async throws {
-        _ = try await call("edit_comment", ["tracker": json(t), "key": .string(key), "id": .string(id), "markdown": .string(markdown)])
+        _ = try await call("edit_comment", ["tracker": .string(t.source.name), "key": .string(key), "id": .string(id), "markdown": .string(markdown)])
     }
 
     public static func deleteComment(_ t: StoredTracker, key: String, id: String) async throws {
-        _ = try await call("delete_comment", ["tracker": json(t), "key": .string(key), "id": .string(id)])
+        _ = try await call("delete_comment", ["tracker": .string(t.source.name), "key": .string(key), "id": .string(id)])
     }
 
     public static func users(_ t: StoredTracker, key: String, query: String, assignable: Bool) async throws -> [UserChoice] {
-        try decode(try await call("users", ["tracker": json(t), "key": .string(key), "query": .string(query),
+        try decode(try await call("users", ["tracker": .string(t.source.name), "key": .string(key), "query": .string(query),
                                             "assignable": .bool(assignable)]), as: [UserChoice].self)
     }
 
     public static func pull(_ t: StoredTracker, repo: String, id: String) async throws -> PullDetail {
-        try decode(try await call("pull", ["tracker": json(t), "repo": .string(repo), "id": .string(id)]), as: PullDetail.self)
+        try decode(try await call("pull", ["tracker": .string(t.source.name), "repo": .string(repo), "id": .string(id)]), as: PullDetail.self)
     }
 
     public static func pullFiles(_ t: StoredTracker, repo: String, id: String) async throws -> PullFiles {
-        try decode(try await call("pull_files", ["tracker": json(t), "repo": .string(repo), "id": .string(id)]), as: PullFiles.self)
+        try decode(try await call("pull_files", ["tracker": .string(t.source.name), "repo": .string(repo), "id": .string(id)]), as: PullFiles.self)
     }
 
     public static func pullFile(_ t: StoredTracker, files: PullFiles, file: PullFile) async throws -> FileDiff {
-        try decode(try await call("pull_file", ["tracker": json(t), "repo": .string(files.repo), "base": .string(files.base),
+        try decode(try await call("pull_file", ["tracker": .string(t.source.name), "repo": .string(files.repo), "base": .string(files.base),
                                                 "head": .string(files.head), "file": json(file)]), as: FileDiff.self)
     }
 
     public static func pullComment(_ t: StoredTracker, repo: String, id: String, body: String, thread: String?) async throws {
-        var args: [String: JSONValue] = ["tracker": try json(t), "repo": .string(repo), "id": .string(id), "body": .string(body)]
+        var args: [String: JSONValue] = ["tracker": .string(t.source.name), "repo": .string(repo), "id": .string(id), "body": .string(body)]
         if let thread { args["thread"] = .string(thread) }
         _ = try await call("pull_comment", args)
     }
@@ -744,7 +712,7 @@ extension TrackerCore {
     /// `approved`, `suggestions`, `changes-requested`, `waiting`, `rejected`
     /// or `commented`, as `offers` allows.
     public static func pullVote(_ t: StoredTracker, repo: String, id: String, verdict: String, body: String) async throws {
-        _ = try await call("pull_vote", ["tracker": json(t), "repo": .string(repo), "id": .string(id), "verdict": .string(verdict),
+        _ = try await call("pull_vote", ["tracker": .string(t.source.name), "repo": .string(repo), "id": .string(id), "verdict": .string(verdict),
                                          "body": .string(body)])
     }
 
@@ -754,7 +722,7 @@ extension TrackerCore {
     /// act on; GitHub does as the repository says.
     public static func pullMerge(_ t: StoredTracker, repo: String, id: String, how: String, head: String?,
                                  deleteBranch: Bool) async throws {
-        _ = try await call("pull_merge", ["tracker": json(t), "repo": .string(repo), "id": .string(id), "how": .string(how),
+        _ = try await call("pull_merge", ["tracker": .string(t.source.name), "repo": .string(repo), "id": .string(id), "how": .string(how),
                                           "head": .string(head ?? ""), "delete_branch": .bool(deleteBranch)])
     }
 
@@ -762,7 +730,7 @@ extension TrackerCore {
     /// auto-complete), or with `how` nil, take that back.
     public static func pullAutoMerge(_ t: StoredTracker, repo: String, id: String, how: String?,
                                      deleteBranch: Bool) async throws {
-        _ = try await call("pull_auto_merge", ["tracker": json(t), "repo": .string(repo), "id": .string(id),
+        _ = try await call("pull_auto_merge", ["tracker": .string(t.source.name), "repo": .string(repo), "id": .string(id),
                                                "how": how.map(JSONValue.string) ?? .null,
                                                "delete_branch": .bool(deleteBranch)])
     }

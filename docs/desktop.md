@@ -684,9 +684,11 @@ rather than selecting the worktree.
 
 What is worth interrupting for is something *changing*: a ticket's status,
 somebody else's comment, a ticket newly yours, a review asked of you, your
-pull request's checks failing or its review coming back. The window reads the
-sidebar every three minutes and says so as an OS notification; it is a switch on
-the settings screen. A tracker that could not be read says so at the top of the
+pull request's checks failing or its review coming back. hura cloud, which
+keeps the trackers and reads them all day, tells the window as it finds it,
+and the window says so as an OS notification; it is a switch on the settings
+screen. Signed out of hura cloud there are no trackers, and the sidebar says
+so. A tracker that could not be read says so at the top of the
 sidebar rather than leaving its rows quietly missing.
 [tickets.md](tickets.md) is the whole of it.
 
@@ -697,7 +699,7 @@ sessions' behalf: the MCP servers and what each one is doing, the secret names i
 things that used to be three procedures in a document -- a `docker run` line to
 copy, a `-e` argument in a shell history, a path in a config file that cannot
 reach your laptop. Trackers used to be here too; they are on the settings
-screen now, beside the other things kept on this machine.
+screen now, under the hura cloud account that keeps them.
 
 Every button there answers with the whole view, re-read, for the reason the git
 view does the same: they explain each other, and a container that will not start
@@ -738,9 +740,9 @@ and does not touch, and why it edits the file rather than regenerating it.
 
 The bottom half never leaves this machine: the three sidebar widths, how often
 the worktree list is re-read, whether the OS is told when an agent starts
-waiting or when your tickets and pull requests change, and the **trackers** the
-sidebar reads, tokens included. Those are kept in their own owner-only file
-rather than with the rest; see [tickets.md](tickets.md#setting-one-up). `localStorage`, which for a Tauri window is a file in its own data
+waiting or when your tickets and pull requests change. Below it are the hura
+cloud **account** and the **trackers** it keeps, which do leave this machine:
+see [tickets.md](tickets.md#setting-one-up). The rest is in `localStorage`, which for a Tauri window is a file in its own data
 directory -- so it survives the window closing without a request, a round trip
 or a file format. Every value is read back through a validator, because the
 store is on disk and an older build may have written something else into it.

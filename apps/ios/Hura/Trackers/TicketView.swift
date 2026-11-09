@@ -179,7 +179,7 @@ struct TicketView: View {
 
     private func load() async {
         guard let stored else {
-            error = "No tracker called \(task.tracker) \(trackers.signedIn ? "in your account" : "on this phone")."
+            error = "No tracker called \(task.tracker) in your account."
             return
         }
         do {
