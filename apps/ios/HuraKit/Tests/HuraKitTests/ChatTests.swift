@@ -143,6 +143,17 @@ struct SlashCommandTests {
         #expect(ComposerInput.leadingCommand("/plugin:do it")?.rest == " it")
         #expect(ComposerInput.leadingCommand("/etc/hosts") == nil)
     }
+
+    @Test func knowsTheKeyboardPuttingASentMessageBack() {
+        #expect(ComposerInput.isEcho("fix the bug ", of: "fix the bug"))
+        #expect(ComposerInput.isEcho("fix the bu", of: "fix the bu"))
+        #expect(ComposerInput.isEcho("fix the bug", of: "fix the bu"), "a prediction completed its last word")
+        #expect(ComposerInput.isEcho("fix the", of: "fix teh"), "an autocorrection replaced it")
+        #expect(ComposerInput.isEcho("hello", of: "hel"))
+        #expect(!ComposerInput.isEcho("", of: "fix the bug"))
+        #expect(!ComposerInput.isEcho("a", of: "hel"), "the next message being typed")
+        #expect(!ComposerInput.isEcho("now run it", of: "fix the bug"))
+    }
 }
 
 /// A websocket that plays a script: what the server says, and when it hangs up.

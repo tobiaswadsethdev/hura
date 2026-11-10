@@ -332,9 +332,10 @@ struct ChatView: View {
                 .textInputAutocapitalization(isCode ? TextInputAutocapitalization.never : .sentences)
                 .focused($composing)
                 .onChange(of: draft) {
-                    guard let just = justSent else { return }
-                    if Date.now.timeIntervalSince(just.at) < 1,
-                       draft.trimmingCharacters(in: .whitespacesAndNewlines) == just.text {
+                    // Emptying it is the send itself, and mustn't end the
+                    // watch for the keyboard putting it back.
+                    guard let just = justSent, !draft.isEmpty else { return }
+                    if Date.now.timeIntervalSince(just.at) < 1, ComposerInput.isEcho(draft, of: just.text) {
                         draft = ""
                     } else {
                         justSent = nil
