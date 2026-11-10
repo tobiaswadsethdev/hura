@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hura: coding agents in parallel, each in its own sandbox</title>
+  <meta name="description" content="A desktop workspace, an iPhone app and a server for running several coding agents at once, each in its own microVM, with network policy you can see and change.">
+  <meta property="og:title" content="hura">
+  <meta property="og:description" content="Run several coding agents in parallel, each in its own sandbox.">
+  <meta property="og:image" content="https://gethura.app/images/desktop-ask.png">
+  <meta name="theme-color" content="#0b2318">
+  <link rel="icon" href="images/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="images/icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="download.js" defer></script>
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="#"><img src="images/icon.svg" alt="" width="28" height="28">hura</a>
+    <nav>
+      <a href="#desktop">Desktop</a>
+      <a href="#ios">iPhone</a>
+      <a href="#hurad">hurad</a>
+      <a href="#download">Download</a>
+      <a href="https://github.com/tobiaswadsethdev/hura">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <img class="hero-icon" src="images/icon.svg" alt="The hura icon: the seed capsule of a hura tree seen from above, with a glowing agent at its centre" width="128" height="128">
+      <h1>Run several coding agents at once.<br><span>Each in its own sandbox.</span></h1>
+      <p class="lede">
+        hura gives every agent session its own microVM, with network policy that
+        names what it may reach. A desktop workspace and an iPhone app let you
+        watch them, answer them, and review what they did.
+      </p>
+
+      <div class="cta" id="cta">
+        <!-- Filled in by download.js for the visitor's platform. Without
+             JavaScript this link is what stays. -->
+        <a class="button primary" id="cta-primary" href="https://github.com/tobiaswadsethdev/hura/releases/latest">
+          <span class="button-label">Download hura</span>
+          <span class="button-sub" id="cta-sub">from GitHub releases</span>
+        </a>
+        <div class="cta-command" id="cta-command" hidden>
+          <code id="cta-command-text"></code>
+          <button class="copy" type="button" data-copy-from="cta-command-text">Copy</button>
+        </div>
+        <p class="cta-note" id="cta-note"></p>
+        <a class="cta-other" href="#download">Other platforms</a>
+      </div>
+
+      <figure class="hero-shot">
+        <img src="images/desktop-ask.png" alt="The hura desktop app: two projects and their worktrees on the left, the relay-tls conversation in the middle asking to edit relay/src/tls.ts with allow and decline buttons, the working copy's files beside it, and the tickets assigned to you on the right" width="1280" height="800">
+      </figure>
+    </section>
+
+    <section class="pillars">
+      <div>
+        <h3>One sandbox per session</h3>
+        <p>Every session is a Docker Sandboxes microVM with its own Docker Engine. The agent clones and works on <code>hura/&lt;name&gt;</code>; your worktree is never handed over.</p>
+      </div>
+      <div>
+        <h3>Credentials it never sees</h3>
+        <p>A token stays on your machine. The sandbox runtime swaps it into requests to the hosts it is for, and the sandbox only ever holds a placeholder.</p>
+      </div>
+      <div>
+        <h3>Isolation you can look at</h3>
+        <p>Every allow and deny the runtime made is a pane. A denied endpoint is opened, or an open one blocked, with a right-click.</p>
+      </div>
+    </section>
+
+    <section class="feature" id="desktop">
+      <div class="feature-text">
+        <p class="eyebrow">Desktop · macOS and Windows</p>
+        <h2>A workspace, not a terminal multiplexer</h2>
+        <p>
+          Projects and their worktrees, a conversation with each agent drawn as a chat,
+          every tool call as a card with its output or its diff, and permission prompts
+          as buttons. Shells beside it, the working copy in a file tree, diffs with
+          comments that go back to the agent, and git on the right.
+        </p>
+        <ul class="ticks">
+          <li>An OS notification the moment a session starts waiting on you</li>
+          <li>Spend and rate-limit use per session, from the agent's own status line</li>
+          <li>Tickets from GitHub, Azure DevOps and Jira, turned into sessions</li>
+        </ul>
+      </div>
+      <div class="feature-media">
+        <img src="images/desktop-chat.png" alt="The docs-search conversation: the agent's replies, a Run and an Edit card with its diff, and the agent still working, beside the working copy and the tickets" width="1280" height="800" loading="lazy">
+      </div>
+    </section>
+
+    <section class="feature reverse" id="ios">
+      <div class="feature-text">
+        <p class="eyebrow">iPhone</p>
+        <h2>Your agents, in your pocket</h2>
+        <p>
+          The same workspace on the phone: sessions and their chats, answering a
+          permission prompt from its notification, files, git, diffs and review,
+          the events and policy panes, terminals and previews of the ports a
+          session serves.
+        </p>
+        <ul class="ticks">
+          <li>A push the moment an agent asks something</li>
+          <li>Tracker inbox synced through hura cloud</li>
+          <li>Connects to your own hurad, nothing in between</li>
+        </ul>
+      </div>
+      <div class="feature-media">
+        <div class="phones">
+          <div class="phone side"><img src="images/ios-servers.png" alt="The server's projects and their worktrees, one waiting on an edit" width="645" height="1402" loading="lazy"></div>
+          <div class="phone"><img src="images/ios-relay.png" alt="The relay-tls chat on the phone, asking to edit relay/src/tls.ts with allow and decline buttons" width="645" height="1402" loading="lazy"></div>
+          <div class="phone side"><img src="images/ios-inbox.png" alt="The inbox: Jira tickets assigned to you and created by you, two with a worktree" width="645" height="1402" loading="lazy"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="feature" id="hurad">
+      <div class="feature-text">
+        <p class="eyebrow">hurad · Linux and macOS</p>
+        <h2>The server where the sandboxes run</h2>
+        <p>
+          <code>hurad</code> runs on a Linux box with KVM (a workstation, a server on
+          the LAN, or WSL2 on the same laptop) or on a Mac. The apps connect to it;
+          it needs nothing from them. Everything the window does, it does on the
+          command line too.
+        </p>
+        <div class="cta-command">
+          <code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/install.sh | sh</code>
+          <button class="copy" type="button" data-copy-from="install-cmd">Copy</button>
+        </div>
+        <p class="small">Checks the download against the release's SHA256SUMS, then runs <code>hurad doctor</code> to say what is missing.</p>
+      </div>
+      <div class="feature-media">
+        <div class="terminal" role="img" aria-label="hurad doctor output, every check ok">
+          <div class="terminal-bar"><i></i><i></i><i></i><span>hurad doctor</span></div>
+<pre><span class="prompt">$</span> hurad doctor
+<span class="ok">[  ok  ]</span> sbx          v0.47.0 (daemon v0.47.0)
+<span class="ok">[  ok  ]</span> sbx checks   13 passed
+<span class="ok">[  ok  ]</span> sbx policy   deny-all
+<span class="ok">[  ok  ]</span> sbx daemon   sbx-daemon.service
+<span class="ok">[  ok  ]</span> docker       server 29.7.2
+<span class="ok">[  ok  ]</span> tmux         tmux 3.7c
+<span class="ok">[  ok  ]</span> linger       enabled
+<span class="ok">[  ok  ]</span> image        hura-sandbox:latest built
+<span class="ok">[  ok  ]</span> templates    1 loaded
+
+<span class="prompt">$</span> git push origin hura/readme-fix  <span class="ok">SUCCEEDS</span>
+<span class="prompt">$</span> curl https://pastebin.com        <span class="bad">DENIED</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="downloads" id="download">
+      <h2>Download</h2>
+      <p class="lede small">Version <span data-version>latest</span>. Checksums for every file are in the release's <code>SHA256SUMS</code>.</p>
+      <div class="grid">
+        <div class="platform" data-platform="mac">
+          <h3>macOS</h3>
+          <p>The desktop app for Apple silicon, and hurad if this Mac runs the sessions too.</p>
+          <a class="button" data-asset="mac-dmg" href="https://github.com/tobiaswadsethdev/hura/releases/latest">Desktop app (.dmg)</a>
+          <a class="link" data-asset="mac-hurad" href="https://github.com/tobiaswadsethdev/hura/releases/latest">hurad for macOS (.tar.gz)</a>
+        </div>
+        <div class="platform" data-platform="windows">
+          <h3>Windows</h3>
+          <p>The desktop app. Pair it with hurad in WSL2 or on another machine.</p>
+          <a class="button" data-asset="win-exe" href="https://github.com/tobiaswadsethdev/hura/releases/latest">Desktop app (installer)</a>
+          <a class="link" data-asset="win-msi" href="https://github.com/tobiaswadsethdev/hura/releases/latest">.msi for managed installs</a>
+        </div>
+        <div class="platform" data-platform="linux">
+          <h3>Linux</h3>
+          <p>hurad for x86_64 and arm64. The desktop app builds from source.</p>
+          <a class="button" data-asset="linux-x64" href="https://github.com/tobiaswadsethdev/hura/releases/latest">hurad x86_64 (.tar.gz)</a>
+          <a class="link" data-asset="linux-arm64" href="https://github.com/tobiaswadsethdev/hura/releases/latest">hurad arm64 (.tar.gz)</a>
+          <a class="link" href="https://github.com/tobiaswadsethdev/hura/blob/main/docs/install.md#linux">Build the desktop app</a>
+        </div>
+        <div class="platform" data-platform="ios">
+          <h3>iPhone</h3>
+          <p>In testing on TestFlight. On the App Store soon.</p>
+          <a class="button disabled" data-asset="ios" aria-disabled="true">Coming to the App Store</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>hura · Apache-2.0</span>
+    <a href="https://github.com/tobiaswadsethdev/hura">GitHub</a>
+    <a href="https://github.com/tobiaswadsethdev/hura/blob/main/docs/install.md">Install guide</a>
+    <a href="https://github.com/tobiaswadsethdev/hura/tree/main/docs">Docs</a>
+  </footer>
+</body>
+</html>

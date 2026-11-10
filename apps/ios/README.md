@@ -151,19 +151,22 @@ as `production`. The relay needs to know which, and the app tells it.
 
 ## Trying it in the simulator
 
-To look at the app with no server, `Tools/fake-hurad.py` stands in for one: a
-few projects and sessions in every state, and a conversation to scroll
-through. It prints the launch command that pairs a Debug build with it, with
-nothing to tap:
+To look at the app with no server, `scripts/fake-hurad.py` stands in for one,
+and for hura cloud: a few projects and sessions in every state, and a
+conversation in each chat. It prints the launch command that pairs a Debug
+build with it, with nothing to tap:
 
 ```sh
-python3 Tools/fake-hurad.py
+python3 scripts/fake-hurad.py
 xcrun simctl launch booted dev.tobiaswadseth.hura.ios \
-  -HuraPair 'hura://127.0.0.1:18555/fake-token#…' -HuraNoLock YES -HuraOpen server
+  -HuraPair 'hura://127.0.0.1:18555/fake-token#…' -HuraName devbox \
+  -HuraCloud http://127.0.0.1:18556 -HuraNoLock YES -HuraOpen server
 ```
 
-`-HuraOpen <session>` goes straight to a session's screen instead. All three
-arguments are read by Debug builds only.
+`-HuraOpen <session>` goes straight to a session's screen instead, and
+`-HuraName` names the server, which is otherwise called by its address. These
+arguments are read by Debug builds only. The screenshots on gethura.app are
+taken this way; see `site/README.md`.
 
 The simulator can't receive real pushes, but it can show one sent with
 `simctl`:
