@@ -69,7 +69,8 @@ struct ChatView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             if items.isEmpty && queued.isEmpty { emptyState }
-                            ChatRows(items: items, cwd: Self.cwd, working: working, receipts: chat.receipts)
+                            ChatRows(items: ChatItem.group(items, working: working), cwd: Self.cwd, working: working,
+                                     receipts: chat.receipts)
                             if !chat.streaming.isEmpty {
                                 MarkdownText(text: chat.streaming).opacity(0.8)
                             }

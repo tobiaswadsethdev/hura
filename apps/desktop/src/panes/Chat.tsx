@@ -35,7 +35,7 @@ import { AskCard } from "../chat/Ask";
 import { matching, naming, offeredCommands, type Typed, typed } from "../chat/commands";
 import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/files";
 import { Items, OpenAgent, Unpin } from "../chat/Items";
-import { arrived, build } from "../chat/transcript";
+import { arrived, build, group } from "../chat/transcript";
 import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
 
 /// The reply being written, from the stream events: the main thread's
@@ -728,10 +728,12 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
   const carriesFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
 
   const receiptsOn = view.state?.receipts ?? false;
-  const { items, queued, agents } = useMemo(
+  const { items: built, queued, agents } = useMemo(
     () => (view.caughtUp ? build(view.entries) : build([])),
     [view.caughtUp, view.entries],
   );
+  const working = view.state?.activity === "running" || view.state?.activity === "waiting";
+  const items = useMemo(() => group(built, working), [built, working]);
   const [following, setFollowing] = useState<string | null>(null);
   const followed = agents.find((a) => a.id === following) ?? null;
   const openAgent = useMemo(

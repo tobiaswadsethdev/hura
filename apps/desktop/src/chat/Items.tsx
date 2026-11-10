@@ -6,7 +6,9 @@
 // do in its header, and what came back underneath, open when the answer is
 // the point (an edit's diff, a plan, the todo list) and closed when it is a
 // file the agent read for its own benefit. A `!` command you ran is a card
-// too, open, since its output is why it was run.
+// too, open, since its output is why it was run. A turn's steps are one row
+// that says what they came to, open while the turn runs and shut once it has
+// answered -- see `group` in transcript.ts.
 
 import { createContext, memo, useContext, useLayoutEffect, useRef, useState } from "react";
 
@@ -400,6 +402,78 @@ function Thinking({ text }: { text: string }) {
   );
 }
 
+/// What a turn's steps came to, in a few words: "Read 3 files, ran 2
+/// commands". Kinds of work in the order they were first done.
+export function summarize(items: Item[]): string {
+  const counts = new Map<string, number>();
+  const add = (what: string) => counts.set(what, (counts.get(what) ?? 0) + 1);
+  for (const item of items) {
+    if (item.kind === "thinking") add("thought");
+    else if (item.kind === "text") add("message");
+    else if (item.kind === "tool") {
+      const name = item.call.name;
+      if (name === "Read") add("read");
+      else if (["Edit", "MultiEdit", "Write", "NotebookEdit"].includes(name)) add("edit");
+      else if (name === "Bash") add("command");
+      else if (name === "Grep" || name === "Glob") add("search");
+      else if (name === "WebFetch" || name === "WebSearch") add("web");
+      else if (name === "Task" || name === "Agent") add("agent");
+      else if (name === "TodoWrite") add("todo");
+      else add("tool");
+    }
+  }
+  const n = (k: number, one: string, many: string) => (k === 1 ? one : `${k} ${many}`);
+  const words: Record<string, (k: number) => string> = {
+    read: (k) => `read ${n(k, "a file", "files")}`,
+    edit: (k) => `edited ${n(k, "a file", "files")}`,
+    command: (k) => `ran ${n(k, "a command", "commands")}`,
+    search: (k) => `searched ${k === 1 ? "once" : `${k} times`}`,
+    web: (k) => `looked up ${n(k, "a page", "pages")}`,
+    agent: (k) => `started ${n(k, "an agent", "agents")}`,
+    todo: () => "updated the plan",
+    tool: (k) => `used ${n(k, "a tool", "tools")}`,
+  };
+  const parts = [...counts.keys()].filter((k) => words[k]).map((k) => words[k](counts.get(k) ?? 0));
+  // Thinking and messages on their way only say so when nothing else does.
+  if (parts.length === 0) parts.push(counts.has("thought") ? "thought" : "worked");
+  const said = parts.join(", ");
+  return said.charAt(0).toUpperCase() + said.slice(1);
+}
+
+/// A turn's steps, as one row. Open while the turn runs, so the work can be
+/// watched, and shut when it ends, leaving the answer under it; either way
+/// until it is clicked, after which it stays as it was put.
+const StepsCard = memo(function StepsCard({
+  item,
+  progress,
+}: {
+  item: Extract<Item, { kind: "steps" }>;
+  progress?: Map<string, number>;
+}) {
+  const [open, setOpen] = useState<boolean | null>(null);
+  const shown = open ?? item.live;
+  const calls = item.items.flatMap((i) => (i.kind === "tool" ? [i.call] : []));
+  const running = calls.some((c) => c.result === null && !(c.answer && !c.answer.allow));
+  const failed = calls.filter((c) => c.result?.isError && !c.result.stopped).length;
+  return (
+    <div className={`chat-steps${running ? " running" : ""}`}>
+      <button className="chat-steps-head" aria-expanded={shown} onClick={() => setOpen(!shown)}>
+        <Twisty open={shown} />
+        <span className="what">{summarize(item.items)}</span>
+        <span className="mark">
+          {failed > 0 && <span className="failed">{failed} failed</span>}
+          {running && <Working />}
+        </span>
+      </button>
+      <Fold open={shown}>
+        <div className="chat-steps-body">
+          <Items items={item.items} progress={progress} />
+        </div>
+      </Fold>
+    </div>
+  );
+});
+
 /// Lets go of the bottom of the conversation, which it otherwise keeps to
 /// while it is there. Unset where nothing is kept to the bottom.
 export const Unpin = createContext<(() => void) | null>(null);
@@ -635,6 +709,8 @@ export const ItemView = memo(function ItemView({
       );
     case "divider":
       return <p className="chat-divider">{item.text}</p>;
+    case "steps":
+      return <StepsCard item={item} progress={progress} />;
   }
 });
 

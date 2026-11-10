@@ -72,7 +72,10 @@ export type Item =
   | { kind: "turn"; key: string; ok: boolean; text: string; at: number }
   | { kind: "divider"; key: string; text: string }
   /// The first thing said on a day, so a time is never read as the wrong one.
-  | { kind: "day"; key: string; at: number };
+  | { kind: "day"; key: string; at: number }
+  /// The steps of a turn on the way to its answer, folded into one row: see
+  /// `group`. `live` while the turn they are in is still running.
+  | { kind: "steps"; key: string; items: Item[]; live: boolean };
 
 /// The same calendar day, where this window is.
 function sameDay(a: number, b: number): boolean {
@@ -440,4 +443,63 @@ export function arrived(entries: ChatEntry[], messageId: string): number {
     }
   }
   return n;
+}
+
+/// Whether an item is one of a turn's steps, to be folded with the others:
+/// what the agent did and thought on the way. Not what you said or ran, not a
+/// failure, and not a plan or a question, which are waiting on you or are what
+/// you answered.
+function isStep(item: Item): boolean {
+  switch (item.kind) {
+    case "thinking":
+    case "text":
+      return true;
+    case "tool":
+      return item.call.name !== "ExitPlanMode" && item.call.name !== "AskUserQuestion";
+    case "note":
+      return item.tone === "dim";
+  }
+  return false;
+}
+
+/// The transcript with each turn's steps folded into one `steps` item, so a
+/// turn reads as what you said, one row for the work, and what Claude said at
+/// the end -- Claude Code's own shape -- rather than a screen of tool calls
+/// for each message.
+///
+/// The answer is the text at the end of a run of steps and stays out of the
+/// fold: it is what the turn was for. A run of one is left as it is, since a
+/// row to open a single card is a click for nothing. `working` is whether the
+/// conversation is mid-turn, which makes the last run live.
+export function group(items: Item[], working: boolean): Item[] {
+  const out: Item[] = [];
+  let run: Item[] = [];
+  const flush = () => {
+    // The answer: the text the run ends with.
+    let end = run.length;
+    while (end > 0 && run[end - 1].kind === "text") end--;
+    const steps = run.slice(0, end);
+    if (steps.length > 1) out.push({ kind: "steps", key: `${steps[0].key}.steps`, items: steps, live: false });
+    else out.push(...steps);
+    out.push(...run.slice(end));
+    run = [];
+  };
+  for (const item of items) {
+    if (isStep(item)) run.push(item);
+    else {
+      flush();
+      out.push(item);
+    }
+  }
+  const tail = out.length;
+  flush();
+  // Live only if the turn has not ended: a run before a `turn` was flushed
+  // by it, so the one flushed last is the turn in progress.
+  if (working) {
+    for (let i = tail; i < out.length; i++) {
+      const item = out[i];
+      if (item.kind === "steps") out[i] = { ...item, live: true };
+    }
+  }
+  return out;
 }
