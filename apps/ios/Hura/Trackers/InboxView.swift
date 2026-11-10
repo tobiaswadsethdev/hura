@@ -60,7 +60,7 @@ struct InboxView: View {
                 ContentUnavailableView {
                     Label("No trackers", glyph: .tracker)
                 } description: {
-                    Text("Add GitHub, Azure DevOps or Jira to see your tickets and pull requests here, on every device signed in to your account.")
+                    Text("Add GitHub, Azure DevOps, Jira or Fizzy to see your tickets and pull requests here, on every device signed in to your account.")
                 } actions: {
                     Button("Add a Tracker") { settings = true }.buttonStyle(.borderedProminent)
                 }
@@ -359,7 +359,7 @@ struct SignInForTrackers: View {
         ContentUnavailableView {
             Label("Sign in for trackers", glyph: .account)
         } description: {
-            Text("Your tickets and pull requests from GitHub, Azure DevOps and Jira come through your hura account, which keeps the trackers and reads them all day, so they are the same on every device and you hear about a change on time.")
+            Text("Your tickets and pull requests from GitHub, Azure DevOps, Jira and Fizzy come through your hura account, which keeps the trackers and reads them all day, so they are the same on every device and you hear about a change on time.")
         } actions: {
             Button("Sign In") {
                 trackers.showAccount = true

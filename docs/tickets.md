@@ -65,8 +65,8 @@ beside the sidebar, over the dock: its status, assignee, reporter, priority,
 parent, labels and dates, the description, and the comments oldest first.
 Escape closes it, and so does clicking the row again. The ↗ in its header, and
 *Open in the browser* in a row's right-click menu, still go to Jira for what
-only Jira does: attaching, linking, logging work. GitHub and Azure DevOps
-tickets open in the browser; pull requests open here, as [Reading and
+only Jira does: attaching, linking, logging work. GitHub, Azure DevOps and
+Fizzy tickets open in the browser; pull requests open here, as [Reading and
 reviewing a pull request](#reading-and-reviewing-a-pull-request) describes.
 
 It is one `GET /rest/api/3/issue/{key}` with the tracker's own token. The
@@ -89,6 +89,7 @@ created (see [Filters](#filters)); the table is what it asks otherwise.
 | Jira | `(assignee = currentUser() OR reporter = currentUser()) AND statusCategory != Done`, from `/rest/api/3/search/jql`, after `/myself` to know which of them are assigned to you | none: Jira has none |
 | Azure DevOps | WIQL for work items in the project assigned to `@Me` or created by `@Me` and not Closed, Done, Removed or Resolved, then the work items themselves | the project's active pull requests by creator and by reviewer, from `/_apis/git/pullrequests` |
 | GitHub | `is:issue is:open` with `assignee:@me`, and with `author:@me` | `is:pr is:open` with `author:@me`, `review-requested:@me` and `assignee:@me` |
+| Fizzy | `/my/identity` for who you are in each account, then each account's `/cards` with `assignee_ids[]` of you, and with `creator_ids[]` of you | none: Fizzy has none |
 
 **GitHub is one GraphQL request** for all five searches, scoped to the
 tracker's repository when it names one. GraphQL rather than REST because it is
@@ -104,7 +105,22 @@ GitHub means by a review request too. Azure DevOps keeps checks behind a request
 per pull request, so its rows have no checks mark, and its list has no time of
 last change, so its rows say when they were opened.
 
-GitHub, Azure DevOps and Jira are read over REST **by [hura cloud](cloud.md),
+**Fizzy is read account by account.** Its token is yours rather than an
+account's, so a tracker reads every account the token belongs to, or the one
+it names. Its card list leaves out closed cards and the ones put off as *not
+now* unless asked for them, which is "not done" in Fizzy's own terms. A card's
+status is its column, or *Maybe?* while it waits to be triaged, and where
+another tracker shows a type, a card shows its board. The list does not count
+comments, so a Fizzy card is announced when it moves column or becomes yours,
+and not for a comment; that would be a request per card on every read. A
+card's key is its number, `#42`, and its branch `<prefix>/42-<title>`, the
+way a GitHub issue's is. Read beside other accounts, every one of which has a
+`#42`, the key says which account it is in, `acme#42`, and so does its branch,
+`<prefix>/acme-42-<title>`. An account that cannot be read is a warning about
+that account, and the others' cards still show. The few hundred cards active
+most recently are read in each search, and a search with more says so.
+
+GitHub, Azure DevOps, Jira and Fizzy are read over REST **by [hura cloud](cloud.md),
 with the tokens your account keeps there**, so trackers need you signed in to
 it (the **account** section of the settings screen; the phone's Account tab).
 They are the same on every device signed in to the account. A hura server is
@@ -246,8 +262,14 @@ with none set up, its **add a tracker** does the same.
 | Jira | the site (`https://your-org.atlassian.net`) and the email of the account the token belongs to | an API token, from id.atlassian.com → Security → API tokens |
 | Azure DevOps | the organisation and the project | a personal access token with *Work Items (read)* for the tickets and *Code (read)* for the pull requests, or *Code (read & write)* to comment and vote on them |
 | GitHub | a repository (`owner/name`), or nothing for every repository the token can see | a token that can read issues and pull requests, and write pull requests to comment and review |
+| Fizzy | the site, or nothing for `https://app.fizzy.do`; and an account, by its name or the number in its address, or nothing for every account | a personal access token, from your profile → API → Personal access tokens; *Read* is enough |
 
 A **name** is optional, and only worth giving a second tracker of the same kind.
+
+**A Fizzy you run yourself** is the site it is at. hura cloud is what reads it,
+and it only sends requests over HTTPS to an address on the public internet (see
+[cloud.md](cloud.md)), so one reachable only on your own network or over plain
+HTTP cannot be read from there.
 
 The token is kept in your hura cloud account, encrypted, and never shown
 again. A tracker whose token has expired has a field on its row to paste a new

@@ -23,12 +23,15 @@ name: string,
 repo: string | null, 
 /**
  * Azure DevOps organisation, and the project its work items and pull
- * requests are read from.
+ * requests are read from. On Fizzy, the one account to read, by its name
+ * or the number in its address, or `None` for every account the token
+ * belongs to.
  */
 org: string | null, project: string | null, 
 /**
  * Jira site, `https://your-org.atlassian.net`, and the account the token
  * belongs to -- Jira Cloud is Basic auth with the email as the username.
+ * On Fizzy, a site of your own, or `None` for 37signals' `app.fizzy.do`.
  */
 site: string | null, email: string | null, 
 /**

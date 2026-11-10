@@ -53,15 +53,17 @@ public enum TrackerCore {
 
 /// A tracker this phone reads (`Source` in hura-core's tracker module).
 public struct TrackerSource: Codable, Equatable, Hashable, Sendable {
-    /// `git-hub`, `azure-dev-ops` or `jira`.
+    /// `git-hub`, `azure-dev-ops`, `jira` or `fizzy`.
     public var kind: String
     public var name: String
     /// GitHub: `owner/name`, or nil for every repository the token sees.
     public var repo: String?
-    /// Azure DevOps organisation and project.
+    /// Azure DevOps organisation and project. On Fizzy, `org` is the one
+    /// account to read, or nil for every account the token belongs to.
     public var org: String?
     public var project: String?
-    /// Jira site and the account the token belongs to.
+    /// Jira site and the account the token belongs to. On Fizzy, a site of
+    /// your own, or nil for `app.fizzy.do`.
     public var site: String?
     public var email: String?
     /// Leave out the tickets you created that nobody assigned you.
@@ -108,6 +110,7 @@ public struct TrackerSource: Codable, Equatable, Hashable, Sendable {
         case "git-hub": "GitHub"
         case "azure-dev-ops": "Azure DevOps"
         case "jira": "Jira"
+        case "fizzy": "Fizzy"
         default: kind
         }
     }

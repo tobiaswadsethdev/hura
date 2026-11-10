@@ -192,9 +192,11 @@ export function InboxBar({
   }
 
   const none = trackers !== null && trackers.length === 0;
-  // Pull requests come from GitHub and Azure DevOps. With only Jira set up,
-  // their view says where they would come from rather than sitting empty.
-  const forges = trackers?.some((t) => t.source.kind !== "jira") ?? false;
+  // Pull requests come from GitHub and Azure DevOps. With only Jira or Fizzy
+  // set up, their view says where they would come from rather than sitting
+  // empty.
+  const forges =
+    trackers?.some((t) => t.source.kind === "git-hub" || t.source.kind === "azure-dev-ops") ?? false;
   const isShut = (key: string) => shut.includes(key);
   const toggle = (key: string) =>
     onShut(isShut(key) ? shut.filter((k) => k !== key) : [...shut, key]);

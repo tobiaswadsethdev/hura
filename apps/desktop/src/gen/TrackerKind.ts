@@ -3,4 +3,4 @@
 /**
  * A tracker this knows how to read.
  */
-export type TrackerKind = "git-hub" | "azure-dev-ops" | "jira";
+export type TrackerKind = "git-hub" | "azure-dev-ops" | "jira" | "fizzy";

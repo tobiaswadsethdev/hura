@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 pub mod changes;
 pub mod doc;
 mod edit;
+mod fizzy;
 mod issue;
 pub mod markdown;
 mod pictures;
@@ -75,6 +76,7 @@ pub enum Kind {
     GitHub,
     AzureDevOps,
     Jira,
+    Fizzy,
 }
 
 impl Kind {
@@ -83,9 +85,21 @@ impl Kind {
             "github" | "gh" => Ok(Kind::GitHub),
             "azure-devops" | "azure" | "ado" => Ok(Kind::AzureDevOps),
             "jira" | "atlassian" => Ok(Kind::Jira),
+            "fizzy" => Ok(Kind::Fizzy),
             other => Err(format!(
-                "`{other}` is not a tracker; use github, azure-devops or jira"
+                "`{other}` is not a tracker; use github, azure-devops, jira or fizzy"
             )),
+        }
+    }
+
+    /// What it is called in a sentence: `Azure DevOps`, where
+    /// [`label`](Self::label) is `azure-devops`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::GitHub => "GitHub",
+            Kind::AzureDevOps => "Azure DevOps",
+            Kind::Jira => "Jira",
+            Kind::Fizzy => "Fizzy",
         }
     }
 
@@ -94,6 +108,7 @@ impl Kind {
             Kind::GitHub => "github",
             Kind::AzureDevOps => "azure-devops",
             Kind::Jira => "jira",
+            Kind::Fizzy => "fizzy",
         }
     }
 }
@@ -116,11 +131,14 @@ pub struct Source {
     /// token can see.
     pub repo: Option<String>,
     /// Azure DevOps organisation, and the project its work items and pull
-    /// requests are read from.
+    /// requests are read from. On Fizzy, the one account to read, by its name
+    /// or the number in its address, or `None` for every account the token
+    /// belongs to.
     pub org: Option<String>,
     pub project: Option<String>,
     /// Jira site, `https://your-org.atlassian.net`, and the account the token
     /// belongs to -- Jira Cloud is Basic auth with the email as the username.
+    /// On Fizzy, a site of your own, or `None` for 37signals' `app.fizzy.do`.
     pub site: Option<String>,
     pub email: Option<String>,
     /// Leave out the tickets you created and nobody assigned you. Pull
@@ -267,7 +285,7 @@ impl Source {
                 }
                 None
             }
-            Kind::GitHub => None,
+            Kind::GitHub | Kind::Fizzy => None,
         }
     }
 }
@@ -549,6 +567,17 @@ pub fn inbox(trackers: &[Stored], branch_prefix: &str) -> Inbox {
                 }
                 Err(e) => out.warnings.push(format!("{name}: {e}")),
             },
+            Kind::Fizzy => match fizzy::read(source, token, branch_prefix) {
+                Ok(read) => {
+                    out.tasks.extend(read.tasks);
+                    if read.complete {
+                        out.read.push(name.clone());
+                    }
+                    out.warnings
+                        .extend(read.warnings.into_iter().map(|w| format!("{name} · {w}")));
+                }
+                Err(e) => out.warnings.push(format!("{name}: {e}")),
+            },
             Kind::AzureDevOps => {
                 // Who the token belongs to, asked once: the work items are
                 // sorted by it and the pull requests are searched by it. The
@@ -581,8 +610,9 @@ pub fn inbox(trackers: &[Stored], branch_prefix: &str) -> Inbox {
             }
         }
         // Here rather than in each tracker's query, so it means the same on
-        // all three. Jira also leaves them out of its JQL, which costs nothing
-        // there; a ticket of yours that a filter matched is `Matched` and stays.
+        // all of them. Jira also leaves them out of its JQL, and Fizzy does not
+        // ask for them, which saves a request each, but this is the rule; a
+        // ticket of yours that a filter matched is `Matched` and stays.
         if source.hide_created {
             let read = out.tasks.split_off(tickets);
             out.tasks

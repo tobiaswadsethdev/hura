@@ -84,7 +84,7 @@ marked as one:
   granted the ones it is given; `hurad` can own their containers and their
   secrets, with a screen that says what each one is doing.
 - **Your tickets and pull requests, beside your work.** A sidebar of what is
-  yours on Jira, Azure DevOps and GitHub: tickets assigned to you or created by
+  yours on Jira, Azure DevOps, GitHub and Fizzy: tickets assigned to you or created by
   you, and pull requests you opened or that wait on your review, with their
   checks and reviews. Set up token and all in the desktop application and read
   from there, with nothing to configure on the server, and a notification when
