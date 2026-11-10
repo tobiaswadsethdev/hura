@@ -419,6 +419,31 @@ test("a ! command the host never saw end is ended when it starts again", () => {
   assert.equal(new Host({ dir, cwd: dir }).conversations.get("agent").entries.filter((e) => e.ev.kind === "exited").length, 1);
 });
 
+test("the agent's conversation closes like any other, and stays closed after a restart", () => {
+  const { dir, host } = hostWithWatcher();
+  assert.equal(host.fresh, true);
+  host.close("agent");
+  assert.deepEqual(host.names(), []);
+  const again = new Host({ dir, cwd: dir });
+  assert.equal(again.fresh, false, "a restart is not a first start, so the task is not given again");
+  assert.deepEqual(again.names(), []);
+});
+
+test("what is said to no one in particular goes to the agent, else the latest, else a new one", () => {
+  const { host, c } = hostWithWatcher();
+  const one = host.open("chat-1");
+  const two = host.open("chat-2");
+  assert.equal(host.addressee(), c);
+  host.close("agent");
+  one.activeAt = 2;
+  two.activeAt = 1;
+  assert.equal(host.addressee(), one);
+  host.close("chat-1");
+  host.close("chat-2");
+  assert.equal(host.addressee().name, "chat-1");
+  assert.deepEqual(host.names(), ["chat-1"]);
+});
+
 test("commands one conversation learns are offered by the others, and after a restart", () => {
   const { dir, host, c, frames } = hostWithWatcher();
   const other = host.open("chat-1");

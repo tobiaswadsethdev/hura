@@ -210,7 +210,8 @@ pub enum Request {
     Files { name: String, path: String },
     /// One file of it, capped and read-only. The agent owns the working copy.
     File { name: String, path: String },
-    /// The shells open beside a worktree's agent, by tmux session name.
+    /// The shells open beside a worktree's agent, by tmux session name, and
+    /// whether the agent is still running beside them.
     ///
     /// Asked of the sandbox rather than remembered by a client: what shells
     /// exist is a fact about the sandbox, and one that survives the window
@@ -219,17 +220,22 @@ pub enum Request {
     /// Open another shell in the same sandbox. Answers with the list, including
     /// the new one, whose name the server chose.
     NewShell { name: String },
-    /// Close one, killing whatever is running in it. The agent's own is not a
-    /// shell and is refused.
+    /// Close one, killing whatever is running in it. The agent's own tmux
+    /// session too, in a terminal session, which then has no agent until
+    /// [`Request::NewAgent`]. Answers with the shells.
     KillShell { name: String, tmux: String },
+    /// Start an agent in a terminal session whose last one was closed: a new
+    /// conversation, without the task. Answers with the shells. A chat
+    /// session's agents are its conversations, and it is refused.
+    NewAgent { name: String },
     /// A chat session's conversations, the agent's first. Asked of the host in
     /// the sandbox, for the reason the shells are asked of tmux.
     Chats { name: String },
     /// Open another conversation beside the agent's. Answers with the list and
     /// the new one's name, which the host chose.
     NewChat { name: String },
-    /// End a conversation and forget its transcript. The agent's own is
-    /// refused, as its terminal is.
+    /// End a conversation and forget its transcript, the agent's own
+    /// included, which the host then does not start again.
     CloseChat { name: String, conv: String },
     /// What is listening in a session's sandbox, which process holds each
     /// port, and the forwards this server is running into it for previews.
@@ -414,6 +420,7 @@ impl Request {
             | Request::Shells { name }
             | Request::NewShell { name }
             | Request::KillShell { name, .. }
+            | Request::NewAgent { name }
             | Request::Chats { name }
             | Request::NewChat { name }
             | Request::CloseChat { name, .. }
@@ -430,6 +437,11 @@ impl Request {
             Request::Destroy { name } => Some(name),
         }
     }
+}
+
+/// What `Reply::Shells::agent` is when a server does not say.
+fn running() -> bool {
+    true
 }
 
 /// One thing to do to the working copy or the remote.
@@ -493,6 +505,10 @@ pub enum Reply {
     },
     Shells {
         shells: Vec<String>,
+        /// Whether the agent's own tmux session is running. True from a server
+        /// that predates closing it, which never had one that was not.
+        #[serde(default = "running")]
+        agent: bool,
     },
     Chats {
         chats: Vec<String>,

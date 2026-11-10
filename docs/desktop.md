@@ -225,10 +225,15 @@ been closed from elsewhere and hide one opened from elsewhere. The server also
 names them, because two windows adding a shell at once would otherwise both
 pick `shell-2` and the second would silently attach to the first's.
 
-Closing a shell kills what is running in it, so only a shell has the button. The
-agent's terminal is not one, and `kill_shell` refuses a target that is not
-prefixed `shell-` rather than trusting the request -- closing the agent's tab
-must not stop the agent.
+Closing a shell kills what is running in it. **The agent's tab closes too**,
+after asking, and that stops the agent: the worktree and its sandbox stay, with
+no agent in them until `+` starts another, which it offers as a third choice
+for as long as there is none. A new agent is a new conversation, without the
+task -- that was the first one's. Closing every tab leaves an empty editor that
+offers the same two ways back in. A closed agent stays closed when the sandbox
+is restarted, and a review sent with no agent running is refused rather than
+typed into a shell. `kill_shell` still refuses anything that is neither the
+agent nor prefixed `shell-`, rather than trusting the request.
 
 **The dock is not a tab bar, and that is deliberate.** Files, git, facts, policy
 and events sit in a sidebar beside the editor, chosen by a strip of five glyphs
@@ -352,9 +357,11 @@ paperclip is not offered there and a drop says so; a new session takes them.
 **`+` opens another conversation** beside the agent's: the same sandbox, the
 same working copy and the same policy, with a context of its own. Two agents in
 one working copy edit the same files, which is what running `claude` in a shell
-beside the agent always meant. Closing one ends it and forgets its transcript;
-the agent's own has no cross, as its terminal has none. Shells are still there,
-on the same menu.
+beside the agent always meant. Closing one ends it and forgets its transcript,
+the agent's own included, which the host then does not start again. A review
+goes to the agent's conversation while there is one, then to the conversation
+most recently in use, or to a new one when every conversation has been closed.
+Shells are still there, on the same menu.
 
 **Where it runs.** Not in this window, and not on the server: the image carries
 `hura-agent`, a small process that runs Claude Code through the Agent SDK

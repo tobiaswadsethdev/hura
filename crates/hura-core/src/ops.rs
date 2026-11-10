@@ -1127,6 +1127,11 @@ pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(
     let script = tell_script(backend.tmux(), &session.tmux);
     match backend.exec_stdin(session, &["sh", "-c", &script], message.as_bytes()) {
         Ok(out) if out.ok() => Ok(()),
+        // Closed, and none started since: tmux's own words for that name a
+        // session the reader has never heard of.
+        Ok(out) if out.stderr.contains("can't find session") => {
+            Err("there is no agent running to tell; start one first".into())
+        }
         Ok(out) => Err(format!(
             "the agent could not be told: {}",
             out.stderr.trim()
@@ -1142,12 +1147,18 @@ pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(
 /// The message never appears in the script. It is free text of any length, so
 /// it travels as data on stdin rather than as a quoted argument, where a
 /// review of a few hundred comments would pass the 128 KiB an argument may be.
+///
+/// The target is matched exactly, and checked before anything is pasted: with
+/// the agent closed, tmux would otherwise take its name as the start of a
+/// shell's and deliver the review there.
 fn tell_script(bin: &str, tmux: &str) -> String {
     format!(
-        "{bin} load-buffer -b hura-tell - \
-         && {bin} paste-buffer -b hura-tell -t {tmux} -d -p \
-         && {bin} send-keys -t {tmux} Enter",
-        tmux = seed::sh_quote(tmux),
+        "{bin} has-session -t {exact} \
+         && {bin} load-buffer -b hura-tell - \
+         && {bin} paste-buffer -b hura-tell -t {pane} -d -p \
+         && {bin} send-keys -t {pane} Enter",
+        exact = seed::sh_quote(&format!("={tmux}")),
+        pane = seed::sh_quote(&format!("={tmux}:")),
     )
 }
 
@@ -1400,11 +1411,21 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
     let bin = backend.tmux();
     // Attaching to the agent after its sandbox was stopped and started is
     // attaching to an agent that is not there yet, so it is brought back first,
-    // the way the status poll would. See `seed::resume_check`.
-    let resume = if tmux == session.tmux {
-        format!("{}\n", seed::resume_check(backend, session))
-    } else {
+    // the way the status poll would. See `seed::resume_check`. One that was
+    // closed is not brought back by that, and asking for the agent's terminal
+    // is then asking for a new agent: without this the fallback below would
+    // make its tmux session a bare shell, which the status poll would go on
+    // reading as the agent's screen.
+    let resume = if tmux != session.tmux {
         String::new()
+    } else if session.interface == crate::chat::Interface::Terminal {
+        format!(
+            "{}\n( sh -c {} ) >/dev/null 2>&1 || true\n",
+            seed::resume_check(backend, session),
+            seed::sh_quote(&seed::launch_agent_script(backend, session, false)),
+        )
+    } else {
+        format!("{}\n", seed::resume_check(backend, session))
     };
     // The fallback below can be what starts the tmux server, in a session
     // with no agent, so this exec's environment is every pane's.
@@ -1508,7 +1529,19 @@ pub fn kill_process(backend: &dyn Backend, session: &Session, pid: u32) -> Resul
     Ok(())
 }
 
-/// The shells beside the agent, by tmux session name.
+/// The terminals in a session: its shells, and whether its agent is running.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Terminals {
+    /// By tmux session name, in order.
+    pub shells: Vec<String>,
+    /// Whether the agent's own tmux session exists. Absent once it has been
+    /// closed, until another is started. For a chat session it is the host,
+    /// which is not closed this way, and says nothing about its conversations.
+    pub agent: bool,
+}
+
+/// The shells beside the agent, by tmux session name, and whether there is
+/// still an agent beside them.
 ///
 /// Asked of tmux rather than kept in a list, because what shells exist is a
 /// fact about where the session runs and tmux is already the thing that knows
@@ -1517,7 +1550,7 @@ pub fn kill_process(backend: &dyn Backend, session: &Session, pid: u32) -> Resul
 ///
 /// Filtered by the backend's prefix, so the agent's own tmux session is not
 /// offered as a shell.
-pub fn shells(backend: &dyn Backend, session: &Session) -> Result<Vec<String>, String> {
+pub fn terminals(backend: &dyn Backend, session: &Session) -> Result<Terminals, String> {
     let prefix = backend.shell_prefix(session);
     let list = format!("{} list-sessions -F '#{{session_name}}'", backend.tmux());
     let out = backend
@@ -1526,17 +1559,19 @@ pub fn shells(backend: &dyn Backend, session: &Session) -> Result<Vec<String>, S
     // No tmux server at all exits non-zero saying so, which is "no shells"
     // rather than a failure worth showing.
     if !out.ok() {
-        return Ok(Vec::new());
+        return Ok(Terminals::default());
     }
-    let mut names: Vec<String> = out
-        .trimmed()
-        .lines()
-        .map(str::trim)
+    let listed: Vec<&str> = out.trimmed().lines().map(str::trim).collect();
+    let mut shells: Vec<String> = listed
+        .iter()
         .filter(|n| n.starts_with(&prefix))
-        .map(str::to_string)
+        .map(|n| n.to_string())
         .collect();
-    names.sort();
-    Ok(names)
+    shells.sort();
+    Ok(Terminals {
+        shells,
+        agent: listed.contains(&session.tmux.as_str()),
+    })
 }
 
 /// Open another shell in the same sandbox, and answer with its name.
@@ -1550,7 +1585,7 @@ pub fn shells(backend: &dyn Backend, session: &Session) -> Result<Vec<String>, S
 /// can run the tests while the agent is still working.
 pub fn new_shell(backend: &dyn Backend, session: &Session) -> Result<String, String> {
     let prefix = backend.shell_prefix(session);
-    let taken = shells(backend, session)?;
+    let taken = terminals(backend, session)?.shells;
     let name = (1..)
         .map(|n| format!("{prefix}{n}"))
         .find(|candidate| !taken.contains(candidate))
@@ -1580,23 +1615,68 @@ fn new_shell_script(backend: &dyn Backend, session: &Session, name: &str) -> Str
     )
 }
 
-/// Close one, killing whatever is running in it.
+/// Close one, killing whatever is running in it -- the agent's own included,
+/// in a terminal session, which then has no agent until another is started.
 pub fn kill_shell(backend: &dyn Backend, session: &Session, tmux: &str) -> Result<(), String> {
-    // The agent's session is not a shell and closing its tab must not stop it.
     // Checked here rather than trusted from the request, which is a client's.
-    if tmux == session.tmux || !tmux.starts_with(&backend.shell_prefix(session)) {
+    let agent = tmux == session.tmux;
+    if agent && session.interface == crate::chat::Interface::Chat {
+        // A chat session's tmux session is the host every conversation runs
+        // in. Its agent is a conversation, and is closed as one.
+        return Err(format!(
+            "`{tmux}` is the chat host; close its conversations instead"
+        ));
+    }
+    if !agent && !tmux.starts_with(&backend.shell_prefix(session)) {
         return Err(format!("`{tmux}` is not a shell"));
     }
-    let script = format!(
-        "{bin} kill-session -t {tmux}",
-        bin = backend.tmux(),
-        tmux = seed::sh_quote(tmux),
-    );
+    let script = kill_script(backend, session, tmux);
     let out = backend
         .exec(session, &["sh", "-c", &script])
         .map_err(|e| e.to_string())?;
     if !out.ok() {
         return Err(format!("could not close it: {}", out.stderr.trim()));
+    }
+    Ok(())
+}
+
+/// What [`kill_shell`] runs. Closing the agent forgets that it was ever
+/// started, so a restart of the sandbox does not bring back what was closed on
+/// purpose (see [`seed::resume_check`]), and its last status with it, which
+/// would otherwise go on saying what it was doing until it went stale.
+fn kill_script(backend: &dyn Backend, session: &Session, tmux: &str) -> String {
+    let kill = format!(
+        "{bin} kill-session -t {tmux}",
+        bin = backend.tmux(),
+        tmux = seed::sh_quote(&format!("={tmux}")),
+    );
+    if tmux != session.tmux {
+        return kill;
+    }
+    let paths = backend.paths(session);
+    format!(
+        "{kill} && rm -f {started} {status}",
+        started = seed::sh_quote(&paths.agent_started()),
+        status = seed::sh_quote(&paths.status()),
+    )
+}
+
+/// Start an agent in a terminal session that has none, because the last was
+/// closed. A new conversation rather than the last one continued: what was
+/// closed was closed on purpose.
+pub fn new_agent(backend: &dyn Backend, session: &Session) -> Result<(), String> {
+    if session.interface == crate::chat::Interface::Chat {
+        return Err("a chat session's agents are its conversations; open one of those".into());
+    }
+    if terminals(backend, session)?.agent {
+        return Err("there is already an agent running here".into());
+    }
+    let script = seed::launch_agent_script(backend, session, false);
+    let out = backend
+        .exec(session, &["sh", "-c", &script])
+        .map_err(|e| e.to_string())?;
+    if !out.ok() {
+        return Err(format!("could not start the agent: {}", out.stderr.trim()));
     }
     Ok(())
 }
@@ -1745,7 +1825,8 @@ fn poll_script(backend: &dyn Backend, session: &Session) -> String {
         crate::chat::Interface::Terminal => format!(
             "{tmux_bin} capture-pane -pe -t {tmux} 2>/dev/null | tail -n {PANE_LINES}",
             tmux_bin = backend.tmux(),
-            tmux = seed::sh_quote(&session.tmux),
+            // Exactly, so a closed agent is no pane rather than a shell's.
+            tmux = seed::sh_quote(&format!("={}:", session.tmux)),
         ),
         crate::chat::Interface::Chat => String::new(),
     };
@@ -1880,6 +1961,50 @@ mod tests {
             .is_empty(),
             "an untracked file is a change even with no line edits"
         );
+    }
+
+    /// Closing the agent forgets it was started, so a restart of the sandbox
+    /// does not bring it back, and its last status with it. A shell is only
+    /// killed. Both by exact name.
+    #[test]
+    fn closing_the_agent_forgets_it_and_closing_a_shell_only_kills_it() {
+        let s = session();
+        let backend = crate::backend::testing::sandboxed();
+        let agent = kill_script(&backend, &s, &s.tmux);
+        assert!(agent.contains("kill-session -t '=agent'"), "{agent}");
+        assert!(agent.contains("/sandbox/.hura/agent-started"), "{agent}");
+        assert!(agent.contains("/sandbox/.hura/status.json"), "{agent}");
+        let shell = kill_script(&backend, &s, "shell-1");
+        assert!(shell.ends_with("kill-session -t '=shell-1'"), "{shell}");
+    }
+
+    /// A chat session's tmux session is its host, which every conversation
+    /// runs in; its agent is closed as a conversation. Refused before anything
+    /// reaches the sandbox.
+    #[test]
+    fn a_chat_host_is_not_closed_as_the_agent() {
+        let mut s = session();
+        s.interface = crate::chat::Interface::Chat;
+        let backend = crate::backend::testing::sandboxed();
+        let refused = kill_shell(&backend, &s, &s.tmux.clone()).unwrap_err();
+        assert!(refused.contains("chat host"), "{refused}");
+        assert!(new_agent(&backend, &s).is_err());
+        assert!(kill_shell(&backend, &s, "not-a-shell").is_err());
+    }
+
+    /// Asking for a closed agent's terminal starts a new agent rather than
+    /// leaving a bare shell under its name.
+    #[test]
+    fn attaching_to_a_closed_agent_starts_another() {
+        let s = session();
+        let backend = crate::backend::testing::sandboxed();
+        let script = attach_script(&backend, &s, &s.tmux);
+        assert!(
+            script.find("claude") < script.find("attach -d"),
+            "the agent is started before the fallback can make a shell: {script}"
+        );
+        let shell = attach_script(&backend, &s, "shell-1");
+        assert!(!shell.contains("claude"), "{shell}");
     }
 
     /// Both attach paths run this, and each clause is there for a reason that is
@@ -2377,7 +2502,7 @@ mod tests {
         let script = tell_script("tmux -u", "agent");
         assert!(script.contains("load-buffer -b hura-tell -"), "{script}");
         assert!(
-            script.contains("paste-buffer -b hura-tell -t 'agent' -d -p"),
+            script.contains("paste-buffer -b hura-tell -t '=agent:' -d -p"),
             "{script}"
         );
         assert_eq!(script.matches("send-keys").count(), 1, "{script}");
@@ -2390,7 +2515,9 @@ mod tests {
     fn a_message_is_never_part_of_the_script() {
         let script = tell_script("tmux -u", "agent");
         assert!(
-            script.starts_with("tmux -u load-buffer -b hura-tell -"),
+            script.starts_with(
+                "tmux -u has-session -t '=agent' && tmux -u load-buffer -b hura-tell -"
+            ),
             "{script}"
         );
         assert!(!script.contains("printf"), "{script}");

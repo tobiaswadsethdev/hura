@@ -35,8 +35,9 @@ use crate::session::Session;
 /// with `PORT` in `hura-agent.mjs`; a test reads that file to check.
 pub const PORT: u16 = 47_681;
 
-/// The conversation the seeder starts with the task, and the one that cannot be
-/// closed: it is the agent, in the way the terminal agent's tmux session is.
+/// The conversation the seeder starts with the task: the agent, in the way the
+/// terminal agent's tmux session is. Closed like any other, after which the
+/// host does not start it again.
 pub const AGENT: &str = "agent";
 
 /// The prefix of every other conversation's name, which the host chooses.
@@ -515,8 +516,7 @@ pub fn open(backend: &dyn Backend, session: &Session) -> Result<String, String> 
 /// End a conversation and forget its transcript.
 pub fn close(backend: &dyn Backend, session: &Session, name: &str) -> Result<(), String> {
     // Checked here as well as by the host, and before anything reaches a
-    // shell: the agent is not a conversation to close, and a name is not
-    // trusted because a client sent it.
+    // shell: a name is not trusted because a client sent it.
     if !is_closable(name) {
         return Err(format!("`{name}` is not a conversation that can be closed"));
     }
@@ -529,8 +529,10 @@ pub fn close(backend: &dyn Backend, session: &Session, name: &str) -> Result<(),
 }
 
 fn is_closable(name: &str) -> bool {
-    name.strip_prefix(PREFIX)
-        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    name == AGENT
+        || name
+            .strip_prefix(PREFIX)
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Answer one permission request by its id, in whichever conversation holds
@@ -569,17 +571,15 @@ pub fn answer(
 /// Say something to the agent's conversation, as you.
 ///
 /// What [`crate::ops::tell`] is for a chat session: a review goes in as one
-/// message, the way a bracketed paste puts it into a terminal.
+/// message, the way a bracketed paste puts it into a terminal. Unnamed, so the
+/// host chooses: the agent's while it is there, and once it has been closed the
+/// conversation most recently in use, or a new one when there are none.
 pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(), String> {
     // On stdin rather than in the script, for the reason `ops::tell` gives.
     let out = backend
         .exec_stdin(
             session,
-            &[
-                "sh",
-                "-c",
-                &command(backend, session, &format!("send {}", sh_quote(AGENT))),
-            ],
+            &["sh", "-c", &command(backend, session, "send")],
             message.as_bytes(),
         )
         .map_err(|e| e.to_string())?;
@@ -645,10 +645,10 @@ mod tests {
     }
 
     #[test]
-    fn only_a_numbered_conversation_can_be_closed() {
+    fn only_the_agent_or_a_numbered_conversation_can_be_closed() {
         assert!(is_closable("chat-1"));
         assert!(is_closable("chat-12"));
-        assert!(!is_closable(AGENT));
+        assert!(is_closable(AGENT));
         assert!(!is_closable("chat-"));
         assert!(!is_closable("chat-1; rm -rf /"));
         assert!(!is_closable("shell-1"));

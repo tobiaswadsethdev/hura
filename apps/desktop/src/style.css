@@ -809,6 +809,11 @@ html.mac .sidebar { border-right-color: rgb(0 0 0 / 0.35); }
   padding: 8px 16px;
   border-bottom: 1px solid var(--line);
 }
+/* A worktree with every tab closed: the absence fills the editor, and under it
+   the ways to open something again. */
+.editor > .empty.page { flex: 1; justify-content: center; }
+.tabs-empty { display: flex; gap: 8px; }
+.tabs-empty button { display: inline-flex; align-items: center; gap: 6px; }
 .tab-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; }
 .tab-body[hidden] { display: none; }
 
@@ -2175,7 +2180,7 @@ main { position: relative; }
 
 .dialog-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .dialog-head h2 { font-size: 15px; font-weight: 700; margin: 0; flex: 1; }
-:is(.dialog, .screen) .quiet {
+:is(.dialog, .screen, .tabs-empty) .quiet {
   background: rgb(255 255 255 / 0.1);
   border: none;
   border-radius: var(--r-sm);
@@ -2188,7 +2193,7 @@ main { position: relative; }
   white-space: nowrap;
   transition: background-color 150ms, color 150ms;
 }
-:is(.dialog, .screen) .quiet:hover { background: rgb(255 255 255 / 0.16); }
+:is(.dialog, .screen, .tabs-empty) .quiet:hover { background: rgb(255 255 255 / 0.16); }
 
 :is(.dialog, .screen) input, :is(.dialog, .screen) textarea, :is(.dialog, .screen) .select-trigger {
   background: rgb(0 0 0 / 0.2);

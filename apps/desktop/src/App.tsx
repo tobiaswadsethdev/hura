@@ -22,7 +22,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { api, messageOf, type Paired, type ServerSummary } from "./api";
+import { api, messageOf, type Paired, type ServerSummary, type Shells } from "./api";
 import { useConfirm } from "./Confirm";
 import { Dock } from "./Dock";
 import { Empty } from "./Empty";
@@ -114,32 +114,30 @@ function isTicketsKey(e: KeyboardEvent): boolean {
 ///
 /// A chat session's agent is its first conversation rather than a terminal, and
 /// the others it has are asked of the host the same way the shells are asked
-/// of tmux. Until that answer arrives the agent's own is there anyway, because
-/// it always exists.
-function tabsFor(session: Session, shells: string[], chats: string[], open: Tab[]): Tab[] {
+/// of tmux. Either agent can have been closed. A terminal agent's tab waits
+/// for the answer, because attaching to a closed one starts another; a chat's
+/// is assumed until then, since attaching to a closed conversation is only
+/// refused.
+function tabsFor(
+  session: Session,
+  shells: Shells | undefined,
+  chats: string[] | undefined,
+  open: Tab[],
+): Tab[] {
   const agent: Tab[] =
     session.interface === "chat"
-      ? [
-          { kind: "chat", conv: "agent", label: "Agent" },
-          ...chats
-            .filter((conv) => conv !== "agent")
-            .map((conv): Tab => ({ kind: "chat", conv, label: conv })),
-        ]
-      : [{ kind: "terminal", tmux: null, label: "Agent" }];
+      ? (chats ?? ["agent"]).map((conv): Tab => ({ kind: "chat", conv, label: conv === "agent" ? "Agent" : conv }))
+      : shells?.agent
+        ? [{ kind: "terminal", tmux: null, label: "Agent" }]
+        : [];
   return [
     ...agent,
-    ...shells.map((tmux): Tab => ({ kind: "terminal", tmux, label: tmux })),
+    ...(shells?.shells ?? []).map((tmux): Tab => ({ kind: "terminal", tmux, label: tmux })),
     // Files and diffs last, in the order they were opened -- the one thing here
     // that is genuinely this window's state. A file is open because someone in
     // *this* window clicked it, and nothing in the sandbox knows that.
     ...open,
   ];
-}
-
-/// The tab a worktree falls back to when the one in front goes away: the
-/// agent, whichever kind of agent it has.
-function home(session: Session): string {
-  return session.interface === "chat" ? "chat:agent" : "terminal:agent";
 }
 
 /// Put the tabs in the order the user dragged them into.
@@ -238,7 +236,7 @@ export default function App() {
   /// The shells each worktree has, and which tab is in front of it. Both are
   /// per worktree: switching away and back finds it as you left it, because a
   /// shell you opened in one is not a shell in another.
-  const [shells, setShells] = useState<Record<string, string[]>>({});
+  const [shells, setShells] = useState<Record<string, Shells>>({});
   /// A chat session's conversations beside the agent's, the same way.
   const [chats, setChats] = useState<Record<string, string[]>>({});
   const [files, setFiles] = useState<Record<string, Tab[]>>({});
@@ -602,7 +600,7 @@ export default function App() {
 
   const openTabs = session
     ? arrange(
-        tabsFor(session, shells[session.name] ?? [], chats[session.name] ?? [], files[session.name] ?? []),
+        tabsFor(session, shells[session.name], chats[session.name], files[session.name] ?? []),
         order[session.name] ?? [],
       )
     : [];
@@ -647,7 +645,22 @@ export default function App() {
     });
     setActive((a) => ({ ...a, [worktree]: key }));
   };
-  const activeTab = session ? (active[session.name] ?? keyOf(openTabs[0])) : "";
+  /// The tab in front: the one chosen, while it is still open, and otherwise
+  /// the first. Nothing is always there to fall back to -- the agent can be
+  /// closed like the rest -- so a closed tab is forgotten rather than replaced.
+  const chosen = session ? active[session.name] : undefined;
+  const activeTab = openTabs.some((t) => keyOf(t) === chosen)
+    ? (chosen as string)
+    : openTabs[0]
+      ? keyOf(openTabs[0])
+      : "";
+  /// Stop remembering `key` as the tab in front of `worktree`, if it was.
+  const unchoose = (worktree: string, key: string) =>
+    setActive((a) => {
+      if (a[worktree] !== key) return a;
+      const { [worktree]: _, ...rest } = a;
+      return rest;
+    });
 
   /// Start a worktree for a ticket: straight into the create form, filled in.
   /// The sidebar's whole point is that starting work on a ticket is one step.
@@ -910,6 +923,7 @@ export default function App() {
                 tabs={openTabs}
                 active={activeTab}
                 failure={session.state === "failed" ? session.failure : null}
+                listed={!!shells[session.name] && (session.interface !== "chat" || !!chats[session.name])}
                 onActivate={(key) => setActive((a) => ({ ...a, [session.name]: key }))}
                 onReorder={(moved, onto) =>
                   setOrder((all) => ({
@@ -924,7 +938,7 @@ export default function App() {
                       setShells((all) => ({ ...all, [session.name]: list }));
                       // Opened in front, because asking for a shell is asking
                       // to use one.
-                      const opened = list[list.length - 1];
+                      const opened = list.shells[list.shells.length - 1];
                       if (opened) {
                         setActive((a) => ({ ...a, [session.name]: `terminal:${opened}` }));
                       }
@@ -945,9 +959,44 @@ export default function App() {
                       }
                     : undefined
                 }
+                onNewAgent={
+                  session.interface !== "chat" && shells[session.name]?.agent === false
+                    ? () => {
+                        api
+                          .newAgent(server, session.name)
+                          .then((list) => {
+                            setShells((all) => ({ ...all, [session.name]: list }));
+                            // In front, for the reason a new shell is.
+                            setActive((a) => ({ ...a, [session.name]: "terminal:agent" }));
+                          })
+                          .catch((e) => setError(messageOf(e)));
+                      }
+                    : undefined
+                }
+                onCloseAgent={() => {
+                  ask({
+                    title: "Stop the agent?",
+                    body: (
+                      <>
+                        Claude Code stops, along with whatever it is doing. The worktree stays, and{" "}
+                        <b>+</b> starts a new agent in it.
+                      </>
+                    ),
+                    confirm: "Stop It",
+                    onConfirm: () => {
+                      api
+                        .killShell(server, session.name, session.tmux)
+                        .then((list) => {
+                          setShells((all) => ({ ...all, [session.name]: list }));
+                          unchoose(session.name, "terminal:agent");
+                        })
+                        .catch((e) => setError(messageOf(e)));
+                    },
+                  });
+                }}
                 onCloseChat={(conv) => {
                   ask({
-                    title: `End ${conv}?`,
+                    title: conv === "agent" ? "End the agent's conversation?" : `End ${conv}?`,
                     body: <>The conversation stops, and its transcript is forgotten.</>,
                     confirm: "End It",
                     onConfirm: () => {
@@ -955,9 +1004,7 @@ export default function App() {
                         .closeChat(server, session.name, conv)
                         .then(({ chats: list }) => {
                           setChats((all) => ({ ...all, [session.name]: list }));
-                          setActive((a) =>
-                            a[session.name] === `chat:${conv}` ? { ...a, [session.name]: home(session) } : a,
-                          );
+                          unchoose(session.name, `chat:${conv}`);
                         })
                         .catch((e) => setError(messageOf(e)));
                     },
@@ -968,22 +1015,15 @@ export default function App() {
                     ...all,
                     [session.name]: (all[session.name] ?? []).filter((t) => keyOf(t) !== key),
                   }));
-                  setActive((a) =>
-                    a[session.name] === key ? { ...a, [session.name]: home(session) } : a,
-                  );
+                  unchoose(session.name, key);
                 }}
                 onCloseShell={(tmux) => {
                   api
                     .killShell(server, session.name, tmux)
                     .then((list) => {
                       setShells((all) => ({ ...all, [session.name]: list }));
-                      // Whatever was in front may have just been killed; the
-                      // agent is the one tab that is always there.
-                      setActive((a) =>
-                        a[session.name] === `terminal:${tmux}`
-                          ? { ...a, [session.name]: home(session) }
-                          : a,
-                      );
+                      // Whatever was in front may have just been killed.
+                      unchoose(session.name, `terminal:${tmux}`);
                     })
                     .catch((e) => setError(messageOf(e)));
                 }}

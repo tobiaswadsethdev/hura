@@ -419,29 +419,54 @@ fn file(server: String, name: String, path: String) -> Result<FileText, Failed> 
     expect_reply!(reply, Reply::File(text) => text, "a file")
 }
 
+/// A worktree's shells, and whether its agent is running beside them. The
+/// webview's shape for `Reply::Shells`.
+#[derive(Serialize)]
+struct Shells {
+    shells: Vec<String>,
+    agent: bool,
+}
+
+fn shells_of(reply: Reply) -> Result<Shells, Failed> {
+    expect_reply!(reply, Reply::Shells { shells, agent } => Shells { shells, agent }, "a shell list")
+}
+
 /// The shells open beside a worktree's agent.
 #[tauri::command(async)]
-fn shells(server: String, name: String) -> Result<Vec<String>, Failed> {
-    let reply = remote(&server)?
-        .call(Request::Shells { name })
-        .map_err(to_message)?;
-    expect_reply!(reply, Reply::Shells { shells } => shells, "a shell list")
+fn shells(server: String, name: String) -> Result<Shells, Failed> {
+    shells_of(
+        remote(&server)?
+            .call(Request::Shells { name })
+            .map_err(to_message)?,
+    )
 }
 
 #[tauri::command(async)]
-fn new_shell(server: String, name: String) -> Result<Vec<String>, Failed> {
-    let reply = remote(&server)?
-        .call(Request::NewShell { name })
-        .map_err(to_message)?;
-    expect_reply!(reply, Reply::Shells { shells } => shells, "a shell list")
+fn new_shell(server: String, name: String) -> Result<Shells, Failed> {
+    shells_of(
+        remote(&server)?
+            .call(Request::NewShell { name })
+            .map_err(to_message)?,
+    )
 }
 
 #[tauri::command(async)]
-fn kill_shell(server: String, name: String, tmux: String) -> Result<Vec<String>, Failed> {
-    let reply = remote(&server)?
-        .call(Request::KillShell { name, tmux })
-        .map_err(to_message)?;
-    expect_reply!(reply, Reply::Shells { shells } => shells, "a shell list")
+fn kill_shell(server: String, name: String, tmux: String) -> Result<Shells, Failed> {
+    shells_of(
+        remote(&server)?
+            .call(Request::KillShell { name, tmux })
+            .map_err(to_message)?,
+    )
+}
+
+/// Start an agent in a terminal session whose last one was closed.
+#[tauri::command(async)]
+fn new_agent(server: String, name: String) -> Result<Shells, Failed> {
+    shells_of(
+        remote(&server)?
+            .call(Request::NewAgent { name })
+            .map_err(to_message)?,
+    )
 }
 
 /// A chat session's conversations, and the one just opened when that is what
@@ -1396,6 +1421,7 @@ fn main() {
             file,
             shells,
             new_shell,
+            new_agent,
             kill_shell,
             chats,
             new_chat,

@@ -60,6 +60,9 @@ export type Paired = { server: ServerSummary; servers: ServerSummary[]; version:
 /// A chat session's conversations, and the one just opened when that is what
 /// was asked: `Chats` in main.rs.
 export type Chats = { chats: string[]; opened: string | null };
+/// A worktree's shells, and whether its agent is running beside them: `Shells`
+/// in main.rs.
+export type Shells = { shells: string[]; agent: boolean };
 
 /// Hand-written because it is the bridge's own shape rather than a message: see
 /// `GitAnswer` in main.rs. Both halves are generated types.
@@ -157,11 +160,13 @@ export const api = {
 
   // Shells beside the agent, in the same sandbox under the same policy. What
   // exists is asked of the sandbox rather than remembered here, so a shell
-  // survives this window closing.
-  shells: (server: string, name: string) => invoke<string[]>("shells", { server, name }),
-  newShell: (server: string, name: string) => invoke<string[]>("new_shell", { server, name }),
+  // survives this window closing. Each answers with whether the agent is
+  // still running too: a terminal session's can be closed, and started again.
+  shells: (server: string, name: string) => invoke<Shells>("shells", { server, name }),
+  newShell: (server: string, name: string) => invoke<Shells>("new_shell", { server, name }),
   killShell: (server: string, name: string, tmux: string) =>
-    invoke<string[]>("kill_shell", { server, name, tmux }),
+    invoke<Shells>("kill_shell", { server, name, tmux }),
+  newAgent: (server: string, name: string) => invoke<Shells>("new_agent", { server, name }),
 
   // A chat session's conversations, asked of the host in the sandbox for the
   // reason the shells are asked of tmux. Opening one answers with the list and

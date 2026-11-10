@@ -129,21 +129,29 @@ public struct ServerClient: Sendable {
         return try await call("close-chat", Body(name: name, conv: conversation), as: Chats.self)
     }
 
-    /// The shells running in a session's sandbox, by tmux session name.
-    public func shells(_ name: String) async throws -> [String] {
-        try await call("shells", Named(name: name), as: ShellsReply.self).shells
+    /// The shells running in a session's sandbox, by tmux session name, and
+    /// whether its agent is running beside them.
+    public func shells(_ name: String) async throws -> Shells {
+        try await call("shells", Named(name: name), as: Shells.self)
     }
 
-    public func newShell(_ name: String) async throws -> [String] {
-        try await call("new-shell", Named(name: name), as: ShellsReply.self).shells
+    public func newShell(_ name: String) async throws -> Shells {
+        try await call("new-shell", Named(name: name), as: Shells.self)
     }
 
-    public func killShell(_ name: String, tmux: String) async throws -> [String] {
+    /// Closes a shell, or the agent's own terminal when `tmux` is the
+    /// session's, which stops the agent.
+    public func killShell(_ name: String, tmux: String) async throws -> Shells {
         struct Body: Encodable {
             var name: String
             var tmux: String
         }
-        return try await call("kill-shell", Body(name: name, tmux: tmux), as: ShellsReply.self).shells
+        return try await call("kill-shell", Body(name: name, tmux: tmux), as: Shells.self)
+    }
+
+    /// Starts an agent in a terminal session whose last one was closed.
+    public func newAgent(_ name: String) async throws -> Shells {
+        try await call("new-agent", Named(name: name), as: Shells.self)
     }
 
     /// Answers a permission request, question or plan in full.
@@ -371,6 +379,8 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public var backend: String
     /// A worktree session's directory on the server.
     public var workdir: String?
+    /// The tmux session its agent runs in: what closing the agent closes.
+    public var tmux: String
 
     public var id: String { name }
     public var isWorktree: Bool { backend == "worktree" }
@@ -379,7 +389,7 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case name, state, task, interface, project, repo, failure, toolchains, providers, policy, sandbox, agent, skills, mcp,
-             ticket, pull, backend, workdir
+             ticket, pull, backend, workdir, tmux
         case workBranch = "work_branch"
         case baseBranch = "base_branch"
         case createdAt = "created_at"
@@ -388,9 +398,10 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public init(name: String, state: String, workBranch: String = "", task: String = "", interface: String = "terminal",
                 project: String? = nil, repo: String = "", baseBranch: String? = nil, createdAt: Int64 = 0,
                 failure: String? = nil, toolchains: [String] = [], providers: [String] = [], policy: String? = nil,
-                sandbox: String = "", backend: String = "sandbox", workdir: String? = nil) {
+                sandbox: String = "", backend: String = "sandbox", workdir: String? = nil, tmux: String = "agent") {
         self.backend = backend
         self.workdir = workdir
+        self.tmux = tmux
         self.name = name
         self.state = state
         self.workBranch = workBranch
@@ -428,6 +439,7 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
         sandbox = try c.decodeIfPresent(String.self, forKey: .sandbox) ?? ""
         backend = try c.decodeIfPresent(String.self, forKey: .backend) ?? "sandbox"
         workdir = try c.decodeIfPresent(String.self, forKey: .workdir)
+        tmux = try c.decodeIfPresent(String.self, forKey: .tmux) ?? "agent"
         agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? "claude"
         struct Named: Decodable { var name: String }
         skills = (try c.decodeIfPresent([Named].self, forKey: .skills) ?? []).map(\.name)

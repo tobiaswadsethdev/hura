@@ -537,6 +537,10 @@ export class Host {
     /// `terminal` names those that only work in Claude Code's terminal,
     /// which `init` lists among the rest; a chat does not offer them.
     ({ commands: this.commands, terminal: this.terminal } = this.#readCommands());
+    /// Whether this host has never run here before: what decides that the
+    /// agent's conversation is to be started, rather than its absence, which
+    /// is also what closing it leaves.
+    this.fresh = !fs.existsSync(this.#registry());
     for (const record of this.#readRegistry()) {
       this.conversations.set(record.name, new Conversation(this, record));
     }
@@ -607,7 +611,6 @@ export class Host {
   }
 
   close(name) {
-    if (name === AGENT) throw new Error("the agent's own conversation cannot be closed");
     const c = this.conversations.get(name);
     if (!c) throw new Error(`no conversation named ${name}`);
     c.end();
@@ -618,6 +621,16 @@ export class Host {
     fs.rmSync(path.join(this.uploads, name), { recursive: true, force: true });
     this.report();
     log(`closed ${name}`);
+  }
+
+  /// Who something said to no conversation in particular is for: the agent's
+  /// while it is there, then whichever was most recently in use, and a new one
+  /// when every conversation has been closed.
+  addressee() {
+    const agent = this.conversations.get(AGENT);
+    if (agent) return agent;
+    const recent = [...this.conversations.values()].sort((a, b) => b.activeAt - a.activeAt)[0];
+    return recent ?? this.open();
   }
 
   /// Something changed that the poll reads. Both files are small and written
@@ -1269,7 +1282,7 @@ class Client {
         this.host.close(req.conv);
         return this.#reply({});
       case "tell": {
-        const target = this.host.conversations.get(req.conv);
+        const target = req.conv == null ? this.host.addressee() : this.host.conversations.get(req.conv);
         if (!target) throw new Error(`no conversation named ${req.conv}`);
         await target.send(String(req.text ?? ""));
         return this.#reply({});
@@ -1318,8 +1331,8 @@ function serve(args) {
 
   // The agent's own conversation, started with the task the first time
   // through. A restart finds it in the registry and leaves it be; it resumes
-  // when it is next spoken to.
-  if (!host.conversations.has(AGENT)) {
+  // when it is next spoken to. One that was closed stays closed.
+  if (host.fresh) {
     const agent = host.open(AGENT);
     const task = args["task-file"] ? readTask(args["task-file"]) : "";
     if (task) agent.send(task).catch((e) => log(`agent: ${e.stack ?? e}`));
@@ -1413,7 +1426,7 @@ async function main(argv) {
     case "send": {
       const text = (await readStdin()).trim();
       if (!text) throw new Error("nothing to send");
-      await request({ op: "tell", conv: name ?? AGENT, text });
+      await request({ op: "tell", conv: name, text });
       return;
     }
     // `hura-agent answer ID`, with the decision as JSON on stdin:
@@ -1425,7 +1438,7 @@ async function main(argv) {
       return;
     }
     default:
-      throw new Error("usage: hura-agent serve|list|new|close NAME|send NAME|answer ID");
+      throw new Error("usage: hura-agent serve|list|new|close NAME|send [NAME]|answer ID");
   }
 }
 
