@@ -188,27 +188,71 @@ body { user-select: none; }
   outline-offset: 0;
 }
 
-/* Scrollbars, as macOS draws overlay ones: the thumb is drawn inside a
-   transparent border and clipped to the padding box, so a 12px scrollbar
-   shows a 6px thumb that floats clear of the content instead of a full-width
-   trough with a groove down it. `scrollbar-width`/`-color` are the standard
-   properties and the only ones WebKitGTK honours; the `::-webkit-` rules are
-   for WebKit on macOS and for WebView2. */
-.scrollbar-sleek {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
-}
-.scrollbar-sleek::-webkit-scrollbar { width: 12px; height: 12px; }
-.scrollbar-sleek::-webkit-scrollbar-track { background: none; }
-.scrollbar-sleek::-webkit-scrollbar-thumb {
+/* Scrollbars, as macOS draws overlay ones, on every scroller in the window:
+   the thumb is drawn inside a transparent border and clipped to the padding
+   box, so a 12px scrollbar shows a 6px thumb that floats clear of the content
+   instead of a full-width trough with arrows at each end.
+
+   They were once opt-in, behind a class on five scrollers, and every other one
+   kept the engine's own. On WebView2 that is the Windows scrollbar: 17 pixels
+   of grey trough, arrows included, down the chat, the dock and every list.
+
+   The standard `scrollbar-width`/`-color` are kept to engines without the
+   `::-webkit-` pseudo-elements. Chromium has both, and since version 121 an
+   element with either standard property set ignores the pseudo-elements
+   entirely. Setting both was what made the five opt-in scrollers on Windows
+   thin grey bars with arrows, rather than the thumb drawn here. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-thumb {
   background: var(--line-strong);
   background-clip: padding-box;
   border: 3px solid transparent;
   border-radius: 999px;
   min-height: 28px;
 }
-.scrollbar-sleek::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
-.scrollbar-sleek::-webkit-scrollbar-corner { background: none; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); background-clip: padding-box; }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+}
+
+/* Text fields, all of them, so none is left in the engine's own look: a white
+   box with an inset bevel on WebView2. The one place a field is drawn; a
+   context that wants it different (a mono face, no border inside the chat's
+   box) says only what differs.
+
+   `:where()` keeps the base at no specificity at all, so any rule naming a
+   field wins over it. The terminal and the editor have text areas of their
+   own that are not fields, and keep their own styles. */
+:where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"]), textarea):not(:where(.monaco-editor, .xterm) *) {
+  background: rgb(0 0 0 / 0.2);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+:where(textarea):not(:where(.monaco-editor, .xterm) *) { resize: vertical; }
+:where(input, textarea)::placeholder { color: var(--dimmer); }
+
+/* A field with the focus: the accent border and the ring around it, the way
+   AppKit draws a focused text field. One look for every field in the window.
+
+   As a box-shadow, not as the outline every other control takes above. A text
+   field matches `:focus-visible` on a click as well as on a tab, so the outline
+   was drawn on every field clicked into. Where it was not overridden it sat
+   three pixels outside a bevel, and the commit message drew a second ring of
+   its own a pixel clear of its border. This rule's `:focus` keeps it level
+   with the outline rule on specificity, and coming after it wins. */
+:where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"]), textarea):not(:where(.monaco-editor, .xterm) *):focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+/* A tick box takes the accent too, rather than the engine's own blue. */
+:root { accent-color: var(--accent); }
 
 .app { display: flex; flex-direction: column; height: 100%; }
 
@@ -1280,8 +1324,6 @@ main { position: relative; }
   font-size: 12px;
   resize: vertical;
 }
-.commit textarea:focus { outline: none; border-color: var(--line-strong); }
-.commit textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .commit .go { padding: 4px 10px 4px 8px; }
 .commit .go .n {
   font-variant-numeric: tabular-nums;
@@ -1462,7 +1504,6 @@ main { position: relative; }
   font-size: 12px;
   resize: vertical;
 }
-.filediff .composer textarea:focus { outline: none; border-color: var(--line-strong); }
 .filediff .quiet, .diff .quiet {
   background: none;
   border: none;
@@ -1885,7 +1926,6 @@ main { position: relative; }
   font-family: var(--font-mono);
   font-size: 12px;
 }
-.change-path input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .change-path input[aria-invalid="true"] { border-color: color-mix(in srgb, var(--bad) 60%, transparent); }
 .change-problem { flex-basis: 100%; padding-left: 90px; color: var(--bad); font-size: 11px; }
 .change-path .change-widen { flex: none; font-size: 11px; padding: 2px 6px; }
@@ -2163,12 +2203,8 @@ main { position: relative; }
 /* Fields are in the UI face, as every Mac form is -- an email address or a
    repository URL in a monospace face reads as a terminal that wandered into a
    form. The few that hold code (a JQL filter, a markdown body) set the mono
-   face themselves. */
-:is(.dialog, .screen) :is(input, textarea, .select-trigger):focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
-}
+   face themselves. A focused field is drawn by the rule for every field, near
+   the top; a select is a button, and takes the ring only from the keyboard. */
 :is(.dialog, .screen) textarea { resize: vertical; }
 
 :is(.dialog, .screen-inner) > label { display: grid; grid-template-columns: 78px 1fr; gap: 10px; align-items: start; margin: 10px 0; }
@@ -3164,6 +3200,9 @@ main { position: relative; }
   padding: 0 8px 0 0;
 }
 .dialog .chip-field .select-trigger { cursor: pointer; }
+/* The chip takes the ring, as the chat's box does, so what is inside it takes
+   none: a ring around the field inside the ring around the chip was two. */
+.dialog .chip-field :is(input, .select-trigger):is(:focus, :focus-visible) { box-shadow: none; }
 
 .pick-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
 .pick-row { display: flex; align-items: flex-start; gap: 10px; }
@@ -3239,7 +3278,6 @@ main { position: relative; }
   font-family: var(--font-mono);
   font-size: 12px;
 }
-.port-add input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .port-add .quiet { background: none; border: 1px solid var(--line-strong); border-radius: var(--r-sm); color: var(--dim); font: inherit; font-size: 12px; padding: 0 10px; cursor: pointer; }
 .port-add .quiet:hover:not(:disabled) { color: var(--text); border-color: var(--hover-line); }
 .port-add .quiet:disabled { opacity: 0.5; cursor: default; }
@@ -3322,7 +3360,7 @@ main { position: relative; }
 .user-current { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text); }
 .user-search { position: relative; display: block; }
 .user-search .lucide { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; color: var(--dimmer); }
-.ticket-edit .user-search input { padding-left: 26px; }
+.ticket-edit .user-search input { width: 100%; padding-left: 26px; }
 .user-found { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; max-height: 180px; overflow-y: auto; }
 .user-found .quiet { width: 100%; text-align: left; }
 .user-found .hint { padding: 4px 8px; }
@@ -3524,6 +3562,9 @@ main { position: relative; }
   border-radius: var(--r);
 }
 .chat-tool-head:hover { background: var(--hover); color: var(--text); }
+/* Open, the head is the top of the card and no longer all of it, so its
+   hover fill keeps the card's corners at the top only. */
+.chat-tool-head[aria-expanded="true"] { border-radius: var(--r) var(--r) 0 0; }
 /* The verb and the subject share a baseline; the chevron and the mark are
    centred on the row. Different faces, so centring all four puts the words
    at two heights. */
@@ -3677,7 +3718,6 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   font: inherit;
   font-size: 12px;
 }
-.chat-ask input:focus { outline: none; border-color: var(--line-strong); }
 .chat-quiet-button { padding: 5px 8px; border-radius: var(--r-sm); font-size: 12px; }
 .chat-quiet-button:hover { background: var(--hover); color: var(--text); }
 .chat-plan { max-height: 420px; overflow-y: auto; padding-right: 4px; }
@@ -3736,7 +3776,8 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   line-height: 1.5;
   resize: none;
 }
-.chat-box textarea:focus { outline: none; }
+/* The box above takes the ring, so the text area inside it takes none. */
+.chat-box textarea:focus { box-shadow: none; }
 .chat-controls { display: flex; align-items: center; gap: 2px; padding: 2px 6px 6px; cursor: default; }
 /* The mode and the model: words until pointed at. Borderless, so two of them
    in a row are a sentence about the next turn rather than a form. */

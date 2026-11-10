@@ -142,7 +142,7 @@ export function PullPanel({
     <aside
       ref={panel}
       tabIndex={-1}
-      className="ticket-panel pull-panel scrollbar-sleek"
+      className="ticket-panel pull-panel"
       aria-label={`${pullName(pull)} ${pull.title}`}
       onKeyDown={(e) => {
         if (e.key === "Escape" && !e.defaultPrevented) {

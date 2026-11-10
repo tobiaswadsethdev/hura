@@ -121,7 +121,7 @@ export function TicketPanel({
       // Focusable, so a click anywhere in it -- on the text being read --
       // keeps Escape here rather than handing it to the screen.
       tabIndex={-1}
-      className="ticket-panel scrollbar-sleek"
+      className="ticket-panel"
       aria-label={`${task.key} ${task.title}`}
       // Escape closes this rather than the whole screen, while focus is in it.
       onKeyDown={(e) => {
