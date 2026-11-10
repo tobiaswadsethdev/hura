@@ -14,6 +14,11 @@ and serve the directory as it is from anywhere that serves static files.
   `.github/workflows/release.yml` gives them. A renamed asset needs its pattern
   in `ASSETS` changed too. Without the script, or without an answer from
   GitHub, every link goes to the releases page.
+- **The motion** is `motion.js` and CSS. Anything marked `data-reveal` fades
+  up the first time it scrolls into view. The inline script in `index.html` adds
+  the `js` class that hides those elements at first, so without the script, or
+  with reduced motion turned on, nothing is hidden. The hero window settles flat
+  as you scroll, using CSS scroll-driven animations where the browser has them.
 - **The iPhone app** has no public link yet. When it is on the App Store, set
   `APP_STORE` in `download.js` and both iPhone buttons start pointing there.
 - **The screenshots** are of the real apps, run against `scripts/fake-hurad.py`,
