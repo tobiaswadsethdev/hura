@@ -237,6 +237,16 @@ fn destroy(server: String, name: String) -> Result<Vec<Session>, Failed> {
     expect_reply!(reply, Reply::Ls { sessions, .. } => sessions, "a session list")
 }
 
+/// Rename a session: its title, the one part of its name nothing is keyed
+/// by. Answers with the list, as destroying does.
+#[tauri::command(async)]
+fn retitle(server: String, name: String, title: String) -> Result<Vec<Session>, Failed> {
+    let reply = remote(&server)?
+        .call(Request::Retitle { name, title })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Ls { sessions, .. } => sessions, "a session list")
+}
+
 #[tauri::command(async)]
 fn poll(server: String, name: String) -> Result<Poll, Failed> {
     let reply = remote(&server)?
@@ -1404,6 +1414,7 @@ fn main() {
             forget,
             sessions,
             destroy,
+            retitle,
             poll,
             policy,
             events,

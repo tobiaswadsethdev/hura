@@ -252,6 +252,10 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             Ok(_) => ls(backends),
             Err(e) => Failure::failed(e).into(),
         },
+        Request::Retitle { name, title } => match ops::retitle(&name, &title) {
+            Ok(_) => ls(backends),
+            Err(e) => Failure::failed(e).into(),
+        },
 
         // The integrations screen. Every one of these answers with the whole
         // view rather than an acknowledgement, for the reason the git view does

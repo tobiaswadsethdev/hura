@@ -702,6 +702,7 @@ mod tests {
     fn draft(providers: &[&str]) -> Draft {
         Draft {
             name: "a".into(),
+            title: None,
             branch: None,
             ticket: None,
             pull: None,

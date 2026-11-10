@@ -179,6 +179,11 @@ public final class Server: Identifiable {
         }
     }
 
+    /// Renames a session: its title, which nothing is keyed by.
+    public func retitle(_ name: String, to title: String) async throws {
+        listed = try await client.retitle(name, title: title)
+    }
+
     public func session(named name: String) -> Session? {
         sessions.first { $0.name == name }
     }

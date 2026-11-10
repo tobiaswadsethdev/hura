@@ -464,7 +464,7 @@ function TicketRow({
   const menuProps = menu(() => [
     ...(readsHere ? [{ label: "Open", run: () => onShow(task) }] : []),
     { label: "Open in the Browser", icon: Elsewhere, run: () => openExternal(task.url) },
-    ...(session ? [{ label: `Go to ${session.name}`, run: () => onSelect(session.name) }] : []),
+    ...(session ? [{ label: `Go to ${session.title ?? session.name}`, run: () => onSelect(session.name) }] : []),
     ...(starts.length > 0 ? (["separator", ...starts] as MenuItem[]) : []),
     "separator",
     { label: "Copy Key", icon: Copy, hint: task.key, run: () => copy(task.key) },
@@ -573,7 +573,7 @@ function PullRow({
   const menuProps = menu(() => [
     { label: "Open", run: () => onShow(pull) },
     { label: "Open in the Browser", icon: Elsewhere, run: () => openExternal(pull.url) },
-    ...(session ? [{ label: `Go to ${session.name}`, run: () => onSelect(session.name) }] : []),
+    ...(session ? [{ label: `Go to ${session.title ?? session.name}`, run: () => onSelect(session.name) }] : []),
     ...(starts.length > 0 && !session ? (["separator", ...starts] as MenuItem[]) : []),
     "separator",
     { label: "Copy Branch", icon: Copy, hint: pull.branch, run: () => copy(pull.branch) },
@@ -686,11 +686,11 @@ function Worktree({ session, onSelect }: { session: Session; onSelect: (name: st
   return (
     <button
       className="inbox-worktree"
-      title={`Go to ${session.name}`}
+      title={`Go to ${session.title ?? session.name}`}
       onClick={() => onSelect(session.name)}
     >
       <StateDot state={session.state} />
-      <span>{session.name}</span>
+      <span>{session.title ?? session.name}</span>
     </button>
   );
 }

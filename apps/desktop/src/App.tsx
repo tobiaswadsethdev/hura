@@ -615,7 +615,7 @@ export default function App() {
     // lose, and saying so is the difference between a click and a hesitation.
     const dead = s.state === "dead";
     ask({
-      title: dead ? `Remove ${s.name}?` : `Destroy ${s.name}?`,
+      title: dead ? `Remove ${s.title ?? s.name}?` : `Destroy ${s.title ?? s.name}?`,
       body: dead ? (
         <>Its sandbox is already gone, so this only takes it off the list.</>
       ) : (
@@ -886,6 +886,13 @@ export default function App() {
                 .catch((e) => setError(messageOf(e)));
             }}
             onDestroy={destroy}
+            onRename={(s, title) => {
+              if (!server) return;
+              api
+                .retitle(server, s.name, title)
+                .then(setSessions)
+                .catch((e) => setError(messageOf(e)));
+            }}
           />
 
           <Split
@@ -1262,8 +1269,8 @@ export default function App() {
 
 /// What a session that is not ready yet is doing.
 function preparingNote(session: Session | null) {
-  if (session?.state === "seeding") return `Cloning into ${session.name} and starting the agent`;
-  return `Creating the sandbox${session ? ` for ${session.name}` : ""}`;
+  if (session?.state === "seeding") return `Cloning into ${session.title ?? session.name} and starting the agent`;
+  return `Creating the sandbox${session ? ` for ${session.title ?? session.name}` : ""}`;
 }
 
 /// One of the header's destinations.

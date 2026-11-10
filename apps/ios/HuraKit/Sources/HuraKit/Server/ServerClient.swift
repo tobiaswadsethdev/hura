@@ -109,6 +109,12 @@ public struct ServerClient: Sendable {
         try await call("destroy", Named(name: name), as: Sessions.self).sessions
     }
 
+    /// Gives a session a new title; a blank one takes it away. Answers with
+    /// the list.
+    public func retitle(_ name: String, title: String) async throws -> [Session] {
+        try await call("retitle", Retitle(name: name, title: title), as: Sessions.self).sessions
+    }
+
     // MARK: Beside the agent
 
     /// A chat session's conversations.
@@ -343,7 +349,10 @@ public struct Hello: Decodable, Equatable, Sendable {
 
 /// A session as `hurad` lists it; only the fields the app shows.
 public struct Session: Decodable, Equatable, Identifiable, Sendable {
+    /// The slug everything about it is keyed by.
     public var name: String
+    /// What it is called where a person reads it; nil shows the name.
+    public var title: String?
     /// `creating`, `seeding`, `ready`, `running`, `waiting`, `idle`, `failed`
     /// or `dead`.
     public var state: String
@@ -383,12 +392,14 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public var tmux: String
 
     public var id: String { name }
+    /// What to call it in a list: the title, or the name when it has none.
+    public var label: String { title ?? name }
     public var isWorktree: Bool { backend == "worktree" }
     public var isChat: Bool { interface == "chat" }
     public var isLive: Bool { !["creating", "seeding", "failed", "dead"].contains(state) }
 
     enum CodingKeys: String, CodingKey {
-        case name, state, task, interface, project, repo, failure, toolchains, providers, policy, sandbox, agent, skills, mcp,
+        case name, title, state, task, interface, project, repo, failure, toolchains, providers, policy, sandbox, agent, skills, mcp,
              ticket, pull, backend, workdir, tmux
         case workBranch = "work_branch"
         case baseBranch = "base_branch"
@@ -398,7 +409,9 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public init(name: String, state: String, workBranch: String = "", task: String = "", interface: String = "terminal",
                 project: String? = nil, repo: String = "", baseBranch: String? = nil, createdAt: Int64 = 0,
                 failure: String? = nil, toolchains: [String] = [], providers: [String] = [], policy: String? = nil,
-                sandbox: String = "", backend: String = "sandbox", workdir: String? = nil, tmux: String = "agent") {
+                sandbox: String = "", backend: String = "sandbox", workdir: String? = nil, title: String? = nil,
+                tmux: String = "agent") {
+        self.title = title
         self.backend = backend
         self.workdir = workdir
         self.tmux = tmux
@@ -424,6 +437,7 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
         state = try c.decode(String.self, forKey: .state)
         workBranch = try c.decodeIfPresent(String.self, forKey: .workBranch) ?? ""
         task = try c.decodeIfPresent(String.self, forKey: .task) ?? ""
@@ -485,6 +499,11 @@ public struct Poll: Decodable, Equatable, Sendable {
         /// `v4` or `v6`.
         public var host: String
     }
+}
+
+struct Retitle: Encodable {
+    let name: String
+    let title: String
 }
 
 struct Told: Decodable {

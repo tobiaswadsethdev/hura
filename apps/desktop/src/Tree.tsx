@@ -39,6 +39,7 @@ import {
   Branch,
   Chevron,
   Copy,
+  Edit,
   Forget,
   Plus,
   Ports,
@@ -105,6 +106,7 @@ export function Tree({
   onNewWorktree,
   onForget,
   onDestroy,
+  onRename,
 }: {
   /// How wide, in pixels. From the window's own preferences and written by the
   /// handle on this sidebar's right edge -- see `prefs.ts` and `Split.tsx`.
@@ -127,6 +129,8 @@ export function Tree({
   onNewWorktree: (project: Project) => void;
   onForget: (project: Project) => void;
   onDestroy: (session: Session) => void;
+  /// Give a worktree a new title. Blank takes it away, and the slug shows.
+  onRename: (session: Session, title: string) => void;
 }) {
   // Which groups are shut. Held as the collapsed set rather than the open one
   // so a project that appears while the window is open -- created here, or by
@@ -247,6 +251,7 @@ export function Tree({
                         key={s.name}
                         session={s}
                         stat={polls[s.name]?.stat ?? null}
+                        branch={polls[s.name]?.branch ?? s.work_branch}
                         usage={polls[s.name]?.usage ?? null}
                         listening={polls[s.name]?.ports.map((l) => l.port) ?? []}
                         on={s.name === selected}
@@ -254,6 +259,7 @@ export function Tree({
                         onSelect={onSelect}
                         onPull={onPull}
                         onDestroy={onDestroy}
+                        onRename={onRename}
                       />
                     ))
                   )}
@@ -300,6 +306,7 @@ function Context({ usage }: { usage: Usage }) {
 function Worktree({
   session: s,
   stat,
+  branch,
   usage,
   listening,
   on,
@@ -307,9 +314,13 @@ function Worktree({
   onSelect,
   onPull,
   onDestroy,
+  onRename,
 }: {
   session: Session;
   stat: DiffStat | null;
+  /// The branch the working copy is on as of the last poll, which the record
+  /// learns a poll later: an agent may have moved to one of its own.
+  branch: string;
   usage: Usage | null;
   listening: number[];
   on: boolean;
@@ -318,8 +329,12 @@ function Worktree({
   onSelect: (name: string) => void;
   onPull: (pull: Pull) => void;
   onDestroy: (session: Session) => void;
+  onRename: (session: Session, title: string) => void;
 }) {
   const menu = useContextMenu();
+  // Renamed in place, where the name is, rather than in a dialog: it is one
+  // line of text, and the row is where your eye already is.
+  const [renaming, setRenaming] = useState(false);
   // Previewed, not merely listening: the globe lights up while this machine
   // is forwarding one of the session's ports, so which sessions have
   // something open is readable from the tree without opening each one.
@@ -330,8 +345,10 @@ function Worktree({
     <div
       className={`worktree-row${on ? " on" : ""}`}
       {...menu(() => [
+        { label: "Rename…", icon: Edit, run: () => setRenaming(true) },
+        "separator",
         { label: "Copy Name", icon: Copy, hint: s.name, run: () => copy(s.name) },
-        { label: "Copy Branch", icon: Branch, hint: s.work_branch, run: () => copy(s.work_branch) },
+        { label: "Copy Branch", icon: Branch, hint: branch, run: () => copy(branch) },
         ...(pull
           ? [{ label: `Open ${pullName(pull)}`, icon: PullRequest, run: () => onPull(pull) }]
           : []),
@@ -345,6 +362,15 @@ function Worktree({
         },
       ])}
     >
+    {renaming ? (
+      <Rename
+        session={s}
+        onDone={(title) => {
+          setRenaming(false);
+          if (title !== null) onRename(s, title);
+        }}
+      />
+    ) : (
     <button
       className={`worktree${on ? " on" : ""}`}
       // `aria-current` rather than `aria-pressed`: this is which of several
@@ -358,7 +384,12 @@ function Worktree({
 
       <span className="wt-body">
         <span className="wt-head">
-          <span className="wt-name">{s.name}</span>
+          {/* The title, which is what the session is called; the slug it is
+              keyed by is in the tooltip and the menu, for the moments it is
+              the thing you want -- a terminal, a path. */}
+          <span className="wt-name" title={s.title ? s.name : undefined}>
+            {s.title ?? s.name}
+          </span>
           <span className="wt-signals">
             {s.backend === "worktree" && (
               <span className="wt-unsandboxed" title="A worktree on the server: not isolated">
@@ -385,8 +416,8 @@ function Worktree({
         </span>
 
         <span className="wt-meta">
-          <span className="wt-branch" title={s.work_branch}>
-            {s.work_branch}
+          <span className="wt-branch" title={branch}>
+            {branch}
           </span>
           {/* Inside the row's button, so a span and not a button of its own:
               a click on it opens the pull request instead of selecting the
@@ -409,7 +440,37 @@ function Worktree({
         </span>
       </span>
     </button>
+    )}
     </div>
+  );
+}
+
+/// The row's name, as a field. Enter keeps it, Escape or leaving puts the row
+/// back as it was; `null` to `onDone` is the second.
+function Rename({ session: s, onDone }: { session: Session; onDone: (title: string | null) => void }) {
+  const [text, setText] = useState(s.title ?? "");
+  return (
+    <form
+      className="worktree on wt-rename"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onDone(text.trim());
+      }}
+    >
+      <input
+        autoFocus
+        value={text}
+        placeholder={s.name}
+        aria-label={`Rename ${s.title ?? s.name}`}
+        spellCheck={false}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onDone(null);
+        }}
+        onBlur={() => onDone(null)}
+      />
+    </form>
   );
 }
 

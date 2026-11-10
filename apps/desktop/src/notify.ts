@@ -86,12 +86,19 @@ async function notify(names: string[], sessions: Session[]) {
   // One notification for several, because four toasts stacking up is worse
   // than one that says four. The body names them, since which one is waiting
   // is the whole question.
+  // By title, the name the window shows them by; the slug is for typing.
+  const label = (name: string) => {
+    const s = sessions.find((s) => s.name === name);
+    return s?.title ?? name;
+  };
   const title =
-    names.length === 1 ? `${names[0]} is waiting for you` : `${names.length} sessions are waiting`;
+    names.length === 1
+      ? `${label(names[0])} is waiting for you`
+      : `${names.length} sessions are waiting`;
   const body = names
     .map((name) => {
       const branch = sessions.find((s) => s.name === name)?.work_branch;
-      return branch ? `${name} · ${branch}` : name;
+      return branch ? `${label(name)} · ${branch}` : label(name);
     })
     .join("\n");
   try {
