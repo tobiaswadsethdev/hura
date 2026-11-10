@@ -200,5 +200,6 @@ inbox is looked at on that phone; telling the phones at every look would be a
 background push each time, which iOS would soon stop delivering.
 
 The service only sends requests over HTTPS to public addresses. A Jira site
-inside the server's own network (`https://10.0.0.5`, `localhost`) is refused,
-since otherwise any account could make the server ask its neighbours.
+or a self-hosted Fizzy inside the server's own network (`https://10.0.0.5`,
+`localhost`) is refused, since otherwise any account could make the server ask
+its neighbours.

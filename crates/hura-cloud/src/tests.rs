@@ -346,6 +346,20 @@ async fn trackers_are_kept_and_their_tokens_never_shown() {
         StatusCode::BAD_REQUEST,
         "a Jira tracker needs a site: {body}"
     );
+    let plain = json!({ "kind": "fizzy", "name": "cards", "site": "http://fizzy.example.com" });
+    let (status, body) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": plain })),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a site that is not https is never read: {body}"
+    );
 
     let renamed = json!({ "source": { "kind": "git-hub", "name": "other" } });
     let (status, _) = t

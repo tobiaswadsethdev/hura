@@ -170,6 +170,141 @@ fn a_jira_tracker_is_one_search_grouped_by_whose_it_is() {
     );
 }
 
+/// Who the token is in each account, then that account's cards by assignee
+/// and by creator, with a bearer token. A card that is both is assigned, and
+/// a self-hosted site is wherever the tracker says.
+#[test]
+fn a_fizzy_tracker_reads_its_accounts_cards_by_whose_they_are() {
+    let (tx, rx) = channel();
+    // `/my/identity`, then the two searches of the one account, each asked
+    // for its second page to find that it has none.
+    let port = answering(5, tx, |_, path| {
+        if path == "/my/identity" {
+            return (
+                200,
+                r#"{"id":"i","accounts":[{"id":"a","name":"Acme","slug":"/555",
+                    "user":{"id":"me-1","name":"Tobias"}}]}"#
+                    .to_string(),
+            );
+        }
+        let both = r#"{"number":4,"title":"Both","closed":false,
+            "url":"https://fizzy.example.com/555/cards/4",
+            "board":{"name":"Website"},"column":{"name":"Doing"},
+            "last_active_at":"2026-11-09T10:00:00Z"}"#;
+        let created = r#"{"number":9,"title":"Handed on","closed":false,
+            "board":{"name":"Website"}}"#;
+        let body = if path.contains("page=2") {
+            "[]".to_string()
+        } else if path.contains("assignee_ids") {
+            format!("[{both}]")
+        } else {
+            format!("[{both},{created}]")
+        };
+        (200, body)
+    });
+    let source = Source {
+        kind: Kind::Fizzy,
+        name: "cards".into(),
+        site: Some(format!("http://127.0.0.1:{port}")),
+        ..Default::default()
+    };
+
+    let got = inbox(
+        &[Stored {
+            source,
+            token: Some("a-token".into()),
+        }],
+        "tobias",
+    );
+    assert!(got.warnings.is_empty(), "{:?}", got.warnings);
+    let rows: Vec<(&str, Relation, &str)> = got
+        .tasks
+        .iter()
+        .map(|t| (t.key.as_str(), t.relation, t.status.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("#4", Relation::Assigned, "Doing"),
+            ("#9", Relation::Created, "Maybe?")
+        ]
+    );
+    assert_eq!(got.tasks[0].id, "555/4");
+    assert_eq!(got.tasks[0].branch, "tobias/4-both");
+    assert_eq!(got.read, ["cards"]);
+    assert!(got.pulls_read.is_empty(), "Fizzy has no pull requests");
+
+    let seen: Vec<Seen> = rx.try_iter().collect();
+    assert!(seen.iter().all(|s| s.auth == "Bearer a-token"), "{seen:?}");
+    let paths: Vec<String> = seen.into_iter().map(|s| s.path).collect();
+    assert_eq!(
+        paths,
+        [
+            "/my/identity",
+            "/555/cards?assignee_ids%5B%5D=me-1",
+            "/555/cards?assignee_ids%5B%5D=me-1&page=2",
+            "/555/cards?creator_ids%5B%5D=me-1",
+            "/555/cards?creator_ids%5B%5D=me-1&page=2",
+        ]
+    );
+}
+
+/// One account refusing is a warning about it, and the other's cards are
+/// still shown; but the tracker is not counted as read, so its missing cards
+/// are not announced as having left. Beside each other, the two accounts'
+/// cards say which account they are in.
+#[test]
+fn a_fizzy_account_that_refuses_fails_alone() {
+    let (tx, _rx) = channel();
+    // `/my/identity`, then the first account's search and its empty second
+    // page, then the second account's refusal.
+    let port = answering(4, tx, |_, path| {
+        if path == "/my/identity" {
+            return (
+                200,
+                r#"{"accounts":[
+                    {"name":"Acme","slug":"/555","user":{"id":"me-1"}},
+                    {"name":"Gone","slug":"/777","user":{"id":"me-2"}}]}"#
+                    .to_string(),
+            );
+        }
+        if path.starts_with("/777") {
+            return (403, r#"{"error":"Forbidden"}"#.to_string());
+        }
+        if path.contains("page=2") {
+            return (200, "[]".to_string());
+        }
+        (
+            200,
+            r#"[{"number":4,"title":"Kept","closed":false}]"#.to_string(),
+        )
+    });
+    let source = Source {
+        kind: Kind::Fizzy,
+        name: "cards".into(),
+        site: Some(format!("http://127.0.0.1:{port}")),
+        hide_created: true,
+        ..Default::default()
+    };
+
+    let got = inbox(
+        &[Stored {
+            source,
+            token: Some("a-token".into()),
+        }],
+        "tobias",
+    );
+    let keys: Vec<&str> = got.tasks.iter().map(|t| t.key.as_str()).collect();
+    assert_eq!(keys, ["acme#4"]);
+    assert_eq!(got.warnings.len(), 1, "{:?}", got.warnings);
+    assert!(
+        got.warnings[0].starts_with("cards · Gone: 403"),
+        "{:?}",
+        got.warnings
+    );
+    assert!(got.read.is_empty(), "read in part is not read");
+}
+
 /// A tracker with JQL filters asks each beside its own search. A ticket of
 /// yours a filter matches is one row with the filter's name on it; one that is
 /// not yours is `Matched`; a filter with bad JQL is a warning naming it and

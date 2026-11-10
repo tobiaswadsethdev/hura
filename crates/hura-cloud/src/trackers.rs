@@ -295,10 +295,21 @@ async fn views(state: &Shared, account: Uuid) -> Result<Json<Vec<Configured>>> {
 /// check.
 fn checked(source: &Source) -> Result<Source> {
     let source = source.normalized();
-    match source.problem() {
-        Some(problem) => Err(Error::bad(problem)),
-        None => Ok(source),
+    if let Some(problem) = source.problem() {
+        return Err(Error::bad(problem));
     }
+    // Refused here rather than on every read after, by `outbound`: a site
+    // this service will never send a request to. A bare host is HTTPS.
+    if let Some(site) = &source.site
+        && site.contains("://")
+        && !site.to_ascii_lowercase().starts_with("https://")
+    {
+        return Err(Error::bad(format!(
+            "`{}`: hura cloud reads trackers over https only, and {site} is not",
+            source.name
+        )));
+    }
+    Ok(source)
 }
 
 fn found(rows: u64, name: &str) -> Result<()> {

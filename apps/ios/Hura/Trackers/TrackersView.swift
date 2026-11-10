@@ -134,6 +134,7 @@ struct TrackersView: View {
         switch s.kind {
         case "jira": "Jira · \(s.site ?? "") · \(s.email ?? "")"
         case "azure-dev-ops": "Azure DevOps · \(s.org ?? "")/\(s.project ?? "")"
+        case "fizzy": "Fizzy · \(s.site ?? "app.fizzy.do") · \(s.org ?? "every account")"
         default: "GitHub · \(s.repo ?? "every repository the token sees")"
         }
     }
@@ -161,6 +162,7 @@ struct AddTrackerView: View {
                     Text("GitHub").tag("git-hub")
                     Text("Azure DevOps").tag("azure-dev-ops")
                     Text("Jira").tag("jira")
+                    Text("Fizzy").tag("fizzy")
                 }
                 Section {
                     switch kind {
@@ -170,6 +172,9 @@ struct AddTrackerView: View {
                     case "azure-dev-ops":
                         field("Organisation", "your-org", $org)
                         field("Project", "YourProject", $project)
+                    case "fizzy":
+                        field("Site", "https://app.fizzy.do", $site, url: true)
+                        field("Account", "blank for every account", $org)
                     default:
                         field("Repository", "owner/name, or blank for all", $repo)
                     }
@@ -177,6 +182,7 @@ struct AddTrackerView: View {
                 } footer: {
                     Text(kind == "jira" ? "Jira Cloud signs in with your email and an API token."
                          : kind == "azure-dev-ops" ? "A personal access token with Work Items and Code read and write."
+                         : kind == "fizzy" ? "A personal access token from your Fizzy profile. Leave the site blank for Fizzy by 37signals; your own has to be reachable from the internet over HTTPS."
                          : "A token that can read your repositories' issues and pull requests.")
                 }
                 Section("Token") {
@@ -219,9 +225,9 @@ struct AddTrackerView: View {
         }
         let source = TrackerSource(kind: kind, name: name,
                                    repo: kind == "git-hub" ? blank(repo) : nil,
-                                   org: kind == "azure-dev-ops" ? blank(org) : nil,
+                                   org: kind == "azure-dev-ops" || kind == "fizzy" ? blank(org) : nil,
                                    project: kind == "azure-dev-ops" ? blank(project) : nil,
-                                   site: kind == "jira" ? blank(site) : nil,
+                                   site: kind == "jira" || kind == "fizzy" ? blank(site) : nil,
                                    email: kind == "jira" ? blank(email) : nil)
         busy = true
         error = nil

@@ -304,7 +304,7 @@ pub fn pull(stored: &Stored, repo: &str, id: &str) -> Result<PullDetail, String>
             }
             Ok(detail)
         }
-        Kind::Jira => unreachable!("connect refuses Jira"),
+        Kind::Jira | Kind::Fizzy => unreachable!("connect refuses trackers without pull requests"),
     }
 }
 
@@ -365,7 +365,7 @@ pub fn pull_files(stored: &Stored, repo: &str, id: &str) -> Result<PullFiles, St
             )?;
             parse_azure_files(last, &changes, &at.repo)
         }
-        Kind::Jira => unreachable!("connect refuses Jira"),
+        Kind::Jira | Kind::Fizzy => unreachable!("connect refuses trackers without pull requests"),
     }
 }
 
@@ -458,7 +458,9 @@ pub fn pull_file(
             };
             (original, modified, a || b)
         }
-        Kind::Jira => return Err("Jira has no pull requests".into()),
+        Kind::Jira | Kind::Fizzy => {
+            return Err(format!("{} has no pull requests", source.kind.name()));
+        }
     };
     Ok(FileDiff {
         path: file.path.clone(),
@@ -525,7 +527,7 @@ pub fn pull_comment(
             let at = AzureAt::of(source, &pr)?;
             azure_comment(&at, &auth, id, body, thread)?;
         }
-        Kind::Jira => unreachable!("connect refuses Jira"),
+        Kind::Jira | Kind::Fizzy => unreachable!("connect refuses trackers without pull requests"),
     }
     Ok(())
 }
@@ -600,7 +602,7 @@ pub fn pull_vote(
                 Some(&json!({ "vote": vote })),
             )?;
         }
-        Kind::Jira => unreachable!("connect refuses Jira"),
+        Kind::Jira | Kind::Fizzy => unreachable!("connect refuses trackers without pull requests"),
     }
     Ok(())
 }
@@ -663,7 +665,7 @@ pub fn pull_merge(
                 })),
             )?;
         }
-        Kind::Jira => unreachable!("connect refuses Jira"),
+        Kind::Jira | Kind::Fizzy => unreachable!("connect refuses trackers without pull requests"),
     }
     Ok(())
 }
@@ -723,7 +725,7 @@ pub fn pull_auto_merge(
             };
             send("PATCH", &at.record_url(id), &auth, Some(&body))?;
         }
-        Kind::Jira => unreachable!("connect refuses Jira"),
+        Kind::Jira | Kind::Fizzy => unreachable!("connect refuses trackers without pull requests"),
     }
     Ok(())
 }
@@ -739,8 +741,8 @@ fn connect<'a>(stored: &'a Stored, id: &str) -> Result<(&'a Source, &'a str), St
 
 pub(super) fn token_of(stored: &Stored) -> Result<&str, String> {
     let source = &stored.source;
-    if source.kind == Kind::Jira {
-        return Err("Jira has no pull requests".into());
+    if matches!(source.kind, Kind::Jira | Kind::Fizzy) {
+        return Err(format!("{} has no pull requests", source.kind.name()));
     }
     if let Some(problem) = source.problem() {
         return Err(problem);
@@ -2630,5 +2632,18 @@ mod tests {
             token: Some("t".into()),
         };
         assert!(pull(&stored, "o/r", "1").unwrap_err().contains("Jira"));
+    }
+
+    #[test]
+    fn fizzy_has_no_pull_requests() {
+        let stored = Stored {
+            source: Source {
+                kind: Kind::Fizzy,
+                name: "fizzy".into(),
+                ..Default::default()
+            },
+            token: Some("t".into()),
+        };
+        assert!(pull(&stored, "o/r", "1").unwrap_err().contains("Fizzy"));
     }
 }

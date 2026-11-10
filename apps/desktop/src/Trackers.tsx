@@ -187,8 +187,8 @@ export function TrackersSection({
 /// What a tracker is pointed at, in one line.
 ///
 /// Each kind is addressed differently (a GitHub repository, an Azure DevOps
-/// organisation and project, a Jira site) and the row says which rather than
-/// making three columns that are empty two times out of three.
+/// organisation and project, a Jira site, a Fizzy site and account) and the
+/// row says which rather than making columns that are mostly empty.
 function target(t: Tracker): string {
   switch (t.kind) {
     case "git-hub":
@@ -197,6 +197,12 @@ function target(t: Tracker): string {
       return [t.org, t.project].filter(Boolean).join("/");
     case "jira":
       return [t.site, t.email].filter(Boolean).join(" as ");
+    case "fizzy":
+      // No site is 37signals' own.
+      return [
+        (t.site ?? "app.fizzy.do").replace(/^https:\/\//, ""),
+        t.org ?? "every account",
+      ].join(" · ");
   }
 }
 
@@ -209,6 +215,7 @@ const KINDS: { value: TrackerKind; label: string; name: string }[] = [
   { value: "jira", label: "jira", name: "Jira" },
   { value: "azure-dev-ops", label: "azure-devops", name: "Azure DevOps" },
   { value: "git-hub", label: "github", name: "GitHub" },
+  { value: "fizzy", label: "fizzy", name: "Fizzy" },
 ];
 
 function kindLabel(kind: TrackerKind): string {
@@ -432,9 +439,9 @@ function NewTracker({
     // Blank means "call it after its kind".
     name: name.trim(),
     repo: kind === "git-hub" ? blank(repo) : null,
-    org: kind === "azure-dev-ops" ? blank(org) : null,
+    org: kind === "azure-dev-ops" || kind === "fizzy" ? blank(org) : null,
     project: kind === "azure-dev-ops" ? blank(project) : null,
-    site: kind === "jira" ? blank(site) : null,
+    site: kind === "jira" || kind === "fizzy" ? blank(site) : null,
     email: kind === "jira" ? blank(email) : null,
     hide_created: false,
     jql_filters: [],
@@ -492,6 +499,28 @@ function NewTracker({
               onChange={(e) => setProject(e.target.value)}
             />
           </Field>
+        </>
+      )}
+      {kind === "fizzy" && (
+        <>
+          <Field label="Site">
+            <input
+              value={site}
+              placeholder="https://app.fizzy.do"
+              onChange={(e) => setSite(e.target.value)}
+            />
+          </Field>
+          <p className="hint indent">
+            Leave it empty for Fizzy by 37signals, or give your own. hura cloud reads it, so it
+            has to be reachable from the internet over HTTPS.
+          </p>
+          <Field label="Account">
+            <input value={org} placeholder="Acme" onChange={(e) => setOrg(e.target.value)} />
+          </Field>
+          <p className="hint indent">
+            Its name, or the number in its address. Leave it empty for every account the token
+            belongs to.
+          </p>
         </>
       )}
       {kind === "git-hub" && (
@@ -562,6 +591,7 @@ const TOKEN_LABEL: Record<TrackerKind, string> = {
   jira: "API token",
   "azure-dev-ops": "Access token",
   "git-hub": "Token",
+  fizzy: "Access token",
 };
 
 const TOKEN_HINT: Record<TrackerKind, string> = {
@@ -570,4 +600,5 @@ const TOKEN_HINT: Record<TrackerKind, string> = {
     "A personal access token with Work Items (read) for the tickets and Code (read) for the pull requests, or Code (read & write) to comment and vote on them.",
   "git-hub":
     "A token that can read issues and pull requests, and write pull requests to comment and review.",
+  fizzy: "A personal access token, from your profile → API → Personal access tokens. Read is enough.",
 };
