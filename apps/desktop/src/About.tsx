@@ -63,7 +63,7 @@ export function AboutScreen({
     about?.server_version != null && about.server_version !== about.desktop;
 
   return (
-    <Screen icon={AboutGlyph} title="about" narrow onClose={onClose}>
+    <Screen icon={AboutGlyph} title="About" narrow onClose={onClose}>
       <div className="about-hero">
         <span className="about-mark">hura</span>
         {about && <span className="version-chip">{about.desktop}</span>}
@@ -71,7 +71,7 @@ export function AboutScreen({
       {error && <p className="error">{error}</p>}
 
       <ul className="about-rows">
-        <Row icon={Desktop} label="desktop" value={about?.desktop} />
+        <Row icon={Desktop} label="Desktop" value={about?.desktop} />
         {server && (
           <Row
             icon={Servers}
@@ -83,7 +83,7 @@ export function AboutScreen({
                   unreachable
                 </span>
               ) : differs ? (
-                <span className="about-warn" title="the window and the server are on different releases">
+                <span className="about-warn" title="The window and the server are on different releases">
                   <Heads /> differs
                 </span>
               ) : null
@@ -91,7 +91,7 @@ export function AboutScreen({
           />
         )}
         {agent?.version && (
-          <Row icon={Agent} label="claude code" value={agent.version} note={agent.model} />
+          <Row icon={Agent} label="Claude Code" value={agent.version} note={agent.model} />
         )}
       </ul>
 
@@ -99,13 +99,13 @@ export function AboutScreen({
 
       <nav className="about-links">
         <a href={`${REPO}/releases`} target="_blank" rel="noreferrer">
-          <Notes /> releases
+          <Notes /> Releases
         </a>
         <a href={`${REPO}/tree/main/docs`} target="_blank" rel="noreferrer">
-          <Docs /> docs
+          <Docs /> Docs
         </a>
         <a href={`${REPO}/issues/new/choose`} target="_blank" rel="noreferrer">
-          <Report /> report a bug
+          <Report /> Report a Bug
         </a>
       </nav>
     </Screen>
@@ -149,11 +149,11 @@ function Updates({ supported }: { supported: boolean | null }) {
       <section className="update-card">
         <Toolchain />
         <div className="update-text">
-          <b>built from source</b>
-          <span className="hint">this platform has no installer, so pull and rebuild to update</span>
+          <b>Built from source</b>
+          <span className="hint">This platform has no installer, so pull and rebuild to update</span>
         </div>
         <a className="quiet" href={`${REPO}/blob/main/docs/install.md`} target="_blank" rel="noreferrer">
-          <Elsewhere /> how
+          <Elsewhere /> How
         </a>
       </section>
     );
@@ -162,7 +162,7 @@ function Updates({ supported }: { supported: boolean | null }) {
   const checkedAt = "checkedAt" in p ? p.checkedAt : null;
   const checkButton = (
     <button className="quiet" disabled={p.at === "checking"} onClick={() => void checkForUpdate()}>
-      <Refresh className={p.at === "checking" ? "turning" : undefined} /> check
+      <Refresh className={p.at === "checking" ? "turning" : undefined} /> Check
     </button>
   );
 
@@ -174,18 +174,19 @@ function Updates({ supported }: { supported: boolean | null }) {
         <div className="update-text">
           <b>{found.version} is available</b>
           <span className="hint">
-            {found.date ? `released ${new Date(found.date).toLocaleDateString()} · ` : ""}
-            the window restarts to install
+            {found.date
+              ? `Released ${new Date(found.date).toLocaleDateString()} · the window restarts to install`
+              : "The window restarts to install"}
           </span>
           {found.notes && (
             <details className="update-notes">
-              <summary>what's new</summary>
+              <summary>What's new</summary>
               <pre>{found.notes}</pre>
             </details>
           )}
         </div>
         <button className="go" onClick={() => void installUpdate()}>
-          <Upgrade /> install &amp; restart
+          <Upgrade /> Install &amp; Restart
         </button>
       </section>
     );
@@ -197,8 +198,8 @@ function Updates({ supported }: { supported: boolean | null }) {
       <section className="update-card found">
         <Busy className="turning" />
         <div className="update-text">
-          <b>installing {p.version}</b>
-          <span className="hint">{pct ? `downloaded ${pct}` : "downloading…"} · restarts on its own</span>
+          <b>Installing {p.version}</b>
+          <span className="hint">{pct ? `Downloaded ${pct}` : "Downloading…"} · restarts on its own</span>
           <span className="update-progress">
             <span style={{ width: pct ?? "0%" }} />
           </span>
@@ -212,7 +213,7 @@ function Updates({ supported }: { supported: boolean | null }) {
       <section className="update-card bad">
         <Heads />
         <div className="update-text">
-          <b>{p.version ? `could not install ${p.version}` : "could not check for updates"}</b>
+          <b>{p.version ? `Could not install ${p.version}` : "Could not check for updates"}</b>
           <span className="hint" title={p.why}>
             {p.why}
           </span>
@@ -224,7 +225,7 @@ function Updates({ supported }: { supported: boolean | null }) {
             target="_blank"
             rel="noreferrer"
           >
-            <Elsewhere /> download
+            <Elsewhere /> Download
           </a>
         )}
         {checkButton}
@@ -236,8 +237,8 @@ function Updates({ supported }: { supported: boolean | null }) {
     <section className="update-card">
       {p.at === "checking" ? <Busy className="turning" /> : <Clean />}
       <div className="update-text">
-        <b>{p.at === "checking" ? "checking…" : p.at === "current" ? "up to date" : "not checked yet"}</b>
-        {checkedAt && <span className="hint">checked {ago(checkedAt)}</span>}
+        <b>{p.at === "checking" ? "Checking…" : p.at === "current" ? "Up to date" : "Not checked yet"}</b>
+        {checkedAt && <span className="hint">Checked {ago(checkedAt)}</span>}
       </div>
       {checkButton}
     </section>

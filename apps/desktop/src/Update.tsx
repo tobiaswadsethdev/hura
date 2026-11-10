@@ -173,7 +173,7 @@ export function UpdateBadge({ onOpen }: { onOpen: () => void }) {
   }
   if (p.at === "installing") {
     return (
-      <button className="update-badge" title="installing" onClick={onOpen}>
+      <button className="update-badge" title="Installing" onClick={onOpen}>
         <Upgrade />
         {percent(p.got, p.total) ?? "…"}
       </button>
@@ -181,7 +181,7 @@ export function UpdateBadge({ onOpen }: { onOpen: () => void }) {
   }
   if (p.at === "failed" && p.version) {
     return (
-      <button className="update-badge bad" title={`could not install ${p.version}`} onClick={onOpen}>
+      <button className="update-badge bad" title={`Could not install ${p.version}`} onClick={onOpen}>
         <Upgrade />
         {p.version}
       </button>

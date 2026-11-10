@@ -43,12 +43,12 @@ import type { Listening } from "./gen/Listening";
 /// product exists rather than an ADE built on git worktrees, and a pane nobody
 /// can find is a pane nobody reads.
 const VIEWS = [
-  { key: "files", label: "files", icon: Files },
-  { key: "git", label: "git", icon: Branch },
-  { key: "events", label: "events", icon: Events },
-  { key: "policy", label: "policy", icon: Policy },
-  { key: "ports", label: "ports", icon: Ports },
-  { key: "facts", label: "facts", icon: Record },
+  { key: "files", label: "Files", icon: Files },
+  { key: "git", label: "Git", icon: Branch },
+  { key: "events", label: "Events", icon: Events },
+  { key: "policy", label: "Policy", icon: Policy },
+  { key: "ports", label: "Ports", icon: Ports },
+  { key: "facts", label: "Facts", icon: Record },
 ] as const;
 type View = (typeof VIEWS)[number]["key"];
 
@@ -91,7 +91,7 @@ export function Dock({
 
   return (
     <aside className="dock" style={{ width }}>
-      <nav className="dock-tabs" aria-label="what is true about this worktree">
+      <nav className="dock-tabs" aria-label="What is true about this worktree">
         {views.map(({ key, label, icon: Mark }) => (
           <button
             key={key}

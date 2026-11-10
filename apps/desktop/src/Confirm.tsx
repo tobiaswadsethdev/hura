@@ -73,7 +73,7 @@ function ConfirmDialog({ ask, onClose }: { ask: Ask; onClose: () => void }) {
         <p className="confirm-body">{ask.body}</p>
         <div className="confirm-actions">
           <button ref={cancel} className="quiet" onClick={onClose}>
-            cancel
+            Cancel
           </button>
           <button
             className="go danger"

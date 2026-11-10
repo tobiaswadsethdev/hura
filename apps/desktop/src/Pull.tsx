@@ -157,20 +157,20 @@ export function PullPanel({
         {(d?.draft ?? pull.draft) && <span className="ticket-type">draft</span>}
         {state !== "open" && <span className={`pull-state ${state}`}>{state}</span>}
         <span className="ticket-panel-tools">
-          <button className="quiet-icon" title="read it again" onClick={() => void read()}>
-            <Refresh aria-label="refresh" />
+          <button className="quiet-icon" title="Read It Again" onClick={() => void read()}>
+            <Refresh aria-label="Refresh" />
           </button>
           <a
             className="quiet-icon"
             href={pull.url}
             target="_blank"
             rel="noreferrer"
-            title={`open on ${forge}`}
+            title={`Open on ${forge}`}
           >
-            <Elsewhere aria-label="open in the browser" />
+            <Elsewhere aria-label="Open in the Browser" />
           </a>
-          <button className="quiet-icon" title="close" onClick={onClose}>
-            <Close aria-label="close" />
+          <button className="quiet-icon" title="Close" onClick={onClose}>
+            <Close aria-label="Close" />
           </button>
         </span>
       </header>
@@ -180,9 +180,9 @@ export function PullPanel({
       <p className="pull-line">
         {d?.author ? <Who person={d.author} /> : <span>{pull.author}</span>}
         <span className="hint">wants</span>
-        <code title="its branch">{d?.branch ?? pull.branch}</code>
+        <code title="Its branch">{d?.branch ?? pull.branch}</code>
         <span className="hint">into</span>
-        <code title="the branch it merges into">{d?.base ?? pull.base}</code>
+        <code title="The branch it merges into">{d?.base ?? pull.base}</code>
         {d?.created && <span className="hint">· opened {ago(d.created)}</span>}
         {d?.additions != null && d.deletions != null && (
           <span className="pull-size" title={`${d.changed_files ?? "?"} files`}>
@@ -205,12 +205,12 @@ export function PullPanel({
         </p>
       ))}
 
-      <nav className="pull-tabs" role="tablist" aria-label="what to read">
+      <nav className="pull-tabs" role="tablist" aria-label="What to read">
         {(
           [
-            ["overview", "overview", null],
-            ["conversation", "conversation", d ? d.conversation.length : pull.comments],
-            ["files", "files", d?.changed_files ?? null],
+            ["overview", "Overview", null],
+            ["conversation", "Conversation", d ? d.conversation.length : pull.comments],
+            ["files", "Files", d?.changed_files ?? null],
           ] as const
         ).map(([key, label, count]) => (
           <button
@@ -251,7 +251,7 @@ export function PullPanel({
                   anything was pushed since this was read, it is refused.
                 </>
               ),
-              confirm: d.kind === "azure-dev-ops" ? "complete" : "merge",
+              confirm: d.kind === "azure-dev-ops" ? "Complete" : "Merge",
               onConfirm: () =>
                 void change("merge", () =>
                   api.pullMerge(pull.tracker, pull.repo, pull.id, how, d.merging?.head ?? null, deleteBranch),
@@ -272,7 +272,7 @@ export function PullPanel({
         {session ? (
           <button
             className="inbox-worktree pull-go"
-            title={`go to ${session.name}`}
+            title={`Go to ${session.name}`}
             onClick={() => onSelect(session.name)}
           >
             <StateDot state={session.state} />
@@ -293,7 +293,7 @@ export function PullPanel({
             {projects.length > 1 ? (
               <Select
                 className="ticket-project"
-                aria-label="project to start it in"
+                aria-label="Project to start it in"
                 value={project?.name ?? ""}
                 onChange={setWhere}
                 options={projects.map((p) => ({ value: p.name, label: p.name }))}
@@ -304,18 +304,18 @@ export function PullPanel({
             <button
               className="quiet"
               disabled={!project}
-              title="a worktree on its branch that reads it and reports back, without pushing"
+              title="A worktree on its branch that reads it and reports back, without pushing"
               onClick={() => project && onStart(project, pull, "review")}
             >
-              <Review /> review it
+              <Review /> Review It
             </button>
             <button
               className="go"
               disabled={!project}
-              title="a worktree on its branch, whose pushes update this pull request"
+              title="A worktree on its branch, whose pushes update this pull request"
               onClick={() => project && onStart(project, pull, "work")}
             >
-              <Start /> work on it
+              <Start /> Work on It
             </button>
           </>
         )}
@@ -344,17 +344,17 @@ function Overview({
   return (
     <>
       <section className="ticket-section">
-        <h3>description</h3>
-        {d.body.trim() ? <Markdown text={d.body} forge={d.tracker} /> : <Nobody>no description</Nobody>}
+        <h3>Description</h3>
+        {d.body.trim() ? <Markdown text={d.body} forge={d.tracker} /> : <Nobody>No description</Nobody>}
       </section>
 
       <section className="ticket-section">
         <h3>
-          checks <span className="count">{d.checks.length}</span>
+          Checks <span className="count">{d.checks.length}</span>
         </h3>
         {d.checks.length === 0 ? (
           <Nobody>
-            {d.kind === "azure-dev-ops" ? "no policy or status says anything" : "none ran"}
+            {d.kind === "azure-dev-ops" ? "No policy or status says anything" : "None ran"}
           </Nobody>
         ) : (
           <ul className="pull-checks">
@@ -370,10 +370,10 @@ function Overview({
 
       <section className="ticket-section">
         <h3>
-          reviewers <span className="count">{d.reviewers.length}</span>
+          Reviewers <span className="count">{d.reviewers.length}</span>
         </h3>
         {d.reviewers.length === 0 ? (
-          <Nobody>nobody has been asked</Nobody>
+          <Nobody>Nobody has been asked</Nobody>
         ) : (
           <ul className="pull-reviewers">
             {d.reviewers.map((r, i) => (
@@ -408,17 +408,17 @@ function Overview({
 function mergeWords(kind: PullDetail["kind"]) {
   const azure = kind === "azure-dev-ops";
   return {
-    section: azure ? "complete" : "merge",
-    now: azure ? "complete" : "merge",
-    auto: azure ? "set auto-complete" : "enable auto-merge",
-    isSet: azure ? "auto-complete is set" : "auto-merge is on",
-    cancel: azure ? "cancel auto-complete" : "disable auto-merge",
+    section: azure ? "Complete" : "Merge",
+    now: azure ? "Complete" : "Merge",
+    auto: azure ? "Set Auto-Complete" : "Enable Auto-Merge",
+    isSet: azure ? "Auto-complete is set" : "Auto-merge is on",
+    cancel: azure ? "Cancel Auto-Complete" : "Disable Auto-Merge",
     method: (m: PullMerge): string =>
       ({
-        merge: azure ? "merge (no fast forward)" : "create a merge commit",
-        squash: azure ? "squash commit" : "squash and merge",
-        rebase: azure ? "rebase and fast-forward" : "rebase and merge",
-        "rebase-merge": "semi-linear merge",
+        merge: azure ? "Merge (no fast forward)" : "Create a merge commit",
+        squash: azure ? "Squash commit" : "Squash and merge",
+        rebase: azure ? "Rebase and fast-forward" : "Rebase and merge",
+        "rebase-merge": "Semi-linear merge",
       })[m],
   };
 }
@@ -466,14 +466,14 @@ function MergeBox({
         </p>
       )}
       {d.draft ? (
-        <Nobody>a draft can't be merged until it's published</Nobody>
+        <Nobody>A draft can't be merged until it's published</Nobody>
       ) : m.methods.length === 0 ? (
-        <Nobody>this account can't merge it</Nobody>
+        <Nobody>This account can't merge it</Nobody>
       ) : (
         <div className="pull-merge-actions">
           {m.methods.length > 1 ? (
             <Select
-              aria-label="merge type"
+              aria-label="Merge type"
               value={how}
               onChange={(v) => setHow(v as PullMerge)}
               options={m.methods.map((v) => ({ value: v, label: words.method(v) }))}
@@ -488,11 +488,11 @@ function MergeBox({
                 checked={deleteBranch}
                 onChange={(e) => setDeleteBranch(e.target.checked)}
               />
-              <span>delete the branch</span>
+              <span>Delete the branch</span>
             </label>
           ) : (
-            <span className="hint" title="the repository's own setting">
-              {m.deletes_branch ? "the branch is deleted after" : "the branch is kept"}
+            <span className="hint" title="The repository's own setting">
+              {m.deletes_branch ? "The branch is deleted after" : "The branch is kept"}
             </span>
           )}
           <span className="pull-merge-go">
@@ -500,7 +500,7 @@ function MergeBox({
               <button
                 className="quiet"
                 disabled={busy}
-                title="merges by itself once its checks and required reviews pass"
+                title="Merges by itself once its checks and required reviews pass"
                 onClick={() => void onAutoMerge(how, deleteBranch)}
               >
                 {words.auto}
@@ -509,7 +509,7 @@ function MergeBox({
             <button
               className="go"
               disabled={busy}
-              title={d.conflicts ? "it conflicts with its base, so the forge will refuse" : undefined}
+              title={d.conflicts ? "It conflicts with its base, so the forge will refuse" : undefined}
               onClick={() => onMerge(how, deleteBranch)}
             >
               {working === "merge" ? "…" : words.now}
@@ -551,10 +551,10 @@ function CheckRow({ check: c }: { check: PullCheck }) {
       {c.url && (
         <button
           className="quiet-icon"
-          title="open its log in the browser"
+          title="Open Its Log in the Browser"
           onClick={() => openExternal(c.url!)}
         >
-          <Elsewhere aria-label="open" />
+          <Elsewhere aria-label="Open" />
         </button>
       )}
     </li>
@@ -562,14 +562,14 @@ function CheckRow({ check: c }: { check: PullCheck }) {
 }
 
 const VERDICT: Record<PullVerdict, { said: string; tone: string; give: string }> = {
-  approved: { said: "approved", tone: "ok", give: "approve" },
-  suggestions: { said: "approved with suggestions", tone: "ok", give: "approve with suggestions" },
-  "changes-requested": { said: "asked for changes", tone: "bad", give: "request changes" },
-  waiting: { said: "waiting for the author", tone: "bad", give: "wait for author" },
-  rejected: { said: "rejected", tone: "bad", give: "reject" },
-  commented: { said: "commented", tone: "", give: "comment" },
-  dismissed: { said: "dismissed", tone: "", give: "dismiss" },
-  pending: { said: "not yet", tone: "", give: "reset my vote" },
+  approved: { said: "approved", tone: "ok", give: "Approve" },
+  suggestions: { said: "approved with suggestions", tone: "ok", give: "Approve with Suggestions" },
+  "changes-requested": { said: "asked for changes", tone: "bad", give: "Request Changes" },
+  waiting: { said: "waiting for the author", tone: "bad", give: "Wait for Author" },
+  rejected: { said: "rejected", tone: "bad", give: "Reject" },
+  commented: { said: "commented", tone: "", give: "Comment" },
+  dismissed: { said: "dismissed", tone: "", give: "Dismiss" },
+  pending: { said: "not yet", tone: "", give: "Reset My Vote" },
 };
 
 function VerdictWord({ verdict }: { verdict: PullVerdict }) {
@@ -600,7 +600,7 @@ function ReviewBox({
 
   return (
     <section className="ticket-section pull-review">
-      <h3>your review</h3>
+      <h3>Your review</h3>
       {d.my_vote && d.my_vote !== "pending" && (
         <p className="hint">
           You have <VerdictWord verdict={d.my_vote} />. A new one replaces it.
@@ -626,7 +626,7 @@ function ReviewBox({
                 disabled={working || (v === "changes-requested" && body.trim().length === 0)}
                 title={
                   v === "changes-requested" && body.trim().length === 0
-                    ? "say what should change first"
+                    ? "Say what should change first"
                     : undefined
                 }
                 onClick={() => give(v)}
@@ -637,13 +637,13 @@ function ReviewBox({
           ) : (
             <>
               <Select
-                aria-label="your vote"
+                aria-label="Your vote"
                 value={vote}
                 onChange={(v) => setVote(v as PullVerdict)}
                 options={offers.map((v) => ({ value: v, label: VERDICT[v].give }))}
               />
               <button className="go" disabled={working} onClick={() => give(vote)}>
-                vote
+                Vote
               </button>
             </>
           )}
@@ -672,7 +672,7 @@ function Conversation({
   return (
     <section className="ticket-section">
       {d.older > 0 && <p className="hint">{d.older} older ones are only on {forge}.</p>}
-      {d.conversation.length === 0 && <Nobody>nothing said yet</Nobody>}
+      {d.conversation.length === 0 && <Nobody>Nothing said yet</Nobody>}
       <ol className="ticket-comments-list pull-conversation">
         {d.conversation.map((t, i) => (
           <Entry
@@ -705,7 +705,7 @@ function Conversation({
             disabled={working !== null || draft.trim().length === 0}
             onClick={send}
           >
-            comment
+            Comment
           </button>
         </div>
       </div>
@@ -737,7 +737,7 @@ function Entry({
       {t.comments.map((c, i) => (
         <div key={i} className={`pull-comment${c.author?.me ? " mine" : ""}`}>
           <div className="comment-head">
-            {c.author ? <Who person={c.author} /> : <Nobody>someone</Nobody>}
+            {c.author ? <Who person={c.author} /> : <Nobody>Someone</Nobody>}
             <span className="comment-when" title={c.created ?? undefined}>
               {ago(c.created)}
             </span>
@@ -754,7 +754,7 @@ function Entry({
       <li className={t.verdict ? "pull-verdict-entry" : undefined}>
         {t.verdict && (
           <div className="comment-head">
-            {t.author ? <Who person={t.author} /> : <Nobody>someone</Nobody>}
+            {t.author ? <Who person={t.author} /> : <Nobody>Someone</Nobody>}
             <VerdictWord verdict={t.verdict} />
             <span className="comment-when" title={t.at ?? undefined}>
               {ago(t.at)}
@@ -787,7 +787,7 @@ function Entry({
       {open && comments}
       {open && t.can_reply && !replying && (
         <button className="link pull-reply" onClick={() => setReplying(true)}>
-          reply
+          Reply
         </button>
       )}
       {open && replying && (
@@ -809,7 +809,7 @@ function Entry({
           />
           <div className="comment-compose-actions">
             <button className="quiet" onClick={() => setReplying(false)}>
-              cancel
+              Cancel
             </button>
             <button
               className="go"
@@ -818,7 +818,7 @@ function Entry({
                 void onReply(draft).then((ok) => ok && (setDraft(""), setReplying(false)))
               }
             >
-              reply
+              Reply
             </button>
           </div>
         </div>
@@ -851,15 +851,15 @@ function Files({ pull }: { pull: Pull }) {
 
   if (error) return <p className="error">{error}</p>;
   if (!files) return <Waiting />;
-  if (files.files.length === 0) return <Empty icon={PullRequest} note="it changes no files" />;
+  if (files.files.length === 0) return <Empty icon={PullRequest} note="It changes no files" />;
 
   if (open !== null && files.files[open]) {
     const file = files.files[open]!;
     return (
       <section className="pull-file">
         <header className="pull-file-head">
-          <button className="quiet-icon" title="all the files" onClick={() => setOpen(null)}>
-            <Back aria-label="back" />
+          <button className="quiet-icon" title="All the Files" onClick={() => setOpen(null)}>
+            <Back aria-label="Back" />
           </button>
           <code className="pull-file-path" title={file.path}>
             {file.old_path ? `${file.old_path} → ` : ""}
@@ -873,14 +873,14 @@ function Files({ pull }: { pull: Pull }) {
             disabled={open === 0}
             onClick={() => setOpen(open - 1)}
           >
-            previous
+            Previous
           </button>
           <button
             className="quiet"
             disabled={open === files.files.length - 1}
             onClick={() => setOpen(open + 1)}
           >
-            next
+            Next
           </button>
         </header>
         <FileSides key={`${file.path}:${open}`} tracker={pull.tracker} files={files} file={file} />
@@ -967,7 +967,7 @@ function FileSides({ tracker, files, file }: { tracker: string; files: PullFiles
   if (error) return <p className="error">{error}</p>;
   if (!sides) return <Waiting />;
   if (sides.binary) {
-    return <Empty icon={NotText} note="binary, or too large to show here; it is on the forge's page" />;
+    return <Empty icon={NotText} note="Binary, or too large to show here; it is on the forge's page" />;
   }
   return (
     <>

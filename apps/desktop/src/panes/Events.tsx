@@ -151,7 +151,7 @@ export function EventsPane({
   // The note stays, and it is the qualifier that earns it: this is the
   // *recent* log rather than every decision ever made, so an empty feed is
   // not a claim that the sandbox has never denied anything.
-  if (feed.length === 0) return <Empty icon={Events} note="no decisions in the recent log" />;
+  if (feed.length === 0) return <Empty icon={Events} note="No decisions in the recent log" />;
 
   const toneOf = (g: Group) => toneFor(g, standing(g.endpoint));
   const blocked = groups.filter((g) => toneOf(g) === "denied");
@@ -223,28 +223,28 @@ export function EventsPane({
       {/* One row: which decisions, then how they are read. The two readings
           used to be a row of tabs of their own above the filters. */}
       <div className="traffic-bar">
-        <div className="traffic-filters" role="group" aria-label="which decisions">
-          <Chip on={filter === "all"} onClick={() => setFilter("all")} label="all" count={counts.all} />
+        <div className="traffic-filters" role="group" aria-label="Which decisions">
+          <Chip on={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
           <Chip
             on={filter === "denied"}
             onClick={() => setFilter("denied")}
-            label="denied"
+            label="Denied"
             count={counts.denied}
             tone="bad"
           />
           <Chip
             on={filter === "allowed"}
             onClick={() => setFilter("allowed")}
-            label="allowed"
+            label="Allowed"
             count={counts.allowed}
             tone="ok"
           />
         </div>
-        <div className="segmented icons" role="tablist" aria-label="how the feed is read">
+        <div className="segmented icons" role="tablist" aria-label="How the feed is read">
           {(
             [
-              ["endpoints", ByEndpoint, "by endpoint"],
-              ["log", AsLog, "as a log, newest first"],
+              ["endpoints", ByEndpoint, "By endpoint"],
+              ["log", AsLog, "As a log, newest first"],
             ] as const
           ).map(([m, Glyph, label]) => (
             <button
@@ -260,8 +260,8 @@ export function EventsPane({
             </button>
           ))}
         </div>
-        <button className="quiet-icon" onClick={() => void read()} title="re-read the feed">
-          <Refresh aria-label="re-read the feed" />
+        <button className="quiet-icon" onClick={() => void read()} title="Re-read the Feed">
+          <Refresh aria-label="Re-read the Feed" />
         </button>
       </div>
 
@@ -270,11 +270,11 @@ export function EventsPane({
 
       {mode === "endpoints" ? (
         <>
-          {!showDenied && !showAllowed && <p className="traffic-none">nothing {filter} in the recent log</p>}
+          {!showDenied && !showAllowed && <p className="traffic-none">Nothing {filter} in the recent log</p>}
           {showDenied && (
             <section>
               <h4>
-                denied <span className="count">{blocked.length}</span>
+                Denied <span className="count">{blocked.length}</span>
               </h4>
               <ul className="endpoints-list">{rows(blocked)}</ul>
             </section>
@@ -282,7 +282,7 @@ export function EventsPane({
           {showAllowed && (
             <section>
               <h4>
-                allowed <span className="count">{passing.length}</span>
+                Allowed <span className="count">{passing.length}</span>
               </h4>
               <ul className="endpoints-list">{rows(passing)}</ul>
             </section>
@@ -294,7 +294,7 @@ export function EventsPane({
           )}
         </>
       ) : shownLog.length === 0 ? (
-        <p className="traffic-none">nothing {filter} in the recent log</p>
+        <p className="traffic-none">Nothing {filter} in the recent log</p>
       ) : (
         <ul className="traffic-log">
           {shownLog.map((e) => (
@@ -375,25 +375,25 @@ function EndpointRow({
             {canWatch && (
               <button
                 className="ep-allow"
-                title={`read each request to ${g.endpoint}, so a refused one shows its path; lets nothing through`}
+                title={`Read each request to ${g.endpoint}, so a refused one shows its path; lets nothing through`}
                 onClick={() =>
                   actions.apply(g.endpoint, api.watch(actions.server, actions.name, g.endpoint))
                 }
               >
-                paths
+                Paths
               </button>
             )}
             {canAllow && (
               <button
                 className="ep-allow"
-                title={`allow this sandbox to reach ${g.endpoint}`}
+                title={`Allow this sandbox to reach ${g.endpoint}`}
                 onClick={() => actions.setAsking({ row, kind: "allow" })}
               >
                 <Grant />
-                allow
+                Allow
               </button>
             )}
-            <span className="ep-age" title={`last decision ${clock(lastSeen(g))} UTC`}>
+            <span className="ep-age" title={`Last decision ${clock(lastSeen(g))} UTC`}>
               {ago(lastSeen(g))}
             </span>
           </>
@@ -437,7 +437,7 @@ function LogRow({ event: e, ...actions }: { event: FeedEvent } & Actions) {
       // Focusable, so the Menu key reaches it: nothing else in a log row is.
       tabIndex={0}
       {...actions.menu(() => {
-        const line: MenuItem = { label: "Copy line", icon: Copy, run: () => copy(lineOf(e)) };
+        const line: MenuItem = { label: "Copy Line", icon: Copy, run: () => copy(lineOf(e)) };
         return e.target
           ? itemsFor(e.target.endpoint, row, requests, e.verdict === "Denied", actions, [line])
           : [line];
@@ -514,38 +514,38 @@ function itemsFor(
     if (requests.length > 0) {
       items.push(
         {
-          label: requests.length === 1 ? "Allow this path…" : "Allow these paths…",
+          label: requests.length === 1 ? "Allow This Path…" : "Allow These Paths…",
           icon: Grant,
           hint: requests.length === 1 ? routeText(requests[0]) : `${requests.length} refused`,
           run: () => a.setAsking({ row, kind: "allow", scope: "paths" }),
         },
         {
-          label: "Allow the whole host…",
+          label: "Allow the Whole Host…",
           run: () => a.setAsking({ row, kind: "allow", scope: "host" }),
         },
       );
     } else {
       items.push(
         {
-          label: "Allow in this session",
+          label: "Allow in This Session",
           icon: Grant,
           run: () => a.apply(endpoint, api.allow(a.server, a.name, endpoint, false)),
         },
         {
-          label: "Allow in every new session too",
+          label: "Allow in Every New Session Too",
           icon: Grant,
           run: () => a.apply(endpoint, api.allow(a.server, a.name, endpoint, true)),
         },
         {
-          label: "Allow only some paths…",
-          hint: "method and path",
+          label: "Allow Only Some Paths…",
+          hint: "Method and path",
           run: () => a.setAsking({ row, kind: "allow", scope: "paths" }),
         },
       );
       if (!s.watch) {
         items.push({
-          label: "Show the paths it asks for",
-          hint: "from its next try",
+          label: "Show the Paths It Asks For",
+          hint: "From its next try",
           run: () => a.apply(endpoint, api.watch(a.server, a.name, endpoint)),
         });
       }
@@ -554,7 +554,7 @@ function itemsFor(
   if (s.watch && a.busy === null) {
     const id = s.watch;
     items.push({
-      label: "Stop reading its requests",
+      label: "Stop Reading Its Requests",
       run: () => a.apply(endpoint, api.removeRule(a.server, a.name, id)),
     });
   }
@@ -568,7 +568,7 @@ function itemsFor(
     });
   }
   if (items.length) items.push("separator");
-  items.push({ label: "Copy endpoint", icon: Copy, hint: endpoint, run: () => copy(endpoint) }, ...more);
+  items.push({ label: "Copy Endpoint", icon: Copy, hint: endpoint, run: () => copy(endpoint) }, ...more);
   return items;
 }
 
@@ -673,11 +673,11 @@ function ChangePanel({
             <Grant className="allowed" /> Allow <code>{endpoint}</code>
           </p>
 
-          <div className="segmented" role="tablist" aria-label="how much of the endpoint">
+          <div className="segmented" role="tablist" aria-label="How much of the endpoint">
             {(
               [
-                ["host", "the whole host"],
-                ["paths", "only these paths"],
+                ["host", "The whole host"],
+                ["paths", "Only these paths"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -709,7 +709,7 @@ function ChangePanel({
                       onChange={(method) => edit(i, { method })}
                       disabled={busy}
                       className="change-method"
-                      aria-label="method"
+                      aria-label="Method"
                     />
                     <input
                       value={r.path}
@@ -720,7 +720,7 @@ function ChangePanel({
                       spellCheck={false}
                       autoFocus={i === 0 && !r.path}
                       disabled={busy}
-                      aria-label="path"
+                      aria-label="Path"
                       aria-invalid={!!problems[i]}
                     />
                     {pathProblem(r.path) === null && r.path.trim() !== "/**" && (
@@ -728,9 +728,9 @@ function ChangePanel({
                         className="quiet change-widen"
                         disabled={busy}
                         onClick={() => edit(i, { path: widen(r.path) })}
-                        title={`everything under it: ${widen(r.path)}`}
+                        title={`Everything under it: ${widen(r.path)}`}
                       >
-                        wider
+                        Wider
                       </button>
                     )}
                     {routes.length > 1 && (
@@ -738,9 +738,9 @@ function ChangePanel({
                         className="quiet-icon"
                         disabled={busy}
                         onClick={() => setRoutes((prev) => prev.filter((_, j) => j !== i))}
-                        title="remove this path"
+                        title="Remove This Path"
                       >
-                        <Close aria-label="remove this path" />
+                        <Close aria-label="Remove This Path" />
                       </button>
                     )}
                     {problems[i] && <span className="change-problem">{problems[i]}</span>}
@@ -751,7 +751,7 @@ function ChangePanel({
                   disabled={busy}
                   onClick={() => setRoutes((prev) => [...prev, { method: "GET", path: "" }])}
                 >
-                  <Plus /> another path
+                  <Plus /> Another Path
                 </button>
               </div>
               <p className="change-note">
@@ -780,14 +780,14 @@ function ChangePanel({
           disabled={busy}
           onChange={(e) => setEverywhere(e.target.checked)}
         />
-        <span>every new session too</span>
+        <span>Every new session too</span>
       </label>
 
       {error && <p className="error">{error}</p>}
 
       <div className="change-actions">
         <button className="quiet" disabled={busy} onClick={onCancel}>
-          cancel
+          Cancel
         </button>
         <button
           className={`go ${kind === "block" ? "danger" : ""}`}
@@ -796,12 +796,12 @@ function ChangePanel({
         >
           {busy ? (
             <>
-              <span className="spin" /> applying
+              <span className="spin" /> Applying
             </>
           ) : kind === "allow" ? (
-            "allow"
+            "Allow"
           ) : (
-            "block"
+            "Block"
           )}
         </button>
       </div>
@@ -818,7 +818,7 @@ const METHODS = [
   { value: "PUT", label: "PUT" },
   { value: "PATCH", label: "PATCH" },
   { value: "DELETE", label: "DELETE" },
-  { value: "ANY", label: "ANY", hint: "any method" },
+  { value: "ANY", label: "ANY", hint: "Any method" },
 ];
 
 /// What is wrong with a path as the runtime will read it, `""` for nothing
@@ -827,10 +827,10 @@ const METHODS = [
 function pathProblem(path: string): string | null {
   const p = path.trim();
   if (!p) return "";
-  if (!p.startsWith("/")) return "a path starts with /";
-  if (/[?#%]/.test(p)) return "the path alone: no query, fragment or %-escapes";
-  if (p.split("/").includes("..")) return "no .. in a path";
-  if (/\s/.test(p)) return "no spaces";
+  if (!p.startsWith("/")) return "A path starts with /";
+  if (/[?#%]/.test(p)) return "The path alone: no query, fragment or %-escapes";
+  if (p.split("/").includes("..")) return "No .. in a path";
+  if (/\s/.test(p)) return "No spaces";
   return null;
 }
 

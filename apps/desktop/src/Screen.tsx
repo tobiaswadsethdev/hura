@@ -65,8 +65,8 @@ export function Screen({
         <Mark className="screen-mark" />
         <h1>{title}</h1>
         {actions}
-        <button className="quiet-icon" title="back to the workspace" onClick={onClose}>
-          <Close aria-label="close" />
+        <button className="quiet-icon" title="Back to the Workspace" onClick={onClose}>
+          <Close aria-label="Close" />
         </button>
       </header>
       {/* Escape closes it, and the listener is in `App` rather than here --

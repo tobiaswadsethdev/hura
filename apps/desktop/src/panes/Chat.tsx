@@ -19,7 +19,7 @@ import type { ChatEntry } from "../gen/ChatEntry";
 import type { ChatFrame } from "../gen/ChatFrame";
 import type { ChatState } from "../gen/ChatState";
 import type { SlashCommand } from "../gen/SlashCommand";
-import { Attach, Chat as ChatGlyph, Close, Send, Shell, Skill, Stop, Working } from "../icons";
+import { Attach, Chat as ChatGlyph, Close, Plus, Send, Shell, Skill, Stop, Working } from "../icons";
 import { api } from "../api";
 import { Markdown, Pictures, type ReadPicture } from "../Markdown";
 import type { PartialMessage, ToolProgress } from "../sdk";
@@ -168,7 +168,7 @@ function Writing({ live, entries }: { live: Live; entries: ChatEntry[] }) {
           <Markdown key={i} text={b.text} />
         ) : b.type === "thinking" ? (
           <p key={i} className="chat-note dim">
-            thinking…
+            Thinking…
           </p>
         ) : b.type === "tool_use" ? (
           <p key={i} className="chat-note dim">
@@ -182,10 +182,10 @@ function Writing({ live, entries }: { live: Live; entries: ChatEntry[] }) {
 
 /// Claude Code's permission modes, in the words the window uses for them.
 const MODES = [
-  { value: "auto", label: "auto", hint: "decides what to ask" },
-  { value: "default", label: "ask", hint: "before edits and commands" },
-  { value: "acceptEdits", label: "accept edits", hint: "asks for the rest" },
-  { value: "plan", label: "plan", hint: "changes nothing" },
+  { value: "auto", label: "Auto", hint: "Decides what to ask" },
+  { value: "default", label: "Ask", hint: "Before edits and commands" },
+  { value: "acceptEdits", label: "Accept Edits", hint: "Asks for the rest" },
+  { value: "plan", label: "Plan", hint: "Changes nothing" },
 ];
 
 /// A model id as a person would say it: `claude-opus-5-5[1m]` is Opus 5.5,
@@ -201,7 +201,7 @@ export function modelName(id: string): string {
 
 /// A reasoning effort as Claude Code's `/effort` says it.
 function effortName(e: string): string {
-  return e === "xhigh" ? "extra high" : e;
+  return e === "xhigh" ? "Extra High" : e.charAt(0).toUpperCase() + e.slice(1);
 }
 
 /// The files waiting in the composer: a picture as itself, anything else as
@@ -220,8 +220,8 @@ function AttachedFiles({ files, onRemove }: { files: Attached[]; onRemove: (key:
               {f.name}
             </span>
           )}
-          <button className="chat-unattach" title="take it out of the message" onClick={() => onRemove(f.key)}>
-            <Close aria-label={`remove ${f.name}`} />
+          <button className="chat-unattach" title="Take it out of the message" onClick={() => onRemove(f.key)}>
+            <Close aria-label={`Remove ${f.name}`} />
           </button>
         </li>
       ))}
@@ -281,7 +281,7 @@ function CommandList({
     list.current?.children[active]?.scrollIntoView({ block: "nearest" });
   }, [active]);
   return (
-    <ul className="chat-commands" role="listbox" id={id} ref={list} aria-label="slash commands">
+    <ul className="chat-commands" role="listbox" id={id} ref={list} aria-label="Slash commands">
       {commands.map((c, i) => (
         <li
           key={c.name}
@@ -320,7 +320,7 @@ function ModeNote({ what, open }: { what: Typed; open: boolean }) {
     return (
       <p className="chat-mode">
         <Shell />
-        runs in the working copy; Claude sees what it prints with your next message
+        Runs in the working copy; Claude sees what it prints with your next message
       </p>
     );
   }
@@ -452,10 +452,10 @@ function Composer({
             autoCapitalize={what.kind === "shell" || query !== null ? "off" : undefined}
             placeholder={
               working
-                ? "queue a message for when this turn is done"
+                ? "Queue a message for when this turn is done"
                 : commands.length || state?.shell
-                  ? `tell the agent what to do${commands.length ? " · / for commands" : ""}${state?.shell ? " · ! for the shell" : ""}`
-                  : "tell the agent what to do"
+                  ? `Tell the agent what to do${commands.length ? " · / for commands" : ""}${state?.shell ? " · ! for the shell" : ""}`
+                  : "Tell the agent what to do"
             }
             onScroll={(e) => {
               if (shade.current) shade.current.scrollTop = e.currentTarget.scrollTop;
@@ -513,8 +513,13 @@ function Composer({
         <div className="chat-controls">
           {state?.files && (
             <>
-              <button className="chat-attach" title="send files with the message" onClick={() => picker.current?.click()}>
-                <Attach aria-label="attach files" />
+              <button
+                className="chat-round chat-attach"
+                title="Send files with the message"
+                aria-label="Attach Files"
+                onClick={() => picker.current?.click()}
+              >
+                <Plus size={16} />
               </button>
               <input
                 ref={picker}
@@ -531,8 +536,8 @@ function Composer({
           )}
           <Select
             className="chat-select"
-            aria-label="permission mode"
-            title="permission mode"
+            aria-label="Permission mode"
+            title="Permission mode"
             value={state?.mode ?? "auto"}
             options={MODES}
             onChange={(mode) => onCommand({ op: "mode", mode })}
@@ -540,8 +545,8 @@ function Composer({
           {models.length > 0 && (
             <Select
               className="chat-select"
-              aria-label="model"
-              title={model ? `model: ${model}` : "model"}
+              aria-label="Model"
+              title={model ? `Model: ${model}` : "Model"}
               // Claude Code reports a full id and offers aliases to switch to,
               // so the closed control names the one running and the list
               // holds the choices, each with the model it stands for.
@@ -558,12 +563,12 @@ function Composer({
           {efforts.length > 0 && (
             <Select
               className="chat-select"
-              aria-label="reasoning effort"
-              title={effort ? `reasoning effort: ${effortName(effort)}` : "reasoning effort"}
+              aria-label="Reasoning effort"
+              title={effort ? `Reasoning effort: ${effortName(effort)}` : "Reasoning effort"}
               value={effort ?? ""}
-              shown={effort ? undefined : "effort"}
+              shown={effort ? undefined : "Effort"}
               options={[
-                { value: "", label: "default", hint: "the model's own" },
+                { value: "", label: "Default", hint: "The model's own" },
                 ...efforts.map((e) => ({ value: e, label: effortName(e) })),
               ]}
               onChange={(next) => onCommand({ op: "effort", effort: next || null })}
@@ -572,22 +577,32 @@ function Composer({
           <span className="chat-facts">
             {state?.status === "compacting" && <span>compacting</span>}
             {state?.context_percentage != null && (
-              <span title="context used">ctx {Math.round(state.context_percentage)}%</span>
+              <span title="Context used">ctx {Math.round(state.context_percentage)}%</span>
             )}
           </span>
-          {working ? (
-            <button className="chat-stop" title="stop this turn (Esc)" onClick={() => onCommand({ op: "interrupt" })}>
-              <Stop aria-label="stop" />
+          {/* One round button at the end, as on the phone: Stop while a turn
+              runs and nothing is written, Send otherwise -- a message
+              written during a turn is queued, so it is still sent. */}
+          {working && !text.trim() && !files.length ? (
+            <button
+              className="chat-round chat-stop"
+              title="Stop This Turn (Esc)"
+              aria-label="Stop"
+              onClick={() => onCommand({ op: "interrupt" })}
+            >
+              <Stop size={10} fill="currentColor" />
             </button>
-          ) : null}
-          <button
-            className="go chat-send"
-            title={what.kind === "shell" ? "run it in the sandbox (Enter)" : "send (Enter)"}
-            disabled={!sendable}
-            onClick={send}
-          >
-            {what.kind === "shell" ? <Shell aria-label="run" /> : <Send aria-label="send" />}
-          </button>
+          ) : (
+            <button
+              className="chat-round chat-send"
+              title={what.kind === "shell" ? "Run It in the Sandbox (Enter)" : "Send (Enter)"}
+              aria-label={what.kind === "shell" ? "Run" : "Send"}
+              disabled={!sendable}
+              onClick={send}
+            >
+              {what.kind === "shell" ? <Shell size={15} /> : <Send size={16} strokeWidth={2.25} />}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -622,7 +637,7 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
           // Opened again from the last entry, after a pause that grows while
           // nothing answers: a session being destroyed should not be asked
           // about twice a second until the tab goes.
-          dispatch({ type: "down", reason: frame.reason ?? "disconnected" });
+          dispatch({ type: "down", reason: frame.reason ?? "Disconnected" });
           retry = setTimeout(connect, wait);
           wait = Math.min(wait * 2, 30_000);
         }

@@ -267,13 +267,13 @@ function Form({
       <header className="dialog-head">
         <h2>
           <Start className="head-mark" />
-          new session <span className="in">in</span> {project.name}
+          New Session <span className="in">in</span> {project.name}
         </h2>
-        <button className="quiet-icon" title="close" onClick={onClose}>
-          <Close aria-label="close" />
+        <button className="quiet-icon" title="Close" onClick={onClose}>
+          <Close aria-label="Close" />
         </button>
       </header>
-      <p className="origin" title="cloned from">
+      <p className="origin" title="Cloned from">
         {project.repo}
       </p>
 
@@ -316,7 +316,7 @@ function Form({
       />
 
       <div className="chips">
-        <label className="chip-field" title="session name (derived from the task when blank)">
+        <label className="chip-field" title="Session name (derived from the task when blank)">
           <Edit />
           <input
             value={name}
@@ -329,8 +329,8 @@ function Form({
           className="chip-field"
           title={
             fromPull
-              ? "the branch the pull request merges into"
-              : "base branch (the remote's default when blank)"
+              ? "The branch the pull request merges into"
+              : "Base branch (the remote's default when blank)"
           }
         >
           <Branch />
@@ -342,39 +342,39 @@ function Form({
             onChange={(e) => setBase(e.target.value)}
           />
         </label>
-        <label className="chip-field" title="how you talk to the agent">
+        <label className="chip-field" title="How you talk to the agent">
           <Agent />
           <Select
             value={agentInterface}
             onChange={(v) => setAgentInterface(v as Interface)}
-            aria-label="agent"
+            aria-label="Agent"
             options={[
-              { value: "chat", label: "chat", hint: "drawn by this window" },
-              { value: "terminal", label: "terminal", hint: "Claude Code's own, in tmux" },
+              { value: "chat", label: "Chat", hint: "Drawn by this window" },
+              { value: "terminal", label: "Terminal", hint: "Claude Code's own, in tmux" },
             ]}
           />
         </label>
         {options.worktrees && (
-          <label className="chip-field" title="where the agent runs">
+          <label className="chip-field" title="Where the agent runs">
             {worktree ? <Unsandboxed /> : <Sandbox />}
             <Select
               value={worktree ? "worktree" : "sandbox"}
               onChange={(v) => setWorktree(v === "worktree")}
-              aria-label="where"
+              aria-label="Where"
               options={[
-                { value: "sandbox", label: "sandbox", hint: "its own VM, under a policy" },
-                { value: "worktree", label: "worktree", hint: "on the server, as you" },
+                { value: "sandbox", label: "Sandbox", hint: "Its own VM, under a policy" },
+                { value: "worktree", label: "Worktree", hint: "On the server, as you" },
               ]}
             />
           </label>
         )}
         {!worktree && (
-          <label className="chip-field" title="network policy">
+          <label className="chip-field" title="Network policy">
             <Policy />
             <Select
               value={policy}
               onChange={setPolicy}
-              aria-label="policy"
+              aria-label="Policy"
               options={options.policies.map((p) => ({ value: p.spec, label: p.spec, hint: p.summary }))}
             />
           </label>
@@ -395,7 +395,7 @@ function Form({
 
       {!worktree && (
       <div className="pick-rows">
-        <PickRow icon={Toolchain} label="toolchains">
+        <PickRow icon={Toolchain} label="Toolchains">
           {options.toolchains.map((t) => (
             <Pill
               key={t.name}
@@ -408,7 +408,7 @@ function Form({
           ))}
         </PickRow>
 
-        <PickRow icon={Secret} label="credentials">
+        <PickRow icon={Secret} label="Credentials">
           {options.providers.map((p) => (
             <Pill
               key={p.name}
@@ -421,24 +421,24 @@ function Form({
           ))}
           {options.providers_error && (
             <span className="error" title={options.providers_error}>
-              could not list credentials
+              Could not list credentials
             </span>
           )}
           {options.providers.length === 0 && !options.providers_error && (
-            <span className="hint">none configured</span>
+            <span className="hint">None configured</span>
           )}
         </PickRow>
 
         {/* Named, not offered: skills and MCP servers are one decision about
             what your agents can reach, made in the server's config file.
             Shown so a session's tools are not a surprise. */}
-        <PickRow icon={Skill} label="skills, set in the server's config">
+        <PickRow icon={Skill} label="Skills, set in the server's config">
           {skills.length === 0 && <span className="hint">none</span>}
           {skills.map((s) => (
             <span
               key={s}
               className="pill fixed"
-              title={mine.includes(s) ? "pushed from this machine first" : undefined}
+              title={mine.includes(s) ? "Pushed from this machine first" : undefined}
             >
               {s}
               {mine.includes(s) && <Publish className="local" />}
@@ -467,12 +467,12 @@ function Form({
 
       <footer className="new-session-foot">
         {facts && <Drift facts={facts} />}
-        <span className="keys" title="start with the keyboard">
+        <span className="keys" title="Start with the keyboard">
           ctrl ↵
         </span>
         <button className="go" disabled={busy} onClick={() => void submit()}>
           {busy ? <Busy className="turning" /> : <Start />}
-          {busy ? "starting…" : "start"}
+          {busy ? "Starting…" : "Start"}
         </button>
       </footer>
     </div>
@@ -564,7 +564,7 @@ function Drift({ facts }: { facts: Facts }) {
   if (!facts.base_on_remote) bits.push("branch not on remote");
   if (bits.length === 0) return null;
   return (
-    <span className="drift" title="the sandbox clones the remote, so this stays behind on the server's checkout">
+    <span className="drift" title="The sandbox clones the remote, so this stays behind on the server's checkout">
       <Heads />
       {bits.join(" · ")}
     </span>

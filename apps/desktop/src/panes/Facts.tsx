@@ -31,7 +31,7 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
   return (
     <div className="facts-pane">
       <section className="facts-task">
-        {session.task ? <p>{session.task}</p> : <p className="none">started at a prompt, with no task</p>}
+        {session.task ? <p>{session.task}</p> : <p className="none">Started at a prompt, with no task</p>}
         {session.ticket && (
           <a className="pill fixed ticket" href={session.ticket.url} title={session.ticket.url}>
             <Tracker />
@@ -46,50 +46,50 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
       {usage ? <Spend usage={usage} /> : <p className="facts-note">Progress shows here once the agent has reported.</p>}
 
       <section>
-        <h4>worktree</h4>
-        <Fact icon={Branch} label="branch">
+        <h4>Worktree</h4>
+        <Fact icon={Branch} label="Branch">
           <span className="mono">{session.work_branch}</span>
           <span className="quiet"> from {session.base_branch ?? "the remote's default"}</span>
         </Fact>
-        <Fact icon={Repo} label="repo">
+        <Fact icon={Repo} label="Repo">
           <span className="mono" title={session.repo}>
             {repoName(session.repo)}
           </span>
         </Fact>
         {session.backend === "worktree" ? (
-          <Fact icon={Unsandboxed} label="not isolated">
+          <Fact icon={Unsandboxed} label="Not isolated">
             <span className="mono" title={session.workdir ?? undefined}>
               {session.workdir ?? "a worktree on the server"}
             </span>
             <span className="quiet"> on the server, as its user, with no policy</span>
           </Fact>
         ) : (
-          <Fact icon={Sandbox} label="sandbox">
+          <Fact icon={Sandbox} label="Sandbox">
             <span className="mono">{session.sandbox}</span>
           </Fact>
         )}
       </section>
 
       <section>
-        <h4>given</h4>
-        <Fact icon={Agent} label="agent">
+        <h4>Given</h4>
+        <Fact icon={Agent} label="Agent">
           <span className="mono">{session.agent}</span>
           {usage?.model && <span className="quiet mono"> {usage.model}</span>}
         </Fact>
-        <Fact icon={Policy} label="policy">
+        <Fact icon={Policy} label="Policy">
           {session.policy ? <span className="mono">{session.policy}</span> : <None>none recorded</None>}
         </Fact>
-        <Chips icon={Toolchain} label="toolchains" values={session.toolchains} />
-        <Chips icon={Secret} label="providers" values={session.providers} />
+        <Chips icon={Toolchain} label="Toolchains" values={session.toolchains} />
+        <Chips icon={Secret} label="Providers" values={session.providers} />
         <Chips
           icon={Skill}
-          label="skills"
+          label="Skills"
           values={session.skills.map((s) => s.name)}
           titles={session.skills.map((s) => s.source)}
         />
         <Chips
           icon={Integrations}
-          label="mcp"
+          label="MCP"
           values={session.mcp.map((m) => m.name)}
           titles={session.mcp.map((m) => m.url)}
         />
@@ -105,9 +105,9 @@ function Spend({ usage }: { usage: Usage }) {
   return (
     <section className="facts-spend">
       <div className="tiles">
-        <Tile label="worked" value={usage.duration_ms === null ? notYet : duration(usage.duration_ms)} />
+        <Tile label="Worked" value={usage.duration_ms === null ? notYet : duration(usage.duration_ms)} />
         <Tile
-          label="lines"
+          label="Lines"
           value={
             usage.lines_added === null ? (
               notYet
@@ -126,8 +126,8 @@ function Spend({ usage }: { usage: Usage }) {
           the warning is the point of it. */}
       {context !== null && (
         <Meter
-          label="context"
-          name="context used"
+          label="Context"
+          name="Context used"
           pct={context}
           tone={context >= 90 ? "bad" : context >= 70 ? "warn" : ""}
         >
@@ -148,7 +148,7 @@ function Spend({ usage }: { usage: Usage }) {
           name={`${w.label} limit used`}
           pct={w.used_percentage}
           tone={w.used_percentage >= 80 ? "warn" : ""}
-          title={w.resets_at ? `resets ${new Date(w.resets_at * 1000).toLocaleString()}` : undefined}
+          title={w.resets_at ? `Resets ${new Date(w.resets_at * 1000).toLocaleString()}` : undefined}
         />
       ))}
     </section>

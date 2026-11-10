@@ -116,7 +116,7 @@ export function TrackersSection({
   if (!signedIn) {
     return (
       <section ref={section} className="setting-group panel trackers">
-        <h3>trackers</h3>
+        <h3>Trackers</h3>
         {signedIn === null ? (
           <Waiting />
         ) : (
@@ -127,7 +127,7 @@ export function TrackersSection({
             </p>
             <div className="setting-actions">
               <button className="go" onClick={onSignIn}>
-                sign in
+                Sign In
               </button>
             </div>
           </>
@@ -138,14 +138,14 @@ export function TrackersSection({
 
   return (
     <section ref={section} className="setting-group panel trackers">
-      <h3>trackers</h3>
+      <h3>Trackers</h3>
       <p className="hint">
         Where the sidebar's tickets and pull requests come from. Kept in your hura account, the same
         on every device signed in to it; tokens are kept there encrypted and never sent back.
       </p>
       {error && <p className="error">{error}</p>}
       {trackers === null && !error && <Waiting />}
-      {trackers?.length === 0 && <Empty icon={TrackerGlyph} note="no trackers yet" />}
+      {trackers?.length === 0 && <Empty icon={TrackerGlyph} note="No trackers yet" />}
       {trackers?.map((t) => (
         <TrackerRow
           key={t.source.name}
@@ -171,7 +171,7 @@ export function TrackersSection({
           </span>
           {connectable.map((p) => (
             <button key={p} className="go" disabled={connecting !== null} onClick={() => void connect(p)}>
-              {p === "github" ? "connect GitHub" : "connect Jira"}
+              {p === "github" ? "Connect GitHub" : "Connect Jira"}
             </button>
           ))}
         </div>
@@ -192,7 +192,7 @@ export function TrackersSection({
 function target(t: Tracker): string {
   switch (t.kind) {
     case "git-hub":
-      return t.repo ?? "every repository";
+      return t.repo ?? "Every repository";
     case "azure-dev-ops":
       return [t.org, t.project].filter(Boolean).join("/");
     case "jira":
@@ -260,30 +260,30 @@ function TrackerRow({
             <input
               type="password"
               value={token}
-              placeholder={tracker.token_set ? "replace the token" : "paste the token"}
+              placeholder={tracker.token_set ? "Replace the token" : "Paste the token"}
               onChange={(e) => setToken(e.target.value)}
             />
             <button
               className="quiet-icon"
               disabled={working || token.trim().length === 0}
-              title={tracker.token_set ? "replace the token" : "store the token"}
+              title={tracker.token_set ? "Replace the Token" : "Store the Token"}
               onClick={() => {
                 // Cleared either way: a password field holding a token is worth
                 // nothing once it is stored, and less if it was refused.
                 void onToken(token.trim()).finally(() => setToken(""));
               }}
             >
-              <Store aria-label="store the token" />
+              <Store aria-label="Store the Token" />
             </button>
           </>
         )}
         <button
           className="quiet-icon danger"
           disabled={working}
-          title="remove this tracker and its token from your account"
+          title="Remove This Tracker and Its Token from Your Account"
           onClick={onForget}
         >
-          <Forget aria-label={`forget ${t.name}`} />
+          <Forget aria-label={`Forget ${t.name}`} />
         </button>
       </span>
       {!tracker.token_set && !tracker.connected && (
@@ -332,7 +332,7 @@ function Shows({
     <div className="tracker-shows">
       <label className="tick">
         <input type="checkbox" checked={created} onChange={(e) => setCreated(e.target.checked)} />
-        <span>show the tickets I created</span>
+        <span>Show the tickets I created</span>
       </label>
       {jira && (
         <>
@@ -345,24 +345,24 @@ function Shows({
             <div key={i} className="tracker-filter">
               <input
                 value={f.name}
-                placeholder="name"
-                aria-label="the filter's name"
+                placeholder="Name"
+                aria-label="The filter's name"
                 onChange={(e) => change(i, { name: e.target.value })}
               />
               <input
                 className="jql"
                 value={f.jql}
                 placeholder="project = PROJ AND status = Ready ORDER BY updated DESC"
-                aria-label="its JQL"
+                aria-label="Its JQL"
                 spellCheck={false}
                 onChange={(e) => change(i, { jql: e.target.value })}
               />
               <button
                 className="quiet-icon danger"
-                title="remove this filter"
+                title="Remove This Filter"
                 onClick={() => setFilters(filters.filter((_, j) => j !== i))}
               >
-                <Forget aria-label={`remove ${f.name || "this filter"}`} />
+                <Forget aria-label={`Remove ${f.name || "This Filter"}`} />
               </button>
             </div>
           ))}
@@ -370,13 +370,13 @@ function Shows({
             className="quiet add-filter"
             onClick={() => setFilters([...filters, { name: "", jql: "" }])}
           >
-            <Plus /> add a filter
+            <Plus /> Add a Filter
           </button>
         </>
       )}
       {changed && (
         <div className="setting-actions">
-          <span className="unsaved">{ready ? "not saved" : "every filter needs a name and JQL"}</span>
+          <span className="unsaved">{ready ? "not saved" : "Every filter needs a name and JQL"}</span>
           <button
             className="go"
             disabled={working || !ready}
@@ -388,7 +388,7 @@ function Shows({
               })
             }
           >
-            save
+            Save
           </button>
         </div>
       )}
@@ -451,9 +451,9 @@ function NewTracker({
 
   return (
     <div className="setting-group new-tracker">
-      <h4>add a tracker</h4>
+      <h4>Add a Tracker</h4>
       <label>
-        <span>tracker</span>
+        <span>Tracker</span>
         <Select
           value={kind}
           onChange={(v) => setKind(v as TrackerKind)}
@@ -463,14 +463,14 @@ function NewTracker({
 
       {kind === "jira" && (
         <>
-          <Field label="site" required>
+          <Field label="Site" required>
             <input
               value={site}
               placeholder="https://your-org.atlassian.net"
               onChange={(e) => setSite(e.target.value)}
             />
           </Field>
-          <Field label="email" required>
+          <Field label="Email" required>
             <input
               value={email}
               placeholder="you@example.com"
@@ -482,10 +482,10 @@ function NewTracker({
       )}
       {kind === "azure-dev-ops" && (
         <>
-          <Field label="organisation" required>
+          <Field label="Organisation" required>
             <input value={org} placeholder="your-org" onChange={(e) => setOrg(e.target.value)} />
           </Field>
-          <Field label="project" required>
+          <Field label="Project" required>
             <input
               value={project}
               placeholder="YourProject"
@@ -496,7 +496,7 @@ function NewTracker({
       )}
       {kind === "git-hub" && (
         <>
-          <Field label="repository">
+          <Field label="Repository">
             <input value={repo} placeholder="owner/name" onChange={(e) => setRepo(e.target.value)} />
           </Field>
           <p className="hint indent">Leave it empty for every repository the token can see.</p>
@@ -510,7 +510,7 @@ function NewTracker({
         {TOKEN_HINT[kind]} Kept in your hura account, encrypted.
       </p>
 
-      <Field label="name">
+      <Field label="Name">
         <input value={name} placeholder={kindLabel(kind)} onChange={(e) => setName(e.target.value)} />
       </Field>
       <p className="hint indent">What this tracker is called here. Only needed for a second one.</p>
@@ -529,7 +529,7 @@ function NewTracker({
             });
           }}
         >
-          add tracker
+          Add Tracker
         </button>
       </div>
     </div>
@@ -560,8 +560,8 @@ function Field({
 /// What each kind calls its token, and where to get one.
 const TOKEN_LABEL: Record<TrackerKind, string> = {
   jira: "API token",
-  "azure-dev-ops": "access token",
-  "git-hub": "token",
+  "azure-dev-ops": "Access token",
+  "git-hub": "Token",
 };
 
 const TOKEN_HINT: Record<TrackerKind, string> = {

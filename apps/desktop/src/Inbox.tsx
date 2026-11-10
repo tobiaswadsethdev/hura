@@ -66,8 +66,8 @@ import { ago, when } from "./Ticket";
 
 /// The groups, in the order they are drawn, and what each is called.
 const GROUPS: { key: string; relation: Relation; label: string }[] = [
-  { key: "assigned", relation: "assigned", label: "assigned to me" },
-  { key: "created", relation: "created", label: "created by me" },
+  { key: "assigned", relation: "assigned", label: "Assigned to me" },
+  { key: "created", relation: "created", label: "Created by me" },
 ];
 
 /// The tickets' groups: yours, then each JQL filter by name in the order the
@@ -87,14 +87,14 @@ function ticketGroups(
     (trackers === null || trackers.some((t) => !t.source.hide_created)) &&
     tasks.some((t) => t.relation === "created");
   return [
-    { key: "assigned", label: "assigned to me", holds: (t) => t.relation === "assigned" },
+    { key: "assigned", label: "Assigned to me", holds: (t) => t.relation === "assigned" },
     ...filters.map((name) => ({
       key: `filter:${name}`,
       label: name,
       holds: (t: Task) => t.filters.includes(name),
     })),
     ...(created
-      ? [{ key: "created", label: "created by me", holds: (t: Task) => t.relation === "created" }]
+      ? [{ key: "created", label: "Created by me", holds: (t: Task) => t.relation === "created" }]
       : []),
   ];
 }
@@ -200,13 +200,13 @@ export function InboxBar({
     onShut(isShut(key) ? shut.filter((k) => k !== key) : [...shut, key]);
 
   return (
-    <aside className="inbox" style={{ width }} aria-label="your tickets and pull requests">
+    <aside className="inbox" style={{ width }} aria-label="Your tickets and pull requests">
       <header className="inbox-head">
-        <div className="segmented inbox-views" role="tablist" aria-label="mine">
+        <div className="segmented inbox-views" role="tablist" aria-label="Mine">
           {(
             [
-              ["tickets", Tracker, "tickets", tasks.length],
-              ["pulls", PullRequest, "pull requests", pulls.length],
+              ["tickets", Tracker, "Tickets", tasks.length],
+              ["pulls", PullRequest, "Pull Requests", pulls.length],
             ] as const
           ).map(([v, Mark, label, count]) => (
             <button
@@ -228,19 +228,19 @@ export function InboxBar({
         <span className="inbox-tools">
           <button
             className="quiet-icon"
-            title="read them again"
+            title="Read Them Again"
             disabled={reading || none}
             onClick={onRefresh}
           >
-            <Refresh aria-label="refresh" />
+            <Refresh aria-label="Refresh" />
           </button>
           <button
             className="quiet-icon"
-            title={`fold this sidebar (${keys.label})`}
+            title={`Fold This Sidebar (${keys.label})`}
             aria-keyshortcuts={keys.aria}
             onClick={onFold}
           >
-            <Fold aria-label="fold" />
+            <Fold aria-label="Fold" />
           </button>
         </span>
       </header>
@@ -261,15 +261,15 @@ export function InboxBar({
         )}
 
         {signedIn === false ? (
-          <Empty icon={Tracker} note="trackers need a hura cloud account">
+          <Empty icon={Tracker} note="Trackers need a hura cloud account">
             <button className="go" onClick={onSetup}>
-              sign in
+              Sign In
             </button>
           </Empty>
         ) : none ? (
-          <Empty icon={Tracker} note="no trackers yet">
+          <Empty icon={Tracker} note="No trackers yet">
             <button className="go" onClick={onSetup}>
-              add a tracker
+              Add a Tracker
             </button>
           </Empty>
         ) : view === "tickets" ? (
@@ -305,7 +305,7 @@ export function InboxBar({
           <p className="inbox-hint">
             Pull requests come from GitHub and Azure DevOps trackers.{" "}
             <button className="link" onClick={onSetup}>
-              add one
+              Add One
             </button>
           </p>
         ) : (
@@ -315,7 +315,7 @@ export function InboxBar({
             return (
               <Group
                 key={key}
-                label={g.relation === "assigned" ? "waiting on me" : g.label}
+                label={g.relation === "assigned" ? "Waiting on me" : g.label}
                 count={rows.length}
                 open={!isShut(key)}
                 loading={inbox === null}
@@ -365,18 +365,18 @@ function Rail({
     return matched > 0 ? `${rest}, ${matched} more from filters` : rest;
   };
   return (
-    <aside className="inbox-rail" aria-label="your tickets and pull requests, folded">
+    <aside className="inbox-rail" aria-label="Your tickets and pull requests, folded">
       <button
         className="quiet-icon"
-        title={`open this sidebar (${keys.label})`}
+        title={`Open This Sidebar (${keys.label})`}
         aria-keyshortcuts={keys.aria}
         onClick={() => onUnfold(view)}
       >
-        <Unfold aria-label="open" />
+        <Unfold aria-label="Open" />
       </button>
       <button
         className="inbox-rail-count"
-        title={`tickets: ${split(tasks, "created by you", "assigned to you")}`}
+        title={`Tickets: ${split(tasks, "created by you", "assigned to you")}`}
         onClick={() => onUnfold("tickets")}
       >
         <Tracker />
@@ -384,14 +384,14 @@ function Rail({
       </button>
       <button
         className="inbox-rail-count"
-        title={`pull requests: ${split(pulls, "yours", "waiting on you")}`}
+        title={`Pull requests: ${split(pulls, "yours", "waiting on you")}`}
         onClick={() => onUnfold("pulls")}
       >
         <PullRequest />
         <span>{pulls.length}</span>
       </button>
       {warned && (
-        <span className="inbox-rail-warn" title="a tracker could not be read; open the sidebar to see which" />
+        <span className="inbox-rail-warn" title="A tracker could not be read; open the sidebar to see which" />
       )}
     </aside>
   );
@@ -422,7 +422,7 @@ function Group({
         <span className="inbox-count">{loading ? "" : count}</span>
       </button>
       {open && count > 0 && <ul className="inbox-rows">{children}</ul>}
-      {open && count === 0 && !loading && <p className="inbox-none">nothing</p>}
+      {open && count === 0 && !loading && <p className="inbox-none">Nothing</p>}
     </section>
   );
 }
@@ -463,12 +463,12 @@ function TicketRow({
   }));
   const menuProps = menu(() => [
     ...(readsHere ? [{ label: "Open", run: () => onShow(task) }] : []),
-    { label: "Open in the browser", icon: Elsewhere, run: () => openExternal(task.url) },
+    { label: "Open in the Browser", icon: Elsewhere, run: () => openExternal(task.url) },
     ...(session ? [{ label: `Go to ${session.name}`, run: () => onSelect(session.name) }] : []),
     ...(starts.length > 0 ? (["separator", ...starts] as MenuItem[]) : []),
     "separator",
-    { label: "Copy key", icon: Copy, hint: task.key, run: () => copy(task.key) },
-    { label: "Copy link", icon: Copy, run: () => copy(task.url) },
+    { label: "Copy Key", icon: Copy, hint: task.key, run: () => copy(task.key) },
+    { label: "Copy Link", icon: Copy, run: () => copy(task.url) },
   ]);
   const updated = ago(task.updated);
   const comments = task.comments ?? 0;
@@ -491,7 +491,7 @@ function TicketRow({
     >
       <div className="inbox-row-top">
         <span className="inbox-key">{task.key}</span>
-        {!readsHere && <Elsewhere className="inbox-out" aria-label="opens in the browser" />}
+        {!readsHere && <Elsewhere className="inbox-out" aria-label="Opens in the browser" />}
         {task.item_type && <span className="inbox-type">{task.item_type}</span>}
         <span className="inbox-status">{task.status}</span>
       </div>
@@ -501,7 +501,7 @@ function TicketRow({
         {comments > 0 && (
           <span
             className="inbox-comments"
-            title={task.last_commenter ? `last comment by ${task.last_commenter}` : undefined}
+            title={task.last_commenter ? `Last comment by ${task.last_commenter}` : undefined}
           >
             <Comments /> {comments}
             {task.last_commenter && !task.last_comment_mine && (
@@ -517,17 +517,17 @@ function TicketRow({
             disabled={projects.length === 0}
             title={
               projects.length === 0
-                ? "make a project first"
+                ? "Make a project first"
                 : projects.length === 1
-                  ? `start a worktree for it in ${projects[0]!.name}`
-                  : "start a worktree for it"
+                  ? `Start a Worktree for It in ${projects[0]!.name}`
+                  : "Start a Worktree for It"
             }
             onClick={(e) => {
               if (projects.length === 1) onStart(projects[0]!, task);
               else startMenu(() => starts)(e);
             }}
           >
-            <Start aria-label="start" />
+            <Start aria-label="Start" />
           </button>
         )}
       </div>
@@ -560,24 +560,24 @@ function PullRow({
     ? []
     : projects.flatMap((p) => [
         {
-          label: projects.length > 1 ? `Work on it in ${p.name}` : "Work on it",
+          label: projects.length > 1 ? `Work on It in ${p.name}` : "Work on It",
           icon: Start,
           run: () => onStart(p, pull, "work"),
         },
         {
-          label: projects.length > 1 ? `Review it in ${p.name}` : "Review it",
+          label: projects.length > 1 ? `Review It in ${p.name}` : "Review It",
           icon: Review,
           run: () => onStart(p, pull, "review"),
         },
       ]);
   const menuProps = menu(() => [
     { label: "Open", run: () => onShow(pull) },
-    { label: "Open in the browser", icon: Elsewhere, run: () => openExternal(pull.url) },
+    { label: "Open in the Browser", icon: Elsewhere, run: () => openExternal(pull.url) },
     ...(session ? [{ label: `Go to ${session.name}`, run: () => onSelect(session.name) }] : []),
     ...(starts.length > 0 && !session ? (["separator", ...starts] as MenuItem[]) : []),
     "separator",
-    { label: "Copy branch", icon: Copy, hint: pull.branch, run: () => copy(pull.branch) },
-    { label: "Copy link", icon: Copy, run: () => copy(pull.url) },
+    { label: "Copy Branch", icon: Copy, hint: pull.branch, run: () => copy(pull.branch) },
+    { label: "Copy Link", icon: Copy, run: () => copy(pull.url) },
   ]);
   const updated = ago(pull.updated);
   const Mark = pull.draft ? PullDraft : PullRequest;
@@ -600,7 +600,7 @@ function PullRow({
       }}
     >
       <div className="inbox-row-top">
-        <Mark className={`inbox-pull-mark${pull.draft ? " draft" : ""}`} aria-label={pull.draft ? "draft" : "pull request"} />
+        <Mark className={`inbox-pull-mark${pull.draft ? " draft" : ""}`} aria-label={pull.draft ? "Draft" : "Pull request"} />
         <span className="inbox-key">{pullName(pull)}</span>
         <span className="inbox-pull-state">
           <ChecksMark checks={pull.checks} />
@@ -623,7 +623,7 @@ function PullRow({
             <Comments /> {pull.comments}
           </span>
         )}
-        {pull.fork && <span title="opened from a fork">fork</span>}
+        {pull.fork && <span title="Opened from a fork">fork</span>}
         {session ? (
           <Worktree session={session} onSelect={onSelect} />
         ) : (
@@ -633,12 +633,12 @@ function PullRow({
               disabled={projects.length === 0}
               title={
                 projects.length === 0
-                  ? `no project is a clone of ${pull.repo}`
-                  : "start a worktree on its branch"
+                  ? `No project is a clone of ${pull.repo}`
+                  : "Start a Worktree on Its Branch"
               }
               onClick={(e) => startMenu(() => starts)(e)}
             >
-              <Start aria-label="start" />
+              <Start aria-label="Start" />
             </button>
           )
         )}
@@ -652,11 +652,11 @@ function PullRow({
 export function ChecksMark({ checks }: { checks: Pull["checks"] }) {
   switch (checks) {
     case "passing":
-      return <Passing className="inbox-checks ok" aria-label="checks passed" />;
+      return <Passing className="inbox-checks ok" aria-label="Checks passed" />;
     case "failing":
-      return <Failing className="inbox-checks bad" aria-label="checks failed" />;
+      return <Failing className="inbox-checks bad" aria-label="Checks failed" />;
     case "pending":
-      return <Pending className="inbox-checks running" aria-label="checks running" />;
+      return <Pending className="inbox-checks running" aria-label="Checks running" />;
     default:
       return null;
   }
@@ -686,7 +686,7 @@ function Worktree({ session, onSelect }: { session: Session; onSelect: (name: st
   return (
     <button
       className="inbox-worktree"
-      title={`go to ${session.name}`}
+      title={`Go to ${session.name}`}
       onClick={() => onSelect(session.name)}
     >
       <StateDot state={session.state} />

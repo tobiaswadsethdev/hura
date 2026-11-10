@@ -162,20 +162,20 @@ export function SettingsScreen({
     });
 
   return (
-    <Screen icon={SettingsGlyph} title="settings" narrow onClose={onClose}>
+    <Screen icon={SettingsGlyph} title="Settings" narrow onClose={onClose}>
       {error && <p className="error">{error}</p>}
       {!view && !error && <Waiting />}
 
       {view && draft && (
         <>
           <section className="setting-group">
-            <h3>new sessions</h3>
+            <h3>New sessions</h3>
             <p className="hint">
               Server defaults, shared with <code>hura new</code>. The create form can override them.
             </p>
 
             <label>
-              <span>branch prefix</span>
+              <span>Branch prefix</span>
               <input
                 value={draft.branch_prefix ?? ""}
                 placeholder={view.default_branch_prefix}
@@ -195,21 +195,21 @@ export function SettingsScreen({
             </p>
 
             <label>
-              <span>agent</span>
+              <span>Agent</span>
               {/* Chat is what the server does with the key missing, so it is
                   the option a file that does not mention it shows. */}
               <Select
                 value={draft.interface ?? "chat"}
                 onChange={(v) => edit({ interface: v === "terminal" ? "terminal" : "chat" })}
                 options={[
-                  { value: "chat", label: "chat", hint: "the Agent SDK, drawn by this window" },
-                  { value: "terminal", label: "terminal", hint: "Claude Code's own, in tmux" },
+                  { value: "chat", label: "Chat", hint: "The Agent SDK, drawn by this window" },
+                  { value: "terminal", label: "Terminal", hint: "Claude Code's own, in tmux" },
                 ]}
               />
             </label>
 
             <label>
-              <span>base branch</span>
+              <span>Base branch</span>
               <input
                 value={draft.base ?? ""}
                 placeholder="the remote's default branch"
@@ -219,7 +219,7 @@ export function SettingsScreen({
             </label>
 
             <label>
-              <span>policy</span>
+              <span>Policy</span>
               {/* The built-in default is an option rather than a blank row:
                   "whatever hura chooses" is a real answer here, and the one
                   that survives the default changing. A policy set to a path
@@ -230,8 +230,8 @@ export function SettingsScreen({
                 options={[
                   {
                     value: "",
-                    label: options ? options.default_policy : "the default",
-                    hint: "the built-in default",
+                    label: options ? options.default_policy : "The default",
+                    hint: "The built-in default",
                   },
                   ...(options?.policies ?? []).map((p) => ({
                     value: p.spec,
@@ -239,7 +239,7 @@ export function SettingsScreen({
                     hint: p.summary,
                   })),
                   ...(draft.policy && !(options?.policies ?? []).some((p) => p.spec === draft.policy)
-                    ? [{ value: draft.policy, label: draft.policy, hint: "from the config file" }]
+                    ? [{ value: draft.policy, label: draft.policy, hint: "From the config file" }]
                     : []),
                 ]}
               />
@@ -254,12 +254,12 @@ export function SettingsScreen({
             )}
 
             <fieldset>
-              <legend>credentials</legend>
-              {!options && <p className="hint">reading the credentials…</p>}
+              <legend>Credentials</legend>
+              {!options && <p className="hint">Reading the credentials…</p>}
               {options?.providers_error && <p className="error">{options.providers_error}</p>}
               {options && options.providers.length === 0 && !options.providers_error && (
                 <p className="hint">
-                  none configured: add a <code>[credentials.NAME]</code> table to the server's config file
+                  None configured: add a <code>[credentials.NAME]</code> table to the server's config file
                 </p>
               )}
               <div className="pills">
@@ -279,7 +279,7 @@ export function SettingsScreen({
           </section>
 
           <section className="setting-group">
-            <h3>this server</h3>
+            <h3>This server</h3>
             <label className="tick">
               <input
                 type="checkbox"
@@ -289,7 +289,7 @@ export function SettingsScreen({
                 checked={draft.auto_update ?? true}
                 onChange={(e) => edit({ auto_update: e.target.checked })}
               />
-              <span>auto-update the server</span>
+              <span>Auto-update the server</span>
             </label>
             <p className="hint indent">
               Verified, then applied the next time <code>hurad</code> starts.
@@ -298,20 +298,20 @@ export function SettingsScreen({
 
           <div className="setting-actions">
             <span className="hint path">
-              {view.present ? "writes " : "creates "}
+              {view.present ? "Writes " : "Creates "}
               <code>{view.path}</code>
             </span>
             {dirty && <span className="unsaved">unsaved</span>}
             {saved && !dirty && <span className="ok">saved</span>}
             <button className="go" disabled={saving || !dirty} onClick={() => void save()}>
-              {saving ? "saving…" : "save"}
+              {saving ? "Saving…" : "Save"}
             </button>
           </div>
         </>
       )}
 
       <section className="setting-group">
-        <h3>this window</h3>
+        <h3>This window</h3>
         <p className="hint">Stored on this machine only.</p>
 
         <label className="tick">
@@ -320,7 +320,7 @@ export function SettingsScreen({
             checked={prefs.notify}
             onChange={(e) => onPrefs({ notify: e.target.checked })}
           />
-          <span>notify when an agent needs me</span>
+          <span>Notify when an agent needs me</span>
         </label>
 
         {/* Signed in only: signed out there are no trackers, so nothing that
@@ -333,7 +333,7 @@ export function SettingsScreen({
                 checked={prefs.notifyTickets}
                 onChange={(e) => onPrefs({ notifyTickets: e.target.checked })}
               />
-              <span>notify when my tickets or pull requests change</span>
+              <span>Notify when my tickets or pull requests change</span>
             </label>
             <p className="hint indent">
               A status moved, somebody else's comment, a ticket newly yours, a review asked of you,

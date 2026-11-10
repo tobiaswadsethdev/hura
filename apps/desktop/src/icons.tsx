@@ -258,8 +258,8 @@ export const Agent = Bot;
 export const Chat = MessagesSquare;
 /// Sending a message. An arrow up, which is where the message goes.
 export const Send = ArrowUp;
-/// A file sent with a message: the button that picks one, and the file once
-/// it is in the message.
+/// A file sent with a message, once it is in the message. The composer's
+/// button that picks one is a `Plus` in a disc, as on the phone.
 export const Attach = Paperclip;
 /// A message the sandbox has, and one Claude Code has taken into a turn: the
 /// receipts a messenger uses, because they are the ones already understood.
