@@ -292,8 +292,25 @@ struct ProjectsReply: Decodable {
     var projects: [Project]
 }
 
-struct ShellsReply: Decodable {
-    var shells: [String]
+/// A session's shells, and whether its agent is running beside them. A
+/// terminal session's agent can be closed, and started again.
+public struct Shells: Decodable, Equatable, Sendable {
+    public var shells: [String]
+    public var agent: Bool
+
+    public init(shells: [String], agent: Bool) {
+        self.shells = shells
+        self.agent = agent
+    }
+
+    private enum Key: String, CodingKey { case shells, agent }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Key.self)
+        shells = try c.decode([String].self, forKey: .shells)
+        // A server from before an agent could be closed always had one.
+        agent = try c.decodeIfPresent(Bool.self, forKey: .agent) ?? true
+    }
 }
 
 struct CreatedReply: Decodable {

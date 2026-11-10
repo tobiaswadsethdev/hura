@@ -27,7 +27,12 @@ export type Reply = { "reply": "ls", sessions: Array<Session>,
  * the server's to do and the client would otherwise see sessions
  * appear and vanish with no account of why.
  */
-adopted: Array<string>, dead: Array<string>, warnings: Array<string>, } | { "reply": "poll" } & Poll | { "reply": "diff", body: string, } | { "reply": "policy" } & View | { "reply": "events", events: Array<Event>, } | { "reply": "comments", comments: Array<Comment>, } | { "reply": "shells", shells: Array<string>, } | { "reply": "chats", chats: Array<string>, 
+adopted: Array<string>, dead: Array<string>, warnings: Array<string>, } | { "reply": "poll" } & Poll | { "reply": "diff", body: string, } | { "reply": "policy" } & View | { "reply": "events", events: Array<Event>, } | { "reply": "comments", comments: Array<Comment>, } | { "reply": "shells", shells: Array<string>, 
+/**
+ * Whether the agent's own tmux session is running. True from a server
+ * that predates closing it, which never had one that was not.
+ */
+agent: boolean, } | { "reply": "chats", chats: Array<string>, 
 /**
  * The conversation just opened, when that is what was asked for.
  */

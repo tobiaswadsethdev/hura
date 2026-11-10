@@ -4,7 +4,8 @@ import SwiftUI
 /// What a worktree has open: its agent (a conversation or a terminal), the
 /// other conversations a chat session has, and the shells beside it. Which
 /// exist is asked of the sandbox rather than remembered here, as the desktop
-/// window does, so one opened or closed elsewhere shows up here.
+/// window does, so one opened or closed elsewhere shows up here. The agent is
+/// one of them: it can be closed, and another started.
 enum WorkTab: Hashable {
     /// A conversation; `agent` is the session's own.
     case chat(String)
@@ -29,8 +30,10 @@ struct WorktreeView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab: WorkTab?
-    @State private var conversations: [String] = []
-    @State private var shells: [String] = []
+    /// Nil until asked: the agent is only shown once the sandbox says it is
+    /// there, since attaching to a closed one's terminal starts another.
+    @State private var conversations: [String]?
+    @State private var shells: Shells?
     @State private var chats: [String: Chat] = [:]
     @State private var terminals: [String: TerminalChannel] = [:]
     @State private var showingDetails = false
@@ -50,14 +53,23 @@ struct WorktreeView: View {
         return s.isLive || (s.isChat && ["creating", "seeding"].contains(s.state))
     }
 
-    private var home: WorkTab { session?.isChat == true ? .chat("agent") : .terminal(nil) }
+    /// Whether the sandbox has been asked what is open in it yet.
+    private var listed: Bool { shells != nil && (session?.isChat != true || conversations != nil) }
 
     private var tabs: [WorkTab] {
-        let agent: [WorkTab] = session?.isChat == true
-            ? [.chat("agent")] + conversations.filter { $0 != "agent" }.map(WorkTab.chat)
-            : [.terminal(nil)]
-        return agent + shells.map { WorkTab.terminal($0) }
+        guard let session else { return [] }
+        // A chat's agent is assumed until the host says otherwise: one being
+        // prepared has its notice to show, and attaching to a closed
+        // conversation is only refused. A terminal agent's waits, because
+        // attaching to a closed one starts another.
+        let agent: [WorkTab] = session.isChat
+            ? (conversations ?? ["agent"]).map(WorkTab.chat)
+            : shells?.agent == true ? [.terminal(nil)] : []
+        return agent + (shells?.shells ?? []).map { WorkTab.terminal($0) }
     }
+
+    /// Where a worktree opens, and goes back to when the tab in front closes.
+    private var home: WorkTab? { tabs.first }
 
     var body: some View {
         Group {
@@ -68,6 +80,10 @@ struct WorktreeView: View {
                     .toolbarBackground(Color.black, for: .navigationBar)
                     .toolbarBackground(.visible, for: .navigationBar)
                     .toolbarColorScheme(.dark, for: .navigationBar)
+            } else if hasWorkspace, !listed, tabs.isEmpty {
+                ProgressView()
+            } else if hasWorkspace, listed, tabs.isEmpty {
+                nothingOpen
             } else {
                 details
             }
@@ -100,8 +116,8 @@ struct WorktreeView: View {
         }
         // Opened from a notification before the list has arrived: the agent
         // opens once the session is known.
-        .task(id: session?.interface) {
-            if session != nil, tab == nil { switchTo(home) }
+        .task(id: tabs) {
+            if tab == nil, let home { switchTo(home) }
         }
         .task(id: hasWorkspace) {
             guard hasWorkspace else { return }
@@ -159,18 +175,23 @@ struct WorktreeView: View {
         if hasWorkspace, let session {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    Picker("Open", selection: Binding(get: { tab ?? home }, set: { switchTo($0) })) {
-                        ForEach(tabs, id: \.self) { t in
-                            Label(t.label, glyph: icon(t)).tag(t)
+                    if let current = tab ?? home {
+                        Picker("Open", selection: Binding(get: { current }, set: { switchTo($0) })) {
+                            ForEach(tabs, id: \.self) { t in
+                                Label(t.label, glyph: icon(t)).tag(t)
+                            }
                         }
+                        Divider()
                     }
-                    Divider()
                     if session.isChat {
                         Button("New Conversation", glyph: .newConversation) { newConversation() }
+                    } else if shells?.agent == false {
+                        Button("New Agent", glyph: .agent) { newAgent() }
                     }
                     Button("New Shell", glyph: .shell) { newShell() }
-                    if let tab, !tab.isAgent {
-                        Button("Close \(tab.label)", systemImage: "xmark", role: .destructive) { close(tab) }
+                    if let tab {
+                        Button(tab == .terminal(nil) ? "Stop Agent" : "Close \(tab.label)",
+                               systemImage: "xmark", role: .destructive) { close(tab) }
                     }
                     Divider()
                     Button("Details", glyph: .info) { showingDetails = true }
@@ -186,6 +207,22 @@ struct WorktreeView: View {
         case .chat: .chat
         case .terminal(nil): .agentTerminal
         case .terminal: .shell
+        }
+    }
+
+    /// Everything closed. The sandbox is still there, and so is the way back.
+    private var nothingOpen: some View {
+        ContentUnavailableView {
+            Label("Nothing running here", glyph: session?.isChat == true ? .chat : .agent)
+        } actions: {
+            if session?.isChat == true {
+                Button("New Conversation", glyph: .newConversation) { newConversation() }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                Button("New Agent", glyph: .agent) { newAgent() }
+                    .buttonStyle(.borderedProminent)
+            }
+            Button("New Shell", glyph: .shell) { newShell() }
         }
     }
 
@@ -282,13 +319,14 @@ struct WorktreeView: View {
         return t
     }
 
-    private func switchTo(_ next: WorkTab) {
+    private func switchTo(_ next: WorkTab?) {
         // Only what is on screen holds a socket.
         if case let .chat(conv)? = tab { chats[conv]?.stop() }
         if case let .terminal(tmux)? = tab { terminals[tmux ?? ""]?.stop() }
         switch next {
-        case let .chat(conv): chat(conv).start()
-        case let .terminal(tmux): _ = terminal(tmux)
+        case let .chat(conv)?: chat(conv).start()
+        case let .terminal(tmux)?: _ = terminal(tmux)
+        case nil: break
         }
         tab = next
     }
@@ -298,8 +336,8 @@ struct WorktreeView: View {
         async let listed = try? server.api.shells(name)
         if session.isChat, let c = try? await server.api.chats(name) { conversations = c.chats }
         if let s = await listed { shells = s }
-        // Closed from elsewhere: back to the agent.
-        if let tab, !tabs.contains(tab) { switchTo(home) }
+        // Closed from elsewhere: back to the first that is left.
+        if let tab, !tabs.contains(tab) { forget(tab) }
     }
 
     private func newConversation() {
@@ -312,24 +350,43 @@ struct WorktreeView: View {
 
     private func newShell() {
         act {
-            let before = Set(shells)
-            shells = try await server.api.newShell(name)
-            if let made = shells.first(where: { !before.contains($0) }) { switchTo(.terminal(made)) }
+            let before = Set(shells?.shells ?? [])
+            let after = try await server.api.newShell(name)
+            shells = after
+            if let made = after.shells.first(where: { !before.contains($0) }) { switchTo(.terminal(made)) }
         }
+    }
+
+    private func newAgent() {
+        act {
+            shells = try await server.api.newAgent(name)
+            switchTo(.terminal(nil))
+        }
+    }
+
+    /// Off screen and dropped, its socket with it, and the first that is
+    /// left in front instead.
+    private func forget(_ t: WorkTab) {
+        switch t {
+        case let .chat(conv): chats.removeValue(forKey: conv)?.stop()
+        case let .terminal(tmux): terminals.removeValue(forKey: tmux ?? "")?.stop()
+        }
+        guard tab == t else { return }
+        tab = nil
+        switchTo(tabs.first { $0 != t })
     }
 
     private func close(_ t: WorkTab) {
         act {
-            switchTo(home)
+            forget(t)
             switch t {
             case let .chat(conv):
-                chats.removeValue(forKey: conv)?.stop()
                 conversations = try await server.api.closeChat(name, conversation: conv).chats
             case let .terminal(tmux?):
-                terminals.removeValue(forKey: tmux)?.stop()
                 shells = try await server.api.killShell(name, tmux: tmux)
             case .terminal(nil):
-                break
+                guard let session else { return }
+                shells = try await server.api.killShell(name, tmux: session.tmux)
             }
         }
     }

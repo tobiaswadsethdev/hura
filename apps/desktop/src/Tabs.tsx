@@ -4,28 +4,28 @@
 // a working copy -- its terminal, its diff, and soon a file in it -- so
 // switching worktree switches the set, and coming back finds it as you left it.
 //
-// The shape allows more than it currently opens: a `file` tab is in the type
-// because the file tree is the next increment, and a second `terminal` because
-// extra shells beside the agent are the one after. Both are held here rather
-// than added later so the tab bar is not rebuilt around them twice.
+// The agent's tab is one of them rather than a fixture: it can be closed, which
+// stops the agent, and another started from `+`. A worktree with nothing open
+// says so, and offers the same.
 
 import { useState } from "react";
 
 import { useButtonMenu } from "./ContextMenu";
+import { Empty } from "./Empty";
 import { ChatPane } from "./panes/Chat";
 import { FilePane } from "./panes/File";
 import { FileDiffPane } from "./panes/FileDiff";
 import type { Against } from "./gen/Against";
-import { Chat, Close, Plus, Shell } from "./icons";
+import { Agent, Chat, Close, Plus, Shell } from "./icons";
 import { TerminalPane } from "./panes/Terminal";
 
 export type Tab =
   /// A terminal in the sandbox. `tmux` names which session, and `null` is the
-  /// agent's own -- so a shell is a second tab rather than a second pane, and
-  /// nothing has to remember which one is special.
+  /// agent's own -- so a shell is a second tab rather than a second pane.
   | { kind: "terminal"; tmux: string | null; label: string }
   /// A conversation in a chat session. `agent` is the one the task started,
-  /// which is the agent in the way the terminal agent's tab is.
+  /// which is the agent in the way the terminal agent's tab is, and closes the
+  /// same way as the rest.
   | { kind: "chat"; conv: string; label: string }
   | { kind: "file"; path: string }
   /// One file's diff, side by side. `against` is part of the key: the staged
@@ -66,11 +66,14 @@ export function Tabs({
   onActivate,
   onNewShell,
   onNewChat,
+  onNewAgent,
   onCloseShell,
+  onCloseAgent,
   onCloseChat,
   onCloseFile,
   onReorder,
   failure,
+  listed,
 }: {
   server: string;
   name: string;
@@ -81,17 +84,23 @@ export function Tabs({
   /// a clone the sandbox denied is explained in the events pane, and the
   /// reason says to go and look there.
   failure?: string | null;
+  /// Whether the sandbox has said what is open in it yet. Until then no tabs
+  /// is not yet nothing, and the empty editor would only flash past.
+  listed: boolean;
   onActivate: (key: string) => void;
   onNewShell: () => void;
   /// Another conversation, in a chat session. Absent in a terminal session,
   /// which has no host to hold one, and then `+` is a shell as it always was.
   onNewChat?: () => void;
-  /// Closing a shell kills what is running in it, which is why only a shell has
-  /// the button: the agent's terminal is not yours to close, and the diff is
-  /// not a thing that can be.
+  /// Another agent, in a terminal session whose last was closed. Absent while
+  /// one is running, since there is only the one, and in a chat session, whose
+  /// agents are its conversations.
+  onNewAgent?: () => void;
+  /// Closing a shell kills what is running in it.
   onCloseShell: (tmux: string) => void;
-  /// Ending a conversation forgets it. The agent's own has no cross, as its
-  /// terminal has none.
+  /// Closing the agent's terminal stops the agent.
+  onCloseAgent: () => void;
+  /// Ending a conversation forgets it, the agent's own included.
   onCloseChat: (conv: string) => void;
   onCloseFile: (path: string) => void;
   /// Put `moved` where `onto` currently is. The order lives with the caller
@@ -112,32 +121,35 @@ export function Tabs({
   };
 
   const menu = useButtonMenu();
-  const add = onNewChat
-    ? menu(() => [
-        { label: "Chat", icon: Chat, run: onNewChat },
-        { label: "Shell", icon: Shell, run: onNewShell },
-      ])
-    : onNewShell;
+  const choices = [
+    ...(onNewChat ? [{ label: "Chat", icon: Chat, run: onNewChat }] : []),
+    ...(onNewAgent ? [{ label: "Agent", icon: Agent, run: onNewAgent }] : []),
+    { label: "Shell", icon: Shell, run: onNewShell },
+  ];
+  const several = choices.length > 1;
+  const add = several ? menu(() => choices) : onNewShell;
 
   return (
     <section className="editor">
       <nav className="tabs">
         {tabs.map((tab) => {
           const key = keyOf(tab);
+          const agent = tab.kind === "terminal" && tab.tmux === null;
           const shell = tab.kind === "terminal" && tab.tmux !== null ? tab.tmux : null;
-          const conv = tab.kind === "chat" && tab.conv !== "agent" ? tab.conv : null;
+          const conv = tab.kind === "chat" ? tab.conv : null;
           const file = tab.kind === "file" || tab.kind === "filediff" ? keyOf(tab) : null;
           /// Middle click closes exactly what the cross closes, and nothing
-          /// else: the agent's terminal has no cross because it is not yours to
-          /// close, and a middle click that killed it would be the same mistake
-          /// made faster.
-          const close = shell
-            ? () => onCloseShell(shell)
-            : conv
-              ? () => onCloseChat(conv)
-              : file
-                ? () => onCloseFile(file)
-                : null;
+          /// else. The agent and a conversation are asked about first, by the
+          /// caller, so a stray middle click costs a dialog and not the work.
+          const close = agent
+            ? onCloseAgent
+            : shell
+              ? () => onCloseShell(shell)
+              : conv
+                ? () => onCloseChat(conv)
+                : file
+                  ? () => onCloseFile(file)
+                  : null;
           return (
             <span
               key={key}
@@ -185,6 +197,11 @@ export function Tabs({
               <button draggable onClick={() => onActivate(key)} title={file ?? undefined}>
                 {labelOf(tab)}
               </button>
+              {agent && (
+                <button className="close" title="Stop the agent, and close its terminal" onClick={onCloseAgent}>
+                  <Close aria-label="Close" />
+                </button>
+              )}
               {shell && (
                 <button
                   className="close"
@@ -213,14 +230,39 @@ export function Tabs({
         })}
         <button
           className="add"
-          title={onNewChat ? "Another conversation, or a shell" : "Another shell in this sandbox"}
-          aria-haspopup={onNewChat ? "menu" : undefined}
+          title={
+            onNewChat
+              ? "Another conversation, or a shell"
+              : onNewAgent
+                ? "An agent, or a shell"
+                : "Another shell in this sandbox"
+          }
+          aria-haspopup={several ? "menu" : undefined}
           onClick={add}
         >
-          <Plus aria-label={onNewChat ? "New Tab" : "New Shell"} />
+          <Plus aria-label={several ? "New Tab" : "New Shell"} />
         </button>
       </nav>
       {failure && <p className="error tabs-failure">{failure}</p>}
+
+      {/* Everything closed: the agent and the shells. The sandbox is still
+          there, and so is the way back into it. */}
+      {listed && tabs.length === 0 && (
+        <Empty size="page" icon={onNewChat ? Chat : Agent} note="Nothing running here">
+          <div className="tabs-empty">
+            {(onNewChat ?? onNewAgent) && (
+              <button className="go" onClick={onNewChat ?? onNewAgent}>
+                {onNewChat ? <Chat /> : <Agent />}
+                {onNewChat ? "New Chat" : "New Agent"}
+              </button>
+            )}
+            <button className="quiet" onClick={onNewShell}>
+              <Shell />
+              New Shell
+            </button>
+          </div>
+        </Empty>
+      )}
 
       {tabs.map((tab) => {
         const key = keyOf(tab);

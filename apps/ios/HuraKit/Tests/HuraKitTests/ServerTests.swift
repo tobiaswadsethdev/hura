@@ -53,11 +53,19 @@ struct WireTests {
             == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
     }
 
+    @Test func readsWhetherTheAgentIsRunningAndAssumesSoFromAnOlderServer() throws {
+        let closed = try JSONDecoder().decode(Shells.self, from: Data(#"{"shells":["shell-1"],"agent":false}"#.utf8))
+        #expect(closed == Shells(shells: ["shell-1"], agent: false))
+        let older = try JSONDecoder().decode(Shells.self, from: Data(#"{"shells":[]}"#.utf8))
+        #expect(older.agent)
+    }
+
     @Test func readsASessionAsHuradWritesIt() throws {
         let json = #"{"name":"fix-tests","sandbox":"x","tmux":"t","repo":"r","work_branch":"hura/fix-tests","task":"Fix the tests","state":"waiting","interface":"chat","created_at":1}"#
         let s = try JSONDecoder().decode(Session.self, from: Data(json.utf8))
         #expect(s == Session(name: "fix-tests", state: "waiting", workBranch: "hura/fix-tests",
-                             task: "Fix the tests", interface: "chat", repo: "r", createdAt: 1, sandbox: "x"))
+                             task: "Fix the tests", interface: "chat", repo: "r", createdAt: 1, sandbox: "x",
+                             tmux: "t"))
         #expect(s.isChat && s.isLive)
         // An older record without the field is a terminal session.
         let old = try JSONDecoder().decode(Session.self, from: Data(#"{"name":"a","state":"dead","work_branch":"b"}"#.utf8))

@@ -552,20 +552,7 @@ pub fn resume_check(backend: &dyn Backend, session: &Session) -> String {
     let paths = backend.paths(session);
     let restart = match session.interface {
         crate::chat::Interface::Chat => crate::chat::start_script(backend, session),
-        crate::chat::Interface::Terminal => format!(
-            r#"set -eu
-{agent_env}
-{markers}
-{tmux_bin} new-session -d -s {tmux} -c {repo}
-{tmux_bin} send-keys -t {tmux} {launch} Enter
-"#,
-            agent_env = AGENT_ENV,
-            markers = agent_markers(&paths),
-            tmux_bin = backend.tmux(),
-            tmux = sh_quote(&session.tmux),
-            repo = sh_quote(&paths.repo),
-            launch = sh_quote(&format!("{} --continue", backend.agent_command(session))),
-        ),
+        crate::chat::Interface::Terminal => launch_agent_script(backend, session, true),
     };
     format!(
         "if [ -e {started} ] && [ ! -e {boot} ] && ! {tmux_bin} has-session -t {tmux} 2>/dev/null; then\n\
@@ -574,8 +561,44 @@ pub fn resume_check(backend: &dyn Backend, session: &Session) -> String {
         started = sh_quote(&paths.agent_started()),
         boot = sh_quote(&paths.boot),
         tmux_bin = backend.tmux(),
-        tmux = sh_quote(&session.tmux),
+        // Exactly: a worktree session's shells are named after its agent, and
+        // tmux takes a name it cannot find as the start of one it can.
+        tmux = sh_quote(&format!("={}", session.tmux)),
         restart = sh_quote(&restart),
+    )
+}
+
+/// Shell starting a terminal agent in a session that has none: after its
+/// sandbox was restarted, continuing its last conversation, or because one was
+/// asked for after the last was closed, starting a new one. Without the task:
+/// that was the first agent's, and it has been given.
+///
+/// Leaves an agent that is already running alone, as the seeder's does.
+pub fn launch_agent_script(backend: &dyn Backend, session: &Session, resume: bool) -> String {
+    let paths = backend.paths(session);
+    let agent = backend.agent_command(session);
+    let launch = if resume {
+        format!("{agent} --continue")
+    } else {
+        agent
+    };
+    format!(
+        r#"set -eu
+{agent_env}
+if {tmux_bin} has-session -t {exact} 2>/dev/null; then
+  exit 0
+fi
+{markers}
+{tmux_bin} new-session -d -s {tmux} -c {repo}
+{tmux_bin} send-keys -t {exact}: {launch} Enter
+"#,
+        agent_env = AGENT_ENV,
+        markers = agent_markers(&paths),
+        tmux_bin = backend.tmux(),
+        tmux = sh_quote(&session.tmux),
+        exact = sh_quote(&format!("={}", session.tmux)),
+        repo = sh_quote(&paths.repo),
+        launch = sh_quote(&launch),
     )
 }
 
@@ -1220,7 +1243,7 @@ mkdir -p "$dest/.git"
             check.contains(&format!("[ ! -e '{BOOT_MARKER}' ]")),
             "{check}"
         );
-        assert!(check.contains("has-session -t 'agent'"), "{check}");
+        assert!(check.contains("has-session -t '=agent'"), "{check}");
         assert!(check.contains("claude --continue"), "{check}");
         assert!(
             !check.contains("the task"),
@@ -1235,5 +1258,30 @@ mkdir -p "$dest/.git"
             "{start}"
         );
         assert!(start.contains("unset ANTHROPIC_API_KEY"), "{start}");
+    }
+
+    /// An agent asked for after the last was closed is a new conversation,
+    /// without the task, and only where there is none: matched exactly, since
+    /// a worktree session's shells are named after its agent.
+    #[test]
+    fn a_new_agent_starts_fresh_and_only_where_there_is_none() {
+        let s = Session::new("a".into(), "url".into(), "the task".into());
+        let fresh = launch_agent_script(&sandboxed(), &s, false);
+        assert!(fresh.contains("has-session -t '=agent'"), "{fresh}");
+        assert!(
+            fresh.contains("send-keys -t '=agent': 'claude' Enter"),
+            "{fresh}"
+        );
+        assert!(!fresh.contains("--continue"), "{fresh}");
+        assert!(
+            !fresh.contains("task"),
+            "the task was the first agent's: {fresh}"
+        );
+        assert!(
+            fresh.contains(&agent_markers(&sandboxed().paths(&s))),
+            "{fresh}"
+        );
+        assert!(fresh.contains("unset ANTHROPIC_API_KEY"), "{fresh}");
+        assert!(launch_agent_script(&sandboxed(), &s, true).contains("claude --continue"));
     }
 }

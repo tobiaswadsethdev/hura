@@ -133,16 +133,10 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 .map(Reply::File)
                 .map_err(Failure::failed)
         }),
-        Request::Shells { name } => with_session(&name, |s| {
-            ops::shells(backends.for_session(s), s)
-                .map(|shells| Reply::Shells { shells })
-                .map_err(Failure::gateway)
-        }),
+        Request::Shells { name } => with_session(&name, |s| shells(backends.for_session(s), s)),
         Request::NewShell { name } => with_session(&name, |s| {
             ops::new_shell(backends.for_session(s), s).map_err(Failure::failed)?;
-            ops::shells(backends.for_session(s), s)
-                .map(|shells| Reply::Shells { shells })
-                .map_err(Failure::gateway)
+            shells(backends.for_session(s), s)
         }),
         Request::Ports { name } => with_session(&name, |s| ports(backends.for_session(s), s)),
         Request::StopForward { name, port } => with_session(&name, |s| {
@@ -163,9 +157,11 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
         }),
         Request::KillShell { name, tmux } => with_session(&name, |s| {
             ops::kill_shell(backends.for_session(s), s, &tmux).map_err(Failure::failed)?;
-            ops::shells(backends.for_session(s), s)
-                .map(|shells| Reply::Shells { shells })
-                .map_err(Failure::gateway)
+            shells(backends.for_session(s), s)
+        }),
+        Request::NewAgent { name } => with_session(&name, |s| {
+            ops::new_agent(backends.for_session(s), s).map_err(Failure::failed)?;
+            shells(backends.for_session(s), s)
         }),
         Request::Chats { name } => with_session(&name, |s| {
             chat::list(backends.for_session(s), s)
@@ -576,6 +572,18 @@ fn with_session(name: &str, f: impl FnOnce(&Session) -> Result<Reply, Failure>) 
         Ok(reply) => reply.into(),
         Err(failure) => failure.into(),
     }
+}
+
+/// A session's shells, and whether its agent is running beside them: what
+/// every shell request answers with, so a window learns an agent was closed
+/// from another along with anything else.
+fn shells(backend: &dyn Backend, s: &Session) -> Result<Reply, Failure> {
+    ops::terminals(backend, s)
+        .map(|t| Reply::Shells {
+            shells: t.shells,
+            agent: t.agent,
+        })
+        .map_err(Failure::gateway)
 }
 
 /// A sandbox's ports: what is listening and who holds it, from the sandbox;
