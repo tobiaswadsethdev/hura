@@ -97,6 +97,18 @@ start scripts unset it, and `/etc/tmux.conf` has `set-environment -gu
 ANTHROPIC_API_KEY`, since a tmux server keeps the environment of whichever exec
 started it.
 
+**`[::1]` is added to `NO_PROXY`.** The runtime's `NO_PROXY` and `no_proxy`
+list the IPv6 loopback bare, as `::1`, and .NET's `HttpClient` only leaves
+`http://[::1]:<port>` alone when the entry is bracketed. Measured: an ASP.NET
+app that renders its pages through a node process of its own, listening on
+`::1`, sent those calls to the proxy, which refused them, so every page was a
+500 and the events feed showed `[::1]:<port>` denied. No rule can open it,
+since the proxy would connect to its own machine's loopback rather than the
+sandbox's. So everything that can start the tmux server (the agent's start
+scripts, a new shell, the attach fallback) appends `[::1]` to both first,
+where they are set and do not already have it. A shell opened with `sbx exec`
+outside tmux still has the runtime's list.
+
 **The image's `ENV` reaches an exec now.** OpenShell stripped it, which is why
 the locale (`LANG`, `LC_ALL`) and `COLORTERM` are also said in `/etc/tmux.conf`
 and in the script `hurad attach` runs. The sandbox runtime passes it through,
