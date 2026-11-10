@@ -23,6 +23,66 @@ export type TaskProgress = {
   usage?: { total_tokens: number; tool_uses: number; duration_ms: number };
 };
 
+/// A row that scrolls across, moved the ways a mouse can: its wheel turned
+/// up and down (not only with Shift, as the engine has it), and dragged. A
+/// drag that moved is not also a click on the chip it started on.
+function useSideScroll(ref: React.RefObject<HTMLElement | null>, shown: boolean) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth || e.shiftKey) return;
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      const step = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 16 : e.deltaY;
+      const before = el.scrollLeft;
+      el.scrollLeft += step;
+      if (el.scrollLeft !== before) e.preventDefault();
+    };
+    let from: { x: number; left: number; id: number } | null = null;
+    let dragged = false;
+    const down = (e: PointerEvent) => {
+      dragged = false;
+      if (e.pointerType !== "mouse" || e.button !== 0 || el.scrollWidth <= el.clientWidth) return;
+      from = { x: e.clientX, left: el.scrollLeft, id: e.pointerId };
+    };
+    const move = (e: PointerEvent) => {
+      if (!from || e.pointerId !== from.id) return;
+      const dx = e.clientX - from.x;
+      if (!dragged && Math.abs(dx) < 4) return;
+      if (!dragged) {
+        dragged = true;
+        el.setPointerCapture(e.pointerId);
+        el.classList.add("dragging");
+      }
+      el.scrollLeft = from.left - dx;
+    };
+    const up = () => {
+      from = null;
+      el.classList.remove("dragging");
+    };
+    const click = (e: MouseEvent) => {
+      if (!dragged) return;
+      dragged = false;
+      e.stopPropagation();
+      e.preventDefault();
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    el.addEventListener("pointerdown", down);
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+    el.addEventListener("click", click, true);
+    return () => {
+      el.removeEventListener("wheel", wheel);
+      el.removeEventListener("pointerdown", down);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      el.removeEventListener("click", click, true);
+    };
+  }, [ref, shown]);
+}
+
 function since(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return `${s}s`;
@@ -65,6 +125,8 @@ export function AgentsBar({
   open: string | null;
   onOpen: (id: string | null) => void;
 }) {
+  const row = useRef<HTMLDivElement>(null);
+  useSideScroll(row, agents.length > 0);
   if (!agents.length) return null;
   // Running ones first, then the most recently finished.
   const shown = [...agents].sort(
@@ -74,8 +136,8 @@ export function AgentsBar({
   );
   const running = agents.filter((a) => a.status === "running").length;
   return (
-    <div className="chat-agents" role="list" aria-label="subagents">
-      <span className="chat-agents-count" title="subagents in this conversation">
+    <div ref={row} className="chat-agents" role="list" aria-label="Subagents">
+      <span className="chat-agents-count" title="Subagents in this conversation">
         <AgentGlyph />
         {running ? `${running} running` : `${agents.length}`}
       </span>
@@ -127,12 +189,12 @@ export function AgentPanel({
   }, [children.length, agent.call?.result, progress?.summary]);
 
   return (
-    <aside className="chat-agent-panel" aria-label={`subagent: ${agent.description}`}>
+    <aside className="chat-agent-panel" aria-label={`Subagent: ${agent.description}`}>
       <header>
         <StatusGlyph agent={agent} />
         <h3 title={agent.description}>{agent.description}</h3>
-        <button className="chat-agent-close" title="close" onClick={onClose}>
-          <Close aria-label="close" />
+        <button className="chat-agent-close" title="Close" onClick={onClose}>
+          <Close aria-label="Close" />
         </button>
       </header>
       <p className="chat-agent-facts">{facts.join(" · ")}</p>
@@ -149,7 +211,7 @@ export function AgentPanel({
           <div className="chat-thinking">
             <button aria-expanded={instructions} onClick={() => setInstructions(!instructions)}>
               <Twisty open={instructions} />
-              instructions
+              Instructions
             </button>
             <Fold open={instructions}>
               <div className="body">

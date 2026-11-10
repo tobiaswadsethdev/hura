@@ -110,11 +110,11 @@ function seconds(ms: number | undefined): string {
 /// Why an assistant message carries an error, in words.
 const ERRORS: Record<string, string> = {
   authentication_failed: "Claude Code is not logged in: this session has no Claude credential attached",
-  rate_limit: "rate limited",
-  overloaded: "the API is overloaded",
-  billing_error: "a billing error",
-  max_output_tokens: "the reply hit its length limit",
-  model_not_found: "the model was not found",
+  rate_limit: "Rate limited",
+  overloaded: "The API is overloaded",
+  billing_error: "A billing error",
+  max_output_tokens: "The reply hit its length limit",
+  model_not_found: "The model was not found",
 };
 
 /// A subagent the conversation started, from the task events Claude Code
@@ -211,7 +211,7 @@ export function build(entries: ChatEntry[]): Built {
         const answer = { allow: ev.allow, always: ev.always, message: ev.message, answers: ev.answers };
         if (call) call.answer = answer;
         else if (!ev.allow) {
-          items.push({ kind: "note", key, tone: "dim", text: `declined ${ev.tool}${ev.message ? `: ${ev.message}` : ""}` });
+          items.push({ kind: "note", key, tone: "dim", text: `Declined ${ev.tool}${ev.message ? `: ${ev.message}` : ""}` });
         }
         break;
       }
@@ -341,7 +341,7 @@ export function build(entries: ChatEntry[]): Built {
         system(msg as SystemMessage, key, at);
         break;
       case "conversation_reset":
-        items.push({ kind: "divider", key, text: "conversation cleared" });
+        items.push({ kind: "divider", key, text: "Conversation cleared" });
         break;
     }
   }
@@ -369,7 +369,7 @@ export function build(entries: ChatEntry[]): Built {
           // A resumed agent's messages stay under the call that first started it.
           callId: had?.callId ?? (text("tool_use_id") || null),
           call: null,
-          description: text("description") || had?.description || "agent",
+          description: text("description") || had?.description || "Agent",
           type: text("subagent_type") || null,
           background: Boolean(m.is_backgrounded),
           status: "running",
@@ -398,14 +398,14 @@ export function build(entries: ChatEntry[]): Built {
         break;
       }
       case "compact_boundary":
-        items.push({ kind: "divider", key, text: "context compacted" });
+        items.push({ kind: "divider", key, text: "Context compacted" });
         break;
       case "api_retry":
         items.push({
           kind: "note",
           key,
           tone: "dim",
-          text: `retrying${m.error_status ? ` after ${m.error_status}` : ""} (attempt ${m.attempt} of ${m.max_retries})`,
+          text: `Retrying${m.error_status ? ` after ${m.error_status}` : ""} (attempt ${m.attempt} of ${m.max_retries})`,
         });
         break;
       case "informational":

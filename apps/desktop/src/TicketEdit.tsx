@@ -111,14 +111,14 @@ export function TicketEditor({
       <footer className="ticket-edit-foot">
         <span className="hint">
           {changed.length === 0
-            ? "nothing changed"
-            : `${changed.length} ${changed.length === 1 ? "field" : "fields"} changed · ctrl+enter saves`}
+            ? "Nothing changed"
+            : `${changed.length} ${changed.length === 1 ? "field" : "fields"} changed · Ctrl+Enter saves`}
         </span>
         <button className="quiet" disabled={saving} onClick={onCancel}>
-          cancel
+          Cancel
         </button>
         <button className="go" disabled={saving || changed.length === 0} onClick={() => void save()}>
-          {saving ? <Busy className="turning" /> : null} save
+          {saving ? <Busy className="turning" /> : null} Save
         </button>
       </footer>
     </section>
@@ -189,7 +189,7 @@ function Control({
           value={value.value ?? ""}
           onChange={(v) => onChange({ ...value, value: v || null })}
           options={[
-            ...(!field.required || value.value === null ? [{ value: "", label: "none" }] : []),
+            ...(!field.required || value.value === null ? [{ value: "", label: "None" }] : []),
             ...value.options.map((o) => ({ value: o.id, label: o.name })),
           ]}
         />
@@ -233,8 +233,8 @@ function Control({
       );
     case "read-only":
       return (
-        <span className="edit-readonly" title="change this in Jira">
-          {value.value || "none"}
+        <span className="edit-readonly" title="Change this in Jira">
+          {value.value || "None"}
         </span>
       );
   }
@@ -293,7 +293,7 @@ function LabelsBox({
     <input
       id={id}
       value={text}
-      placeholder="space-separated"
+      placeholder="Space-separated"
       onChange={(e) => {
         setText(e.target.value);
         onChange(e.target.value.split(/[\s,]+/).filter(Boolean));
@@ -342,15 +342,15 @@ function UserBox({
   return (
     <div className="user-box">
       <div className="user-current">
-        <span>{value ? value.name : <span className="nobody">nobody</span>}</span>
+        <span>{value ? value.name : <span className="nobody">Nobody</span>}</span>
         {value && !required && (
           <button
             type="button"
             className="quiet-icon"
-            title={assignable ? "unassign" : "clear"}
+            title={assignable ? "Unassign" : "Clear"}
             onClick={() => onChange(null)}
           >
-            <Close aria-label="clear" />
+            <Close aria-label="Clear" />
           </button>
         )}
       </div>
@@ -360,14 +360,14 @@ function UserBox({
           id={id}
           className="prose"
           value={query}
-          placeholder={assignable ? "assign to…" : "find somebody…"}
+          placeholder={assignable ? "Assign to…" : "Find somebody…"}
           onChange={(e) => setQuery(e.target.value)}
         />
       </label>
       {error && <p className="error">{error}</p>}
       {found && (
         <ul className="user-found">
-          {found.length === 0 && <li className="hint">nobody by that name</li>}
+          {found.length === 0 && <li className="hint">Nobody by that name</li>}
           {found.map((u) => (
             <li key={u.account_id}>
               <button

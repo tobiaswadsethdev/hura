@@ -28,7 +28,7 @@ export function AccountScreen({
   onClose: () => void;
 }) {
   return (
-    <Screen icon={AccountGlyph} title="account" narrow onClose={onClose}>
+    <Screen icon={AccountGlyph} title="Account" narrow onClose={onClose}>
       <AccountSection onChanged={onChanged} />
     </Screen>
   );
@@ -100,7 +100,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
       {sentTo === null ? (
         <>
           <label>
-            <span>email</span>
+            <span>Email</span>
             <input
               type="email"
               value={email}
@@ -113,7 +113,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
           </label>
           <div className="setting-actions">
             <button className="go" disabled={busy || !email.includes("@")} onClick={() => void send(email)}>
-              {busy ? "sending…" : "email me a code"}
+              {busy ? "Sending…" : "Email Me a Code"}
             </button>
           </div>
         </>
@@ -123,10 +123,10 @@ function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
             A code was sent to <strong>{sentTo}</strong>. It works for ten minutes, once.
           </p>
           <label>
-            <span>code</span>
+            <span>Code</span>
             <input
               value={code}
-              placeholder="six digits"
+              placeholder="Six digits"
               inputMode="numeric"
               autoComplete="one-time-code"
               autoFocus
@@ -140,7 +140,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
           </label>
           <div className="setting-actions">
             <button className="quiet" disabled={busy} onClick={() => void send(sentTo)}>
-              send another
+              Send Another
             </button>
             <button
               className="quiet"
@@ -151,14 +151,14 @@ function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
                 setError(null);
               }}
             >
-              use another address
+              Use Another Address
             </button>
             <button
               className="go"
               disabled={busy || digits.length !== 6}
               onClick={() => void run(async () => onSignedIn(await api.cloudVerify(sentTo, digits)))}
             >
-              {busy ? "signing in…" : "sign in"}
+              {busy ? "Signing In…" : "Sign In"}
             </button>
           </div>
         </>
@@ -220,17 +220,17 @@ function SignedIn({
   return (
     <>
       <label>
-        <span>email</span>
+        <span>Email</span>
         <span className="value">{status.email}</span>
       </label>
       {account && (
         <label>
-          <span>plan</span>
+          <span>Plan</span>
           <span className="value">{account.plan}</span>
         </label>
       )}
 
-      <h4>devices</h4>
+      <h4>Devices</h4>
       {devices === null && !error && <Waiting />}
       {devices?.map((d) => (
         // Two lines, as a device is listed under an Apple Account: the name,
@@ -240,7 +240,7 @@ function SignedIn({
           <span className="device-text">
             <span className="row-name">{d.name}</span>
             <span className="hint">
-              {d.platform} · {d.current ? "this computer" : `last seen ${ago(d.last_seen_at)}`}
+              {d.platform} · {d.current ? "This computer" : `Last seen ${ago(d.last_seen_at)}`}
             </span>
           </span>
           <span className="row-actions">
@@ -248,12 +248,12 @@ function SignedIn({
               <button
                 className="quiet-icon danger"
                 disabled={busy !== null}
-                title={`sign ${d.name} out`}
+                title={`Sign ${d.name} Out`}
                 onClick={() =>
                   void act(`device:${d.id}`, async () => setDevices(await api.cloudSignOutDevice(d.id)))
                 }
               >
-                <Forget aria-label={`sign ${d.name} out`} />
+                <Forget aria-label={`Sign ${d.name} Out`} />
               </button>
             )}
           </span>
@@ -274,7 +274,7 @@ function SignedIn({
             })
           }
         >
-          {busy === "sign-out" ? "signing out…" : "sign out"}
+          {busy === "sign-out" ? "Signing Out…" : "Sign Out"}
         </button>
       </div>
       {error && <p className="error">{error}</p>}

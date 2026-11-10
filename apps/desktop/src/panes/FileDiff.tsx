@@ -135,7 +135,7 @@ export function FileDiffPane({
   if (error && !sides) return <p className="error">{error}</p>;
   if (!sides) return <Waiting />;
   // The path is on the tab above this pane, so the sentence loses it.
-  if (sides.binary) return <Empty icon={NotText} note="binary file, so there is no diff to show" />;
+  if (sides.binary) return <Empty icon={NotText} note="Binary file, so there is no diff to show" />;
 
   const mine = review.filter((c) => c.file === path);
 
@@ -156,7 +156,7 @@ export function FileDiffPane({
             autoFocus
             rows={2}
             value={draft}
-            placeholder={`comment on ${path}:${writing.line}`}
+            placeholder={`Comment on ${path}:${writing.line}`}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -167,10 +167,10 @@ export function FileDiffPane({
             }}
           />
           <button className="quiet" onClick={() => void add()}>
-            add
+            Add
           </button>
           <button className="quiet" onClick={() => setWriting(null)}>
-            cancel
+            Cancel
           </button>
         </div>
       )}
@@ -179,11 +179,11 @@ export function FileDiffPane({
         <ul className="comments">
           {mine.map((c) => (
             <li key={c.id}>
-              <span className="at">line {c.line}</span>
+              <span className="at">Line {c.line}</span>
               <span className="body">{c.body}</span>
               <button
                 className="quiet-icon danger"
-                title={`remove the comment on line ${c.line}`}
+                title={`Remove the comment on line ${c.line}`}
                 onClick={() =>
                   api
                     .uncomment(server, name, c.id)
@@ -191,7 +191,7 @@ export function FileDiffPane({
                     .catch((e) => setError(messageOf(e)))
                 }
               >
-                <Forget aria-label="remove this comment" />
+                <Forget aria-label="Remove This Comment" />
               </button>
             </li>
           ))}

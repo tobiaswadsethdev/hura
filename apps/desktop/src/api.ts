@@ -334,5 +334,5 @@ export function messageOf(e: unknown): string {
   if (isFailed(e)) return e.message;
   if (typeof e === "string") return e;
   if (e instanceof Error) return e.message;
-  return `unexpected failure: ${JSON.stringify(e)}`;
+  return `Unexpected failure: ${JSON.stringify(e)}`;
 }

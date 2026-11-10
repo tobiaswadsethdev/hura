@@ -140,15 +140,15 @@ export function TicketPanel({
           {writable && (
             <button
               className={editing ? "quiet-icon on" : "quiet-icon"}
-              title={editing ? "stop editing" : "edit its fields"}
+              title={editing ? "Stop Editing" : "Edit Its Fields"}
               aria-pressed={editing}
               onClick={() => setEditing((e) => !e)}
             >
-              <Edit aria-label="edit" />
+              <Edit aria-label="Edit" />
             </button>
           )}
-          <button className="quiet-icon" title="read it again" onClick={() => void read()}>
-            <Refresh aria-label="refresh" />
+          <button className="quiet-icon" title="Read It Again" onClick={() => void read()}>
+            <Refresh aria-label="Refresh" />
           </button>
           {/* The window's one mark for "this leaves the window". */}
           <a
@@ -156,12 +156,12 @@ export function TicketPanel({
             href={task.url}
             target="_blank"
             rel="noreferrer"
-            title={`open in ${task.kind === "jira" ? "Jira" : "the browser"}`}
+            title={`Open in ${task.kind === "jira" ? "Jira" : "the Browser"}`}
           >
-            <Elsewhere aria-label="open in the browser" />
+            <Elsewhere aria-label="Open in the Browser" />
           </a>
-          <button className="quiet-icon" title="close" onClick={onClose}>
-            <Close aria-label="close" />
+          <button className="quiet-icon" title="Close" onClick={onClose}>
+            <Close aria-label="Close" />
           </button>
         </span>
       </header>
@@ -188,14 +188,14 @@ export function TicketPanel({
       {issue && !editing && (
         <>
           <dl className="ticket-fields">
-            <dt>status</dt>
+            <dt>Status</dt>
             <dd>
               {/* A status is a transition out of this one, so the choices are
                   the workflow's, named by where each lands. */}
               {moves && moves.length > 0 ? (
                 <Select
                   className={`stage-select stage ${issue.stage}`}
-                  aria-label="move it to"
+                  aria-label="Move it to"
                   disabled={working !== null}
                   value=""
                   onChange={(id) =>
@@ -214,19 +214,19 @@ export function TicketPanel({
                 <span className={`stage ${issue.stage}`}>{issue.status}</span>
               )}
             </dd>
-            <dt>assignee</dt>
-            <dd>{issue.assignee ? <Who person={issue.assignee} /> : <Nobody>unassigned</Nobody>}</dd>
-            <dt>reporter</dt>
-            <dd>{issue.reporter ? <Who person={issue.reporter} /> : <Nobody>nobody</Nobody>}</dd>
+            <dt>Assignee</dt>
+            <dd>{issue.assignee ? <Who person={issue.assignee} /> : <Nobody>Unassigned</Nobody>}</dd>
+            <dt>Reporter</dt>
+            <dd>{issue.reporter ? <Who person={issue.reporter} /> : <Nobody>Nobody</Nobody>}</dd>
             {issue.priority && (
               <>
-                <dt>priority</dt>
+                <dt>Priority</dt>
                 <dd>{issue.priority}</dd>
               </>
             )}
             {issue.parent && (
               <>
-                <dt>parent</dt>
+                <dt>Parent</dt>
                 <dd>
                   <span className="ticket-panel-key">{issue.parent.key}</span> {issue.parent.title}
                 </dd>
@@ -234,7 +234,7 @@ export function TicketPanel({
             )}
             {issue.labels.length > 0 && (
               <>
-                <dt>labels</dt>
+                <dt>Labels</dt>
                 <dd className="ticket-labels">
                   {issue.labels.map((l) => (
                     <span key={l} className="tag">
@@ -246,53 +246,53 @@ export function TicketPanel({
             )}
             {issue.due && (
               <>
-                <dt>due</dt>
+                <dt>Due</dt>
                 <dd>{issue.due}</dd>
               </>
             )}
             {issue.custom.map((f) => (
               <Fragment key={f.id}>
                 <dt className="ticket-custom" title={f.name}>
-                  {f.name.toLowerCase()}
+                  {f.name}
                 </dt>
                 <dd className="ticket-custom">
                   {f.doc.length > 0 ? <Doc blocks={f.doc} tracker={task.tracker} /> : f.value}
                 </dd>
               </Fragment>
             ))}
-            <dt>created</dt>
-            <dd title={issue.created ?? undefined}>{ago(issue.created) ?? "unknown"}</dd>
-            <dt>updated</dt>
-            <dd title={issue.updated ?? undefined}>{ago(issue.updated) ?? "unknown"}</dd>
+            <dt>Created</dt>
+            <dd title={issue.created ?? undefined}>{ago(issue.created) ?? "Unknown"}</dd>
+            <dt>Updated</dt>
+            <dd title={issue.updated ?? undefined}>{ago(issue.updated) ?? "Unknown"}</dd>
           </dl>
 
           <section className="ticket-section">
-            <h3>description</h3>
+            <h3>Description</h3>
             {issue.description.length > 0 ? (
               <Doc blocks={issue.description} tracker={task.tracker} />
             ) : (
-              <Nobody>no description</Nobody>
+              <Nobody>No description</Nobody>
             )}
           </section>
 
           <section className="ticket-section">
             <h3>
-              comments <span className="count">{issue.comments_total}</span>
+              Comments <span className="count">{issue.comments_total}</span>
             </h3>
             {issue.comments_total > issue.comments.length && (
               <p className="hint">
                 {issue.comments_total - issue.comments.length} older ones are only in the tracker.
               </p>
             )}
-            {issue.comments.length === 0 && <Nobody>no comments yet</Nobody>}
+            {issue.comments.length === 0 && <Nobody>No comments yet</Nobody>}
             <ol className="ticket-comments-list">
               {issue.comments.map((c, i) => (
                 <li key={c.id || i} className={c.author?.me ? "mine" : undefined}>
                   <div className="comment-head">
-                    {c.author ? <Who person={c.author} /> : <Nobody>someone</Nobody>}
+                    {c.author ? <Who person={c.author} /> : <Nobody>Someone</Nobody>}
                     <span className="comment-when" title={c.created ?? undefined}>
                       {ago(c.created)}
-                      {c.edited && <span title={`edited ${c.edited}`}> · edited</span>}
+                      {c.edited && <span title={`Edited ${c.edited}`}> · edited</span>}
                     </span>
                     {/* Yours to change, and only yours: Jira lets an admin
                         edit anybody's, and this is not the place for that. */}
@@ -300,15 +300,15 @@ export function TicketPanel({
                       <span className="comment-tools">
                         <button
                           className="quiet-icon"
-                          title="edit your comment"
+                          title="Edit Your Comment"
                           disabled={working !== null}
                           onClick={() => setRewriting({ id: c.id, text: c.markdown!.text })}
                         >
-                          <Edit aria-label="edit" />
+                          <Edit aria-label="Edit" />
                         </button>
                         <button
                           className="quiet-icon danger"
-                          title="delete your comment"
+                          title="Delete Your Comment"
                           disabled={working !== null}
                           onClick={() =>
                             ask({
@@ -319,7 +319,7 @@ export function TicketPanel({
                                   everybody. There is no undo.
                                 </>
                               ),
-                              confirm: "delete",
+                              confirm: "Delete",
                               onConfirm: () =>
                                 void change(c.id, () =>
                                   api.deleteComment(task.tracker, task.key, c.id),
@@ -327,7 +327,7 @@ export function TicketPanel({
                             })
                           }
                         >
-                          <Forget aria-label="delete" />
+                          <Forget aria-label="Delete" />
                         </button>
                       </span>
                     )}
@@ -346,7 +346,7 @@ export function TicketPanel({
                           disabled={working !== null}
                           onClick={() => setRewriting(null)}
                         >
-                          cancel
+                          Cancel
                         </button>
                         <button
                           className="go"
@@ -357,7 +357,7 @@ export function TicketPanel({
                             ).then((ok) => ok && setRewriting(null))
                           }
                         >
-                          save
+                          Save
                         </button>
                       </div>
                     </div>
@@ -389,7 +389,7 @@ export function TicketPanel({
                     disabled={working !== null || draft.trim().length === 0}
                     onClick={send}
                   >
-                    comment
+                    Comment
                   </button>
                 </div>
               </div>
@@ -404,21 +404,21 @@ export function TicketPanel({
         {projects.length > 1 ? (
           <Select
             className="ticket-project"
-            aria-label="project to start it in"
+            aria-label="Project to start it in"
             value={where}
             onChange={setWhere}
             options={projects.map((p) => ({ value: p.name, label: p.name }))}
           />
         ) : (
-          <span className="hint">{projects[0]?.name ?? "no project yet"}</span>
+          <span className="hint">{projects[0]?.name ?? "No project yet"}</span>
         )}
         <button
           className="go"
           disabled={!project}
-          title={project ? `start a worktree in ${project.name}` : "make a project first"}
+          title={project ? `Start a Worktree in ${project.name}` : "Make a project first"}
           onClick={() => project && onStart(project, task)}
         >
-          <Start /> start
+          <Start /> Start
         </button>
       </footer>
     </aside>

@@ -108,8 +108,8 @@ function Level({
                   run: () => activate(e.dir, full),
                 },
                 "separator",
-                { label: "Copy path", icon: Copy, hint: full, run: () => copy(full) },
-                { label: "Copy name", icon: Copy, run: () => copy(e.name) },
+                { label: "Copy Path", icon: Copy, hint: full, run: () => copy(full) },
+                { label: "Copy Name", icon: Copy, run: () => copy(e.name) },
               ])}
             >
               <span className="twist">{e.dir && <Chevron open={isOpen} />}</span>

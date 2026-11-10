@@ -81,20 +81,20 @@ export function IntegrationsScreen({
   };
 
   return (
-    <Screen icon={IntegrationsGlyph} title="integrations" onClose={onClose}>
+    <Screen icon={IntegrationsGlyph} title="Integrations" onClose={onClose}>
       {error && <p className="error">{error}</p>}
       {!view && !error && <Waiting />}
 
       {view && (
         <>
           <Section
-            title="mcp servers"
+            title="MCP servers"
             hint="Tools the agent can call. They run on the server, in their own containers, holding their own credentials. The sandbox is granted one endpoint for each."
           >
             {view.mcp.length === 0 ? (
               <Empty
                 icon={NoIntegrations}
-                note="an [[mcp]] table in the server's config file adds one"
+                note="An [[mcp]] table in the server's config file adds one"
               />
             ) : (
               view.mcp.map((s) => (
@@ -120,7 +120,7 @@ export function IntegrationsScreen({
           </Section>
 
           <Section
-            title="secrets"
+            title="Secrets"
             hint="Held by the server and given to the containers above as environment. A value goes in and never comes back out, so nothing here can show you one."
           >
             {/* Nothing stored *and* nothing asking for anything, which is
@@ -151,7 +151,7 @@ export function IntegrationsScreen({
           </Section>
 
           <Section
-            title="skills"
+            title="Skills"
             hint="Copied into every new session. The server keeps a library of what this machine has pushed to it; the originals stay here, and pushing again is how an edit reaches the next session."
           >
             {view.configured_skills.length > 0 && (
@@ -171,12 +171,12 @@ export function IntegrationsScreen({
                   <button
                     className="quiet-icon danger"
                     disabled={busy !== null}
-                    title="remove it from the server (your own copy stays)"
+                    title="Remove It from the Server (your own copy stays)"
                     onClick={() =>
                       void act(`skill:${s.name}`, () => api.forgetSkill(server, s.name))
                     }
                   >
-                    <Forget aria-label={`forget ${s.name}`} />
+                    <Forget aria-label={`Forget ${s.name}`} />
                   </button>
                 </div>
               ))
@@ -185,14 +185,14 @@ export function IntegrationsScreen({
               <span className="hint">
                 {mine.length > 0
                   ? `${mine.length} here: ${mine.join(", ")}`
-                  : "no skills in ~/.claude/skills on this machine"}
+                  : "No skills in ~/.claude/skills on this machine"}
               </span>
               <button
                 className="go"
                 disabled={busy !== null || mine.length === 0}
                 onClick={() => void act("upload", () => api.uploadSkills(server))}
               >
-                {busy === "upload" ? "uploading…" : "push mine to the server"}
+                {busy === "upload" ? "Uploading…" : "Push Mine to the Server"}
               </button>
             </div>
           </Section>
@@ -254,35 +254,35 @@ function McpRow({
               <button
                 className="quiet-icon"
                 disabled={working}
-                title={`restart ${status.name} (recreates it from the catalog)`}
+                title={`Restart ${status.name} (recreates it from the catalog)`}
                 onClick={() => onAction("restart")}
               >
-                {working ? <span className="spin" /> : <Restart aria-label="restart" />}
+                {working ? <span className="spin" /> : <Restart aria-label="Restart" />}
               </button>
               <button
                 className="quiet-icon"
                 disabled={working}
-                title={`stop ${status.name}`}
+                title={`Stop ${status.name}`}
                 onClick={() => onAction("stop")}
               >
-                <Stop aria-label="stop" />
+                <Stop aria-label="Stop" />
               </button>
             </>
           ) : (
             <button
               className="quiet-icon"
               disabled={working}
-              title={`start ${status.name}`}
+              title={`Start ${status.name}`}
               onClick={() => onAction("start")}
             >
-              {working ? <span className="spin" /> : <Start aria-label="start" />}
+              {working ? <span className="spin" /> : <Start aria-label="Start" />}
             </button>
           )}
         </span>
       ) : (
         // Nothing to press: whoever runs it started it, and this server has no
         // say in whether it is up.
-        <span className="row-actions muted">not ours to start</span>
+        <span className="row-actions muted">Not ours to start</span>
       )}
       {status.problem && <p className="problem">{status.problem}</p>}
       {/* The container's own last words, which are the only thing that ever
@@ -311,34 +311,34 @@ function SecretRow({
       <span className="row-name">{secret.name}</span>
       <span className={secret.set ? "yes" : "no"}>{secret.set ? "stored" : "NOT set"}</span>
       <span className="hint">
-        {secret.used_by.length > 0 ? `used by ${secret.used_by.join(", ")}` : "nothing uses it"}
+        {secret.used_by.length > 0 ? `Used by ${secret.used_by.join(", ")}` : "Nothing uses it"}
       </span>
       <span className="row-actions">
         <input
           type="password"
           value={value}
-          placeholder={secret.set ? "replace it" : "paste the value"}
+          placeholder={secret.set ? "Replace it" : "Paste the value"}
           onChange={(e) => setValue(e.target.value)}
         />
         <button
           className="quiet-icon"
           disabled={working || value.trim().length === 0}
-          title={secret.set ? `replace ${secret.name}` : `store ${secret.name}`}
+          title={secret.set ? `Replace ${secret.name}` : `Store ${secret.name}`}
           onClick={() => {
             onSet(value);
             setValue("");
           }}
         >
-          <Store aria-label="store" />
+          <Store aria-label="Store" />
         </button>
         {secret.set && (
           <button
             className="quiet-icon danger"
             disabled={working}
             onClick={onForget}
-            title={`forget ${secret.name}`}
+            title={`Forget ${secret.name}`}
           >
-            <Forget aria-label={`forget ${secret.name}`} />
+            <Forget aria-label={`Forget ${secret.name}`} />
           </button>
         )}
       </span>
@@ -372,20 +372,20 @@ function NewSecret({
       <input
         type="password"
         value={value}
-        placeholder="the value"
+        placeholder="The value"
         onChange={(e) => setValue(e.target.value)}
       />
       <button
         className="quiet-icon"
         disabled={busy || !ready}
-        title="store it under that name"
+        title="Store It Under That Name"
         onClick={() => {
           onSet(name.trim(), value);
           setName("");
           setValue("");
         }}
       >
-        <Store aria-label="store" />
+        <Store aria-label="Store" />
       </button>
     </div>
   );

@@ -124,7 +124,7 @@ function Block({ block: b }: { block: DocBlock }) {
       return b.image ? (
         <Picture id={b.image} name={b.name} />
       ) : (
-        <p className="doc-attachment">attachment: {b.name}</p>
+        <p className="doc-attachment">Attachment: {b.name}</p>
       );
     case "card":
       return (
@@ -178,7 +178,7 @@ function Picture({ id, name }: { id: string; name: string }) {
       </p>
     );
   }
-  const said = !tracker ? `attachment: ${name}` : failed ? `image: ${name} (not read)` : `image: ${name}…`;
+  const said = !tracker ? `Attachment: ${name}` : failed ? `Image: ${name} (not read)` : `Image: ${name}…`;
   return (
     <p className="doc-attachment" title={failed ?? undefined}>
       {said}

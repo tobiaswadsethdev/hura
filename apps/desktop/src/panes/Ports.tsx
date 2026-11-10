@@ -113,7 +113,7 @@ export function PortsPane({
       title: `Stop the process on ${row.port}?`,
       body: (
         <>
-          <code>{row.owner?.command || "the process"}</code>
+          <code>{row.owner?.command || "The process"}</code>
           {row.owner && <> (pid {row.owner.pid})</>} is sent <code>TERM</code>, then{" "}
           <code>KILL</code> if it is still there two seconds later.
           {row.owner && !row.owner.certain && (
@@ -122,7 +122,7 @@ export function PortsPane({
           If the agent started it, the agent will see it exit.
         </>
       ),
-      confirm: "kill",
+      confirm: "Kill",
       onConfirm: () => void act(row.port, () => api.killPort(server, name, row.port)),
     });
 
@@ -136,7 +136,7 @@ export function PortsPane({
           exit.
         </>
       ),
-      confirm: "kill",
+      confirm: "Kill",
       onConfirm: () => void act(-p.pid, () => api.killProcess(server, name, p.pid)),
     });
 
@@ -147,7 +147,7 @@ export function PortsPane({
   return (
     <div className="ports">
       {rows.length === 0 ? (
-        <Empty icon={NoPorts} note="nothing listening" />
+        <Empty icon={NoPorts} note="Nothing listening" />
       ) : (
         <ul>
           {rows.map((row) => {
@@ -158,7 +158,7 @@ export function PortsPane({
                   <Ports />
                   <span
                     className="port"
-                    title={row.host === "v6" ? "listening on ::1" : "listening on 127.0.0.1"}
+                    title={row.host === "v6" ? "Listening on ::1" : "Listening on 127.0.0.1"}
                   >
                     {row.port}
                   </span>
@@ -170,7 +170,7 @@ export function PortsPane({
                             row.owner.certain ? "" : "\n(guessed: its command line names this port)"
                           }`
                         : row.listening
-                          ? "the process holding this is not visible from here. Check the process list."
+                          ? "The process holding this is not visible from here. Check the process list."
                           : undefined
                     }
                   >
@@ -183,7 +183,7 @@ export function PortsPane({
                   <span className="port-tools">
                     <button
                       className="quiet-icon"
-                      title={row.preview ? "open in browser" : "preview in browser"}
+                      title={row.preview ? "Open in Browser" : "Preview in Browser"}
                       disabled={busy === row.port}
                       onClick={() => void open(row.port, row.host)}
                     >
@@ -192,7 +192,7 @@ export function PortsPane({
                     {row.preview && (
                       <button
                         className="quiet-icon"
-                        title="copy address"
+                        title="Copy Address"
                         onClick={() => void navigator.clipboard.writeText(row.preview!.url)}
                       >
                         <Copy />
@@ -201,7 +201,7 @@ export function PortsPane({
                     {live && (
                       <button
                         className="quiet-icon"
-                        title="stop forwarding and close every connection"
+                        title="Stop Forwarding and Close Every Connection"
                         disabled={busy === row.port}
                         onClick={() => void stop(row.port)}
                       >
@@ -211,7 +211,7 @@ export function PortsPane({
                     {row.owner && (
                       <button
                         className="quiet-icon danger"
-                        title={`kill ${short(row.owner.command)} in the sandbox`}
+                        title={`Kill ${short(row.owner.command)} in the Sandbox`}
                         disabled={busy === row.port}
                         onClick={() => kill(row)}
                       >
@@ -229,7 +229,7 @@ export function PortsPane({
 
       {view && view.processes.length > 0 && (
         <section className="procs">
-          <h4>processes</h4>
+          <h4>Processes</h4>
           <ul>
             {view.processes.map((p) => (
               <li key={p.pid} className={busy === -p.pid ? "busy" : ""}>
@@ -238,13 +238,13 @@ export function PortsPane({
                   {short(p.command)}
                 </span>
                 {p.protected ? (
-                  <span className="hint" title="the agent or its terminal. Destroy the worktree to end it.">
+                  <span className="hint" title="The agent or its terminal. Destroy the worktree to end it.">
                     agent
                   </span>
                 ) : (
                   <button
                     className="quiet-icon danger"
-                    title={`kill ${short(p.command)}`}
+                    title={`Kill ${short(p.command)}`}
                     disabled={busy === -p.pid}
                     onClick={() => killProcess(p)}
                   >
@@ -269,12 +269,12 @@ export function PortsPane({
         <input
           value={typed}
           inputMode="numeric"
-          placeholder="another port"
-          aria-label="port"
+          placeholder="Another port"
+          aria-label="Port"
           onChange={(e) => setTyped(e.target.value.replace(/\D/g, ""))}
         />
         <button className="quiet" type="submit" disabled={!typedValid}>
-          preview
+          Preview
         </button>
       </form>
 
@@ -295,7 +295,7 @@ function Forwarded({ row }: { row: Row }) {
       </span>,
     );
     bits.push(
-      <span key="here" title="connections open through it from this machine">
+      <span key="here" title="Connections open through it from this machine">
         {row.preview.connections} open
       </span>,
     );
@@ -306,7 +306,7 @@ function Forwarded({ row }: { row: Row }) {
   }
   if (row.forward) {
     bits.push(
-      <span key="server" title="the server's forward into the sandbox">
+      <span key="server" title="The server's forward into the sandbox">
         {row.forward.idle_secs !== null
           ? `server idle ${idle(row.forward.idle_secs)}`
           : `${row.forward.connections} on the server`}

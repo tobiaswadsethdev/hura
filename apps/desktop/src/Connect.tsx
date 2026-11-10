@@ -63,7 +63,7 @@ export function ServersScreen({
   };
 
   return (
-    <Screen icon={Servers} title="servers" onClose={onClose}>
+    <Screen icon={Servers} title="Servers" onClose={onClose}>
       {/* Trimmed to the one thing that goes wrong. What stood here also
           explained what a pairing string is and where to run the command, and
           the field below has the shape of one in its placeholder -- which
@@ -79,7 +79,7 @@ export function ServersScreen({
       </p>
 
       <label>
-        <span>pairing</span>
+        <span>Pairing</span>
         <textarea
           ref={field}
           rows={3}
@@ -100,9 +100,9 @@ export function ServersScreen({
       </label>
 
       <label>
-        <span>name</span>
+        <span>Name</span>
         <input
-          placeholder="defaults to the host"
+          placeholder="Defaults to the host"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
@@ -112,13 +112,13 @@ export function ServersScreen({
 
       <div className="actions">
         <button className="go" disabled={busy || !pairing.trim()} onClick={() => void submit()}>
-          {busy ? "connecting…" : "connect"}
+          {busy ? "Connecting…" : "Connect"}
         </button>
       </div>
 
       {servers.length > 0 && (
         <section className="panel">
-          <h3>paired</h3>
+          <h3>Paired</h3>
           <ul className="paired">
             {servers.map((s) => (
               <li key={s.name}>
@@ -135,10 +135,10 @@ export function ServersScreen({
                     for it. */}
                 <button
                   className="quiet-icon danger"
-                  title={`forget ${s.name} (the server keeps accepting the token until hurad revoke)`}
+                  title={`Forget ${s.name} (the server keeps accepting the token until hurad revoke)`}
                   onClick={() => void forget(s.name)}
                 >
-                  <Forget aria-label={`forget ${s.name}`} />
+                  <Forget aria-label={`Forget ${s.name}`} />
                 </button>
               </li>
             ))}

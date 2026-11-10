@@ -60,7 +60,7 @@ export function PolicyPane({ server, name }: { server: string; name: string }) {
             and anything that depends on it stops working.
           </>
         ),
-        confirm: "block",
+        confirm: "Block",
         onConfirm: () => void run(endpoint, api.block(server, name, endpoint, false)),
       }),
     remove: (rule, host) => {
@@ -76,7 +76,7 @@ export function PolicyPane({ server, name }: { server: string; name: string }) {
             It also names <code>{others.join(", ")}</code>, which lose it too.
           </>
         ),
-        confirm: "remove",
+        confirm: "Remove",
         onConfirm: go,
       });
     },
@@ -102,14 +102,14 @@ function Policy({ view, change, busy }: { view: View; change: Change; busy: stri
   const listed = (endpoint: string) =>
     menu(() => [
       {
-        label: "Remove from the list",
+        label: "Remove from the List",
         icon: Forget,
-        hint: "new sessions only",
+        hint: "New sessions only",
         disabled: busy !== null,
         run: () => change.unlist(endpoint),
       },
       "separator",
-      { label: "Copy endpoint", icon: Copy, hint: endpoint, run: () => copy(endpoint) },
+      { label: "Copy Endpoint", icon: Copy, hint: endpoint, run: () => copy(endpoint) },
     ]);
 
   const own = byHost(view.rules.filter((r) => !r.global));
@@ -121,14 +121,14 @@ function Policy({ view, change, busy }: { view: View; change: Change; busy: stri
       <header className="policy-head">
         <PolicyGlyph className="policy-glyph" />
         <span className="policy-name">{view.template ?? "no template recorded"}</span>
-        <span className="pill fixed" title="rules on this session's own sandbox">
+        <span className="pill fixed" title="Rules on this session's own sandbox">
           {view.rules.filter((r) => !r.global).length} rules
         </span>
       </header>
 
       <section>
         <h4>
-          this session
+          This session
           {own.length > 0 && (
             <span className="count">
               {own.length} {own.length === 1 ? "host" : "hosts"}
@@ -146,7 +146,7 @@ function Policy({ view, change, busy }: { view: View; change: Change; busy: stri
 
       {global.length > 0 && (
         <section>
-          <h4 title="From the sandbox runtime's own policy; changed with `sbx policy`, not here.">every sandbox</h4>
+          <h4 title="From the sandbox runtime's own policy; changed with `sbx policy`, not here.">Every sandbox</h4>
           {global.map(([host, rules]) => (
             <HostCard key={host} host={host} rules={rules} change={change} busy={busy} menu={menu} readOnly />
           ))}
@@ -155,11 +155,11 @@ function Policy({ view, change, busy }: { view: View; change: Change; busy: stri
 
       {lists && (
         <section>
-          <h4 title="Applied to every new session, so an entry may not be in this one.">every new session</h4>
+          <h4 title="Applied to every new session, so an entry may not be in this one.">Every new session</h4>
           <ul className="lists">
             {lists.allow.length + lists.routes.length + lists.block.length === 0 && (
               <li className="none">
-                none yet. Allow or block from the events pane with “every new session” ticked.
+                None yet. Allow or block from the events pane with “Every new session” ticked.
               </li>
             )}
             {lists.allow.map((a) => (
@@ -239,7 +239,7 @@ function HostCard({
                 },
                 "separator" as const,
               ]),
-          { label: "Copy host", icon: Copy, hint: host, run: () => copy(host) },
+          { label: "Copy Host", icon: Copy, hint: host, run: () => copy(host) },
         ])}
       >
         <span className="host">
@@ -253,20 +253,20 @@ function HostCard({
             key={r.id}
             className={`listed${r.allow ? "" : " deny"}`}
             tabIndex={0}
-            title={r.hosts.length > 1 ? `one rule for ${r.hosts.join(", ")}` : undefined}
+            title={r.hosts.length > 1 ? `One rule for ${r.hosts.join(", ")}` : undefined}
             {...menu(() => [
               ...(readOnly
                 ? []
                 : [
                     {
-                      label: "Remove this rule",
+                      label: "Remove This Rule",
                       icon: Forget,
                       disabled: busy !== null,
                       run: () => change.remove(r, host),
                     },
                     "separator" as const,
                   ]),
-              { label: "Copy rule id", icon: Copy, hint: r.id.slice(0, 8), run: () => copy(r.id) },
+              { label: "Copy Rule ID", icon: Copy, hint: r.id.slice(0, 8), run: () => copy(r.id) },
             ])}
           >
             <span className="method">{r.methods.length ? r.methods.join(",") : "any"}</span>

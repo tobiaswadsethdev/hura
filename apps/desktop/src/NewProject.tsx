@@ -109,15 +109,15 @@ function Picker({
           that floats is the one control nobody has needed labelled since
           1985. Escape still does it, and the title attribute still says so. */}
       <header className="dialog-head">
-        <h2>New project</h2>
-        <button className="quiet-icon" title="close" onClick={onClose}>
-          <Close aria-label="close" />
+        <h2>New Project</h2>
+        <button className="quiet-icon" title="Close" onClick={onClose}>
+          <Close aria-label="Close" />
         </button>
       </header>
       <input
         ref={field}
         className="search"
-        placeholder="filter repositories"
+        placeholder="Filter repositories"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
@@ -127,7 +127,7 @@ function Picker({
         // did not expect is the answer nine times out of ten.
         <Empty
           icon={NoRepos}
-          note={`nothing in ${listing.roots.join(", ") || "any configured root"}`}
+          note={`Nothing in ${listing.roots.join(", ") || "any configured root"}`}
         >
           <p className="hint">
             <code>repo_roots</code> in the server's config file is where it looks.
@@ -147,11 +147,11 @@ function Picker({
                 <span className="name">{r.name}</span>
                 <span className="branch">{r.branch ?? "detached"}</span>
                 <span className="path">{r.display}</span>
-                <span className="origin">{r.origin ?? "no origin, so it cannot be cloned"}</span>
+                <span className="origin">{r.origin ?? "No origin, so it cannot be cloned"}</span>
               </button>
             </li>
           ))}
-          {rows.length === 0 && <li className="none">nothing matches “{query}”</li>}
+          {rows.length === 0 && <li className="none">Nothing matches “{query}”</li>}
         </ul>
       )}
     </>

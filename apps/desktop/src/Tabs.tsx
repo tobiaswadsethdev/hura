@@ -114,8 +114,8 @@ export function Tabs({
   const menu = useButtonMenu();
   const add = onNewChat
     ? menu(() => [
-        { label: "chat", icon: Chat, run: onNewChat },
-        { label: "shell", icon: Shell, run: onNewShell },
+        { label: "Chat", icon: Chat, run: onNewChat },
+        { label: "Shell", icon: Shell, run: onNewShell },
       ])
     : onNewShell;
 
@@ -188,24 +188,24 @@ export function Tabs({
               {shell && (
                 <button
                   className="close"
-                  title="close this shell, and whatever is running in it"
+                  title="Close this shell, and whatever is running in it"
                   onClick={() => onCloseShell(shell)}
                 >
-                  <Close aria-label="close" />
+                  <Close aria-label="Close" />
                 </button>
               )}
               {conv && (
                 <button
                   className="close"
-                  title="end this conversation, and forget it"
+                  title="End this conversation, and forget it"
                   onClick={() => onCloseChat(conv)}
                 >
-                  <Close aria-label="close" />
+                  <Close aria-label="Close" />
                 </button>
               )}
               {file && (
-                <button className="close" title="close" onClick={() => onCloseFile(file)}>
-                  <Close aria-label="close" />
+                <button className="close" title="Close" onClick={() => onCloseFile(file)}>
+                  <Close aria-label="Close" />
                 </button>
               )}
             </span>
@@ -213,11 +213,11 @@ export function Tabs({
         })}
         <button
           className="add"
-          title={onNewChat ? "another conversation, or a shell" : "another shell in this sandbox"}
+          title={onNewChat ? "Another conversation, or a shell" : "Another shell in this sandbox"}
           aria-haspopup={onNewChat ? "menu" : undefined}
           onClick={add}
         >
-          <Plus aria-label={onNewChat ? "new tab" : "new shell"} />
+          <Plus aria-label={onNewChat ? "New Tab" : "New Shell"} />
         </button>
       </nav>
       {failure && <p className="error tabs-failure">{failure}</p>}

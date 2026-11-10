@@ -143,7 +143,7 @@ export function Tree({
 
   return (
     <div className="sidebar" style={{ width }}>
-      <nav className="tree" aria-label="projects and worktrees">
+      <nav className="tree" aria-label="Projects and worktrees">
         {groups.map((g) => {
           const key = keyOf(g);
           const open = !shut.has(key);
@@ -162,21 +162,21 @@ export function Tree({
                   ...(g.project
                     ? [
                         {
-                          label: "New worktree",
+                          label: "New Worktree",
                           icon: Plus,
                           run: () => onNewWorktree(g.project!),
                         },
                         "separator" as const,
                       ]
                     : []),
-                  { label: "Copy repository URL", icon: Copy, hint: g.hint, run: () => copy(g.hint) },
+                  { label: "Copy Repository URL", icon: Copy, hint: g.hint, run: () => copy(g.hint) },
                   ...(g.project
                     ? [
                         "separator" as const,
                         {
-                          label: "Forget project",
+                          label: "Forget Project",
                           icon: Forget,
-                          hint: "worktrees stay",
+                          hint: "Worktrees stay",
                           danger: true,
                           run: () => onForget(g.project!),
                         },
@@ -217,10 +217,10 @@ export function Tree({
                   <span className="group-actions">
                     <button
                       className="quiet-icon"
-                      title="new worktree in this project"
+                      title="New worktree in this project"
                       onClick={() => onNewWorktree(g.project!)}
                     >
-                      <Plus aria-label="new worktree" />
+                      <Plus aria-label="New Worktree" />
                     </button>
                   </span>
                 )}
@@ -281,7 +281,7 @@ function Context({ usage }: { usage: Usage }) {
   const filled = Math.max(0, Math.min(100, pct)) / 100;
   const of = usage.context_size ? ` of ${Math.round(usage.context_size / 1000)}k` : "";
   return (
-    <span className="wt-context" title={`context ${Math.round(pct)}% full${of}`}>
+    <span className="wt-context" title={`Context ${Math.round(pct)}% full${of}`}>
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
         <circle cx="6" cy="6" r={r} className="track" />
         <circle
@@ -330,14 +330,14 @@ function Worktree({
     <div
       className={`worktree-row${on ? " on" : ""}`}
       {...menu(() => [
-        { label: "Copy name", icon: Copy, hint: s.name, run: () => copy(s.name) },
-        { label: "Copy branch", icon: Branch, hint: s.work_branch, run: () => copy(s.work_branch) },
+        { label: "Copy Name", icon: Copy, hint: s.name, run: () => copy(s.name) },
+        { label: "Copy Branch", icon: Branch, hint: s.work_branch, run: () => copy(s.work_branch) },
         ...(pull
           ? [{ label: `Open ${pullName(pull)}`, icon: PullRequest, run: () => onPull(pull) }]
           : []),
         "separator",
         {
-          label: "Destroy worktree",
+          label: "Destroy Worktree",
           icon: Forget,
           hint: s.backend === "worktree" ? "and its directory" : "and its sandbox",
           danger: true,
@@ -361,7 +361,7 @@ function Worktree({
           <span className="wt-name">{s.name}</span>
           <span className="wt-signals">
             {s.backend === "worktree" && (
-              <span className="wt-unsandboxed" title="a worktree on the server: not isolated">
+              <span className="wt-unsandboxed" title="A worktree on the server: not isolated">
                 <Unsandboxed />
               </span>
             )}
@@ -370,8 +370,8 @@ function Worktree({
                 className={`wt-ports${previewed.length > 0 ? " on" : ""}`}
                 title={
                   previewed.length > 0
-                    ? `previewing ${previewed.map((p) => `${p.port} → localhost:${p.local}`).join(", ")}`
-                    : `listening on ${listening.join(", ")}`
+                    ? `Previewing ${previewed.map((p) => `${p.port} → localhost:${p.local}`).join(", ")}`
+                    : `Listening on ${listening.join(", ")}`
                 }
               >
                 <Ports />
@@ -379,7 +379,7 @@ function Worktree({
             )}
             {usage && <Context usage={usage} />}
           </span>
-          <span className="wt-age" title="how long this worktree has existed">
+          <span className="wt-age" title="How long this worktree has existed">
             {age(s.created_at)}
           </span>
         </span>

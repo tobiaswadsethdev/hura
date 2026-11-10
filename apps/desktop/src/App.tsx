@@ -120,12 +120,12 @@ function tabsFor(session: Session, shells: string[], chats: string[], open: Tab[
   const agent: Tab[] =
     session.interface === "chat"
       ? [
-          { kind: "chat", conv: "agent", label: "agent" },
+          { kind: "chat", conv: "agent", label: "Agent" },
           ...chats
             .filter((conv) => conv !== "agent")
             .map((conv): Tab => ({ kind: "chat", conv, label: conv })),
         ]
-      : [{ kind: "terminal", tmux: null, label: "agent" }];
+      : [{ kind: "terminal", tmux: null, label: "Agent" }];
   return [
     ...agent,
     ...shells.map((tmux): Tab => ({ kind: "terminal", tmux, label: tmux })),
@@ -623,7 +623,7 @@ export default function App() {
       ) : (
         <>Its sandbox goes with it, and anything the agent has not pushed is lost.</>
       ),
-      confirm: dead ? "remove" : "destroy",
+      confirm: dead ? "Remove" : "Destroy",
       onConfirm: () => {
         api
           .destroy(server, s.name)
@@ -705,7 +705,7 @@ export default function App() {
             onForgot={forgot}
           />
         ) : (
-          <Empty size="page" icon={NoServer} note="no server paired">
+          <Empty size="page" icon={NoServer} note="No server paired">
             <pre>
               hurad serve{"\n"}
               hurad pair desktop --host 127.0.0.1
@@ -721,7 +721,7 @@ export default function App() {
             </p>
             <button className="go" onClick={() => setScreen("servers")}>
               <Servers />
-              paste a pairing string
+              Paste a Pairing String
             </button>
           </Empty>
         )}
@@ -736,7 +736,7 @@ export default function App() {
             version so "which build is this" is never more than a glance. */}
         <button
           className={`mark${screen === "about" ? " on" : ""}`}
-          title="about hura"
+          title="About hura"
           onClick={() => setScreen(screen === "about" ? null : "about")}
         >
           hura
@@ -762,7 +762,7 @@ export default function App() {
         {servers && servers.length > 1 && (
           <Select
             className="server-pick"
-            aria-label="server"
+            aria-label="Server"
             value={server ?? ""}
             onChange={setServer}
             options={servers.map((s) => ({ value: s.name, label: s.name, hint: s.address }))}
@@ -789,12 +789,12 @@ export default function App() {
             The divider is not decoration: `new project` is an action and the
             four after it are destinations. A row that mixed them silently
             would be a row where one button does not come back. */}
-        <nav className="destinations" aria-label="destinations">
+        <nav className="destinations" aria-label="Destinations">
           <button
             className="dest"
             disabled={!server}
-            title="new project"
-            aria-label="new project"
+            title="New Project"
+            aria-label="New Project"
             onClick={() => setCreatingProject(true)}
           >
             <NewProject />
@@ -802,7 +802,7 @@ export default function App() {
           <span className="dest-split" />
           <Destination
             icon={Integrations}
-            label="integrations"
+            label="Integrations"
             on={screen === "integrations"}
             disabled={!server}
             onOpen={() => setScreen("integrations")}
@@ -810,21 +810,21 @@ export default function App() {
           />
           <Destination
             icon={Servers}
-            label="servers"
+            label="Servers"
             on={screen === "servers"}
             onOpen={() => setScreen("servers")}
             onClose={() => setScreen(null)}
           />
           <Destination
             icon={Account}
-            label="account"
+            label="Account"
             on={screen === "account"}
             onOpen={() => setScreen("account")}
             onClose={() => setScreen(null)}
           />
           <Destination
             icon={Settings}
-            label="settings"
+            label="Settings"
             on={screen === "settings"}
             disabled={!server}
             onOpen={() => {
@@ -876,7 +876,7 @@ export default function App() {
           />
 
           <Split
-            label="projects sidebar width"
+            label="Projects sidebar width"
             value={prefs.treeWidth}
             min={LIMITS.treeWidth.min}
             max={LIMITS.treeWidth.max}
@@ -895,11 +895,11 @@ export default function App() {
             // panes each said `sandbox not found`, and the reason was on the
             // server's terminal. The mark is grey because it only says what is
             // absent; the reason is red because it is an error.
-            <Empty size="page" icon={NoSandbox} note="no sandbox behind this worktree">
+            <Empty size="page" icon={NoSandbox} note="No sandbox behind this worktree">
               {session.failure && <p className="error">{session.failure}</p>}
               <button className="go" onClick={() => destroy(session)}>
                 <Forget />
-                remove
+                Remove
               </button>
             </Empty>
           ) : session && server ? (
@@ -949,7 +949,7 @@ export default function App() {
                   ask({
                     title: `End ${conv}?`,
                     body: <>The conversation stops, and its transcript is forgotten.</>,
-                    confirm: "end it",
+                    confirm: "End It",
                     onConfirm: () => {
                       api
                         .closeChat(server, session.name, conv)
@@ -992,7 +992,7 @@ export default function App() {
                   from the middle and gives it to the right -- which is why
                   this one `grows="left"`. */}
               <Split
-                label="dock width"
+                label="Dock width"
                 value={prefs.dockWidth}
                 min={LIMITS.dockWidth.min}
                 max={LIMITS.dockWidth.max}
@@ -1017,10 +1017,10 @@ export default function App() {
             // A glyph that is the button that fixes it, which is as close as an
             // empty state gets to explaining itself: the mark here and the mark
             // on `new project` in the header are the same picture.
-            <Empty size="page" icon={NewProject} note="no projects yet">
+            <Empty size="page" icon={NewProject} note="No projects yet">
               <button className="go" disabled={!server} onClick={() => setCreatingProject(true)}>
                 <NewProject />
-                new project
+                New Project
               </button>
             </Empty>
           ) : (
@@ -1032,8 +1032,8 @@ export default function App() {
               icon={Branch}
               note={
                 sessions.length === 0
-                  ? "start a worktree with + beside a project"
-                  : "pick a worktree, or start one with + beside a project"
+                  ? "Start a worktree with + beside a project"
+                  : "Pick a worktree, or start one with + beside a project"
               }
             />
           )}
@@ -1084,7 +1084,7 @@ export default function App() {
             of it being a sidebar rather than a destination. */}
         {inboxOpen && (
           <Split
-            label="tickets sidebar width"
+            label="Tickets sidebar width"
             value={prefs.inboxWidth}
             min={LIMITS.inboxWidth.min}
             max={LIMITS.inboxWidth.max}
@@ -1222,8 +1222,8 @@ export default function App() {
 
 /// What a session that is not ready yet is doing.
 function preparingNote(session: Session | null) {
-  if (session?.state === "seeding") return `cloning into ${session.name} and starting the agent`;
-  return `creating the sandbox${session ? ` for ${session.name}` : ""}`;
+  if (session?.state === "seeding") return `Cloning into ${session.name} and starting the agent`;
+  return `Creating the sandbox${session ? ` for ${session.name}` : ""}`;
 }
 
 /// One of the header's destinations.

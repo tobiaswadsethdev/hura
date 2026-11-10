@@ -3384,19 +3384,26 @@ main { position: relative; }
 .chat-split { display: flex; height: 100%; min-width: 0; }
 .chat-split > .chat { flex: 1; min-width: 0; }
 .chat { display: flex; flex-direction: column; height: 100%; background: var(--bg); }
-/* Above the box: the subagents, running ones first. One row, scrolled across. */
+/* Above the box: the subagents, running ones first. One row, scrolled across.
+   As wide as the composer's box, not its padded column: a scroller draws its
+   content through its own padding, so chips scrolled into a padded gutter
+   would hang out past the box's edges. */
 .chat-agents {
   flex: none;
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
-  max-width: 900px;
+  width: calc(100% - 40px);
+  max-width: 860px;
   margin: 0 auto;
-  padding: 6px 20px 0;
+  padding: 6px 0 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* Dragged across (see `useSideScroll`): the chips do not light up under a
+   pointer that is moving the row, and no text is picked up on the way. */
+.chat-agents.dragging { cursor: grabbing; }
+.chat-agents.dragging > * { pointer-events: none; }
 .chat-agents-count {
   display: inline-flex;
   align-items: center;
@@ -3605,6 +3612,12 @@ main { position: relative; }
   border-radius: var(--r);
 }
 .chat-tool-head:hover { background: var(--hover); color: var(--text); }
+/* No ring on the transcript's own toggles: the fill above is the focus
+   indicator, the way a context-menu row shows one. A ring round every step
+   clicked open was the loudest thing in the transcript. */
+:is(.chat-thinking button, .chat-tool-head, .chat-more, .chat-quiet-button):focus-visible { outline: none; }
+.chat-tool-head:focus-visible { background: var(--hover); color: var(--text); }
+.chat-thinking button:focus-visible, :is(.chat-more, .chat-quiet-button):focus-visible { color: var(--text); }
 /* Open, the head is the top of the card and no longer all of it, so its
    hover fill keeps the card's corners at the top only. */
 .chat-tool-head[aria-expanded="true"] { border-radius: var(--r) var(--r) 0 0; }
@@ -3791,7 +3804,7 @@ p.chat-quiet { margin: 0; font-size: 12px; }
 .chat-banner { margin: 0; padding: 4px 20px; border-top: 1px solid var(--line); }
 
 /* The composer: one box, the text and under it a row of what the next
-   message will run under. The box takes the focus ring, not the textarea, so
+   message will run under. The box shows the focus, not the textarea, so
    the controls read as part of what you are writing. */
 .chat-composer {
   position: relative;
@@ -3808,12 +3821,14 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   cursor: text;
   transition: border-color 120ms;
 }
-.chat-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+/* Focused, the box only firms its border: it is focused nearly all the time
+   the window is in use, and an accent ring round it all day was noise. */
+.chat-box:focus-within { border-color: var(--dimmer); }
 .chat-box textarea {
   display: block;
   width: 100%;
   min-height: 40px;
-  padding: 10px 12px 4px;
+  padding: 12px 14px 6px;
   background: none;
   color: var(--text);
   border: none;
@@ -3821,7 +3836,8 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   line-height: 1.5;
   resize: none;
 }
-/* The box above takes the ring, so the text area inside it takes none. */
+/* The box above shows the focus, so the text area inside it takes no ring
+   (the rule for every field would give it one). */
 .chat-box textarea:focus { box-shadow: none; }
 /* What is typed, coloured: drawn under a textarea whose own text is made
    clear while there is something to colour. Both are set alike to the last
@@ -3831,7 +3847,7 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   position: absolute;
   inset: 0;
   overflow: hidden;
-  padding: 10px 12px 4px;
+  padding: 12px 14px 6px;
   color: var(--text);
   font: inherit;
   line-height: 1.5;
@@ -3858,12 +3874,13 @@ p.chat-quiet { margin: 0; font-size: 12px; }
 }
 .chat-mode svg { flex: none; }
 .chat-mode span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-controls { display: flex; align-items: center; gap: 2px; padding: 2px 6px 6px; cursor: default; }
+.chat-controls { display: flex; align-items: center; gap: 2px; padding: 2px 8px 8px; cursor: default; }
 /* The mode and the model: words until pointed at. Borderless, so two of them
    in a row are a sentence about the next turn rather than a form. */
 .select-trigger.chat-select {
   max-width: 220px;
-  padding: 3px 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
   background: none;
   border-color: transparent;
   box-shadow: none;
@@ -3880,33 +3897,30 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
-.chat-stop {
+/* The round buttons at either end of the row, the phone's: a plus in a grey
+   disc for what goes with the message, and at the other end one filled disc
+   that sends -- or, while a turn runs and nothing is written, stops it. */
+.chat-round {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   width: 28px;
-  height: 26px;
-  margin-right: 4px;
-  background: none;
+  height: 28px;
+  padding: 0;
   border: none;
-  border-radius: var(--r-sm);
-  color: var(--text);
+  border-radius: 50%;
   cursor: pointer;
+  transition: background-color 120ms, color 120ms, filter 120ms;
 }
-.chat-stop:hover { background: var(--hover); }
-.chat-attach {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  background: none;
-  border: none;
-  border-radius: var(--r-sm);
-  color: var(--dim);
-  cursor: pointer;
-}
-.chat-attach:hover { background: var(--hover); color: var(--text); }
+.chat-round:focus-visible { outline-offset: 1px; }
+.chat-attach { margin-right: 4px; background: var(--hover); color: var(--dim); }
+.chat-attach:hover { background: rgb(255 255 255 / 0.12); color: var(--text); }
+.chat-send, .chat-stop { margin-left: 2px; background: var(--primary); color: var(--primary-ink); }
+.chat-send:hover:not(:disabled), .chat-stop:hover { filter: brightness(1.1); }
+.chat-send:active:not(:disabled), .chat-stop:active { filter: brightness(0.9); }
+.chat-send:disabled { background: var(--hover); color: var(--dimmer); cursor: default; }
+.chat-stop { background: var(--bad); color: #fff; }
 /* Waiting in the composer, in the box above what is typed. */
 .chat-attached { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 8px 10px 0; list-style: none; }
 .chat-attached li { position: relative; }
@@ -3928,7 +3942,6 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   color: var(--text);
   cursor: pointer;
 }
-.chat-send { width: 26px; height: 26px; padding: 0; border-radius: 50%; }
 /* The slash commands that fit what is typed, floating over the transcript
    as a menu does: the same glass, the active row in the accent. Each row is
    the name and what it takes, then what it does. */

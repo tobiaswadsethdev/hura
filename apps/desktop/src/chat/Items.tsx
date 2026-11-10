@@ -127,7 +127,7 @@ function Output({ text, error }: { text: string; error?: boolean }) {
   const lines = text.replace(/\n+$/, "").split("\n");
   const LIMIT = 30;
   const shown = all || lines.length <= LIMIT ? lines : lines.slice(-LIMIT);
-  if (!text.trim()) return <p className="chat-quiet">no output</p>;
+  if (!text.trim()) return <p className="chat-quiet">No output</p>;
   return (
     <>
       {shown.length < lines.length && (
@@ -213,7 +213,7 @@ function ToolBody({ call }: { call: ToolCall }) {
           {questions.map((q, i) => (
             <div key={i}>
               <dt>{q.question}</dt>
-              <dd>{answers[q.question ?? ""] ?? (call.answer && !call.answer.allow ? "not answered" : "…")}</dd>
+              <dd>{answers[q.question ?? ""] ?? (call.answer && !call.answer.allow ? "Not answered" : "…")}</dd>
             </div>
           ))}
         </dl>
@@ -228,7 +228,7 @@ function ToolBody({ call }: { call: ToolCall }) {
         <>
           {openAgent && (
             <button className="chat-follow" onClick={() => openAgent(call.id)}>
-              follow this agent beside the conversation
+              Follow this agent beside the conversation
             </button>
           )}
           {call.children.length > 0 && (
@@ -321,7 +321,7 @@ export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolC
             <img key={i} className="chat-image" src={`data:${p.mime};base64,${p.data}`} alt="" />
           ))}
           {call.answer && !call.answer.allow && call.answer.message && (
-            <p className="chat-quiet">you said: {call.answer.message}</p>
+            <p className="chat-quiet">You said: {call.answer.message}</p>
           )}
         </div>
       </Fold>
@@ -391,7 +391,7 @@ function Thinking({ text }: { text: string }) {
     <div className="chat-thinking">
       <button aria-expanded={open} onClick={() => setOpen(!open)}>
         <Twisty open={open} />
-        thinking
+        Thinking
       </button>
       <Fold open={open}>
         <div className="body">{text}</div>
@@ -534,7 +534,7 @@ function Prompt({ text }: { text: string }) {
       </div>
       {long && (
         <button className="chat-prompt-more" aria-expanded={all} onClick={toggle}>
-          {all ? "show less" : "show more"}
+          {all ? "Show less" : "Show more"}
         </button>
       )}
     </div>
@@ -556,8 +556,8 @@ function dayName(at: number): string {
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return "today";
-  if (d.toDateString() === yesterday.toDateString()) return "yesterday";
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
   return d.toLocaleDateString([], {
     weekday: "short",
     day: "numeric",
@@ -575,24 +575,24 @@ function Receipt({ at, read, receipts }: { at: number; read: number | null; rece
   const full = new Date(at).toLocaleString();
   if (receipts === "off") {
     return (
-      <p className="chat-receipt" title={`sent ${full}`}>
+      <p className="chat-receipt" title={`Sent ${full}`}>
         {clock(at)}
       </p>
     );
   }
   if (read !== null) {
     return (
-      <p className="chat-receipt" title={`sent ${full}, read ${new Date(read).toLocaleString()}`}>
+      <p className="chat-receipt" title={`Sent ${full}, read ${new Date(read).toLocaleString()}`}>
         {clock(at)}
-        <Read aria-label="read" />
+        <Read aria-label="Read" />
       </p>
     );
   }
   const queued = receipts === "working";
   return (
-    <p className="chat-receipt" title={queued ? `sent ${full}; Claude takes it when this turn is done` : `sent ${full}`}>
+    <p className="chat-receipt" title={queued ? `Sent ${full}; Claude takes it when this turn is done` : `Sent ${full}`}>
       {clock(at)}
-      <Delivered aria-label={queued ? "queued" : "sent"} />
+      <Delivered aria-label={queued ? "Queued" : "Sent"} />
     </p>
   );
 }

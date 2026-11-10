@@ -146,12 +146,12 @@ export function GitView({
           {status.branch}
         </span>
         <span className="git-ops">
-          {remote("fetch", Fetch, "fetch the remote's refs without touching the working copy")}
-          {remote("pull", Pull, "pull")}
+          {remote("fetch", Fetch, "Fetch the remote's refs without touching the working copy")}
+          {remote("pull", Pull, "Pull")}
           {status.upstream
-            ? remote("push", Push, "push")
-            : remote("push", Publish, "publish this branch, which is not on the remote yet")}
-          <button className="quiet-icon" disabled={busy} onClick={load} title="re-read git" aria-label="re-read git">
+            ? remote("push", Push, "Push")
+            : remote("push", Publish, "Publish this branch, which is not on the remote yet")}
+          <button className="quiet-icon" disabled={busy} onClick={load} title="Re-read Git" aria-label="Re-read Git">
             <Refresh />
           </button>
         </span>
@@ -169,7 +169,7 @@ export function GitView({
         ) : (
           // Never pushed is not the same as in sync, and the publish glyph
           // above is the button that says so.
-          <span className="none">not on the remote yet</span>
+          <span className="none">Not on the remote yet</span>
         )}
       </div>
 
@@ -188,8 +188,8 @@ export function GitView({
             <textarea
               rows={2}
               value={message}
-              placeholder="commit message"
-              title="ctrl+enter commits"
+              placeholder="Commit message"
+              title="Ctrl+Enter commits"
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -204,17 +204,17 @@ export function GitView({
               // button that produces an error you could have been shown is a
               // bad button.
               disabled={!canCommit}
-              title={status.staged.length === 0 ? "stage something first" : undefined}
+              title={status.staged.length === 0 ? "Stage something first" : undefined}
               onClick={commit}
             >
               {running === "commit" ? <Busy className="turning" /> : <Commit />}
-              commit
+              Commit
               {status.staged.length > 0 && <span className="n">{status.staged.length}</span>}
             </button>
           </div>
 
           <Section
-            title="staged"
+            title="Staged"
             entries={status.staged}
             busy={busy}
             onOpen={(p) => onOpenDiff(p, "staged")}
@@ -222,7 +222,7 @@ export function GitView({
             run={(paths) => void act("unstage", paths.map((path) => ({ do: "unstage", path })))}
           />
           <Section
-            title="changes"
+            title="Changes"
             entries={status.unstaged}
             busy={busy}
             onOpen={(p) => onOpenDiff(p, "worktree")}
@@ -237,7 +237,7 @@ export function GitView({
                     through writing it.
                   </>
                 ),
-                confirm: "discard",
+                confirm: "Discard",
                 onConfirm: () => void act("discard", [{ do: "discard", path }]),
               })
             }
@@ -328,6 +328,7 @@ function Section({
 
   if (entries.length === 0) return null;
   const All = verb === "stage" ? StageAll : UnstageAll;
+  const label = verb === "stage" ? "Stage" : "Unstage";
 
   const toggle = (path: string) =>
     setClosed((s) => {
@@ -346,8 +347,8 @@ function Section({
         <button
           className="quiet-icon"
           disabled={busy}
-          title={`${verb} all`}
-          aria-label={`${verb} all`}
+          title={`${label} All`}
+          aria-label={`${label} All`}
           onClick={() => run(nodes.map((n) => n.path))}
         >
           <All />
@@ -413,15 +414,15 @@ function Row({
         {...menu(() =>
           file
             ? [
-                { label: "Open diff", icon: Diff, run: () => onOpen(file.path) },
+                { label: "Open Diff", icon: Diff, run: () => onOpen(file.path) },
                 { label, icon: Act, disabled: busy, run: () => run([file.path]) },
                 "separator",
-                { label: "Copy path", icon: Copy, hint: file.path, run: () => copy(file.path) },
+                { label: "Copy Path", icon: Copy, hint: file.path, run: () => copy(file.path) },
                 ...(discard
                   ? [
                       "separator" as const,
                       {
-                        label: "Discard changes…",
+                        label: "Discard Changes…",
                         icon: Revert,
                         danger: true,
                         disabled: busy,
@@ -432,9 +433,9 @@ function Row({
               ]
             : [
                 { label: open ? "Collapse" : "Expand", run: () => toggle(node.path) },
-                { label: `${label} folder`, icon: Act, disabled: busy, run: () => run([node.path]) },
+                { label: `${label} Folder`, icon: Act, disabled: busy, run: () => run([node.path]) },
                 "separator",
-                { label: "Copy path", icon: Copy, hint: node.path, run: () => copy(node.path) },
+                { label: "Copy Path", icon: Copy, hint: node.path, run: () => copy(node.path) },
               ],
         )}
       >
@@ -451,8 +452,8 @@ function Row({
         <button
           className="act"
           disabled={busy}
-          title={file ? verb : `${verb} folder`}
-          aria-label={file ? verb : `${verb} folder`}
+          title={file ? label : `${label} Folder`}
+          aria-label={file ? label : `${label} Folder`}
           onClick={() => run([node.path])}
         >
           <Act />

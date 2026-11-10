@@ -59,8 +59,8 @@ function Permission({ ask, onAnswer }: { ask: ChatAsk; onAnswer: Answer }) {
         {/* Often the subject again, which the title already says. */}
         {ask.description && !title.includes(ask.description) && <p>{ask.description}</p>}
         {ask.reason && <p className="chat-quiet">{ask.reason}</p>}
-        {ask.blocked_path && <p className="chat-quiet">outside the working copy: {relative(ask.blocked_path)}</p>}
-        {ask.agent && <p className="chat-quiet">asked by a subagent</p>}
+        {ask.blocked_path && <p className="chat-quiet">Outside the working copy: {relative(ask.blocked_path)}</p>}
+        {ask.agent && <p className="chat-quiet">Asked by a subagent</p>}
       </header>
       <Preview ask={ask} />
       {declining ? (
@@ -75,31 +75,31 @@ function Permission({ ask, onAnswer }: { ask: ChatAsk; onAnswer: Answer }) {
             autoFocus
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder="what to do instead (optional)"
+            placeholder="What to do instead (optional)"
           />
           <button type="submit" className="go">
-            decline
+            Decline
           </button>
           <button type="button" className="chat-quiet-button" onClick={() => setDeclining(false)}>
-            back
+            Back
           </button>
         </form>
       ) : (
         <div className="chat-ask-actions">
           <button className="go" autoFocus={!ask.default_to_no} onClick={() => onAnswer(decided({ allow: true }))}>
-            allow
+            Allow
           </button>
           {ask.can_remember && (
             <button
               className="chat-quiet-button"
-              title="allow this and calls like it for the rest of the session, as Claude Code suggests"
+              title="Allow this and calls like it for the rest of the session, as Claude Code suggests"
               onClick={() => onAnswer(decided({ allow: true, always: true }))}
             >
-              allow, and don't ask again
+              Allow, and don't ask again
             </button>
           )}
           <button className="chat-quiet-button" autoFocus={ask.default_to_no} onClick={() => setDeclining(true)}>
-            decline…
+            Decline…
           </button>
         </div>
       )}
@@ -168,21 +168,21 @@ function Questions({ ask, onAnswer }: { ask: ChatAsk; onAnswer: Answer }) {
                 setOther((o) => ({ ...o, [key]: e.target.value }));
                 if (e.target.value) setChosen((c) => ({ ...c, [key]: [] }));
               }}
-              placeholder="or say something else"
+              placeholder="Or say something else"
             />
           </fieldset>
         );
       })}
       <div className="chat-ask-actions">
         <button type="submit" className="go" disabled={!complete}>
-          answer
+          Answer
         </button>
         <button
           type="button"
           className="chat-quiet-button"
           onClick={() => onAnswer(decided({ allow: false, message: "The user did not answer." }))}
         >
-          skip
+          Skip
         </button>
       </div>
     </form>
@@ -208,24 +208,24 @@ function Plan({ ask, onAnswer }: { ask: ChatAsk; onAnswer: Answer }) {
             onAnswer(decided({ allow: false, message: message.trim() || "Keep planning." }));
           }}
         >
-          <input autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="what to change" />
+          <input autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="What to change" />
           <button type="submit" className="go">
-            send back
+            Send Back
           </button>
           <button type="button" className="chat-quiet-button" onClick={() => setRevising(false)}>
-            back
+            Back
           </button>
         </form>
       ) : (
         <div className="chat-ask-actions">
           <button className="go" autoFocus onClick={() => onAnswer(decided({ allow: true, mode: "acceptEdits" }))}>
-            approve, and accept edits
+            Approve, and accept edits
           </button>
           <button className="chat-quiet-button" onClick={() => onAnswer(decided({ allow: true, mode: "default" }))}>
-            approve, and ask for each edit
+            Approve, and ask for each edit
           </button>
           <button className="chat-quiet-button" onClick={() => setRevising(true)}>
-            keep planning…
+            Keep planning…
           </button>
         </div>
       )}

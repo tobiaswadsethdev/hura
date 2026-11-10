@@ -113,7 +113,7 @@ export function Empty({
 /// such claim.
 export function Waiting({ size = "pane" }: { size?: Size }) {
   return (
-    <div className={`empty ${size}`} role="status" aria-label="loading">
+    <div className={`empty ${size}`} role="status" aria-label="Loading">
       <span className="spin" />
     </div>
   );

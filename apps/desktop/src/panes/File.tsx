@@ -125,14 +125,14 @@ export function FilePane({
   // sentence: what is worth saying is that there is nothing to show and how
   // big the thing being withheld is.
   if (file.binary) {
-    return <Empty icon={NotText} note={`binary file, ${file.bytes} bytes`} />;
+    return <Empty icon={NotText} note={`Binary file, ${file.bytes} bytes`} />;
   }
 
   return (
     <div className="file">
       {file.truncated && (
         <p className="notice">
-          showing the first part of {path}; it is {file.bytes} bytes
+          Showing the first part of {path}; it is {file.bytes} bytes
         </p>
       )}
       <div className="monaco" ref={host} />
