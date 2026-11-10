@@ -1603,7 +1603,7 @@ fn auth_header(auth: &str) -> String {
 /// attacker-influenced in the general case -- a ticket title, a JQL string, a
 /// token -- and an unescaped quote would end the value and start a new
 /// configuration line, which in a curl config file can name a file to write.
-fn quote(value: &str) -> String {
+pub(crate) fn quote(value: &str) -> String {
     let mut out = String::with_capacity(value.len() + 2);
     out.push('"');
     for c in value.chars() {

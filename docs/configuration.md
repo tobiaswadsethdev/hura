@@ -14,6 +14,7 @@ branch_prefix = "tobias"                              # <prefix>/<name> for a wo
 refresh    = "1s"                                     # unused since v0.4.0; still parsed
 auto_update = true                                    # download new releases ahead of a restart
 interface  = "chat"                                   # a new session's agent: "chat" or "terminal"
+names      = "ai"                                     # name unnamed sessions by a model, or "rules"
 
 sbx            = "/opt/sbx/bin/sbx"                   # unset: PATH, then ~/.docker/sbx/bin/sbx
 sandbox_cpus   = 4                                    # unset: every host CPU
@@ -262,6 +263,18 @@ its installer puts it. `sandbox_cpus` and `sandbox_memory` (`"8g"`, `"512m"`)
 size each session's sandbox. Unset, the runtime gives every sandbox every host
 CPU and half the host's memory, which is generous for one session and too much
 for several at once.
+
+`names` is how a session started without a name gets one. A session has two:
+the slug its sandbox, worktree directory and branch are keyed by, which never
+changes, and a title, which is what the window and the phone show and what
+renaming a session changes. `"ai"`, the default, asks Claude Haiku for both from
+the task -- through the Messages API when `hurad` has `ANTHROPIC_API_KEY` in its
+environment, otherwise through the `claude` command if it is on `hurad`'s
+`PATH` and signed in. That is a second or three before a create starts, and the
+task's text goes to Anthropic. Anything that goes wrong -- no key, no `claude`, ten
+seconds without an answer -- names it by `"rules"` instead: the slug from the
+task's first meaningful words, the title from its first sentence. `"rules"` on
+its own never sends anything anywhere.
 
 `gateway` named the OpenShell gateway sessions ran on. Nothing reads it now; it
 is still accepted, and ignored, so an existing file keeps loading.

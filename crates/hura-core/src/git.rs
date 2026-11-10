@@ -412,14 +412,13 @@ pub fn push(backend: &dyn Backend, session: &Session) -> Result<String, String> 
     // `-u` on every push, not only the first: it is a no-op once set, and
     // without it a branch that has never been pushed has no upstream to report
     // ahead and behind against afterwards.
-    run(
-        backend,
-        session,
-        &format!(
-            "git push -u origin HEAD:{branch}",
-            branch = sh_quote(&session.work_branch)
-        ),
-    )
+    //
+    // `HEAD`, not `HEAD:<work_branch>`: the agent may have moved to a branch of
+    // its own, and the record only learns that at the next poll. Pushing HEAD
+    // to the record's name would publish the new branch's commits under the
+    // old one. A plain `HEAD` pushes the branch checked out to its own name,
+    // which is the session's branch whenever the agent has not moved.
+    run(backend, session, "git push -u origin HEAD")
 }
 
 pub fn pull(backend: &dyn Backend, session: &Session) -> Result<String, String> {

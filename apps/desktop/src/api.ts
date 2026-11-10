@@ -111,6 +111,9 @@ export const api = {
   /// End a session and delete its sandbox. Answers with the list that is left.
   destroy: (server: string, name: string) =>
     invoke<Session[]>("destroy", { server, name }),
+  /// Rename a session. A blank title takes it away, and the slug shows.
+  retitle: (server: string, name: string, title: string) =>
+    invoke<Session[]>("retitle", { server, name, title }),
   poll: (server: string, name: string) => invoke<Poll>("poll", { server, name }),
   policy: (server: string, name: string) => invoke<PolicyView>("policy", { server, name }),
   events: (server: string, name: string) => invoke<FeedEvent[]>("events", { server, name }),

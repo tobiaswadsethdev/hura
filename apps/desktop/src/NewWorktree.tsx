@@ -138,7 +138,9 @@ function Form({
         ? pullTask(fromPull.pull, fromPull.mode)
         : "",
   );
-  const [name, setName] = useState(from?.session_name ?? "");
+  // A name as a person writes one. The server makes the slug the sandbox and
+  // the branch are keyed by from it, so a ticket's is its key and summary.
+  const [name, setName] = useState(from ? `${from.key} ${from.title}` : "");
   // Only sent when it came from a ticket or a pull request. Left empty, the
   // server names the branch by the convention in its own config file, which is
   // the one place that decides it. A pull request's is its own branch, and its
@@ -230,8 +232,11 @@ function Form({
         // branch rather than make one.
         pull: fromPull ? pullOrigin(fromPull.pull) : null,
         // Blank means "derive it", which is what `hura new` without `--name`
-        // does. The rule lives on the server so there is one of it.
+        // does -- by a model, when the server is set up for one. The rule
+        // lives on the server so there is one of it. Words rather than a slug
+        // are the title, with a slug made from them.
         name: name.trim() || null,
+        title: null,
         repo: project.repo,
         task,
         base: base.trim() || null,
@@ -316,7 +321,7 @@ function Form({
       />
 
       <div className="chips">
-        <label className="chip-field" title="Session name (derived from the task when blank)">
+        <label className="chip-field" title="Name (made from the task when blank)">
           <Edit />
           <input
             value={name}

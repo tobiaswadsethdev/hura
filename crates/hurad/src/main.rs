@@ -31,8 +31,8 @@ use clap::{Parser, Subcommand};
 use hura_client as remote;
 use hura_core::backend::Backends;
 use hura_core::{
-    chat, config, doctor, endpoints, events, image, mcp, ops, pane, policy, repos, session, store,
-    toolchain, update,
+    chat, config, doctor, endpoints, events, image, mcp, naming, ops, pane, policy, repos, session,
+    store, toolchain, update,
 };
 use hura_proto::{DEFAULT_PORT, Pairing};
 
@@ -795,14 +795,15 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
         )
     })?;
 
-    // A name from --name, else the task, else the repo's last path segment --
-    // with a counter on a derived one that is taken, as the window's has.
-    let name = match args.name {
-        Some(n) => n,
+    // A name from --name, else one made from the task -- by a model when the
+    // config file allows, else the slug rules -- else the repo's last path
+    // segment, with a counter on a made one that is taken, as the window's has.
+    let (name, title) = match args.name {
+        Some(n) => (n, None),
         None => {
-            let derived = session::derive_name(&args.task, &repo)
+            let named = naming::name(&args.task, &repo, cfg.naming(), &Store::load()?.names())
                 .ok_or("could not derive a session name; pass --name")?;
-            session::unique_name(&derived, &Store::load()?.names())
+            (named.name, named.title)
         }
     };
 
@@ -819,6 +820,7 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
         // The terminal has no projects; see `Session::project`.
         project: None,
         name,
+        title,
         repo,
         task: args.task,
         base: args.base.or_else(|| cfg.base.clone()),
@@ -886,6 +888,9 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
 
     println!();
     println!("session  {}", s.name);
+    if let Some(title) = &s.title {
+        println!("title    {title}");
+    }
     let backend = backends.for_session(&s);
     match s.backend {
         session::Kind::Sandbox => println!("sandbox  {}", s.sandbox),
@@ -1159,6 +1164,12 @@ fn print_sessions(rows: &[(Session, State)]) {
             s.work_branch,
             s.repo,
         );
+        // Under its row rather than in a column, like the failure below: the
+        // name is what a command here is typed with, so it keeps the column,
+        // and the title is a sentence.
+        if let Some(title) = &s.title {
+            println!("  {title}");
+        }
         // Under its row rather than in a column: it is a sentence, and only a
         // failed or dead session has one.
         if let Some(why) = &s.failure {

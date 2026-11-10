@@ -36,6 +36,7 @@ pub mod git;
 pub mod image;
 pub mod integrations;
 pub mod mcp;
+pub mod naming;
 pub mod ops;
 pub mod pane;
 pub mod policy;

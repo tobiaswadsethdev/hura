@@ -39,6 +39,8 @@ struct WorktreeView: View {
     @State private var error: String?
 
     private var session: Session? { server.session(named: name) }
+    /// The title it is shown by, or its name before the list has it.
+    private var label: String { session?.label ?? name }
 
     /// A terminal can't attach before the sandbox is up, and a session that
     /// failed or died has nothing to attach to. A chat shows hurad's own
@@ -70,7 +72,7 @@ struct WorktreeView: View {
                 details
             }
         }
-        .navigationTitle(tab.map { $0.isAgent ? name : "\(name) · \($0.label)" } ?? name)
+        .navigationTitle(tab.map { $0.isAgent ? label : "\(label) · \($0.label)" } ?? label)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
         // A session has the whole screen; back is the way to the tabs.
@@ -81,7 +83,7 @@ struct WorktreeView: View {
         .sheet(isPresented: $showingDetails) {
             NavigationStack {
                 details
-                    .navigationTitle(name)
+                    .navigationTitle(label)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
@@ -247,7 +249,7 @@ struct WorktreeView: View {
                     Button("Delete Worktree", role: .destructive) { confirmingDelete = true }
                         // On the button, so it opens over it, and from the
                         // details sheet as well as the screen.
-                        .confirmationDialog("Delete \(name)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                        .confirmationDialog("Delete \(label)?", isPresented: $confirmingDelete, titleVisibility: .visible) {
                             Button("Delete Worktree", role: .destructive, action: destroy)
                         } message: {
                             Text(session.isWorktree

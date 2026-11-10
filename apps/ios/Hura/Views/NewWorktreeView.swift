@@ -251,7 +251,8 @@ struct NewWorktreeView: View {
         switch origin {
         case let .ticket(t)?:
             task = "\(t.key): \(t.title)\n\n\(t.url)"
-            name = t.sessionName
+            // A name as a person writes one; the server makes the slug.
+            name = "\(t.key) \(t.title)"
             // The branch under this server's prefix, which is what a session
             // here will be given.
             let prefix = (try? await server.api.settings()).map { $0.settings.branchPrefix ?? $0.defaultBranchPrefix } ?? "hura"

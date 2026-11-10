@@ -129,6 +129,9 @@ pub struct Config {
     /// Whether a new session's agent is a chat or a terminal. `None` is a
     /// chat; see [`Self::interface`].
     pub interface: Option<chat::Interface>,
+    /// How a session given no name is named. `None` is
+    /// [`crate::naming::Mode::Ai`]; see [`Self::naming`].
+    pub names: Option<crate::naming::Mode>,
 }
 
 impl Config {
@@ -200,6 +203,16 @@ impl Config {
                 invalid(
                     "interface",
                     format!("`{text}` is not an interface; expected \"chat\" or \"terminal\""),
+                )
+            })?),
+        };
+
+        let names = match blank_to_none(raw.names.take()) {
+            None => None,
+            Some(text) => Some(crate::naming::Mode::parse(&text).ok_or_else(|| {
+                invalid(
+                    "names",
+                    format!("`{text}` is not a way of naming; expected \"ai\" or \"rules\""),
                 )
             })?),
         };
@@ -396,6 +409,7 @@ impl Config {
             mcp,
             branch_prefix: raw.branch_prefix,
             interface,
+            names,
         })
     }
 
@@ -404,6 +418,12 @@ impl Config {
     /// what every session made before the choice existed stays.
     pub fn interface(&self) -> chat::Interface {
         self.interface.unwrap_or(chat::Interface::Chat)
+    }
+
+    /// How a session given no name is named: by a model when one can be
+    /// reached, which is the default, or by the slug rules alone.
+    pub fn naming(&self) -> crate::naming::Mode {
+        self.names.unwrap_or(crate::naming::Mode::Ai)
     }
 
     /// The policy a new session gets when nothing else says.
@@ -491,6 +511,7 @@ struct Raw {
     tracker: Option<serde::de::IgnoredAny>,
     branch_prefix: Option<String>,
     interface: Option<String>,
+    names: Option<String>,
     /// `[credentials.NAME]` tables. Ordered by name so the create form lists
     /// them the same way every time.
     credentials: Option<std::collections::BTreeMap<String, RawCredential>>,

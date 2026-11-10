@@ -7,7 +7,24 @@ import type { Skill } from "./Skill";
 import type { State } from "./State";
 import type { Ticket } from "./Ticket";
 
-export type Session = { name: string, 
+export type Session = { 
+/**
+ * What the session is keyed by: its sandbox, its worktree directory, its
+ * default branch, every request about it. A slug, because it is all of
+ * those, and fixed for the session's life, for the same reason.
+ */
+name: string, 
+/**
+ * What the session is called where a person reads it: "Fix the flaky
+ * login test" rather than `fix-flaky-login-test`.
+ *
+ * Apart from the name because the name cannot change and this can: it
+ * keys nothing, so renaming a session is writing this field and nothing
+ * else. `None` on a record from before there was one, and on a session
+ * whose task said nothing to make one from, which shows its name instead;
+ * see [`Session::label`].
+ */
+title: string | null, 
 /**
  * Where this session runs. See [`Kind`]; a record without it is a
  * sandbox, which every session was until the server could say otherwise.
