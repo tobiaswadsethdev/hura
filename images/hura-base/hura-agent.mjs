@@ -38,6 +38,12 @@
 // an image block, which is what Claude Code does with one pasted into its
 // terminal; the agent sees it without spending a tool call on reading it.
 //
+// A message that starts with `!` is a command for the sandbox's shell, as in
+// Claude Code's terminal: run here in the working copy, kept in the transcript
+// with what it printed, and handed to Claude with the next message without a
+// turn of its own. The window could run it in a shell tab instead; doing it
+// here is what puts the output in front of the model.
+//
 // Each message you send is kept as you wrote it, and once Claude Code takes it
 // into a turn a `read` entry says so. Claude Code acknowledges a message on
 // stdout when it starts the turn that carries it, not when it reads it from
@@ -49,6 +55,7 @@
 // the same user and can reach this port, just as a terminal agent can type into
 // its own tmux pane. The sandbox policy is the boundary.
 
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
@@ -177,6 +184,114 @@ function size(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1 << 20) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1 << 20)).toFixed(1)} MB`;
+}
+
+/// Claude Code's slash commands in the protocol's shape (`SlashCommand` in
+/// hura-core): from `supportedCommands()` or `commands_changed`, which
+/// describe each, or the bare names an `init` message has. Rows can share a
+/// name, and then the one Claude Code marks as its own is the one `/name`
+/// runs, so that is the one kept. A name starting `__` is Claude Code's own
+/// plumbing (`__remote-workflow`), not something to type.
+export function slashCommands(list) {
+  if (!Array.isArray(list)) return [];
+  const byName = new Map();
+  for (const c of list) {
+    const name = typeof c === "string" ? c : c?.name;
+    if (typeof name !== "string" || !name.trim() || name.startsWith("__")) continue;
+    const had = byName.get(name);
+    if (had && !(c?.builtin && !had.builtin)) continue;
+    byName.set(name, {
+      name,
+      description: typeof c?.description === "string" ? c.description : "",
+      argument_hint: typeof c?.argumentHint === "string" ? c.argumentHint : "",
+      aliases: Array.isArray(c?.aliases) ? c.aliases.filter((a) => typeof a === "string" && a) : [],
+      builtin: Boolean(c?.builtin),
+    });
+  }
+  return [...byName.values()].map(({ builtin: _, ...c }) => c);
+}
+
+/// The names an `init` message lists, each with what is already known about
+/// it: `init` names the commands and says nothing else, and arrives after
+/// `supportedCommands()` has described them.
+export function namedCommands(names, known) {
+  const described = new Map(known.map((c) => [c.name, c]));
+  return slashCommands(names).map((c) => described.get(c.name) ?? c);
+}
+
+/// The end of a "turn" that was only a `!` command's output going in: Claude
+/// Code reports one for a message that asked for no reply, with nothing in
+/// it. Kept, it would draw as a turn that never happened.
+export function silent(msg, quiet) {
+  if (msg.type !== "result" || msg.num_turns) return false;
+  const uuids = msg.user_message_uuids ?? (msg.user_message_uuid ? [msg.user_message_uuid] : []);
+  return uuids.length > 0 && uuids.every((u) => quiet.has(u));
+}
+
+/// The most of a `!` command's output that is kept: about what Claude Code
+/// keeps of a Bash call's, and as much as is worth putting before the model.
+export const SHELL_OUTPUT = 30_000;
+/// How long a `!` command may run, which is Claude Code's longest for a Bash
+/// call. Something meant to run for good belongs in a shell tab.
+const SHELL_TIME_MS = 10 * 60_000;
+
+/// Output as text rather than as a terminal draws it: colour and cursor codes
+/// taken out, and a line rewritten in place (a progress bar) as it ended.
+export function plain(text) {
+  return text
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b[@-Z\\-_]/g, "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.split("\r").findLast((part) => part !== "") ?? "")
+    .join("\n");
+}
+
+/// A command's output as it arrives, keeping its start and its end once it
+/// is longer than both: the end is where a command says how it went, and the
+/// middle of a long build log is what nobody reads.
+export class Output {
+  #head = "";
+  #tail = "";
+  #left = 0;
+
+  constructor(limit = SHELL_OUTPUT) {
+    this.headRoom = Math.floor(limit / 3);
+    this.tailRoom = limit - this.headRoom;
+  }
+
+  add(chunk) {
+    let text = String(chunk);
+    if (this.#head.length < this.headRoom) {
+      const room = this.headRoom - this.#head.length;
+      this.#head += text.slice(0, room);
+      text = text.slice(room);
+    }
+    if (!text) return;
+    this.#tail += text;
+    if (this.#tail.length > this.tailRoom) {
+      this.#left += this.#tail.length - this.tailRoom;
+      this.#tail = this.#tail.slice(-this.tailRoom);
+    }
+  }
+
+  get truncated() {
+    return this.#left > 0;
+  }
+
+  text() {
+    const gap = this.#left ? `\n[${this.#left} characters left out]\n` : "";
+    return plain(this.#head + gap + this.#tail);
+  }
+}
+
+/// What Claude is told about a `!` command, in the tags Claude Code's own
+/// terminal uses for one, so it reads as the same thing. The output went to
+/// one stream, as a terminal shows it; how it ended goes where errors do.
+export function shellContext(command, output, code, stopped) {
+  const ended = stopped ? "Stopped before it finished." : code === null ? "Did not finish." : code ? `Exit code ${code}` : "";
+  return `<bash-input>${command}</bash-input>\n<bash-stdout>${output}</bash-stdout><bash-stderr>${ended}</bash-stderr>`;
 }
 
 /// The message of yours that a user message from Claude Code acknowledges, by
@@ -401,7 +516,8 @@ function writeAtomically(file, text) {
   fs.renameSync(tmp, file);
 }
 
-class Host {
+/// Exported for the tests, which run `!` commands through one without an SDK.
+export class Host {
   constructor({ dir, cwd }) {
     this.dir = path.join(dir, "chat");
     this.hura = dir;
@@ -414,6 +530,13 @@ class Host {
     this.limits = {};
     fs.mkdirSync(this.dir, { recursive: true });
     fs.mkdirSync(this.uploads, { recursive: true });
+    /// The slash commands Claude Code last described, in any conversation.
+    /// They are the working copy's and the image's, so the same in every
+    /// conversation; kept on disk, so one not yet started, or a host just
+    /// restarted, can offer them before Claude Code has said a word.
+    /// `terminal` names those that only work in Claude Code's terminal,
+    /// which `init` lists among the rest; a chat does not offer them.
+    ({ commands: this.commands, terminal: this.terminal } = this.#readCommands());
     for (const record of this.#readRegistry()) {
       this.conversations.set(record.name, new Conversation(this, record));
     }
@@ -421,6 +544,38 @@ class Host {
 
   #registry() {
     return path.join(this.dir, "conversations.json");
+  }
+
+  #readCommands() {
+    try {
+      const kept = JSON.parse(fs.readFileSync(path.join(this.dir, "commands.json"), "utf8"));
+      const terminal = new Set((Array.isArray(kept.terminal) ? kept.terminal : []).filter((n) => typeof n === "string"));
+      return { commands: slashCommands(kept.commands), terminal };
+    } catch {
+      return { commands: [], terminal: new Set() };
+    }
+  }
+
+  /// The commands one conversation has just heard of, for the rest: each one
+  /// Claude Code is not running for has nothing better to offer. Answers
+  /// them as a chat offers them, without the terminal's own.
+  learnCommands(heard, terminal = this.terminal) {
+    this.terminal = terminal;
+    const commands = heard.filter((c) => !terminal.has(c.name));
+    if (JSON.stringify(commands) === JSON.stringify(this.commands)) return this.commands;
+    this.commands = commands;
+    try {
+      const kept = { commands, terminal: [...terminal] };
+      writeAtomically(path.join(this.dir, "commands.json"), JSON.stringify(kept) + "\n");
+    } catch (e) {
+      log(`could not keep the commands: ${e.message}`);
+    }
+    for (const c of this.conversations.values()) {
+      if (c.query || c.commands === commands) continue;
+      c.commands = commands;
+      c.broadcast({ t: "state", state: c.snapshot() });
+    }
+    return commands;
   }
 
   #readRegistry() {
@@ -515,10 +670,19 @@ class Conversation {
     this.modelName = null;
     this.version = null;
     this.models = [];
-    this.commands = [];
+    /// `SlashCommand`s. The host's until Claude Code says for itself.
+    this.commands = host.commands;
+    /// The `!` commands running, by uuid: `{child, stopped}`.
+    this.shells = new Map();
+    /// Messages pushed to Claude Code that are not prompts of yours: a `!`
+    /// command's output. Its echo is not a note to draw.
+    this.quiet = new Set();
+    /// Those of `quiet` Claude Code has not yet said it took in.
+    this.taking = new Set();
     this.context = null;
     this.spend = {};
     this.activeAt = record.created ?? 0;
+    this.#endOrphans();
   }
 
   get name() {
@@ -544,6 +708,22 @@ class Conversation {
     return entries;
   }
 
+  /// A `!` command that was running when the host stopped never said how it
+  /// ended, and a window would show it running for ever. It is said now.
+  #endOrphans() {
+    const ended = new Set(this.entries.filter((e) => e.ev.kind === "exited").map((e) => e.ev.uuid));
+    for (const e of this.entries.filter((e) => e.ev.kind === "shell" && !ended.has(e.ev.uuid))) {
+      this.append({
+        kind: "exited",
+        uuid: e.ev.uuid,
+        output: "The chat host restarted before this finished.",
+        code: null,
+        stopped: false,
+        truncated: false,
+      });
+    }
+  }
+
   append(ev) {
     const entry = { seq: ++this.seq, at: Date.now(), ev };
     this.entries.push(entry);
@@ -561,19 +741,21 @@ class Conversation {
 
   snapshot() {
     return {
-      activity: this.pending.size ? "waiting" : this.activity,
+      activity: this.pending.size ? "waiting" : this.shells.size ? "running" : this.activity,
       pending: [...this.pending.values()].map((p) => p.request),
       mode: this.mode,
       model: this.model,
       effort: this.effort,
       models: this.models,
-      commands: this.commands,
+      commands: this.commands.map((c) => c.name),
+      slash_commands: this.commands,
       status: this.status,
       cost_usd: this.spend.cost ?? null,
       context_percentage: this.context?.percentage ?? null,
       started: this.query !== null,
       files: true,
       receipts: true,
+      shell: true,
     };
   }
 
@@ -651,7 +833,16 @@ class Conversation {
         this.changed();
       })
       .catch(() => {});
+    q.supportedCommands()
+      .then((commands) => this.#commands(slashCommands(commands)))
+      .catch(() => {});
     this.#pump(q);
+  }
+
+  #commands(heard, terminal) {
+    if (!heard.length) return;
+    this.commands = this.host.learnCommands(heard, terminal);
+    this.changed();
   }
 
   async #pump(q) {
@@ -682,6 +873,17 @@ class Conversation {
       this.host.report();
     }
     if (msg.type === "rate_limit_event") log(`rate limit: ${JSON.stringify(msg.rate_limit_info)}`);
+
+    if (silent(msg, this.quiet)) {
+      // Not a turn: a `!` command's output going in. Nothing was spent and
+      // nothing is drawn, and the activity is what it was. Claude Code has
+      // written the session down, though, so it can be resumed.
+      for (const u of msg.user_message_uuids ?? [msg.user_message_uuid]) this.taking.delete(u);
+      this.#resumable();
+      this.changed();
+      return;
+    }
+    if (msg.type === "result") for (const u of msg.user_message_uuids ?? []) this.taking.delete(u);
 
     switch (msg.type) {
       case "stream_event":
@@ -739,7 +941,7 @@ class Conversation {
           this.read.add(uuid);
           this.append({ kind: "read", uuid });
         }
-        if (msg.isReplay || (msg.uuid && this.sent.has(msg.uuid))) return;
+        if (msg.isReplay || (msg.uuid && (this.sent.has(msg.uuid) || this.quiet.has(msg.uuid)))) return;
         break;
       }
     }
@@ -786,10 +988,23 @@ class Conversation {
         // Claude Code says, and a choice stands until it does.
         if (msg.effort !== undefined) this.effort = msg.effort;
         this.version = msg.claude_code_version;
-        this.commands = msg.slash_commands ?? [];
+        this.#commands(
+          namedCommands(msg.slash_commands, this.commands),
+          Array.isArray(msg.terminal_slash_commands) ? new Set(msg.terminal_slash_commands) : undefined,
+        );
         this.changed();
         break;
+      case "commands_changed":
+        // Skills found as the agent works in a directory that has some: the
+        // whole list again, to replace the one held.
+        this.#commands(slashCommands(msg.commands));
+        break;
       case "session_state_changed":
+        // Claude Code says it is running while it takes in a `!` command's
+        // output, with no reply to come. A conversation idle before is still
+        // idle: the session list, and a phone told "Claude finished", would
+        // otherwise see a turn that never happened.
+        if (msg.state === "running" && this.activity === "idle" && this.taking.size) break;
         this.activity = msg.state === "requires_action" ? "waiting" : msg.state;
         if (msg.state === "idle") this.tool = null;
         this.changed();
@@ -872,9 +1087,7 @@ class Conversation {
     }
     this.sent.add(uuid);
     this.append({ kind: "prompt", text, uuid, files: saved, receipt: true });
-    // Shared, so a second message sent while the first is still starting the
-    // conversation waits for that start rather than making another.
-    if (!this.query) await (this.starting ??= this.start().finally(() => (this.starting = null)));
+    await this.#running();
     this.inbox.push({
       type: "user",
       message: { role: "user", content },
@@ -888,7 +1101,91 @@ class Conversation {
     this.changed();
   }
 
+  /// Claude Code, started if it is not running. Shared, so a second message
+  /// sent while the first is still starting the conversation waits for that
+  /// start rather than making another.
+  async #running() {
+    if (!this.query) await (this.starting ??= this.start().finally(() => (this.starting = null)));
+  }
+
+  /// A `!` command: run in the working copy, kept with what it printed, and
+  /// then put before Claude without a turn of its own, to be read with the
+  /// next message. Answers once it has started; its end is an entry.
+  async shell(command) {
+    const text = String(command ?? "").trim();
+    if (!text) throw new Error("nothing to run");
+    const uuid = randomUUID();
+    const output = new Output();
+    const child = spawn("bash", ["-c", text], {
+      cwd: this.host.cwd,
+      // A pager or a prompt for a password would wait on a terminal that is
+      // not there; with no input, either gives up at once.
+      env: { ...process.env, PAGER: "cat", GIT_PAGER: "cat", GIT_TERMINAL_PROMPT: "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+      // Its own process group, so stopping it stops what it started too.
+      detached: true,
+    });
+    const run = { child, stopped: false, late: false };
+    this.shells.set(uuid, run);
+    this.append({ kind: "shell", uuid, command: text });
+    this.changed();
+    log(`${this.name}: running ${JSON.stringify(text)}`);
+    child.stdout.setEncoding("utf8").on("data", (d) => output.add(d));
+    child.stderr.setEncoding("utf8").on("data", (d) => output.add(d));
+    const limit = setTimeout(() => {
+      run.late = true;
+      this.#stop(run);
+    }, SHELL_TIME_MS);
+    const ended = new Promise((resolve) => {
+      child.on("error", (e) => {
+        output.add(`${e.message}\n`);
+        resolve(null);
+      });
+      child.on("close", (code) => resolve(code));
+    });
+    void ended.then(async (code) => {
+      clearTimeout(limit);
+      this.shells.delete(uuid);
+      if (run.late) output.add(`\n[stopped after ${SHELL_TIME_MS / 60_000} minutes]`);
+      const said = output.text();
+      const exit = run.stopped || run.late ? null : code;
+      this.append({ kind: "exited", uuid, output: said, code: exit, stopped: run.stopped, truncated: output.truncated });
+      this.changed();
+      try {
+        await this.#running();
+        const id = randomUUID();
+        this.quiet.add(id);
+        this.taking.add(id);
+        this.inbox.push({
+          type: "user",
+          message: { role: "user", content: shellContext(text, said, exit, run.stopped) },
+          parent_tool_use_id: null,
+          origin: { kind: "human" },
+          shouldQuery: false,
+          uuid: id,
+        });
+      } catch (e) {
+        log(`${this.name}: could not hand a command's output to Claude: ${e.message ?? e}`);
+      }
+    });
+  }
+
+  #stop(run) {
+    if (run.child.exitCode !== null || run.child.signalCode !== null) return;
+    run.stopped ||= !run.late;
+    const group = (signal) => {
+      try {
+        process.kill(-run.child.pid, signal);
+      } catch {
+        // Gone already.
+      }
+    };
+    group("SIGTERM");
+    setTimeout(() => group("SIGKILL"), 3_000).unref();
+  }
+
   async interrupt() {
+    for (const run of this.shells.values()) this.#stop(run);
     await this.query?.interrupt();
   }
 
@@ -919,6 +1216,7 @@ class Conversation {
   }
 
   end() {
+    for (const run of this.shells.values()) this.#stop(run);
     for (const w of this.watchers) w.end();
     this.inbox?.close();
     this.query?.close();
@@ -1001,6 +1299,8 @@ class Client {
         return c.setModel(req.model ?? null);
       case "effort":
         return c.setEffort(req.effort ?? null);
+      case "shell":
+        return c.shell(req.command);
       default:
         throw new Error(`unknown op ${req.op}`);
     }

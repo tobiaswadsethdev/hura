@@ -284,10 +284,32 @@ attention hue appears in a conversation.
 
 **Enter sends, Shift+Enter is a new line, Esc stops the turn.** A message sent
 while the agent is working waits for the turn to end, which is how Claude Code
-treats one. A `/` offers the slash commands this session's Claude Code has. In
-the box, under what you write, are the permission mode (auto, ask, accept edits,
-plan) and the model, named as a person would (Opus 5.5 rather than its id), both
-kept with the conversation, and how full its context is and what it has cost.
+treats one. In the box, under what you write, are the permission mode (auto,
+ask, accept edits, plan) and the model, named as a person would (Opus 5.5 rather
+than its id), both kept with the conversation, and how full its context is and
+what it has cost.
+
+**A `/` is a slash command, as in Claude Code's terminal.** Typing one lists the
+commands this session's Claude Code offers, its skills and plugins' included,
+each with what it takes and what it does, best match first: `/rev` finds
+`/code-review`, and `/cost` finds `/usage` by its other name. The arrow keys move
+through the list, Tab or Enter completes the name, and Esc puts the list away.
+A command the session has is coloured as you type it, with what it takes shown
+after it until you type something there, and its description under the box;
+it keeps its colour in your message once sent. The list is the one Claude Code
+gave the last time any conversation in the session started, so a new tab has it
+before anything has been said. The commands that only work in a terminal, such
+as `/doctor`, are left out.
+
+**A `!` runs a command in the sandbox.** `!git status` is run by the chat host in
+the working copy rather than sent to Claude: the box turns to code, and Enter
+runs it. What it prints is a card in the conversation, open, with its exit
+code when it failed, and Esc stops one still running. Claude reads the command
+and its output with your next message, in the tags Claude Code's terminal uses
+for one, without a turn of its own, so `!npm test` and then "fix that" works as
+it does there. A command has ten minutes; something meant to keep running
+belongs in a shell tab. A session whose image predates this lists the slash
+commands by name alone, and has no `!`.
 
 **Every message says when it was sent and whether Claude has read it.** The
 time sits under it, and each new day starts with a line naming it. One tick

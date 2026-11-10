@@ -80,6 +80,8 @@ struct ChatRows: View {
             ThinkingView(text: text)
         case let .tool(_, call):
             ToolCard(call: call, cwd: cwd, working: working)
+        case let .shell(_, run):
+            ShellCard(run: run)
         case let .day(_, date):
             HStack {
                 VStack { Divider() }
@@ -107,6 +109,18 @@ struct ChatRows: View {
     }
 }
 
+extension ChatRows {
+    /// Your message, with a slash command it starts with set apart as code,
+    /// on a lighter patch of the bubble, as the desktop draws it.
+    static func bubble(_ text: String) -> AttributedString {
+        guard let lead = ComposerInput.leadingCommand(text) else { return AttributedString(text) }
+        var command = AttributedString(lead.command)
+        command.font = Font.body.monospaced().weight(.semibold)
+        command.backgroundColor = Color.white.opacity(0.2)
+        return command + AttributedString(lead.rest)
+    }
+}
+
 /// What you sent, as a message bubble: as Messages and the desktop draw it,
 /// the accent, solid, and white on it. A long one shows its first lines,
 /// fading out, with the rest a tap away, as the desktop's does (`Prompt` in
@@ -129,12 +143,15 @@ struct PromptBubble: View {
     private static let shownLines = 5
     private static let longLines = shownLines + 2
 
+    /// With a slash command it starts with set apart.
+    private var words: AttributedString { ChatRows.bubble(text) }
+
     private var long: Bool { full > upToLong + 1 }
     private var cut: Bool { long && !all }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(text)
+            Text(words)
                 .lineLimit(cut ? Self.shownLines : nil)
                 .textSelection(.enabled)
                 .mask { fade }
@@ -173,10 +190,10 @@ struct PromptBubble: View {
     /// one has, to be measured: one in full and one cut at `longLines`.
     private var measures: some View {
         ZStack(alignment: .top) {
-            Text(text)
+            Text(words)
                 .fixedSize(horizontal: false, vertical: true)
                 .measuredHeight($full)
-            Text(text)
+            Text(words)
                 .lineLimit(Self.longLines)
                 .fixedSize(horizontal: false, vertical: true)
                 .measuredHeight($upToLong)

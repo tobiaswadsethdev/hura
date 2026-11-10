@@ -2,21 +2,31 @@
 // sandbox: `node --test images/hura-base/hura-agent.test.mjs`.
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
+  Host,
   Inbox,
+  Output,
   UPLOAD_BYTES,
   attach,
   describeAsk,
   holding,
   kept,
+  namedCommands,
   nextName,
   permissionResult,
+  plain,
   rateLimits,
   receipt,
   replayFrames,
   sessionStatus,
+  shellContext,
+  silent,
+  slashCommands,
   uploadName,
   usagePayload,
 } from "./hura-agent.mjs";
@@ -291,4 +301,145 @@ test("a message is read when Claude Code acknowledges it, once", () => {
   assert.equal(receipt({ ...ack, uuid: "other" }, sent, read), null, "not one of ours");
   assert.equal(receipt({ ...ack, isReplay: undefined, uuid: "u2" }, new Set(["u2"]), read), null, "not an acknowledgement");
   assert.equal(receipt({ type: "assistant", isReplay: true, uuid: "u1" }, sent, new Set()), null);
+});
+
+test("slash commands are described once each, Claude Code's own winning a shared name", () => {
+  const described = slashCommands([
+    { name: "review", description: "Review a pull request", argumentHint: "<pr>", aliases: ["rv"] },
+    { name: "compact", description: "a plugin's compact" },
+    { name: "compact", description: "Compact the conversation", argumentHint: "", builtin: true },
+    { name: "" },
+    null,
+  ]);
+  assert.deepEqual(described, [
+    { name: "review", description: "Review a pull request", argument_hint: "<pr>", aliases: ["rv"] },
+    { name: "compact", description: "Compact the conversation", argument_hint: "", aliases: [] },
+  ]);
+  assert.deepEqual(slashCommands(["clear", "clear", 3, "__remote-workflow"]), [
+    { name: "clear", description: "", argument_hint: "", aliases: [] },
+  ]);
+  assert.deepEqual(slashCommands(undefined), []);
+});
+
+test("init's bare names keep what was already known about each", () => {
+  const known = slashCommands([{ name: "review", description: "Review a pull request", argumentHint: "<pr>" }]);
+  assert.deepEqual(namedCommands(["review", "deploy"], known), [
+    { name: "review", description: "Review a pull request", argument_hint: "<pr>", aliases: [] },
+    { name: "deploy", description: "", argument_hint: "", aliases: [] },
+  ]);
+});
+
+test("output is text: no colour codes, and a rewritten line as it ended", () => {
+  assert.equal(plain("\x1b[31mred\x1b[0m and \x1b]0;title\x07plain"), "red and plain");
+  assert.equal(plain("10%\r50%\r100%\r\ndone\r\n"), "100%\ndone\n");
+});
+
+test("long output keeps its start and its end", () => {
+  const out = new Output(30);
+  out.add("a".repeat(10));
+  out.add("b".repeat(50));
+  out.add("c".repeat(20));
+  assert.ok(out.truncated);
+  assert.equal(out.text(), `${"a".repeat(10)}\n[50 characters left out]\n${"c".repeat(20)}`);
+  const short = new Output(30);
+  short.add("ok\n");
+  assert.equal(short.text(), "ok\n");
+  assert.ok(!short.truncated);
+});
+
+test("Claude reads a ! command in Claude Code's own tags", () => {
+  assert.equal(
+    shellContext("ls", "a\nb\n", 0, false),
+    "<bash-input>ls</bash-input>\n<bash-stdout>a\nb\n</bash-stdout><bash-stderr></bash-stderr>",
+  );
+  assert.match(shellContext("false", "", 1, false), /<bash-stderr>Exit code 1<\/bash-stderr>/);
+  assert.match(shellContext("sleep 9", "", null, true), /Stopped before it finished/);
+});
+
+test("a running ! command is not Claude working, so no phone is told Claude finished", () => {
+  const busy = conversation({ shells: new Map([["s", {}]]) });
+  assert.equal(sessionStatus([conversation(), busy]).state, "idle");
+});
+
+/// A host in a directory of its own, with a watcher on its agent's
+/// conversation that collects the frames it is sent.
+function hostWithWatcher() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hura-agent-test-"));
+  const host = new Host({ dir, cwd: dir });
+  const c = host.open("agent");
+  const frames = [];
+  c.attach({ send: (f) => frames.push(f), end() {} }, 0);
+  return { dir, host, c, frames };
+}
+
+/// The entry of `kind` once the conversation has one.
+async function entryOf(c, kind) {
+  for (let i = 0; i < 200; i++) {
+    const e = c.entries.find((x) => x.ev.kind === kind);
+    if (e) return e;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`no ${kind} entry`);
+}
+
+test("a ! command runs in the working copy and is kept with what it printed", async () => {
+  const { dir, c, frames } = hostWithWatcher();
+  await c.shell("  pwd; echo out; echo err >&2; exit 3  ");
+  const started = c.entries.find((e) => e.ev.kind === "shell");
+  assert.equal(started.ev.command, "pwd; echo out; echo err >&2; exit 3");
+  assert.equal(frames.findLast((f) => f.t === "state").state.activity, "running");
+  const exited = await entryOf(c, "exited");
+  assert.equal(exited.ev.uuid, started.ev.uuid);
+  assert.equal(exited.ev.code, 3);
+  assert.equal(exited.ev.stopped, false);
+  assert.match(exited.ev.output, new RegExp(`^${fs.realpathSync(dir)}\nout\n`));
+  assert.match(exited.ev.output, /err/);
+  assert.equal(frames.findLast((f) => f.t === "state").state.activity, "idle");
+  assert.equal(c.snapshot().shell, true);
+  await assert.rejects(c.shell("   "), /nothing to run/);
+});
+
+test("stopping the turn stops a ! command and everything it started", async () => {
+  const { c } = hostWithWatcher();
+  await c.shell("sleep 30 & sleep 30; echo never");
+  await c.interrupt();
+  const exited = await entryOf(c, "exited");
+  assert.equal(exited.ev.code, null);
+  assert.equal(exited.ev.stopped, true);
+  assert.doesNotMatch(exited.ev.output, /never/);
+});
+
+test("a ! command the host never saw end is ended when it starts again", () => {
+  const { dir, c } = hostWithWatcher();
+  c.append({ kind: "shell", uuid: "s1", command: "sleep 99" });
+  const again = new Host({ dir, cwd: dir }).conversations.get("agent");
+  const exited = again.entries.find((e) => e.ev.kind === "exited");
+  assert.equal(exited.ev.uuid, "s1");
+  assert.equal(exited.ev.code, null);
+  assert.equal(new Host({ dir, cwd: dir }).conversations.get("agent").entries.filter((e) => e.ev.kind === "exited").length, 1);
+});
+
+test("commands one conversation learns are offered by the others, and after a restart", () => {
+  const { dir, host, c, frames } = hostWithWatcher();
+  const other = host.open("chat-1");
+  const commands = slashCommands([{ name: "review", description: "Review a pull request" }, { name: "doctor" }]);
+  host.learnCommands(commands, new Set(["doctor"]));
+  const offered = commands.slice(0, 1);
+  assert.deepEqual(other.snapshot().slash_commands, offered, "not the terminal's own");
+  assert.deepEqual(c.snapshot().commands, ["review"]);
+  assert.deepEqual(frames.findLast((f) => f.t === "state").state.slash_commands, offered);
+  const again = new Host({ dir, cwd: dir });
+  assert.deepEqual(again.conversations.get("chat-1").snapshot().slash_commands, offered);
+  // A restarted host still knows which are the terminal's, before init says.
+  assert.deepEqual(again.learnCommands(commands), offered);
+});
+
+test("the empty turn after a ! command's output goes in is not kept", () => {
+  const quiet = new Set(["q1"]);
+  const result = { type: "result", subtype: "success", num_turns: 0, user_message_uuids: ["q1"] };
+  assert.ok(silent(result, quiet));
+  assert.ok(!silent({ ...result, user_message_uuids: ["q1", "p1"] }, quiet), "merged with a prompt of yours");
+  assert.ok(!silent({ ...result, num_turns: 1 }, quiet));
+  assert.ok(!silent({ type: "result", num_turns: 0 }, quiet));
+  assert.ok(silent({ type: "result", num_turns: 0, user_message_uuid: "q1" }, quiet));
 });

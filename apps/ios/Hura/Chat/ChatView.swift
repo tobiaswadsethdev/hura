@@ -41,6 +41,19 @@ struct ChatView: View {
     private var callRunning: Bool {
         if case let .tool(_, call)? = items.last { call.result == nil } else { false }
     }
+    /// The newest thing is a `!` command still running, whose card says so.
+    private var shellRunning: Bool {
+        if case let .shell(_, run)? = items.last { run.running } else { false }
+    }
+    /// What is being typed, as Claude Code's terminal reads it.
+    private var input: ComposerInput {
+        ComposerInput.parse(draft, commands: chat.commands, shell: chat.runsShell)
+    }
+    private var isShell: Bool {
+        if case .shell = input { true } else { false }
+    }
+    /// A command, which the keyboard mustn't correct: `wc` became "we".
+    private var isCode: Bool { isShell || ComposerInput.naming(draft) != nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,7 +77,7 @@ struct ChatView: View {
                             // turn, as on the desktop; not while a tool call
                             // is running, whose card says so already. The word
                             // only while there is nothing else to look at.
-                            if working && chat.pending.isEmpty && !callRunning {
+                            if working && chat.pending.isEmpty && !callRunning && !shellRunning {
                                 HStack(spacing: 6) {
                                     WorkingDots(size: 22)
                                     if chat.streaming.isEmpty { Text("working").font(.caption) }
@@ -123,17 +136,9 @@ struct ChatView: View {
                 AgentsStrip(agents: agents) { following = Following(id: $0.id) }
             }
             if !suggestions.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(suggestions, id: \.self) { c in
-                            Button("/\(c)") { draft = "/\(c) " }
-                                .font(.caption.monospaced())
-                                .buttonStyle(.bordered)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                }
-                .padding(.vertical, 4)
+                Divider()
+                CommandSuggestions(commands: suggestions) { draft = "/\($0.name) " }
+                    .background(.bar)
             }
             composer
         }
@@ -184,11 +189,47 @@ struct ChatView: View {
         .padding(.top, 60)
     }
 
-    /// Slash commands matching what is being typed.
-    private var suggestions: [String] {
-        guard draft.hasPrefix("/"), !draft.contains(" ") else { return [] }
-        let typed = draft.dropFirst()
-        return Array(chat.commands.filter { $0.hasPrefix(typed) }.prefix(8))
+    /// Slash commands that fit the name being typed, best first.
+    private var suggestions: [SlashCommand] {
+        guard let typed = ComposerInput.naming(draft) else { return [] }
+        return SlashCommand.matching(typed, in: chat.commands)
+    }
+
+    /// What sending will do, when it isn't to say something to Claude: run a
+    /// shell command, or a slash command, which says what it does once the
+    /// list of them has gone.
+    @ViewBuilder
+    private var modeNote: some View {
+        switch input {
+        case .shell:
+            Label("Runs in the working copy. Claude sees what it prints with your next message.", glyph: .agentTerminal)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.top, 6)
+        case let .command(_, known?, _) where suggestions.isEmpty:
+            HStack(spacing: 6) {
+                Text("/\(known.name)")
+                    .font(.caption.monospaced().weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                if !known.argumentHint.isEmpty {
+                    Text(known.argumentHint).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                }
+                Text(known.description).font(.caption).foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.top, 6)
+        default:
+            EmptyView()
+        }
+    }
+
+    private var canSend: Bool {
+        if case let .shell(line) = input { return !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return !(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attached.isEmpty)
     }
 
     /// Claude Code's permission modes, in the desktop window's words.
@@ -262,6 +303,7 @@ struct ChatView: View {
         if !attached.isEmpty {
             AttachedStrip(files: attached) { f in attached.removeAll { $0.id == f.id } }
         }
+        modeNote
         HStack(alignment: .bottom, spacing: 8) {
             // Only for a host that keeps them: an older one drops them.
             if chat.takesFiles {
@@ -276,6 +318,10 @@ struct ChatView: View {
             }
             TextField("Message Claude", text: $draft, axis: .vertical)
                 .lineLimit(1...6)
+                // A `!` command is code, and set as code.
+                .font(isShell ? Font.body.monospaced() : Font.body)
+                .autocorrectionDisabled(isCode)
+                .textInputAutocapitalization(isCode ? TextInputAutocapitalization.never : .sentences)
                 .focused($composing)
                 .onChange(of: draft) {
                     guard let just = justSent else { return }
@@ -289,6 +335,7 @@ struct ChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(isShell ? Color.accentColor : .clear, lineWidth: 1))
             if working && draft.isEmpty && attached.isEmpty {
                 Button {
                     Task { try? await chat.interrupt() }
@@ -301,8 +348,8 @@ struct ChatView: View {
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 30))
                 }
-                .disabled((draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attached.isEmpty) || sending)
-                .accessibilityLabel("Send")
+                .disabled(!canSend || sending)
+                .accessibilityLabel(isShell ? "Run" : "Send")
             }
         }
         .padding(.horizontal, 10)
@@ -336,6 +383,10 @@ struct ChatView: View {
     }
 
     private func send() {
+        if case let .shell(line) = input {
+            run(line)
+            return
+        }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let files = attached
         guard !text.isEmpty || !files.isEmpty else { return }
@@ -359,6 +410,27 @@ struct ChatView: View {
         }
     }
 
+    /// A `!` command, for the sandbox's shell. Files wait for the next
+    /// message: a command doesn't take them.
+    private func run(_ line: String) {
+        let command = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return }
+        draft = ""
+        justSent = (text, .now)
+        sending = true
+        Task {
+            defer { sending = false }
+            do {
+                try await chat.shell(command)
+            } catch {
+                justSent = nil
+                if draft.isEmpty { draft = text }
+                chat.error = error.localizedDescription
+            }
+        }
+    }
+
     private func answer(_ ask: Ask, _ decision: ChatDecision) {
         answering = ask.id
         Task {
@@ -375,6 +447,57 @@ func modelName(_ id: String) -> String {
     let family = m.1.prefix(1).uppercased() + m.1.dropFirst()
     let name = "\(family) \(m.2)\(m.3.map { ".\($0)" } ?? "")"
     return m.4 == nil ? name : "\(name) (1M)"
+}
+
+/// The slash commands that fit what is typed: each one's name and what it
+/// takes, then what it does. A tap completes the name.
+private struct CommandSuggestions: View {
+    let commands: [SlashCommand]
+    let pick: (SlashCommand) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(commands) { c in
+                    Button { pick(c) } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text("/\(c.name)").layoutPriority(1)
+                                if !c.argumentHint.isEmpty {
+                                    Text(c.argumentHint).foregroundStyle(.tertiary)
+                                }
+                            }
+                            .font(.subheadline.monospaced())
+                            .lineLimit(1)
+                            if !c.description.isEmpty || !c.aliases.isEmpty {
+                                Text(about(c))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if c.id != commands.last?.id {
+                        Divider().padding(.leading, 14)
+                    }
+                }
+            }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(maxHeight: 240)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func about(_ c: SlashCommand) -> String {
+        guard !c.aliases.isEmpty else { return c.description }
+        let also = "also " + c.aliases.map { "/\($0)" }.joined(separator: ", ")
+        return c.description.isEmpty ? also : "\(c.description) (\(also))"
+    }
 }
 
 /// A subagent to follow, as `sheet(item:)` wants one.

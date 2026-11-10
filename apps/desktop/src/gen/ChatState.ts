@@ -2,6 +2,7 @@
 import type { ChatActivity } from "./ChatActivity";
 import type { ChatAsk } from "./ChatAsk";
 import type { ChatModel } from "./ChatModel";
+import type { SlashCommand } from "./SlashCommand";
 
 export type ChatState = { activity: ChatActivity, 
 /**
@@ -26,6 +27,11 @@ models: Array<ChatModel>,
  */
 commands: Array<string>, 
 /**
+ * The same commands with what each does and takes, from a host that
+ * says. A client reads [`ChatState::commands`] when this is empty.
+ */
+slash_commands: Array<SlashCommand>, 
+/**
  * What Claude Code is doing that is not a turn: `compacting`.
  */
 status: string | null, cost_usd: number | null, context_percentage: number | null, 
@@ -44,4 +50,9 @@ files: boolean,
  * would look unread for ever, so a client shows receipts only when this
  * says.
  */
-receipts: boolean, };
+receipts: boolean, 
+/**
+ * Whether the host runs a [`ChatCommand::Shell`]. One built before it
+ * did would refuse the op, so a client offers `!` only when this says.
+ */
+shell: boolean, };
