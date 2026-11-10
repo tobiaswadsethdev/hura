@@ -484,12 +484,39 @@ printf '%s' {task} > {task_path}
     )
 }
 
+/// [`LOOPBACK_NO_PROXY`]'s text, as a literal so [`AGENT_ENV`] can be one too.
+macro_rules! loopback_no_proxy {
+    () => {
+        "case \",${NO_PROXY-},\" in ,,|*',[::1],'*) ;; *) export NO_PROXY=\"$NO_PROXY,[::1]\" ;; esac\n\
+         case \",${no_proxy-},\" in ,,|*',[::1],'*) ;; *) export no_proxy=\"$no_proxy,[::1]\" ;; esac"
+    };
+}
+
 /// The environment an agent is started in, as shell: the locale it draws
-/// with, and none of the sandbox runtime's Anthropic sentinel, which the
-/// runtime sets in every exec and Claude Code would otherwise ask about and
-/// then prefer to the session's own credential.
-pub const AGENT_ENV: &str =
-    "export LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor\nunset ANTHROPIC_API_KEY";
+/// with, none of the sandbox runtime's Anthropic sentinel, which the runtime
+/// sets in every exec and Claude Code would otherwise ask about and then
+/// prefer to the session's own credential, and [`LOOPBACK_NO_PROXY`].
+pub const AGENT_ENV: &str = concat!(
+    "export LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor\nunset ANTHROPIC_API_KEY\n",
+    loopback_no_proxy!(),
+);
+
+/// Shell adding the IPv6 loopback in brackets, `[::1]`, to `NO_PROXY` and
+/// `no_proxy`, wherever they are set and do not already have it.
+///
+/// The sandbox runtime lists `::1` there bare, and .NET's `HttpClient` only
+/// skips the proxy for `http://[::1]:<port>` when the entry is bracketed.
+/// Measured: an ASP.NET app that renders its pages through a node process of
+/// its own, listening on `::1`, sent every one of those calls to the proxy,
+/// which refused them, so every page was a 500 and the events feed showed
+/// `[::1]:<port>` denied. With `[::1]` added the calls reached node. No rule can
+/// stand in for this: the proxy would connect to the loopback of the machine
+/// it runs on, not the sandbox's.
+///
+/// Said wherever a tmux server can be started, since every pane inherits the
+/// environment of whichever exec started it. Unset or empty stays that way,
+/// so a session with no proxy is left alone.
+pub const LOOPBACK_NO_PROXY: &str = loopback_no_proxy!();
 
 /// Where a sandbox remembers, for one boot, that its agent has been started.
 ///
@@ -607,6 +634,91 @@ mod tests {
         ] {
             assert_eq!(shell_roundtrip(case), case, "mangled: {case:?}");
         }
+    }
+
+    /// `NO_PROXY` and `no_proxy` after running `script` under `set -eu` in a
+    /// real shell that started with them as given, `None` meaning unset.
+    fn proxy_lists_after(
+        script: &str,
+        upper: Option<&str>,
+        lower: Option<&str>,
+    ) -> (Option<String>, Option<String>) {
+        let mut sh = Command::new("sh");
+        sh.arg("-c").arg(format!(
+            "set -eu\n{script}\nprintf '%s\\n%s\\n' \"${{NO_PROXY+=$NO_PROXY}}\" \"${{no_proxy+=$no_proxy}}\""
+        ));
+        sh.env_remove("NO_PROXY").env_remove("no_proxy");
+        if let Some(v) = upper {
+            sh.env("NO_PROXY", v);
+        }
+        if let Some(v) = lower {
+            sh.env("no_proxy", v);
+        }
+        let out = sh.output().expect("sh");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        let mut lines = stdout.lines();
+        let mut next = || {
+            lines
+                .next()
+                .and_then(|l| l.strip_prefix('='))
+                .map(str::to_string)
+        };
+        (next(), next())
+    }
+
+    /// The runtime's own list gains the bracketed loopback, in both spellings
+    /// and only once; a list that has it, and one that is not there at all,
+    /// are left as they were.
+    #[test]
+    fn the_loopback_is_added_to_the_proxy_exceptions_once() {
+        const RUNTIME: &str = "localhost,127.0.0.1,::1,gateway.docker.internal";
+        let added = format!("{RUNTIME},[::1]");
+        let some = |s: &str| Some(s.to_string());
+
+        assert_eq!(
+            proxy_lists_after(LOOPBACK_NO_PROXY, Some(RUNTIME), Some(RUNTIME)),
+            (some(&added), some(&added))
+        );
+        // Twice is still once: a resume runs it again in the same shell.
+        let twice = format!("{LOOPBACK_NO_PROXY}\n{LOOPBACK_NO_PROXY}");
+        assert_eq!(
+            proxy_lists_after(&twice, Some(RUNTIME), None),
+            (some(&added), None)
+        );
+        for already in ["[::1]", "a,[::1],b", "a,[::1]"] {
+            assert_eq!(
+                proxy_lists_after(LOOPBACK_NO_PROXY, Some(already), Some(already)),
+                (some(already), some(already)),
+                "{already}"
+            );
+        }
+        // No proxy at all, as on a machine running worktree sessions.
+        assert_eq!(
+            proxy_lists_after(LOOPBACK_NO_PROXY, None, None),
+            (None, None)
+        );
+        assert_eq!(
+            proxy_lists_after(LOOPBACK_NO_PROXY, Some(""), Some("")),
+            (some(""), some(""))
+        );
+    }
+
+    /// Every agent start says it, under the `set -eu` those scripts run with,
+    /// whatever the runtime set.
+    #[test]
+    fn the_agent_env_carries_the_loopback_exception() {
+        assert!(AGENT_ENV.contains(LOOPBACK_NO_PROXY), "{AGENT_ENV}");
+        assert!(AGENT_ENV.contains("unset ANTHROPIC_API_KEY"), "{AGENT_ENV}");
+        assert_eq!(proxy_lists_after(AGENT_ENV, None, None), (None, None));
+        assert_eq!(
+            proxy_lists_after(AGENT_ENV, Some("::1"), None),
+            (Some("::1,[::1]".to_string()), None)
+        );
     }
 
     /// The seeder runs detached, so the state file is the only thing that knows
