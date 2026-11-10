@@ -296,6 +296,19 @@ fn check_image() -> Check {
                 "hurad image build",
             );
         }
+        // The same for a host older than this hurad's: chats work on it, and
+        // the windows quietly offer less.
+        if !crate::image::chat_host_current(crate::session::IMAGE) {
+            return Check::warn(
+                "image",
+                format!(
+                    "{} predates {}: the first chat session will rebuild it",
+                    crate::session::IMAGE,
+                    crate::image::CHAT_HOST_BROUGHT
+                ),
+                "hurad image build",
+            );
+        }
         // The agent's own version. The base image freezes whatever Claude Code
         // was current when it was published, and the agent cannot upgrade itself
         // from inside a sandbox -- so without this an image built months ago

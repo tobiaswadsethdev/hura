@@ -78,6 +78,21 @@ pub const REGISTRY: &str = "ghcr.io/tobiaswadsethdev/hura-sandbox";
 
 /// The label an image able to run a chat session carries.
 const CHAT_LABEL: &str = "hura.chat";
+/// The label saying which revision of `hura-agent` an image carries, as a
+/// number, and the revision a chat session needs.
+///
+/// `hura.chat` says only that the image has a host at all, and the host has
+/// gained things since that the windows draw only when it says it has them:
+/// an image from before files in chats starts, chats, and never offers to
+/// attach anything, with nothing to say why. So the revision goes up whenever
+/// the host gains something a client relies on, in the Dockerfile's label and
+/// here, and every image below it is replaced the way one without a host is.
+/// A label of its own rather than a new value for `hura.chat`, which an older
+/// `hurad` compares with `1` and would take a `2` as no host at all.
+const CHAT_HOST_LABEL: &str = "hura.chat-host";
+const CHAT_HOST: u32 = 1;
+/// What revision [`CHAT_HOST`] brought, in words that finish "predates ...".
+pub const CHAT_HOST_BROUGHT: &str = "files, read receipts and subagents in chats";
 /// The label an image carrying the stand-in `az` carries, which a session
 /// with an `azure-cli` credential needs; see `images/hura-base/az`.
 const AZURE_LABEL: &str = "hura.azure";
@@ -538,15 +553,35 @@ pub fn supports_chat(tag: &str) -> bool {
     has_label(tag, CHAT_LABEL)
 }
 
+/// Whether an image's chat host is the revision this `hurad` needs; see
+/// [`CHAT_HOST`].
+pub fn chat_host_current(tag: &str) -> bool {
+    revision(label(tag, CHAT_HOST_LABEL).as_deref()) >= CHAT_HOST
+}
+
+/// A revision label's number. An image without the label is from before it,
+/// which is revision 0, and so is a value that is not a number.
+fn revision(value: Option<&str>) -> u32 {
+    value.and_then(|v| v.trim().parse().ok()).unwrap_or(0)
+}
+
 /// Whether a built image says `label="1"`. One label per thing a session can
 /// need of an image that older images do not have.
-fn has_label(tag: &str, label: &str) -> bool {
+fn has_label(tag: &str, label_name: &str) -> bool {
+    label(tag, label_name).as_deref() == Some("1")
+}
+
+/// A label's value on a built image. Docker answers `<no value>` for a label
+/// the image does not have, which no caller takes for anything it wants.
+fn label(tag: &str, label: &str) -> Option<String> {
     let format = format!("{{{{index .Config.Labels \"{label}\"}}}}");
-    Command::new("docker")
+    let out = Command::new("docker")
         .args(["image", "inspect", "--format", &format, tag])
         .output()
-        .map(|out| out.status.success() && String::from_utf8_lossy(&out.stdout).trim() == "1")
-        .unwrap_or(false)
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// What a session needs of its image.
@@ -591,6 +626,8 @@ pub fn ensure(need: &Need, registry: Option<&str>) -> Result<bool, String> {
 fn lacking(need: &Need, tag: &str) -> Option<&'static str> {
     if need.chat && !has_label(tag, CHAT_LABEL) {
         Some("chat sessions")
+    } else if need.chat && !chat_host_current(tag) {
+        Some(CHAT_HOST_BROUGHT)
     } else if need.azure && !has_label(tag, AZURE_LABEL) {
         Some("azure-cli credentials")
     } else {
@@ -830,6 +867,50 @@ mod tests {
             crate::backend::Paths::in_sandbox().usage(),
             "/sandbox/.hura/usage.json"
         );
+    }
+
+    /// The image says which host it carries with the number this binary asks
+    /// for. One raised without the other either replaces every image on every
+    /// chat session or never replaces a stale one.
+    #[test]
+    fn the_dockerfile_labels_the_chat_host_revision_this_binary_needs() {
+        let labels: Vec<&str> = DOCKERFILE
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("LABEL "))
+            .flat_map(str::split_whitespace)
+            .collect();
+        for (name, want) in [
+            (CHAT_LABEL, "1".to_string()),
+            (CHAT_HOST_LABEL, CHAT_HOST.to_string()),
+            (AZURE_LABEL, "1".to_string()),
+        ] {
+            let pair = format!("{name}=\"{want}\"");
+            assert!(
+                labels.contains(&pair.as_str()),
+                "the Dockerfile must say {pair}; its labels are {labels:?}"
+            );
+        }
+    }
+
+    /// The host's file support came after `hura.chat`, so an image with the
+    /// one and not the other is the stale image the revision exists to catch.
+    #[test]
+    fn an_image_without_a_chat_host_revision_is_revision_zero() {
+        assert_eq!(revision(None), 0);
+        assert_eq!(revision(Some("<no value>")), 0);
+        assert_eq!(revision(Some("")), 0);
+        assert_eq!(revision(Some("1")), 1);
+        assert_eq!(revision(Some("12\n")), 12);
+        assert!(revision(None) < CHAT_HOST);
+    }
+
+    /// The host this revision is about says so to the windows, which draw
+    /// the attach button only then: without it the label would be raised for
+    /// a host that does not offer what it promises.
+    #[test]
+    fn the_chat_host_offers_what_its_revision_promises() {
+        assert!(HURA_AGENT.contains("files: true"));
+        assert!(HURA_AGENT.contains("receipts: true"));
     }
 
     /// `reports_status` probes for this path, so the Dockerfile has to keep

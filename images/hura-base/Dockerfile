@@ -258,6 +258,9 @@ RUN set -eu; \
 
 # What `image::supports` asks the image, without starting a container. A
 # variant inherits them, so a variant built from an older base says so too.
-LABEL hura.chat="1" hura.azure="1"
+# `hura.chat-host` is the revision of hura-agent.mjs above, kept in step with
+# `CHAT_HOST` in image.rs: raise both when the host gains something a client
+# relies on, and every image below it is replaced.
+LABEL hura.chat="1" hura.chat-host="1" hura.azure="1"
 
 USER agent
