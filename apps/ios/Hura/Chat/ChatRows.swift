@@ -105,6 +105,65 @@ struct ChatRows: View {
                 .font(.caption)
                 .foregroundStyle(isError ? Color.red.opacity(0.85) : .secondary)
                 .textSelection(.enabled)
+        case let .steps(_, steps, live):
+            StepsRow(items: steps, live: live, cwd: cwd, working: working)
+        }
+    }
+}
+
+/// A turn's steps, as one row that says what they came to. Open while the
+/// turn runs, so the work can be watched, and shut when it ends, leaving the
+/// answer under it; either way until it is tapped, after which it stays as
+/// it was put. As the desktop's `StepsCard` in `chat/Items.tsx`.
+struct StepsRow: View {
+    let items: [ChatItem]
+    let live: Bool
+    let cwd: String
+    let working: Bool
+    @State private var open: Bool?
+
+    private var shown: Bool { open ?? live }
+    private var calls: [ToolCall] {
+        items.compactMap { if case let .tool(_, call) = $0 { call } else { nil } }
+    }
+
+    var body: some View {
+        let running = working && calls.contains { $0.result == nil }
+        let failed = calls.filter { $0.failed && !$0.stopped }.count
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.snappy) { open = !shown }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .rotationEffect(.degrees(shown ? 90 : 0))
+                    Text(ChatItem.summary(items))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 4)
+                    if failed > 0 {
+                        Text("\(failed) failed").foregroundStyle(Color.red.opacity(0.85))
+                    }
+                    if running { WorkingDots(size: 16).foregroundStyle(Color.working) }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if shown {
+                // The steps on a rule, indented, the way a subagent's are on
+                // the desktop. Erased, because the rows draw this row.
+                VStack(alignment: .leading, spacing: 12) {
+                    AnyView(ChatRows(items: items, cwd: cwd, working: working))
+                }
+                .padding(.leading, 10)
+                .overlay(alignment: .leading) {
+                    Rectangle().fill(Color.secondary.opacity(0.3)).frame(width: 1)
+                }
+                .padding(.leading, 6)
+            }
         }
     }
 }

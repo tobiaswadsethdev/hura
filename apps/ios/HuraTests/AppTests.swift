@@ -280,3 +280,33 @@ struct MarkdownImageTests {
     #expect(texts(ChatItem.fold(entries).items) == ["starting one", "back to you"])
     #expect(texts(ChatItem.fold(entries, thread: "toolu_1").items) == ["reading", "more reading"])
 }
+
+/// A turn's steps fold into one row, with the answer it ends with left out
+/// of it, as on the desktop; a run of one is left alone, and only the turn
+/// still running is live.
+@Test func aTurnsStepsFoldIntoOneRow() {
+    func tool(_ id: String, _ name: String) -> ChatItem {
+        .tool(id: id, call: ToolCall(id: id, name: name, input: .object([:]), inputTruncated: false, result: nil))
+    }
+    let prompt = Prompt(text: "go", pictures: [], files: [], sent: nil, read: nil)
+    let items: [ChatItem] = [
+        .prompt(id: "1", prompt: prompt), .thinking(id: "2", text: "hm"), tool("3", "Read"),
+        .text(id: "4", text: "on my way", at: nil), tool("5", "Bash"), tool("6", "Edit"),
+        .text(id: "7", text: "done", at: nil), .turnEnd(id: "8", ms: 1000, at: nil),
+        .prompt(id: "9", prompt: prompt), tool("10", "Read"), .text(id: "11", text: "one step", at: nil),
+        .prompt(id: "12", prompt: prompt), tool("13", "Read"), tool("14", "Read"),
+    ]
+    func shape(_ items: [ChatItem]) -> [String] {
+        items.map {
+            if case let .steps(_, steps, live) = $0 { "steps\(live ? "*" : "")[\(steps.map(\.id).joined(separator: ","))]" } else { $0.id }
+        }
+    }
+    #expect(shape(ChatItem.group(items, working: false)) == ["1", "steps[2,3,4,5,6]", "7", "8", "9", "10", "11", "12", "steps[13,14]"])
+    #expect(shape(ChatItem.group(items, working: true)).last == "steps*[13,14]")
+    if case let .steps(_, steps, _) = ChatItem.group(items, working: false)[1] {
+        #expect(ChatItem.summary(steps) == "Read a file, ran a command, edited a file")
+    }
+    if case let .steps(_, steps, _) = ChatItem.group(items, working: false).last {
+        #expect(ChatItem.summary(steps) == "Read 2 files")
+    }
+}

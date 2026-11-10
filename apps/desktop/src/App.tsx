@@ -23,6 +23,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, messageOf, type Paired, type ServerSummary, type Shells } from "./api";
+import { forgetSession } from "./cache";
 import { useConfirm } from "./Confirm";
 import { Dock } from "./Dock";
 import { Empty } from "./Empty";
@@ -53,6 +54,7 @@ import { onSessions, reset as resetNotifications } from "./notify";
 import { onCloudChanges } from "./inboxNotify";
 import { close, nextChannelId, open } from "./stream";
 import { NewProjectDialog } from "./NewProject";
+import { forgetChat } from "./panes/Chat";
 import { NewWorktreeDialog } from "./NewWorktree";
 import { DEFAULTS, LIMITS, usePrefs } from "./prefs";
 import { SettingsScreen } from "./Settings";
@@ -627,6 +629,7 @@ export default function App() {
           .destroy(server, s.name)
           .then((left) => {
             setSessions(left);
+            forgetSession(server, s.name);
             // Whatever was showing is gone. Left selected, the panes would go
             // on asking the server about a session it no longer has.
             if (selected === s.name) setSelected(null);
@@ -1011,6 +1014,7 @@ export default function App() {
                         .closeChat(server, session.name, conv)
                         .then(({ chats: list }) => {
                           setChats((all) => ({ ...all, [session.name]: list }));
+                          forgetChat(server, session.name, conv);
                           unchoose(session.name, `chat:${conv}`);
                         })
                         .catch((e) => setError(messageOf(e)));

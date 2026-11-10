@@ -8,14 +8,25 @@
 // Read-only, because the agent owns the working copy. Two writers with no
 // shared lock is how a file ends up with half of each; what you want here is to
 // see what it did, and the review is how you say something about it.
+//
+// Each listing, and which folders are open, is remembered for when the tree is
+// drawn again -- after the git pane, or another worktree -- so it comes back
+// as it was and is read again behind that, rather than starting from a
+// spinner at the root and closed all the way down.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { api, messageOf } from "./api";
+import { keyFor, Remembered } from "./cache";
 import { copy, useContextMenu } from "./ContextMenu";
 import type { Entry } from "./gen/Entry";
 import { Empty, Waiting } from "./Empty";
 import { Chevron, Copy, FileIcon, Folder, NoFiles } from "./icons";
+
+/// Directories as last read, by worktree and path.
+const listings = new Remembered<Entry[]>(500);
+/// The folders open in each worktree's tree.
+const opened = new Remembered<Set<string>>(50);
 
 export function FileTree({
   server,
@@ -26,6 +37,19 @@ export function FileTree({
   name: string;
   onOpen: (path: string) => void;
 }) {
+  const tree = keyFor(server, name);
+  const [open, setOpen] = useState<Set<string>>(() => opened.get(tree) ?? new Set());
+  const toggle = useCallback(
+    (full: string) =>
+      setOpen((s) => {
+        const next = new Set(s);
+        next.has(full) ? next.delete(full) : next.add(full);
+        opened.set(tree, next);
+        return next;
+      }),
+    [tree],
+  );
+
   return (
     // No heading. There used to be a sticky `FILES` above this, and it was a
     // label repeating the word on the dock tab two lines above it -- the one
@@ -33,7 +57,7 @@ export function FileTree({
     // by its tab, and eleven pixels of uppercase saying so again is eleven
     // pixels of the tree.
     <div className="files">
-      <Level server={server} name={name} path="" depth={0} onOpen={onOpen} />
+      <Level server={server} name={name} path="" depth={0} open={open} toggle={toggle} onOpen={onOpen} />
     </div>
   );
 }
@@ -44,42 +68,45 @@ function Level({
   name,
   path,
   depth,
+  open,
+  toggle,
   onOpen,
 }: {
   server: string;
   name: string;
   path: string;
   depth: number;
+  open: Set<string>;
+  toggle: (path: string) => void;
   onOpen: (path: string) => void;
 }) {
-  const [entries, setEntries] = useState<Entry[] | null>(null);
+  const key = keyFor(server, name, path);
+  const [entries, setEntries] = useState<Entry[] | null>(() => listings.get(key) ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<Set<string>>(new Set());
   const menu = useContextMenu();
 
+  // Read every time the level is drawn, remembered or not -- the agent is
+  // still editing, and a tree of what was there an hour ago would be a tree
+  // of what used to be. What was remembered is only what shows meanwhile.
   useEffect(() => {
     let live = true;
-    setEntries(null);
+    setEntries(listings.get(key) ?? null);
     api
       .files(server, name, path)
-      .then((dir) => live && setEntries(dir.entries))
+      .then((dir) => {
+        listings.set(key, dir.entries);
+        if (live) {
+          setEntries(dir.entries);
+          setError(null);
+        }
+      })
       .catch((e) => live && setError(messageOf(e)));
     return () => {
       live = false;
     };
-  }, [server, name, path]);
+  }, [key, server, name, path]);
 
-  const activate = (dir: boolean, full: string) => {
-    if (!dir) return onOpen(full);
-    setOpen((s) => {
-      const next = new Set(s);
-      // Collapsing forgets the level, so reopening re-reads it -- the agent is
-      // still editing, and a tree that cached what was there an hour ago would
-      // be a tree of what used to be.
-      next.has(full) ? next.delete(full) : next.add(full);
-      return next;
-    });
-  };
+  const activate = (dir: boolean, full: string) => (dir ? toggle(full) : onOpen(full));
 
   if (error) return <p className="error">{error}</p>;
   // Indented to the level being read, so the wait appears where the
@@ -122,6 +149,8 @@ function Level({
                 name={name}
                 path={full}
                 depth={depth + 1}
+                open={open}
+                toggle={toggle}
                 onOpen={onOpen}
               />
             )}

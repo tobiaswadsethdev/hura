@@ -56,13 +56,112 @@ enum ChatItem: Identifiable, Equatable {
     case turnEnd(id: String, ms: Int64, at: Date?)
     case divider(id: String, reason: String)
     case notice(id: String, text: String, isError: Bool)
+    /// The steps of a turn on the way to its answer, folded into one row: see
+    /// `group`. `live` while the turn they are in is still running.
+    indirect case steps(id: String, items: [ChatItem], live: Bool)
 
     var id: String {
         switch self {
         case let .prompt(id, _), let .shell(id, _), let .day(id, _), let .text(id, _, _), let .thinking(id, _),
-             let .tool(id, _), let .turnEnd(id, _, _), let .divider(id, _), let .notice(id, _, _):
+             let .tool(id, _), let .turnEnd(id, _, _), let .divider(id, _), let .notice(id, _, _), let .steps(id, _, _):
             id
         }
+    }
+
+    /// One of a turn's steps, to be folded with the others: what the agent
+    /// did and thought on the way. Not what you said or ran, not a failure,
+    /// and not a plan or a question, which wait on you or are what you
+    /// answered. As the desktop's `isStep` in `transcript.ts`.
+    private var isStep: Bool {
+        switch self {
+        case .thinking, .text: true
+        case let .tool(_, call): call.name != "ExitPlanMode" && call.name != "AskUserQuestion"
+        case let .notice(_, _, isError): !isError
+        default: false
+        }
+    }
+
+    /// The items with each turn's steps folded into one `steps` row, so a
+    /// turn reads as what you said, one row for the work, and what Claude
+    /// said at the end, as the desktop draws it (`group` in `transcript.ts`).
+    ///
+    /// The answer is the text a run of steps ends with and stays out of the
+    /// fold. A run of one is left as it is: a row to open a single card is a
+    /// tap for nothing. `working` makes the last run live, unless a turn has
+    /// ended after it.
+    static func group(_ items: [ChatItem], working: Bool) -> [ChatItem] {
+        var out: [ChatItem] = []
+        var run: [ChatItem] = []
+        func flush(live: Bool) {
+            var end = run.count
+            while end > 0, case .text = run[end - 1] { end -= 1 }
+            let steps = Array(run[..<end])
+            if steps.count > 1 {
+                out.append(.steps(id: "\(steps[0].id).steps", items: steps, live: live))
+            } else {
+                out += steps
+            }
+            out += run[end...]
+            run = []
+        }
+        for item in items {
+            if item.isStep {
+                run.append(item)
+            } else {
+                flush(live: false)
+                out.append(item)
+            }
+        }
+        flush(live: working)
+        return out
+    }
+
+    /// What a turn's steps came to, in a few words: "Read 3 files, ran 2
+    /// commands". Kinds of work in the order they were first done.
+    static func summary(_ items: [ChatItem]) -> String {
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        func add(_ kind: String) {
+            if counts[kind] == nil { order.append(kind) }
+            counts[kind, default: 0] += 1
+        }
+        for item in items {
+            switch item {
+            case .thinking: add("thought")
+            case .text: add("message")
+            case let .tool(_, call):
+                switch call.name {
+                case "Read": add("read")
+                case "Edit", "MultiEdit", "Write", "NotebookEdit": add("edit")
+                case "Bash": add("command")
+                case "Grep", "Glob": add("search")
+                case "WebFetch", "WebSearch": add("web")
+                case "Task", "Agent": add("agent")
+                case "TodoWrite": add("todo")
+                default: add("tool")
+                }
+            default: continue
+            }
+        }
+        func n(_ k: Int, _ one: String, _ many: String) -> String { k == 1 ? one : "\(k) \(many)" }
+        var parts: [String] = order.compactMap { kind in
+            let k = counts[kind] ?? 0
+            switch kind {
+            case "read": return "read \(n(k, "a file", "files"))"
+            case "edit": return "edited \(n(k, "a file", "files"))"
+            case "command": return "ran \(n(k, "a command", "commands"))"
+            case "search": return "searched \(k == 1 ? "once" : "\(k) times")"
+            case "web": return "looked up \(n(k, "a page", "pages"))"
+            case "agent": return "started \(n(k, "an agent", "agents"))"
+            case "todo": return "updated the plan"
+            case "tool": return "used \(n(k, "a tool", "tools"))"
+            default: return nil
+            }
+        }
+        // Thinking and messages on the way only say so when nothing else does.
+        if parts.isEmpty { parts = [counts["thought"] != nil ? "thought" : "worked"] }
+        let said = parts.joined(separator: ", ")
+        return said.prefix(1).uppercased() + said.dropFirst()
     }
 
     /// Rebuilds the list from scratch; ids are `seq.block`, so SwiftUI

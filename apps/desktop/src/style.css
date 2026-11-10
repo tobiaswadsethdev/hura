@@ -3735,6 +3735,38 @@ main { position: relative; }
   border-left: 1px solid var(--line-strong);
 }
 
+/* A turn's steps folded into one row: a quiet line of what they came to, and
+   the steps themselves under it, indented on a rule the way a subagent's are. */
+.chat-steps-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px 4px 4px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--r);
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-steps-head:hover,
+.chat-steps-head:focus-visible { background: var(--hover); color: var(--text); outline: none; }
+.chat-steps-head .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-steps-head .mark { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.chat-steps.running .mark { color: var(--working); }
+.chat-steps-head .failed { color: var(--bad); font-size: 11px; }
+.chat-steps-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 2px 10px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line-strong);
+}
+
 .chat-note { margin: 0; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-note.dim, .chat-quiet { color: var(--dimmer); }
 .chat-note.bad { color: var(--bad); }
