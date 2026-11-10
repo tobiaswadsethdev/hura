@@ -143,7 +143,7 @@ export function Tree({
 
   return (
     <div className="sidebar" style={{ width }}>
-      <nav className="tree scrollbar-sleek" aria-label="projects and worktrees">
+      <nav className="tree" aria-label="projects and worktrees">
         {groups.map((g) => {
           const key = keyOf(g);
           const open = !shut.has(key);
