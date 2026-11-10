@@ -120,9 +120,9 @@
 
 # How a session started without a name is named. "ai" asks Claude Haiku for a
 # short title and a branch-safe name from the task: through the Messages API when
-# this server has ANTHROPIC_API_KEY in its environment, otherwise through the
-# `claude` command if it is installed here and signed in. It is a few seconds
-# before the create starts, and anything that goes wrong -- no key, no `claude`,
+# this server has a key -- set from an app's Settings, or ANTHROPIC_API_KEY in
+# its environment -- otherwise through the `claude` command if it is installed
+# here and signed in. It is a few seconds before the create starts, and anything that goes wrong -- no key, no `claude`,
 # a timeout -- falls back to "rules": the first words of the task that carry
 # meaning. The task text is sent to Anthropic either way the model is reached.
 # names = "ai"

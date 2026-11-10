@@ -62,6 +62,9 @@ pub struct Settings {
     /// Whether a new session's agent is a chat or a terminal.
     #[serde(default)]
     pub interface: Option<crate::chat::Interface>,
+    /// How a session given no name is named: by a model, or by the rules.
+    #[serde(default)]
+    pub names: Option<crate::naming::Mode>,
 }
 
 /// What a settings screen is drawn from.
@@ -82,6 +85,11 @@ pub struct SettingsView {
     pub settings: Settings,
     /// [`session::DEFAULT_BRANCH_PREFIX`], for the placeholder.
     pub default_branch_prefix: String,
+    /// Where naming's API key comes from, if anywhere. Not a setting -- the
+    /// key is a secret, set with [`crate::secrets`] -- but this is the screen
+    /// that sets it, and it has to be able to say whether there is one.
+    #[serde(default)]
+    pub naming_key: crate::naming::KeySource,
 }
 
 impl From<&Config> for Settings {
@@ -93,6 +101,7 @@ impl From<&Config> for Settings {
             providers: cfg.providers.clone(),
             auto_update: cfg.auto_update,
             interface: cfg.interface,
+            names: cfg.names,
         }
     }
 }
@@ -133,6 +142,7 @@ impl Settings {
                 .filter(|list| !list.is_empty()),
             auto_update: self.auto_update,
             interface: self.interface,
+            names: self.names,
         }
     }
 }
@@ -144,6 +154,7 @@ pub fn view(cfg: &Config) -> SettingsView {
         present: cfg.present,
         settings: Settings::from(cfg),
         default_branch_prefix: session::DEFAULT_BRANCH_PREFIX.to_string(),
+        naming_key: crate::naming::key_source(),
     }
 }
 
@@ -209,7 +220,7 @@ fn write_atomically(path: &Path, text: &str) -> Result<(), Error> {
     })
 }
 
-/// The file with the six managed keys set to what `settings` says, and
+/// The file with the seven managed keys set to what `settings` says, and
 /// nothing else touched.
 fn edit(text: &str, settings: &Settings) -> String {
     // Line endings are preserved as a whole rather than per line: a file is
@@ -248,6 +259,11 @@ fn edit(text: &str, settings: &Settings) -> String {
         &mut lines,
         "interface",
         settings.interface.map(|i| quote(i.as_str())),
+    );
+    set(
+        &mut lines,
+        "names",
+        settings.names.map(|m| quote(m.as_str())),
     );
 
     let mut out = lines.join(newline);
@@ -593,6 +609,7 @@ mod tests {
             providers: Some(vec!["claude-oauth".into(), "azure-pat".into()]),
             auto_update: Some(false),
             interface: Some(crate::chat::Interface::Terminal),
+            names: Some(crate::naming::Mode::Rules),
         };
         let text = edit(config::EXAMPLE, &settings);
         let cfg = Config::parse(Path::new("x.toml"), &text).unwrap();

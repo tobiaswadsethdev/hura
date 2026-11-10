@@ -8,10 +8,17 @@
 //! MaxGaming customer id to importer" and `add-maxgaming-customer-id-importer`.
 //!
 //! **Two ways to reach one, and neither is required.** The Messages API when the
-//! server has `ANTHROPIC_API_KEY`, which is fast and is what a key is for; else
+//! server has an API key, which is fast and is what a key is for; else
 //! the `claude` command, signed in as whoever runs the server, which is what
 //! most machines running hura already have. The Claude Code credential hura
 //! hands to sandboxes is not used for this: that token is for Claude Code.
+//!
+//! **The key is the server's.** Set from a client's settings screen it goes in
+//! the server's secret store under [`KEY`], write-only like every secret there,
+//! and so it is per server: each machine names with its own key, or with none.
+//! Stored wins over `ANTHROPIC_API_KEY` in `hurad`'s environment, because it is
+//! the later and the more visible decision -- the screen that set it says it is
+//! set, and an environment variable says nothing to anybody.
 //!
 //! **Everything fails to the rules.** No key and no `claude`, a timeout, a
 //! refusal, an answer that is not JSON -- each is the slug rules and a title
@@ -30,8 +37,14 @@ use std::time::{Duration, Instant};
 
 use crate::session;
 
+/// The name the API key is stored under, in [`crate::secrets`] and in the
+/// environment alike.
+pub const KEY: &str = "ANTHROPIC_API_KEY";
+
 /// How a session given no name is named. See the config file's `names`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, rename = "NamingMode"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Mode {
     /// Ask a model, and fall back to the rules.
     Ai,
@@ -47,6 +60,54 @@ impl Mode {
             _ => None,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Mode::Ai => "ai",
+            Mode::Rules => "rules",
+        }
+    }
+}
+
+/// Where the API key naming would use comes from, for a settings screen to
+/// say. Never the key.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export, rename = "NamingKey"))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KeySource {
+    /// In the server's secret store, set from a client.
+    Stored,
+    /// `ANTHROPIC_API_KEY` in `hurad`'s environment.
+    Environment,
+    /// Neither: naming asks the `claude` command, or uses the rules.
+    #[default]
+    None,
+}
+
+/// Which key [`api_key`] would answer with.
+pub fn key_source() -> KeySource {
+    if crate::secrets::get(KEY).is_some() {
+        KeySource::Stored
+    } else if env_key().is_some() {
+        KeySource::Environment
+    } else {
+        KeySource::None
+    }
+}
+
+/// The key to call the API with: the stored one, then the environment's.
+fn api_key() -> Option<String> {
+    crate::secrets::get(KEY)
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .or_else(env_key)
+}
+
+fn env_key() -> Option<String> {
+    std::env::var(KEY)
+        .ok()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
 }
 
 /// A name and a title for a session.
@@ -123,9 +184,9 @@ fn ask(task: &str) -> Option<Named> {
         return None;
     }
     let task: String = task.chars().take(TASK_CHARS).collect();
-    let answer = match std::env::var("ANTHROPIC_API_KEY") {
-        Ok(key) if !key.trim().is_empty() => ask_api(&task, key.trim()),
-        _ => ask_claude(&task),
+    let answer = match api_key() {
+        Some(key) => ask_api(&task, &key),
+        None => ask_claude(&task),
     };
     match answer {
         Ok(named) => Some(named),
@@ -403,5 +464,8 @@ mod tests {
         assert_eq!(Mode::parse("ai"), Some(Mode::Ai));
         assert_eq!(Mode::parse(" rules "), Some(Mode::Rules));
         assert_eq!(Mode::parse("llm"), None);
+        for mode in [Mode::Ai, Mode::Rules] {
+            assert_eq!(Mode::parse(mode.as_str()), Some(mode));
+        }
     }
 }

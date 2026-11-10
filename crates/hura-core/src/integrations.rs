@@ -86,6 +86,11 @@ fn named_secrets(entries: &[mcp::Entry]) -> Vec<secrets::Named> {
             note(name, Some(entry.name()));
         }
     }
+    // Only when stored: naming does without a key, so an absent one is not
+    // the missing-secret failure this list exists to point at.
+    if stored.iter().any(|s| s == crate::naming::KEY) {
+        note(crate::naming::KEY, Some("session naming"));
+    }
     for name in &stored {
         note(name, None);
     }
