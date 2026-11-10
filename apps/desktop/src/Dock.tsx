@@ -76,7 +76,7 @@ export function Dock({
   usage: Usage | null;
   /// What the sandbox is listening on, from the status poll.
   listening: Listening[];
-  /// The window's refresh interval, which the events feed re-reads on.
+  /// The window's refresh interval, which the events feed and git re-read on.
   refreshMs: number;
   onOpenFile: (path: string) => void;
   onOpenDiff: (path: string, against: Against) => void;
@@ -122,6 +122,7 @@ export function Dock({
             key={session.name}
             server={server}
             name={session.name}
+            refreshMs={refreshMs}
             onOpenDiff={onOpenDiff}
           />
         )}

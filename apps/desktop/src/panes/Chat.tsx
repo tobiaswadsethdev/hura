@@ -8,8 +8,13 @@
 //
 // The transcript is the host's, not this pane's. It survives the window
 // closing, a second window opening and the server restarting, which is why a
-// channel that drops is opened again from the last entry it saw rather than
-// the pane keeping anything of its own.
+// channel that drops is opened again from the last entry it saw.
+//
+// What this pane has seen is remembered for when it is opened again, after a
+// switch to another worktree and back: it draws that at once and asks only for
+// what came after, rather than having the whole conversation replayed. A host
+// that answers with less than was remembered has started its transcript again,
+// and is asked for all of it.
 
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 
@@ -21,6 +26,7 @@ import type { ChatState } from "../gen/ChatState";
 import type { SlashCommand } from "../gen/SlashCommand";
 import { Attach, Chat as ChatGlyph, Close, Plus, Send, Shell, Skill, Stop, Working } from "../icons";
 import { api } from "../api";
+import { keyFor, Remembered } from "../cache";
 import { Markdown, Pictures, type ReadPicture } from "../Markdown";
 import type { PartialMessage, ToolProgress } from "../sdk";
 import { Select } from "../Select";
@@ -71,10 +77,29 @@ const EMPTY: View = {
   error: null,
 };
 
-type Action = { type: "frame"; frame: ChatFrame } | { type: "down"; reason: string };
+/// What a conversation's pane had when it went, by server, worktree and
+/// conversation. A few, since a transcript is mostly pictures and can run to
+/// megabytes.
+type Kept = { entries: ChatEntry[]; seq: number; state: ChatState | null };
+const kept = new Remembered<Kept>(12);
+
+/// A conversation that has ended: one opened later under the same name is
+/// another conversation.
+export function forgetChat(server: string, name: string, conv: string) {
+  kept.delete(keyFor(server, name, "chat", conv));
+}
+
+/// Where a pane starts: from what it had, drawn at once, when it had anything.
+function restore(key: string): View {
+  const k = kept.get(key);
+  return k ? { ...EMPTY, ...k, caughtUp: true } : EMPTY;
+}
+
+type Action = { type: "frame"; frame: ChatFrame } | { type: "down"; reason: string } | { type: "reset" };
 
 function reduce(v: View, a: Action): View {
   if (a.type === "down") return { ...v, down: a.reason, live: null };
+  if (a.type === "reset") return EMPTY;
   const f = a.frame;
   switch (f.t) {
     case "replay": {
@@ -610,10 +635,17 @@ function Composer({
 }
 
 export function ChatPane({ server, name, conv }: { server: string; name: string; conv: string }) {
-  const [view, dispatch] = useReducer(reduce, EMPTY);
+  const key = keyFor(server, name, "chat", conv);
+  const [view, dispatch] = useReducer(reduce, key, restore);
   const channel = useRef(0);
   const seq = useRef(0);
   seq.current = view.seq;
+
+  // Kept once the history is all here: a pane that went part-way through a
+  // replay would otherwise come back as only the start of it.
+  useEffect(() => {
+    if (view.caughtUp) kept.set(key, { entries: view.entries, seq: view.seq, state: view.state });
+  }, [key, view.caughtUp, view.entries, view.seq, view.state]);
   // An image a reply names, read from this session's working copy.
   const readPicture = useMemo<ReadPicture>(
     () => (path) => api.file(server, name, path).then((f) => f.image ?? undefined),
@@ -629,9 +661,19 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
       const id = nextChannelId();
       channel.current = id;
       void open(server, id, { kind: "chat", session: name, conv, since: seq.current }, (frame) => {
-        if (!live) return;
+        if (!live || id !== channel.current) return;
         if (frame.is === "chat") {
           wait = 2_000;
+          // Every replay frame ends past `since` unless the host has less than
+          // this pane does: its transcript started again, and what is here is
+          // another conversation's. Asked again from the beginning.
+          if (frame.frame.t === "replay" && frame.frame.seq < seq.current) {
+            seq.current = 0;
+            dispatch({ type: "reset" });
+            void close(id);
+            connect();
+            return;
+          }
           dispatch({ type: "frame", frame: frame.frame });
         } else if (frame.is === "closed") {
           // Opened again from the last entry, after a pause that grows while

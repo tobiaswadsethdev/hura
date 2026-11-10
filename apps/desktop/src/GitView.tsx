@@ -14,10 +14,16 @@
 // each list a tree of the files tree's own folders and icons. A flat list of
 // full paths read as a column of `apps/desktop/src/` with the names cut off
 // the end; a tree says the directory once and the name in full.
+//
+// Read again on a timer while it is on screen, so the agent's edits appear as
+// it makes them rather than at the next press of refresh. The last status,
+// and a commit message half-written, are remembered per worktree, so coming
+// back to this pane draws what it had at once instead of a spinner.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, messageOf, type GitAnswer } from "./api";
+import { keyFor, Remembered } from "./cache";
 import { useConfirm } from "./Confirm";
 import { copy, useContextMenu } from "./ContextMenu";
 import type { Against } from "./gen/Against";
@@ -64,16 +70,28 @@ const MARK: Record<Change, string> = {
 /// glyph rather than a changing tooltip on the same one.
 type RemoteOp = "fetch" | "pull" | "push";
 
+/// The quickest the timer re-reads, whatever the window's interval: each read
+/// is an exec and a `git status` over the whole working copy.
+const FLOOR_MS = 2000;
+
+/// Each worktree's last status, and the commit message being written in it.
+const answers = new Remembered<GitAnswer>(50);
+const drafts = new Remembered<string>(50);
+
 export function GitView({
   server,
   name,
+  refreshMs,
   onOpenDiff,
 }: {
   server: string;
   name: string;
+  /// How often the status is re-read while this is on screen.
+  refreshMs: number;
   onOpenDiff: (path: string, against: Against) => void;
 }) {
-  const [answer, setAnswer] = useState<GitAnswer | null>(null);
+  const key = keyFor(server, name);
+  const [answer, setAnswerState] = useState<GitAnswer | null>(() => answers.get(key) ?? null);
   const [error, setError] = useState<string | null>(null);
   /// What is under way, so the one control that started it can say so. Every
   /// control is disabled while anything is: two writes racing each other on
@@ -83,22 +101,70 @@ export function GitView({
   /// Discarding a file is the one thing in this pane that destroys work, so it
   /// is asked for in a dialog of the window's own rather than the webview's.
   const { ask, dialog: confirmation } = useConfirm();
-  const [message, setMessage] = useState("");
+  const [message, setMessageState] = useState(() => drafts.get(key) ?? "");
+  const setMessage = (m: string) => {
+    drafts.set(key, m);
+    setMessageState(m);
+  };
+  const setAnswer = useCallback(
+    (a: GitAnswer) => {
+      answers.set(key, a);
+      setAnswerState(a);
+    },
+    [key],
+  );
+  /// Bumped by every action, so a timed read that set out before one cannot
+  /// land after it with the status from before.
+  const generation = useRef(0);
+  const runningRef = useRef(false);
+  runningRef.current = busy;
 
   const load = useCallback(() => {
+    const at = ++generation.current;
     api
       .gitStatus(server, name)
-      .then(setAnswer)
+      .then((a) => at === generation.current && setAnswer(a))
       .catch((e) => setError(messageOf(e)));
-  }, [server, name]);
+  }, [server, name, setAnswer]);
 
   useEffect(load, [load]);
+
+  // The timed read. It keeps what the last action said -- a push's output
+  // should not vanish three seconds later -- and leaves a status that has not
+  // changed alone, so the lists are not redrawn for nothing. Skipped while an
+  // action runs, while the last read is still out, and while the window is
+  // hidden.
+  useEffect(() => {
+    let out = false;
+    const tick = () => {
+      if (out || runningRef.current || document.hidden) return;
+      out = true;
+      const at = generation.current;
+      api
+        .gitStatus(server, name)
+        .then((next) => {
+          if (at !== generation.current || runningRef.current) return;
+          const had = answers.get(key);
+          if (had && JSON.stringify(had.status) === JSON.stringify(next.status)) return;
+          setAnswer({ said: had?.said ?? "", status: next.status });
+        })
+        // Said by the next action or refresh, rather than every few seconds.
+        .catch(() => {})
+        .finally(() => {
+          out = false;
+        });
+    };
+    const timer = setInterval(tick, Math.max(refreshMs, FLOOR_MS));
+    return () => clearInterval(timer);
+  }, [server, name, key, refreshMs, setAnswer]);
 
   /// One or more operations in a row, keeping the answer to the last. More
   /// than one is staging a whole section, which is a stage per top-level entry
   /// rather than one of the whole tree: `git add -A -- ''` is an error, and
   /// asking the server for `.` would be a change it does not have yet.
   const act = async (what: string, actions: GitOp[]) => {
+    generation.current++;
+    runningRef.current = true;
     setRunning(what);
     setError(null);
     try {
