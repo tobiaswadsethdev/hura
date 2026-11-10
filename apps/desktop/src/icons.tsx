@@ -348,6 +348,16 @@ type Props = { className?: string; title?: string };
 export const Chevron = ({ open, ...p }: Props & { open: boolean }) =>
   open ? <ChevronDown {...p} /> : <ChevronRight {...p} />;
 
+/// The twisty of a fold that opens by growing (`Fold` in `Fold.tsx`), which
+/// turns as it opens rather than swapping glyphs. The right-pointing one, a
+/// quarter turn by CSS: turned about the middle of a 14-pixel box, every point
+/// on the grid lands on the grid, and `ChevronRight` turned a quarter is
+/// `ChevronDown` point for point, so at rest it is the same pixels as
+/// `Chevron`.
+export const Twisty = ({ open, className, ...p }: Props & { open: boolean }) => (
+  <ChevronRight {...p} className={`twisty${open ? " open" : ""}${className ? ` ${className}` : ""}`} />
+);
+
 /// What the agent in a session is doing, as one fixed-size mark.
 ///
 /// Fixed-size is the requirement, not a detail: this sits in a column to the

@@ -62,15 +62,7 @@ struct ChatRows: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if !prompt.text.isEmpty {
-                        Text(prompt.text)
-                            .textSelection(.enabled)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 7)
-                            // A message bubble, as Messages and the desktop
-                            // draw what you sent: the accent, solid, and white
-                            // on it.
-                            .foregroundStyle(.white)
-                            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        PromptBubble(text: prompt.text)
                     }
                     ReceiptLine(prompt: prompt, receipts: receipts, working: working)
                 }
@@ -111,6 +103,96 @@ struct ChatRows: View {
                 .font(.caption)
                 .foregroundStyle(isError ? Color.red.opacity(0.85) : .secondary)
                 .textSelection(.enabled)
+        }
+    }
+}
+
+/// What you sent, as a message bubble: as Messages and the desktop draw it,
+/// the accent, solid, and white on it. A long one shows its first lines,
+/// fading out, with the rest a tap away, as the desktop's does (`Prompt` in
+/// `apps/desktop/src/chat/Items.tsx`): a pasted log or a page of instructions
+/// would otherwise fill the screen and push the conversation out of sight.
+///
+/// Long is measured rather than counted, since how many lines some text takes
+/// depends on how wide the screen is, and is measured again when that changes.
+struct PromptBubble: View {
+    let text: String
+    @State private var all = false
+    /// How tall the text is in full, and cut at `longLines`, at the width it
+    /// has. It is long when the two differ.
+    @State private var full: CGFloat = 0
+    @State private var upToLong: CGFloat = 0
+
+    /// The desktop's numbers: five lines shown, and cut only when that hides
+    /// at least two, since hiding one saves no more room than the button to
+    /// show it takes.
+    private static let shownLines = 5
+    private static let longLines = shownLines + 2
+
+    private var long: Bool { full > upToLong + 1 }
+    private var cut: Bool { long && !all }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(text)
+                .lineLimit(cut ? Self.shownLines : nil)
+                .textSelection(.enabled)
+                .mask { fade }
+                .background(alignment: .top) { measures }
+            if long {
+                Button(all ? "Show less" : "Show more") {
+                    withAnimation(.snappy) { all.toggle() }
+                }
+                .buttonStyle(.plain)
+                .font(.footnote.weight(.semibold))
+                .opacity(0.85)
+            }
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 7)
+        .foregroundStyle(.white)
+        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    /// The last line fading into the bubble while it is cut, rather than
+    /// stopping hard at the ellipsis.
+    @ViewBuilder
+    private var fade: some View {
+        if cut {
+            VStack(spacing: 0) {
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 24)
+            }
+        } else {
+            Color.black
+        }
+    }
+
+    /// Two copies of the text that nobody sees, wrapped at the width the shown
+    /// one has, to be measured: one in full and one cut at `longLines`.
+    private var measures: some View {
+        ZStack(alignment: .top) {
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+                .measuredHeight($full)
+            Text(text)
+                .lineLimit(Self.longLines)
+                .fixedSize(horizontal: false, vertical: true)
+                .measuredHeight($upToLong)
+        }
+        .hidden()
+        .accessibilityHidden(true)
+    }
+}
+
+private extension View {
+    /// Its height, kept in `height` as it changes.
+    func measuredHeight(_ height: Binding<CGFloat>) -> some View {
+        background {
+            GeometryReader { g in
+                Color.clear.onChange(of: g.size.height, initial: true) { _, h in height.wrappedValue = h }
+            }
         }
     }
 }
