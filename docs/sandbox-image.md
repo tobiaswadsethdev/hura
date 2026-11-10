@@ -154,7 +154,13 @@ dependency, is not installed. Like `claude`, it is owned by root.
 
 The image is labelled `hura.chat`, which is what lets the first chat session on
 an older image rebuild it rather than wait for a host that is not there, and what
-`hurad doctor` checks.
+`hurad doctor` checks. It is also labelled `hura.chat-host` with the revision of
+the host it carries, a number raised whenever the host gains something the
+windows rely on (revision 1 is files, read receipts and subagents). A chat
+session on an image below the revision `hurad` needs pulls or rebuilds it the
+same way, because an older host chats perfectly well and the windows quietly
+offer less: on an image from before files in chats, the attach button is simply
+not there. A session already made keeps the host its sandbox was made with.
 
 Three things measured against Claude Code 2.1.289 rather than read in the SDK's
 types. Turn state (idle, running, waiting on you) is only sent when
