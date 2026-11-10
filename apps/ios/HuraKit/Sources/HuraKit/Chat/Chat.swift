@@ -152,6 +152,20 @@ public enum ComposerInput: Equatable, Sendable {
         guard let m = text.prefixMatch(of: /\/[A-Za-z0-9][\w:.\-]*(?=\s|$)/) else { return nil }
         return (String(m.output), String(text[m.range.upperBound...]))
     }
+
+    /// Whether what came into an emptied composer is the message just sent,
+    /// put back by the keyboard: it commits a pending prediction or
+    /// autocorrection after the field is cleared, so the last word may have
+    /// been completed or replaced. Typing starts one character at a time.
+    public static func isEcho(_ text: String, of sent: String) -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !sent.isEmpty else { return false }
+        if text == sent { return true }
+        func head(_ s: String) -> Substring {
+            s.lastIndex(where: \.isWhitespace).map { s[..<$0] } ?? ""
+        }
+        return text.count >= max(2, sent.count - 2) && head(text) == head(sent)
+    }
 }
 
 /// The chat protocol's entries, translated into the transcript shapes the
