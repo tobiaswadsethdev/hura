@@ -105,7 +105,8 @@ extension HuraApp {
     ///         -HuraCloud http://127.0.0.1:18556 -HuraNoLock YES
     ///
     /// so the app can be looked at in a simulator against stand-ins
-    /// (`Tools/fake-hurad.py` is both) with nothing to tap. The pairing is the
+    /// (`scripts/fake-hurad.py` is both) with nothing to tap; `-HuraName`
+    /// names the server, which is otherwise called by its address. The pairing is the
     /// real one -- the certificate is pinned and the token checked -- only the
     /// confirmation is skipped; the sign-in is the emailed-code one, with a
     /// code the stand-in takes.
@@ -118,7 +119,7 @@ extension HuraApp {
         let defaults = UserDefaults.standard
         if let raw = defaults.string(forKey: "HuraPair"),
            let pairing = try? PairingString(raw),
-           let record = try? await Pairing.pair(pairing) {
+           let record = try? await Pairing.pair(pairing, name: defaults.string(forKey: "HuraName")) {
             _ = try? model.add(record)
         }
         if let raw = defaults.string(forKey: "HuraCloud"), let base = URL(string: raw),
