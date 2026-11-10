@@ -8,7 +8,7 @@ struct AdminTests {
         let v = try JSONDecoder().decode(JSONValue.self, from: data)
         #expect(v == .object([
             "op": .string("set-settings"), "branch_prefix": .string("tobias"), "base": .null, "policy": .null,
-            "providers": .array([]), "auto_update": .null, "interface": .null,
+            "providers": .array([]), "auto_update": .null, "interface": .null, "names": .null,
         ]))
     }
 
@@ -44,5 +44,15 @@ struct AdminTests {
         let raw = #"{"path":"/c.toml","present":false,"settings":{"branch_prefix":null,"base":null,"policy":"open","providers":null,"auto_update":false,"interface":"chat"},"default_branch_prefix":"hura"}"#
         let s = try JSONDecoder().decode(SettingsView.self, from: Data(raw.utf8))
         #expect(s.settings.autoUpdate == false && s.settings.policy == "open" && s.defaultBranchPrefix == "hura")
+    }
+
+    /// Naming's key is reported as where it comes from, and an older server
+    /// that says nothing about it has none.
+    @Test func readsWhereTheNamingKeyComesFrom() throws {
+        let raw = #"{"path":"/c.toml","present":true,"settings":{"branch_prefix":null,"base":null,"policy":null,"providers":null,"auto_update":null,"interface":null,"names":"rules"},"default_branch_prefix":"hura","naming_key":"stored"}"#
+        let s = try JSONDecoder().decode(SettingsView.self, from: Data(raw.utf8))
+        #expect(s.namingKey == "stored" && s.settings.names == "rules")
+        let old = #"{"path":"/c.toml","present":false,"settings":{"branch_prefix":null,"base":null,"policy":null,"providers":null,"auto_update":null,"interface":null},"default_branch_prefix":"hura"}"#
+        #expect(try JSONDecoder().decode(SettingsView.self, from: Data(old.utf8)).namingKey == "none")
     }
 }

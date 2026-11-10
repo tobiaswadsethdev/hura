@@ -81,8 +81,8 @@ pub fn names_at(path: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// One value, for the one caller that may have it: the thing starting a
-/// container on this machine.
+/// One value, for the callers on this machine that may have it: the thing
+/// starting a container, and [`crate::naming`] calling the API with its key.
 ///
 /// `pub(crate)` deliberately. It is not reachable from `hurad`, from the CLI or
 /// from any request handler, so there is no path from a client to a value --

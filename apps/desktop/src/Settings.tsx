@@ -32,6 +32,7 @@ import { useEffect, useState } from "react";
 import { api, messageOf } from "./api";
 import { Waiting } from "./Empty";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
+import type { NamingKey } from "./gen/NamingKey";
 import type { NewOptions } from "./gen/NewOptions";
 import type { Settings } from "./gen/Settings";
 import type { SettingsView } from "./gen/SettingsView";
@@ -279,6 +280,33 @@ export function SettingsScreen({
           </section>
 
           <section className="setting-group">
+            <h3>Session names</h3>
+            <p className="hint">
+              For a session started without a name: a title to show it by, and the slug its branch and
+              sandbox are named from.
+            </p>
+            <label>
+              <span>Names</span>
+              {/* AI is what the server does with the key missing. */}
+              <Select
+                value={draft.names ?? "ai"}
+                onChange={(v) => edit({ names: v === "rules" ? "rules" : "ai" })}
+                options={[
+                  { value: "ai", label: "By Claude Haiku", hint: "From the task, or by the rules if it can't be asked" },
+                  { value: "rules", label: "By the rules", hint: "The task's first words. Nothing leaves the server" },
+                ]}
+              />
+            </label>
+            <NamingKeyField
+              server={server}
+              source={view.naming_key}
+              // Only the key's status: the draft is the file's, and a key is
+              // not in the file.
+              onChange={(naming_key) => setView((v) => (v ? { ...v, naming_key } : v))}
+            />
+          </section>
+
+          <section className="setting-group">
             <h3>This server</h3>
             <label className="tick">
               <input
@@ -353,5 +381,79 @@ export function SettingsScreen({
         onChanged={onTrackers}
       />
     </Screen>
+  );
+}
+
+/// The Anthropic API key naming calls Claude with, kept in the server's secret
+/// store -- so per server, and write-only: this says whether there is one and
+/// where it comes from, never what it is. Stored or forgotten at once rather
+/// than with Save, because it is not part of the config file Save writes.
+function NamingKeyField({
+  server,
+  source,
+  onChange,
+}: {
+  server: string;
+  source: NamingKey;
+  onChange: (source: NamingKey) => void;
+}) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const change = async (next: string | null) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.secret(server, "ANTHROPIC_API_KEY", next);
+      setValue("");
+      onChange((await api.settings(server)).naming_key);
+    } catch (e) {
+      setError(messageOf(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <label>
+        <span>API key</span>
+        <span className="key-field">
+          <input
+            type="password"
+            value={value}
+            placeholder={source === "stored" ? "Stored. Paste to replace it" : "sk-ant-…"}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <button disabled={busy || value.trim() === ""} onClick={() => void change(value.trim())}>
+            Store
+          </button>
+          {source === "stored" && (
+            <button disabled={busy} onClick={() => void change(null)}>
+              Forget
+            </button>
+          )}
+        </span>
+      </label>
+      {error && <p className="error indent">{error}</p>}
+      <p className="hint indent">
+        {source === "stored" && "Stored on this server, which names with it. It can't be shown again."}
+        {source === "environment" && (
+          <>
+            From <code>ANTHROPIC_API_KEY</code> in <code>hurad</code>'s environment. One stored here
+            would be used instead.
+          </>
+        )}
+        {source === "none" && (
+          <>
+            None, so naming uses the <code>claude</code> command on the server if it is there and signed
+            in. Stored on the server, never sent back here.
+          </>
+        )}
+      </p>
+    </>
   );
 }

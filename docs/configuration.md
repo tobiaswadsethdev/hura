@@ -268,9 +268,12 @@ for several at once.
 the slug its sandbox, worktree directory and branch are keyed by, which never
 changes, and a title, which is what the window and the phone show and what
 renaming a session changes. `"ai"`, the default, asks Claude Haiku for both from
-the task -- through the Messages API when `hurad` has `ANTHROPIC_API_KEY` in its
-environment, otherwise through the `claude` command if it is on `hurad`'s
-`PATH` and signed in. That is a second or three before a create starts, and the
+the task -- through the Messages API when `hurad` has an API key, otherwise
+through the `claude` command if it is on `hurad`'s `PATH` and signed in. The key
+is set from the desktop or iOS app's Settings, under Session names, and kept in
+the server's secret store beside the MCP secrets: per server, and never sent
+back to an app. `ANTHROPIC_API_KEY` in `hurad`'s environment works too; a stored
+key wins over it. That is a second or three before a create starts, and the
 task's text goes to Anthropic. Anything that goes wrong -- no key, no `claude`, ten
 seconds without an answer -- names it by `"rules"` instead: the slug from the
 task's first meaningful words, the title from its first sentence. `"rules"` on

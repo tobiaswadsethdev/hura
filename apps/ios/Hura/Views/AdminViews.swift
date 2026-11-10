@@ -341,12 +341,35 @@ struct ServerSettingsView: View {
                     Text(draft.providers == nil ? "Each repository gets its own guess." : "Every new session gets these, whatever the repository.")
                 }
                 Section {
+                    Picker("Names", selection: Binding(get: { draft.names ?? "ai" },
+                                                       set: { draft.names = $0 })) {
+                        Text("By Claude Haiku").tag("ai")
+                        Text("By the rules").tag("rules")
+                    }
+                    NamingKeyRow(server: server, source: view.namingKey) { source in
+                        self.view?.namingKey = source
+                    }
+                } header: {
+                    Text("Session names")
+                } footer: {
+                    Text(namingFooter(view.namingKey))
+                }
+                Section {
                     Toggle("Update itself", isOn: Binding(get: { draft.autoUpdate ?? true }, set: { draft.autoUpdate = $0 }))
                 } header: {
                     Text("This server")
                 } footer: {
                     Text("Written to \(view.path)\(view.present ? "" : ", which doesn't exist yet"). Save writes these; the name and notifications above apply at once.")
                 }
+    }
+
+    private func namingFooter(_ source: String) -> String {
+        let key = switch source {
+        case "stored": "The API key is stored on this server and can't be shown again."
+        case "environment": "The API key comes from ANTHROPIC_API_KEY in hurad's environment; one stored here is used instead."
+        default: "With no API key, naming uses the claude command on the server if it's there and signed in."
+        }
+        return "For a session started without a name. \(key) Keys are stored at once; Save writes the rest."
     }
 
     /// A text field over an optional string: empty is nil, the default.
@@ -374,6 +397,48 @@ struct ServerSettingsView: View {
                 let v = try await server.api.setSettings(draft)
                 view = v
                 draft = v.settings
+            } catch {
+                failed = error.localizedDescription
+            }
+        }
+    }
+}
+
+/// The Anthropic API key naming calls Claude with, in the server's secret
+/// store: per server, and write-only. Stored or forgotten at once, since it
+/// isn't part of the config file Save writes.
+private struct NamingKeyRow: View {
+    let server: Server
+    let source: String
+    let changed: (String) -> Void
+    @State private var value = ""
+    @State private var busy = false
+    @State private var failed: String?
+
+    var body: some View {
+        HStack {
+            SecureField(source == "stored" ? "Stored, paste to replace" : "API key", text: $value)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if busy {
+                ProgressView()
+            } else if !value.isEmpty {
+                Button("Store") { change(value.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            } else if source == "stored" {
+                Button("Forget", role: .destructive) { change(nil) }
+            }
+        }
+        .failure($failed)
+    }
+
+    private func change(_ next: String?) {
+        busy = true
+        Task {
+            defer { busy = false }
+            do {
+                _ = try await server.api.secret("ANTHROPIC_API_KEY", value: next)
+                value = ""
+                changed(try await server.api.settings().namingKey)
             } catch {
                 failed = error.localizedDescription
             }

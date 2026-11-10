@@ -79,9 +79,12 @@ public struct ServerSettings: Codable, Equatable, Sendable {
     public var autoUpdate: Bool?
     /// `chat` or `terminal`.
     public var interface: String?
+    /// How a session given no name is named: `ai` or `rules`.
+    public var names: String?
 
     public init(branchPrefix: String? = nil, base: String? = nil, policy: String? = nil, providers: [String]? = nil,
-                autoUpdate: Bool? = nil, interface: String? = nil) {
+                autoUpdate: Bool? = nil, interface: String? = nil, names: String? = nil) {
+        self.names = names
         self.branchPrefix = branchPrefix
         self.base = base
         self.policy = policy
@@ -91,7 +94,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case base, policy, providers, interface
+        case base, policy, providers, interface, names
         case branchPrefix = "branch_prefix"
         case autoUpdate = "auto_update"
     }
@@ -104,6 +107,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         try c.encode(providers, forKey: .providers)
         try c.encode(autoUpdate, forKey: .autoUpdate)
         try c.encode(interface, forKey: .interface)
+        try c.encode(names, forKey: .names)
     }
 }
 
@@ -114,10 +118,24 @@ public struct SettingsView: Decodable, Equatable, Sendable {
     public var present: Bool
     public var settings: ServerSettings
     public var defaultBranchPrefix: String
+    /// Where naming's API key comes from: `stored`, `environment` or `none`.
+    /// Never the key.
+    public var namingKey: String
 
     enum CodingKeys: String, CodingKey {
         case path, present, settings
         case defaultBranchPrefix = "default_branch_prefix"
+        case namingKey = "naming_key"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        path = try c.decode(String.self, forKey: .path)
+        present = try c.decode(Bool.self, forKey: .present)
+        settings = try c.decode(ServerSettings.self, forKey: .settings)
+        defaultBranchPrefix = try c.decode(String.self, forKey: .defaultBranchPrefix)
+        // A server from before naming had a key says nothing about one.
+        namingKey = try c.decodeIfPresent(String.self, forKey: .namingKey) ?? "none"
     }
 }
 
