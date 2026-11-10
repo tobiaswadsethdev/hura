@@ -934,6 +934,7 @@ export default function App() {
                 active={activeTab}
                 failure={session.state === "failed" ? session.failure : null}
                 listed={!!shells[session.name] && (session.interface !== "chat" || !!chats[session.name])}
+                usage={polls[session.name]?.usage ?? null}
                 onActivate={(key) => setActive((a) => ({ ...a, [session.name]: key }))}
                 onReorder={(moved, onto) =>
                   setOrder((all) => ({

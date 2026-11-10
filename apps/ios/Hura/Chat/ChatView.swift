@@ -12,6 +12,9 @@ struct ChatView: View {
     /// until it is, and that is not news: the chat says what is happening, so
     /// a banner saying the server cannot be reached would be a false alarm.
     var preparing = false
+    /// The session's figures, asked for when the context ring is opened: the
+    /// account's limits are in a poll, not in the conversation.
+    var usage: (() async -> Usage?)?
     @State private var draft = ""
     @State private var sending = false
     /// What was just sent, and when: the keyboard commits a pending
@@ -287,9 +290,13 @@ struct ChatView: View {
                     Label(chat.effort.map(Self.effortName) ?? "Effort", glyph: .effort)
                 }
             }
+            // After the settings rather than at the end of the row: the end
+            // is over the stop button, and a tap meant for one hit the other.
+            if chat.loaded {
+                ContextRing(percentage: chat.contextPercentage, size: chat.contextSize, usage: usage)
+            }
             Spacer()
             if chat.status == "compacting" { Text("compacting") }
-            if let ctx = chat.contextPercentage { Text("ctx \(Int(ctx.rounded()))%") }
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -357,7 +364,9 @@ struct ChatView: View {
         .padding(.vertical, 8)
         }
         .disabled(chat.phase != .live)
-        .background(.bar)
+        // Carried on behind the keyboard: its top corners are rounded, and
+        // a bar that stopped at its edge left the chat's black in them.
+        .background { Rectangle().fill(.bar).ignoresSafeArea() }
         .photosPicker(isPresented: $choosingPhotos, selection: $photos, maxSelectionCount: 10, matching: .images)
         .onChange(of: photos) {
             let picked = photos

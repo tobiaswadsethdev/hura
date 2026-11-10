@@ -36,6 +36,12 @@ slash_commands: Array<SlashCommand>,
  */
 status: string | null, cost_usd: number | null, context_percentage: number | null, 
 /**
+ * How big this conversation's context window is, in tokens, so the
+ * percentage has something to be a percentage of. `None` from a host
+ * built before it said.
+ */
+context_size: number | null, 
+/**
  * Whether Claude Code is running for this conversation. One that has not
  * been spoken to since the host started is not, until it is.
  */

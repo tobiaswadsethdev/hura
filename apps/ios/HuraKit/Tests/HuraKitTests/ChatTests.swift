@@ -266,6 +266,20 @@ struct ChatTests {
         #expect(socket.sent.last?["command"]?["effort"] == .null, "nil is sent, as the model's default")
     }
 
+    @Test func readsHowFullTheContextIsAndOfWhat() async throws {
+        let socket = ScriptedSocket()
+        socket.dropWhenDone = false
+        socket.say(#"{"is":"opened","id":1}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"replay","seq":0,"entries":[]}}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle","context_percentage":42.5,"context_size":200000}}}"#)
+        let chat = Chat(record: Self.record, session: "fix-tests", transport: { _ in socket })
+        chat.start()
+        defer { chat.stop() }
+        try await until { chat.loaded }
+        #expect(chat.contextPercentage == 42.5)
+        #expect(chat.contextSize == 200_000)
+    }
+
     @Test func sendsFilesOnlyToAHostThatTakesThem() async throws {
         let socket = ScriptedSocket()
         socket.dropWhenDone = false

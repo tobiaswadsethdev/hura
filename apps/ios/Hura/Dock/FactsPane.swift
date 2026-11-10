@@ -1,8 +1,9 @@
 import HuraKit
 import SwiftUI
 
-/// What a session is, and what it has spent: its task, its worktree, what it
-/// was given, and the agent's own figures once its status line has run.
+/// What a session is, and what it has done: its task, its worktree, what it
+/// was given, and the agent's own figures once its status line has run. How
+/// full the context is, and the account's limits, are in the chat composer.
 struct FactsPane: View {
     let server: Server
     let name: String
@@ -76,43 +77,8 @@ struct FactsPane: View {
                         Text("not yet")
                     }
                 }
-                if let ctx = usage.contextUsedPercentage {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Context")
-                            Spacer()
-                            Text("\(Int(ctx.rounded()))%\(usage.contextSize.map { " of \($0 / 1000)k" } ?? "")")
-                                .foregroundStyle(.secondary)
-                        }
-                        ProgressView(value: min(100, max(0, ctx)), total: 100)
-                            .tint(ctx >= 90 ? .red : ctx >= 70 ? .yellow : .accentColor)
-                    }
-                }
             } else {
                 Text("Spending shows here once the agent has reported.").foregroundStyle(.secondary)
-            }
-        }
-        // The account's limits as this session's agent last reported them --
-        // here, beside the session they came from, as the desktop's facts
-        // pane shows them, rather than anywhere that would pass them off as
-        // current.
-        if let windows = usage?.windows, !windows.isEmpty {
-            Section("Account limits") {
-                ForEach(windows, id: \.label) { w in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(w.label)
-                            Spacer()
-                            Text("\(Int(w.usedPercentage.rounded()))%").foregroundStyle(w.usedPercentage >= 80 ? .orange : .secondary)
-                        }
-                        ProgressView(value: min(100, max(0, w.usedPercentage)), total: 100)
-                            .tint(w.usedPercentage >= 80 ? .orange : .accentColor)
-                        if let r = w.resetsAt {
-                            Text("Resets \(Date(timeIntervalSince1970: TimeInterval(r)).formatted(.relative(presentation: .named)))")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
             }
         }
     }
