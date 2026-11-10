@@ -5,13 +5,15 @@
 // rather than read every time. A tool call is one card: what it was asked to
 // do in its header, and what came back underneath, open when the answer is
 // the point (an edit's diff, a plan, the todo list) and closed when it is a
-// file the agent read for its own benefit.
+// file the agent read for its own benefit. A `!` command you ran is a card
+// too, open, since its output is why it was run.
 
 import { createContext, memo, useContext, useState } from "react";
 
 import type { ChatFile } from "../gen/ChatFile";
 import { Attach, Chevron, Chosen, Close, Delivered, Read, Working } from "../icons";
 import { Markdown } from "../Markdown";
+import { leadingCommand } from "./commands";
 import type { Item, ToolCall } from "./transcript";
 
 /// Where the working copy is in the sandbox. Paths under it are shown relative
@@ -326,6 +328,57 @@ export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolC
   );
 });
 
+/// A `!` command you ran, and what it printed. Open, unlike a tool call: you
+/// ran it to see this.
+const ShellCard = memo(function ShellCard({ item }: { item: Extract<Item, { kind: "shell" }> }) {
+  const [open, setOpen] = useState(true);
+  const state =
+    item.output === null ? "running" : item.stopped ? "stopped" : item.code === 0 ? "done" : "failed";
+  return (
+    <div className={`chat-tool chat-shell ${state}`}>
+      <button className="chat-tool-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Chevron open={open} />
+        <span className="what">
+          <span className="verb">You ran</span>
+          <span className="subject" title={item.command}>
+            {item.command}
+          </span>
+        </span>
+        <span className="mark" aria-label={state}>
+          {state === "running" && <Working />}
+          {state === "stopped" && <span className="declined">stopped</span>}
+          {state === "failed" && (
+            <span className="exit">{item.code === null ? "did not finish" : `exit ${item.code}`}</span>
+          )}
+        </span>
+      </button>
+      {open && item.output !== null && (
+        <div className="chat-tool-body">
+          <Output text={item.output} />
+        </div>
+      )}
+    </div>
+  );
+});
+
+/// Your message, with a slash command it starts with set apart, as it was
+/// while you typed it.
+function PromptText({ text }: { text: string }) {
+  const lead = leadingCommand(text);
+  return (
+    <div className="chat-prompt">
+      {lead ? (
+        <>
+          <span className="chat-slash">{lead.command}</span>
+          {lead.rest}
+        </>
+      ) : (
+        text
+      )}
+    </div>
+  );
+}
+
 /// What was sent with a message: a picture the model saw as itself, and any
 /// other file as the path the agent was given.
 function SentFiles({ files }: { files: ChatFile[] }) {
@@ -432,7 +485,7 @@ export const ItemView = memo(function ItemView({
       return (
         <>
           {item.files.length > 0 && <SentFiles files={item.files} />}
-          {item.text && <div className="chat-prompt">{item.text}</div>}
+          {item.text && <PromptText text={item.text} />}
           <Receipt at={item.at} read={item.read} receipts={receipts} />
         </>
       );
@@ -444,6 +497,8 @@ export const ItemView = memo(function ItemView({
       return <Thinking text={item.text} />;
     case "tool":
       return <ToolCard call={item.call} progress={progress?.get(item.call.id)} />;
+    case "shell":
+      return <ShellCard item={item} />;
     case "note":
       return <p className={`chat-note ${item.tone}`}>{item.text}</p>;
     case "turn":

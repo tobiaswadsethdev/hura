@@ -28,9 +28,25 @@ struct Prompt: Equatable {
     var read: Date?
 }
 
+/// A `!` command you ran in the sandbox, and how it ended once it has.
+struct ShellRun: Equatable {
+    var command: String
+    var at: Date?
+    /// What it printed; nil while it runs.
+    var output: String?
+    /// Nil when it did not exit by itself: stopped, or out of time.
+    var code: Int?
+    var stopped: Bool
+    var truncated: Bool
+
+    var running: Bool { output == nil }
+    var failed: Bool { output != nil && !stopped && code != 0 }
+}
+
 /// What the chat shows, folded from transcript entries.
 enum ChatItem: Identifiable, Equatable {
     case prompt(id: String, prompt: Prompt)
+    case shell(id: String, run: ShellRun)
     /// The first thing said on a day, so a time is never read as the wrong one.
     case day(id: String, date: Date)
     /// What Claude said, and when.
@@ -43,8 +59,8 @@ enum ChatItem: Identifiable, Equatable {
 
     var id: String {
         switch self {
-        case let .prompt(id, _), let .day(id, _), let .text(id, _, _), let .thinking(id, _), let .tool(id, _),
-             let .turnEnd(id, _, _), let .divider(id, _), let .notice(id, _, _):
+        case let .prompt(id, _), let .shell(id, _), let .day(id, _), let .text(id, _, _), let .thinking(id, _),
+             let .tool(id, _), let .turnEnd(id, _, _), let .divider(id, _), let .notice(id, _, _):
             id
         }
     }
@@ -68,6 +84,11 @@ enum ChatItem: Identifiable, Equatable {
                 if let id = b.toolUseID { results[id] = b }
             }
         }
+        // How each `!` command ended, by its uuid: the end comes after it.
+        var exits: [String: TranscriptEntry] = [:]
+        for e in entries where e.kind == TranscriptEntry.Kind.exited {
+            if let uuid = e.uuid { exits[uuid] = e }
+        }
         // When each prompt was read, by its uuid: the receipt comes after it.
         var read: [String: Date] = [:]
         var lastRead: UInt64 = 0
@@ -79,13 +100,16 @@ enum ChatItem: Identifiable, Equatable {
         var day: Date?
         var held: [(uuid: String, id: String, prompt: Prompt)] = []
         let entries = entries.filter { $0.parent == thread }
-        func place(_ id: String, _ prompt: Prompt, at: Date?) {
-            if let at {
-                if day.map({ !Calendar.current.isDate($0, inSameDayAs: at) }) ?? true {
-                    items.append(.day(id: "\(id).day", date: at))
-                }
-                day = at
+        /// The first thing on a day goes under a line naming the day.
+        func newDay(_ id: String, at: Date?) {
+            guard let at else { return }
+            if day.map({ !Calendar.current.isDate($0, inSameDayAs: at) }) ?? true {
+                items.append(.day(id: "\(id).day", date: at))
             }
+            day = at
+        }
+        func place(_ id: String, _ prompt: Prompt, at: Date?) {
+            newDay(id, at: at)
             items.append(.prompt(id: id, prompt: prompt))
         }
         for e in entries {
@@ -103,6 +127,13 @@ enum ChatItem: Identifiable, Equatable {
                 } else {
                     place(id(0), prompt, at: e.at)
                 }
+            case TranscriptEntry.Kind.shell:
+                let end = e.uuid.flatMap { exits[$0] }
+                newDay(id(0), at: e.at)
+                items.append(.shell(id: id(0), run: ShellRun(
+                    command: blocks.first?.text ?? "", at: e.at, output: end.map { $0.blocks?.first?.text ?? "" },
+                    code: end?.code, stopped: end?.stopped ?? false,
+                    truncated: end?.blocks?.first?.truncated ?? false)))
             case TranscriptEntry.Kind.read:
                 if let i = held.firstIndex(where: { $0.uuid == e.uuid }) {
                     let h = held.remove(at: i)

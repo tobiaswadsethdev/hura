@@ -53,6 +53,18 @@ export type Item =
   /// both epoch milliseconds from the sandbox's clock; `read` is null until
   /// then.
   | { kind: "prompt"; key: string; text: string; files: ChatFile[]; at: number; read: number | null }
+  /// A `!` command you ran in the sandbox. `output` is null while it runs;
+  /// `code` is null when it did not exit by itself.
+  | {
+      kind: "shell";
+      key: string;
+      command: string;
+      at: number;
+      output: string | null;
+      code: number | null;
+      stopped: boolean;
+      truncated: boolean;
+    }
   | { kind: "text"; key: string; text: string }
   | { kind: "thinking"; key: string; text: string }
   | { kind: "tool"; key: string; call: ToolCall }
@@ -172,6 +184,8 @@ export function build(entries: ChatEntry[]): Built {
     (parent !== null && calls.get(parent)?.children) || items;
   /// Your messages, so their receipts can be filled in as they arrive.
   const prompts = new Map<string, Extract<Item, { kind: "prompt" }>>();
+  /// Your `!` commands, so each one's end can be filled in when it comes.
+  const shells = new Map<string, Extract<Item, { kind: "shell" }>>();
   let day: number | null = null;
 
   for (const entry of entries) {
@@ -204,6 +218,30 @@ export function build(entries: ChatEntry[]): Built {
       case "error":
         items.push({ kind: "note", key, tone: "bad", text: ev.message });
         break;
+      case "shell": {
+        const shell = {
+          kind: "shell" as const,
+          key,
+          command: ev.command,
+          at: entry.at,
+          output: null,
+          code: null,
+          stopped: false,
+          truncated: false,
+        };
+        shells.set(ev.uuid, shell);
+        place(shell, entry.at);
+        break;
+      }
+      case "exited": {
+        const shell = shells.get(ev.uuid);
+        if (!shell) break;
+        shell.output = ev.output;
+        shell.code = ev.code;
+        shell.stopped = ev.stopped;
+        shell.truncated = ev.truncated;
+        break;
+      }
       case "sdk":
         message(ev.msg as SdkMessage, key, entry.at);
         break;

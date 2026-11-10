@@ -117,6 +117,12 @@ pub enum ChatCommand {
     /// The reasoning effort, `low` to `max`, or `None` for the model's
     /// default.
     Effort { effort: Option<String> },
+    /// A command for the sandbox's shell, typed after a `!` as in Claude
+    /// Code's terminal. The host runs it in the working copy, keeps what it
+    /// printed, and hands both to Claude with the next message, without
+    /// starting a turn of its own. Sent only to a host whose
+    /// [`ChatState::shell`] says it takes one.
+    Shell { command: String },
 }
 
 /// A file as a client sends it, whole.
@@ -203,8 +209,9 @@ pub enum ChatFrame {
         #[cfg_attr(feature = "ts", ts(type = "unknown"))]
         ev: serde_json::Value,
     },
-    /// The conversation's state, whenever it changes.
-    State { state: ChatState },
+    /// The conversation's state, whenever it changes. Boxed, being by far the
+    /// largest frame, so every other frame on a channel is not its size.
+    State { state: Box<ChatState> },
     /// A request on this connection could not be done.
     Error { message: String },
     /// Said by `hurad` rather than the host: why there is nothing yet. A
@@ -264,6 +271,24 @@ pub enum ChatEvent {
     },
     /// The conversation failed, in the SDK's words.
     Error { message: String },
+    /// A command you ran with `!`, as you typed it after the `!`. Its
+    /// [`ChatEvent::Exited`] follows, with the same uuid, once it is done.
+    Shell { uuid: String, command: String },
+    /// How the [`ChatEvent::Shell`] with this uuid ended, and what it printed.
+    Exited {
+        uuid: String,
+        /// Its output and its errors, together as a terminal shows them, with
+        /// colour codes taken out. A long one keeps its start and its end.
+        output: String,
+        /// `None` when it did not exit by itself: stopped, or out of time.
+        code: Option<i32>,
+        /// Stopped by you, rather than ending or running out of time.
+        #[serde(default)]
+        stopped: bool,
+        /// Some of the middle of the output was left out.
+        #[serde(default)]
+        truncated: bool,
+    },
     /// A kind a newer host writes that this one has not heard of. Read as
     /// nothing rather than failing the whole transcript.
     #[serde(other)]
@@ -302,6 +327,10 @@ pub struct ChatState {
     /// Slash commands Claude Code offers, without the slash.
     #[serde(default)]
     pub commands: Vec<String>,
+    /// The same commands with what each does and takes, from a host that
+    /// says. A client reads [`ChatState::commands`] when this is empty.
+    #[serde(default)]
+    pub slash_commands: Vec<SlashCommand>,
     /// What Claude Code is doing that is not a turn: `compacting`.
     pub status: Option<String>,
     pub cost_usd: Option<f64>,
@@ -319,6 +348,26 @@ pub struct ChatState {
     /// says.
     #[serde(default)]
     pub receipts: bool,
+    /// Whether the host runs a [`ChatCommand::Shell`]. One built before it
+    /// did would refuse the op, so a client offers `!` only when this says.
+    #[serde(default)]
+    pub shell: bool,
+}
+
+/// A slash command, as Claude Code describes it.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlashCommand {
+    /// Without the slash.
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// What it takes after its name, such as `<file>`. Empty for nothing.
+    #[serde(default)]
+    pub argument_hint: String,
+    /// Other names that run it: `/cost` for `/usage`, say.
+    #[serde(default)]
+    pub aliases: Vec<String>,
 }
 
 /// A permission request, a question, or a plan to approve.
@@ -689,6 +738,70 @@ mod tests {
         );
         let back: ChatCommand = serde_json::from_str(r#"{"op":"effort","effort":null}"#).unwrap();
         assert_eq!(back, ChatCommand::Effort { effort: None });
+        assert_eq!(
+            serde_json::to_value(ChatCommand::Shell {
+                command: "git status".into()
+            })
+            .unwrap(),
+            serde_json::json!({"op": "shell", "command": "git status"})
+        );
+    }
+
+    /// A `!` command is two entries, its start and its end, tied by a uuid.
+    /// A host that described its commands says so beside the bare names,
+    /// and one that did not still reads.
+    #[test]
+    fn a_shell_command_and_the_described_commands_come_through() {
+        let started: ChatEntry = serde_json::from_str(
+            r#"{"seq":1,"at":0,"ev":{"kind":"shell","uuid":"s1","command":"ls"}}"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(started.ev, ChatEvent::Shell { ref uuid, ref command } if uuid == "s1" && command == "ls")
+        );
+        let ended: ChatEntry = serde_json::from_str(
+            r#"{"seq":2,"at":9,"ev":{"kind":"exited","uuid":"s1","output":"README.md\n","code":0}}"#,
+        )
+        .unwrap();
+        let ChatEvent::Exited {
+            output,
+            code,
+            stopped,
+            truncated,
+            ..
+        } = ended.ev
+        else {
+            panic!("not an exit");
+        };
+        assert_eq!(output, "README.md\n");
+        assert_eq!(code, Some(0));
+        assert!(!stopped && !truncated);
+
+        let state: ChatState = serde_json::from_str(
+            r#"{"activity":"idle","mode":null,"model":null,"commands":["review"],
+            "slash_commands":[{"name":"review","description":"Review a pull request",
+            "argument_hint":"<pr>","aliases":["rv"]},{"name":"compact"}],
+            "status":null,"cost_usd":null,"context_percentage":null,"shell":true}"#,
+        )
+        .unwrap();
+        assert!(state.shell);
+        assert_eq!(state.slash_commands[0].argument_hint, "<pr>");
+        assert_eq!(state.slash_commands[0].aliases, ["rv"]);
+        assert_eq!(state.slash_commands[1].description, "");
+        let v = serde_json::to_value(&state).unwrap();
+        assert_eq!(v["slash_commands"][0]["name"], "review");
+        assert_eq!(v["shell"], true);
+
+        let old: ChatState = serde_json::from_str(
+            r#"{"activity":"idle","mode":null,"model":null,"commands":["compact"],
+            "status":null,"cost_usd":null,"context_percentage":null}"#,
+        )
+        .unwrap();
+        assert!(old.slash_commands.is_empty());
+        assert!(
+            !old.shell,
+            "a host that does not say runs no shell commands"
+        );
     }
 
     /// Files ride on the message they were sent with. A message without any

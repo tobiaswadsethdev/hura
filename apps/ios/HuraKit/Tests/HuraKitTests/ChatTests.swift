@@ -71,11 +71,77 @@ struct ChatTranscriptTests {
         #expect(ChatTranscript.streamedText(other) == nil)
     }
 
+    @Test func aShellCommandAndHowItEndedAreTwoEntries() {
+        let started = ChatTranscript.entry(json(#"{"seq":1,"at":0,"ev":{"kind":"shell","uuid":"s1","command":"git status"}}"#))
+        #expect(started?.kind == TranscriptEntry.Kind.shell)
+        #expect(started?.uuid == "s1")
+        #expect(started?.blocks?.first?.text == "git status")
+        let ended = ChatTranscript.entry(json(#"{"seq":2,"at":0,"ev":{"kind":"exited","uuid":"s1","output":"clean\n","code":1,"stopped":false,"truncated":true}}"#))
+        #expect(ended?.kind == TranscriptEntry.Kind.exited)
+        #expect(ended?.blocks?.first?.text == "clean\n")
+        #expect(ended?.blocks?.first?.truncated == true)
+        #expect(ended?.code == 1)
+        #expect(ended?.stopped == false)
+        let stopped = ChatTranscript.entry(json(#"{"seq":3,"at":0,"ev":{"kind":"exited","uuid":"s2","output":"","code":null,"stopped":true}}"#))
+        #expect(stopped?.code == nil)
+        #expect(stopped?.stopped == true)
+    }
+
+    @Test func aLocalCommandsAnswerIsANotice() {
+        let e = json(#"{"seq":4,"at":0,"ev":{"kind":"sdk","msg":{"type":"system","subtype":"local_command_output","content":"Total cost: $0.12"}}}"#)
+        #expect(ChatTranscript.entry(e)?.kind == TranscriptEntry.Kind.notice)
+        #expect(ChatTranscript.entry(e)?.blocks?.first?.text == "Total cost: $0.12")
+    }
+
     @Test func describesAnAskLikeTheHost() throws {
         let ask = try #require(Ask(json(#"{"id":"t","tool":"Bash","input":{"command":"npm test"},"title":null}"#)))
         #expect(ask.summary == "Bash: npm test")
         #expect(!ask.isQuestion)
         #expect(Ask(json(#"{"id":"q","tool":"AskUserQuestion","input":{}}"#))?.isQuestion == true)
+    }
+}
+
+struct SlashCommandTests {
+    static let commands = [
+        SlashCommand(name: "compact", description: "Free up context by summarizing the conversation so far",
+                     argumentHint: "<optional custom summarization instructions>"),
+        SlashCommand(name: "code-review", description: "Review the current diff"),
+        SlashCommand(name: "security-review", description: "Complete a security review"),
+        SlashCommand(name: "usage", description: "Show session cost", aliases: ["cost", "stats"]),
+        SlashCommand(name: "context", description: "Show current context usage"),
+        SlashCommand(name: "clear", description: "Clear the conversation and start over"),
+    ]
+
+    @Test func ranksANamesStartThenAnAliasThenAWordThenADescription() {
+        #expect(SlashCommand.matching("co", in: Self.commands).map(\.name) == ["code-review", "compact", "context", "usage"])
+        #expect(SlashCommand.matching("rev", in: Self.commands).map(\.name) == ["code-review", "security-review"])
+        #expect(SlashCommand.matching("cost", in: Self.commands).map(\.name) == ["usage"])
+        #expect(SlashCommand.matching("summ", in: Self.commands).map(\.name) == ["compact"])
+        #expect(SlashCommand.matching("", in: Self.commands).count == Self.commands.count)
+    }
+
+    @Test func readsWhatIsTypedAsTheTerminalDoes() {
+        guard case let .command(name, known, rest) = ComposerInput.parse("/compact keep the plan", commands: Self.commands, shell: true) else {
+            Issue.record("not a command")
+            return
+        }
+        #expect(name == "compact")
+        #expect(known?.name == "compact")
+        #expect(rest == " keep the plan")
+        guard case let .command(_, alias, _) = ComposerInput.parse("/cost", commands: Self.commands, shell: true) else {
+            Issue.record("not a command")
+            return
+        }
+        #expect(alias?.name == "usage", "an alias names its command")
+        #expect(ComposerInput.parse("!ls -la", commands: Self.commands, shell: true) == .shell("ls -la"))
+        #expect(ComposerInput.parse("!ls", commands: Self.commands, shell: false) == .message, "not for a host that runs none")
+        #expect(ComposerInput.parse("/etc/hosts is wrong", commands: Self.commands, shell: true) == .message)
+        #expect(ComposerInput.naming("/co") == "co")
+        #expect(ComposerInput.naming("/") == "")
+        #expect(ComposerInput.naming("/compact now") == nil)
+        #expect(ComposerInput.leadingCommand("/plugin:do it")?.command == "/plugin:do")
+        #expect(ComposerInput.leadingCommand("/plugin:do it")?.rest == " it")
+        #expect(ComposerInput.leadingCommand("/etc/hosts") == nil)
     }
 }
 
@@ -223,6 +289,27 @@ struct ChatTests {
 
         let big = ChatUpload(name: "big", mime: "", bytes: Data(count: ChatUpload.limit + 1))
         await #expect(throws: ServerError.self) { try await chat.send("", files: [big]) }
+    }
+
+    @Test func offersDescribedCommandsAndRunsAShellCommandOnlyWhereItCan() async throws {
+        let socket = ScriptedSocket()
+        socket.dropWhenDone = false
+        socket.say(#"{"is":"opened","id":1}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"replay","seq":0,"entries":[]}}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle","commands":["review"],"slash_commands":[{"name":"review","description":"Review a pull request","argument_hint":"<pr>","aliases":[]}],"shell":true}}}"#)
+        let chat = Chat(record: Self.record, session: "fix-tests", transport: { _ in socket })
+        chat.start()
+        defer { chat.stop() }
+        try await until { chat.runsShell }
+
+        #expect(chat.commands == [SlashCommand(name: "review", description: "Review a pull request", argumentHint: "<pr>")])
+        try await chat.shell("git status")
+        #expect(socket.sent.last?["command"]?["op"]?.string == "shell")
+        #expect(socket.sent.last?["command"]?["command"]?.string == "git status")
+
+        socket.say(#"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle","commands":["compact"]}}}"#)
+        try await until { !chat.runsShell }
+        #expect(chat.commands.map(\.name) == ["compact"], "an older host's names, undescribed")
     }
 
     private func until(_ condition: () -> Bool) async throws {

@@ -111,11 +111,16 @@ public struct TranscriptEntry: Codable, Equatable, Identifiable, Sendable {
     public var parent: String?
     /// A `task` entry: the SDK's task event, whole.
     public var task: JSONValue?
+    /// An `exited` entry: the `!` command's exit code, nil when it did not
+    /// exit by itself.
+    public var code: Int?
+    /// An `exited` entry: you stopped it.
+    public var stopped: Bool?
 
     public var id: UInt64 { seq }
 
     enum CodingKeys: String, CodingKey {
-        case seq, uuid, ts, kind, blocks, reason, level, at, receipt, parent, task
+        case seq, uuid, ts, kind, blocks, reason, level, at, receipt, parent, task, code, stopped
         case durationMS = "duration_ms"
     }
 
@@ -147,5 +152,11 @@ public struct TranscriptEntry: Codable, Equatable, Identifiable, Sendable {
         /// A subagent started, changed or finished: `task_started`,
         /// `task_updated` or `task_notification`.
         public static let task = "task"
+        /// A `!` command you ran, its text in a block; the `exited` with the
+        /// same `uuid` says how it ended.
+        public static let shell = "shell"
+        /// How a `!` command ended: its output in a block, `code` and
+        /// `stopped`.
+        public static let exited = "exited"
     }
 }

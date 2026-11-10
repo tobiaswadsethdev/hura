@@ -169,6 +169,86 @@ struct ToolCard: View {
     }
 }
 
+/// A `!` command you ran, and what it printed. Open, unlike a tool call: you
+/// ran it to see this.
+struct ShellCard: View {
+    let run: ShellRun
+    @State private var open = true
+    @State private var showAll = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.snappy) { open.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(glyph: .agentTerminal)
+                        .frame(width: 18)
+                        .foregroundStyle(.secondary)
+                    Text("You ran").fontWeight(.semibold)
+                    Text(run.command)
+                        .font(.system(.subheadline, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 4)
+                    status
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                }
+                .font(.subheadline)
+                .contentShape(Rectangle())
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+            }
+            .buttonStyle(.plain)
+            if open, let printed = run.output {
+                Divider().opacity(0.4)
+                output(printed)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(run.failed ? Color.red.opacity(0.5) : Color.white.opacity(0.08), lineWidth: 1))
+    }
+
+    /// The end of it, which is where a command says how it went, with the
+    /// rest a tap away.
+    @ViewBuilder
+    private func output(_ printed: String) -> some View {
+        let text = printed.hasSuffix("\n") ? String(printed.dropLast()) : printed
+        let lines = text.components(separatedBy: "\n")
+        VStack(alignment: .leading, spacing: 8) {
+            if text.isEmpty {
+                Text("No output").font(.caption).foregroundStyle(.secondary)
+            } else {
+                CodeBlock(text: showAll || lines.count <= 30 ? text : lines.suffix(30).joined(separator: "\n"))
+                if lines.count > 30 && !showAll {
+                    Button("Show \(lines.count - 30) earlier lines") { showAll = true }
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        if run.running {
+            WorkingDots().foregroundStyle(Color.working)
+        } else if run.stopped {
+            Text("stopped").font(.caption).foregroundStyle(.secondary)
+        } else if run.failed {
+            Text(run.code.map { "exit \($0)" } ?? "did not finish")
+                .font(.caption.monospaced())
+                .foregroundStyle(.red)
+        }
+    }
+}
+
 struct DiffView: View {
     let lines: [LineDiff.Line]
 

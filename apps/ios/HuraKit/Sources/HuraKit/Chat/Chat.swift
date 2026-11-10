@@ -71,6 +71,89 @@ public struct ChatModel: Equatable, Identifiable, Sendable {
     }
 }
 
+/// A slash command Claude Code offers (`SlashCommand` in hura-core).
+public struct SlashCommand: Equatable, Identifiable, Sendable {
+    /// Without the slash.
+    public var name: String
+    public var description: String
+    /// What it takes after its name, such as `<file>`; empty for nothing.
+    public var argumentHint: String
+    /// Other names that run it: `/cost` for `/usage`.
+    public var aliases: [String]
+
+    public var id: String { name }
+
+    public init(name: String, description: String = "", argumentHint: String = "", aliases: [String] = []) {
+        self.name = name
+        self.description = description
+        self.argumentHint = argumentHint
+        self.aliases = aliases
+    }
+
+    init?(_ v: JSONValue) {
+        guard let name = v["name"]?.string, !name.isEmpty else { return nil }
+        self.name = name
+        description = v["description"]?.string ?? ""
+        argumentHint = v["argument_hint"]?.string ?? ""
+        if case let .array(list)? = v["aliases"] { aliases = list.compactMap(\.string) } else { aliases = [] }
+    }
+
+    /// The commands that fit what has been typed, best first, ranked as the
+    /// desktop ranks them (`apps/desktop/src/chat/commands.ts`): a name that
+    /// starts with it, then an alias that does, then a name with it at the
+    /// start of a word (`review` in `security-review`), then anywhere in the
+    /// name, then in what the command does. Alphabetical within each, so the
+    /// list doesn't shuffle as it narrows.
+    public static func matching(_ query: String, in commands: [SlashCommand]) -> [SlashCommand] {
+        let q = query.lowercased()
+        func rank(_ c: SlashCommand) -> Int? {
+            let name = c.name.lowercased()
+            if name.hasPrefix(q) { return 0 }
+            if c.aliases.contains(where: { $0.lowercased().hasPrefix(q) }) { return 1 }
+            if name.split(whereSeparator: { "-_:.".contains($0) }).contains(where: { $0.hasPrefix(q) }) { return 2 }
+            if name.contains(q) { return 3 }
+            if q.count > 2, c.description.lowercased().contains(q) { return 4 }
+            return nil
+        }
+        return commands
+            .compactMap { c in rank(c).map { (command: c, rank: $0) } }
+            .sorted { $0.rank != $1.rank ? $0.rank < $1.rank : $0.command.name < $1.command.name }
+            .map(\.command)
+    }
+}
+
+/// What is being typed in the composer, as Claude Code's terminal reads it.
+public enum ComposerInput: Equatable, Sendable {
+    case message
+    /// `/name` and what follows it. `known` is the command it names, by its
+    /// name or an alias, when the host offers one.
+    case command(name: String, known: SlashCommand?, rest: String)
+    /// `!` and the command after it, for a host that runs one.
+    case shell(String)
+
+    public static func parse(_ text: String, commands: [SlashCommand], shell: Bool) -> ComposerInput {
+        if shell, text.hasPrefix("!") { return .shell(String(text.dropFirst())) }
+        guard let lead = leadingCommand(text) else { return .message }
+        let name = String(lead.command.dropFirst())
+        let known = commands.first { $0.name == name } ?? commands.first { $0.aliases.contains(name) }
+        return .command(name: name, known: known, rest: lead.rest)
+    }
+
+    /// The name being typed, while the list of commands is worth showing:
+    /// from the slash until the first space.
+    public static func naming(_ text: String) -> String? {
+        guard text.hasPrefix("/"), !text.contains(where: \.isWhitespace) else { return nil }
+        return String(text.dropFirst())
+    }
+
+    /// The slash command a message starts with, by its shape: a plugin's are
+    /// `plugin:name`, and a path such as `/etc/hosts` is not one.
+    public static func leadingCommand(_ text: String) -> (command: String, rest: String)? {
+        guard let m = text.prefixMatch(of: /\/[A-Za-z0-9][\w:.\-]*(?=\s|$)/) else { return nil }
+        return (String(m.output), String(text[m.range.upperBound...]))
+    }
+}
+
 /// The chat protocol's entries, translated into the transcript shapes the
 /// chat screen draws.
 public enum ChatTranscript {
@@ -117,6 +200,19 @@ public enum ChatTranscript {
             return notice(seq, text)
         case "error":
             return notice(seq, ev["message"]?.string ?? "The conversation failed.", level: "error")
+        case "shell":
+            // A `!` command you ran; its `exited`, with the same uuid, follows.
+            guard let uuid = ev["uuid"]?.string else { return nil }
+            return TranscriptEntry(seq: seq, uuid: uuid, kind: TranscriptEntry.Kind.shell,
+                                   blocks: [TranscriptBlock(type: "text", text: ev["command"]?.string ?? "")])
+        case "exited":
+            guard let uuid = ev["uuid"]?.string else { return nil }
+            var exited = TranscriptEntry(seq: seq, uuid: uuid, kind: TranscriptEntry.Kind.exited,
+                                         blocks: [TranscriptBlock(type: "text", text: ev["output"]?.string ?? "",
+                                                                  truncated: ev["truncated"]?.bool)])
+            if case let .number(n)? = ev["code"] { exited.code = Int(n) }
+            exited.stopped = ev["stopped"]?.bool ?? false
+            return exited
         case "sdk":
             return ev["msg"].flatMap { sdk($0, seq: seq) }
         default:
@@ -180,6 +276,11 @@ public enum ChatTranscript {
                 return TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.divider, reason: "compact")
             case "permission_denied":
                 return notice(seq, "\(m["tool_name"]?.string ?? "A tool") was not allowed")
+            // What a slash command such as `/usage` answered with, when it
+            // answers in a message of its own rather than as a reply.
+            case "local_command_output", "informational":
+                guard let text = m["content"]?.string, !text.isEmpty else { return nil }
+                return notice(seq, text)
             case "task_started", "task_updated", "task_notification":
                 return TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.task, task: m)
             default:
@@ -290,8 +391,9 @@ public final class Chat {
     public private(set) var effort: String?
     /// The models this account can switch to, once Claude Code has said.
     public private(set) var models: [ChatModel] = []
-    /// Slash commands on offer, without the slash.
-    public private(set) var commands: [String] = []
+    /// Slash commands on offer: described by a host that says, and by name
+    /// alone from one that doesn't.
+    public private(set) var commands: [SlashCommand] = []
     /// What Claude Code is doing that isn't a turn: `compacting`.
     public private(set) var status: String?
     public private(set) var contextPercentage: Double?
@@ -316,6 +418,9 @@ public final class Chat {
     /// The host says when Claude has read a message. Without it every
     /// message would look unread, so receipts show only when this says.
     public private(set) var receipts = false
+    /// The host runs a `!` command. One built before it did refuses the op,
+    /// so `!` is only offered when this says.
+    public private(set) var runsShell = false
 
     @ObservationIgnored private let record: ServerRecord
     @ObservationIgnored private let transport: TransportFactory
@@ -379,6 +484,14 @@ public final class Chat {
 
     public func interrupt() async throws {
         try await command(Op(op: "interrupt", body: Nothing()))
+    }
+
+    /// Runs a command in the sandbox's working copy, as `!` does in Claude
+    /// Code's terminal: what it prints is kept in the transcript and handed to
+    /// Claude with the next message. Only for a host that `runsShell`.
+    public func shell(_ line: String) async throws {
+        struct Body: Encodable { var command: String }
+        try await self.command(Op(op: "shell", body: Body(command: line)))
     }
 
     public func answer(_ ask: String, allow: Bool) async throws {
@@ -496,11 +609,18 @@ public final class Chat {
             model = s["model"]?.string
             effort = s["effort"]?.string
             if case let .array(list)? = s["models"] { models = list.compactMap(ChatModel.init) } else { models = [] }
-            if case let .array(list)? = s["commands"] { commands = list.compactMap(\.string) } else { commands = [] }
+            if case let .array(list)? = s["slash_commands"], !list.isEmpty {
+                commands = list.compactMap { SlashCommand($0) }
+            } else if case let .array(list)? = s["commands"] {
+                commands = list.compactMap(\.string).map { SlashCommand(name: $0) }
+            } else {
+                commands = []
+            }
             status = s["status"]?.string
             if case let .number(n)? = s["context_percentage"] { contextPercentage = n } else { contextPercentage = nil }
             takesFiles = s["files"]?.bool ?? false
             receipts = s["receipts"]?.bool ?? false
+            runsShell = s["shell"]?.bool ?? false
             if activity == "idle" { streaming = "" }
             loaded = true
         case "error":

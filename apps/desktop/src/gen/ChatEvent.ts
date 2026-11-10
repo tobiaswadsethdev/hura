@@ -13,4 +13,21 @@ receipt: boolean, } | { "kind": "read", uuid: string, } | { "kind": "answer", id
  * because the tool call in the transcript is as the agent made it,
  * before the answers went into it.
  */
-answers: { [key in string]: string } | null, } | { "kind": "error", message: string, } | { "kind": "unknown" };
+answers: { [key in string]: string } | null, } | { "kind": "error", message: string, } | { "kind": "shell", uuid: string, command: string, } | { "kind": "exited", uuid: string, 
+/**
+ * Its output and its errors, together as a terminal shows them, with
+ * colour codes taken out. A long one keeps its start and its end.
+ */
+output: string, 
+/**
+ * `None` when it did not exit by itself: stopped, or out of time.
+ */
+code: number | null, 
+/**
+ * Stopped by you, rather than ending or running out of time.
+ */
+stopped: boolean, 
+/**
+ * Some of the middle of the output was left out.
+ */
+truncated: boolean, } | { "kind": "unknown" };

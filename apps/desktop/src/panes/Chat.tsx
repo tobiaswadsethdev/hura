@@ -11,20 +11,22 @@
 // channel that drops is opened again from the last entry it saw rather than
 // the pane keeping anything of its own.
 
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { Empty } from "../Empty";
 import type { ChatCommand } from "../gen/ChatCommand";
 import type { ChatEntry } from "../gen/ChatEntry";
 import type { ChatFrame } from "../gen/ChatFrame";
 import type { ChatState } from "../gen/ChatState";
-import { Attach, Chat as ChatGlyph, Close, Send, Stop, Working } from "../icons";
+import type { SlashCommand } from "../gen/SlashCommand";
+import { Attach, Chat as ChatGlyph, Close, Send, Shell, Skill, Stop, Working } from "../icons";
 import { api } from "../api";
 import { Markdown, Pictures, type ReadPicture } from "../Markdown";
 import type { PartialMessage, ToolProgress } from "../sdk";
 import { Select } from "../Select";
 import { chat, close, nextChannelId, open } from "../stream";
 import { AskCard } from "../chat/Ask";
+import { matching, naming, offeredCommands, type Typed, typed } from "../chat/commands";
 import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/files";
 import { Items, OpenAgent } from "../chat/Items";
 import { arrived, build } from "../chat/transcript";
@@ -227,6 +229,112 @@ function AttachedFiles({ files, onRemove }: { files: Attached[]; onRemove: (key:
   );
 }
 
+/// What is typed, drawn under the textarea in its place: a slash command the
+/// host offers in the accent, with what it takes after it until something is
+/// typed there, or a `!` command with its bang marked. Only colour and a
+/// background differ from the textarea's own text, never the metrics, so
+/// every character lands where the caret thinks it is.
+function Shade({ what, shade }: { what: Typed; shade: React.Ref<HTMLDivElement> }) {
+  if (what.kind === "message" || (what.kind === "command" && !what.known)) return null;
+  return (
+    <div className="chat-shade" ref={shade} aria-hidden>
+      {what.kind === "shell" ? (
+        <>
+          <span className="chat-bang">!</span>
+          {what.command}
+        </>
+      ) : (
+        <>
+          <span className="chat-slash">/{what.name}</span>
+          {what.rest}
+          {what.known?.argument_hint && !what.rest.trim() && (
+            <span className="chat-ghost">
+              {what.rest ? "" : " "}
+              {what.known.argument_hint}
+            </span>
+          )}
+        </>
+      )}
+      {/* A last line that is empty still has a height. */}
+      {"\u200b"}
+    </div>
+  );
+}
+
+/// The slash commands that fit what is typed, under the pointer or the arrow
+/// keys; the active one's description beside its name.
+function CommandList({
+  id,
+  commands,
+  active,
+  onHover,
+  onPick,
+}: {
+  id: string;
+  commands: SlashCommand[];
+  active: number;
+  onHover: (i: number) => void;
+  onPick: (c: SlashCommand) => void;
+}) {
+  const list = useRef<HTMLUListElement>(null);
+  useLayoutEffect(() => {
+    list.current?.children[active]?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+  return (
+    <ul className="chat-commands" role="listbox" id={id} ref={list} aria-label="slash commands">
+      {commands.map((c, i) => (
+        <li
+          key={c.name}
+          id={`${id}-${i}`}
+          role="option"
+          aria-selected={i === active}
+          className={i === active ? "active" : undefined}
+          onMouseMove={() => i !== active && onHover(i)}
+          // Down rather than click, so the textarea keeps the focus.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onPick(c);
+          }}
+        >
+          <span className="chat-command-name">
+            /{c.name}
+            {c.argument_hint && <span className="chat-command-hint"> {c.argument_hint}</span>}
+          </span>
+          {(c.description || c.aliases.length > 0) && (
+            <span className="chat-command-about">
+              {c.description}
+              {c.aliases.length > 0 && ` (also ${c.aliases.map((a) => `/${a}`).join(", ")})`}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/// A line under what is typed saying what sending it will do, when that is
+/// not to say it to Claude: run a shell command, or run a slash command,
+/// which says what it does once the list of them has gone.
+function ModeNote({ what, open }: { what: Typed; open: boolean }) {
+  if (what.kind === "shell") {
+    return (
+      <p className="chat-mode">
+        <Shell />
+        runs in the working copy; Claude sees what it prints with your next message
+      </p>
+    );
+  }
+  if (what.kind === "command" && what.known?.description && !open) {
+    return (
+      <p className="chat-mode">
+        <Skill />
+        <span>{what.known.description}</span>
+      </p>
+    );
+  }
+  return null;
+}
+
 function Composer({
   state,
   onCommand,
@@ -244,7 +352,9 @@ function Composer({
 }) {
   const [text, setText] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+  const shade = useRef<HTMLDivElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const listId = useId();
   /// What was just sent, and when. WebKit commits a pending autocorrection or
   /// inline prediction into the box after Enter has emptied it, which put the
   /// message straight back; for a moment after a send, that is not typing.
@@ -259,13 +369,38 @@ function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, [text]);
 
-  // A slash command, offered while one is being typed.
-  const typing = /^\/(\S*)$/.exec(text);
-  const offered = typing
-    ? (state?.commands ?? []).filter((c) => c.startsWith(typing[1])).slice(0, 8)
-    : [];
+  const commands = useMemo(() => offeredCommands(state), [state?.slash_commands, state?.commands]);
+  const what = typed(text, commands, state?.shell ?? false);
+  // The commands, offered while a name is being typed, until Esc puts them
+  // away for that name.
+  const query = naming(text);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const offered = useMemo(
+    () => (query === null || query === dismissed ? [] : matching(query, commands)),
+    [query, dismissed, commands],
+  );
+  const [active, setActive] = useState(0);
+  useEffect(() => setActive(0), [query]);
+  const picked = offered[Math.min(active, offered.length - 1)];
 
+  const complete = (c: SlashCommand) => {
+    setText(`/${c.name} `);
+    box.current?.focus();
+  };
+
+  const say = (t: string) => {
+    sent.current = { text: t, at: Date.now() };
+    setText("");
+  };
   const send = () => {
+    if (what.kind === "shell") {
+      // Files wait for the next message: a command does not take them.
+      const command = what.command.trim();
+      if (!command) return;
+      onCommand({ op: "shell", command });
+      say(text.trim());
+      return;
+    }
     const t = text.trim();
     if (!t && !files.length) return;
     onCommand({
@@ -273,10 +408,10 @@ function Composer({
       text: t,
       files: files.length ? files.map(({ name, mime, data }) => ({ name, mime, data })) : undefined,
     });
-    sent.current = { text: t, at: Date.now() };
-    setText("");
+    say(t);
     onSent();
   };
+  const sendable = what.kind === "shell" ? Boolean(what.command.trim()) : Boolean(text.trim() || files.length);
 
   const models = state?.models ?? [];
   const model = state?.model ?? null;
@@ -288,68 +423,93 @@ function Composer({
   return (
     <div className="chat-composer">
       {offered.length > 0 && (
-        <ul className="chat-commands" role="listbox">
-          {offered.map((c) => (
-            <li key={c}>
-              <button
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  setText(`/${c} `);
-                  box.current?.focus();
-                }}
-              >
-                /{c}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <CommandList id={listId} commands={offered} active={active} onHover={setActive} onPick={complete} />
       )}
       {/* One box: what you write, and under it, in the same frame, what it
           will run under. The controls are words until pointed at, because
           they are read far more often than they are changed. A click on the
           box's own padding is a click on the text. */}
-      <div className="chat-box" onClick={(e) => e.target === e.currentTarget && box.current?.focus()}>
+      <div
+        className={`chat-box${what.kind === "shell" ? " shell" : ""}`}
+        onClick={(e) => e.target === e.currentTarget && box.current?.focus()}
+      >
         <AttachedFiles files={files} onRemove={onRemove} />
-        <textarea
-          ref={box}
-          rows={1}
-          value={text}
-          placeholder={working ? "queue a message for when this turn is done" : "tell the agent what to do"}
-          onChange={(e) => {
-            const just = sent.current;
-            if (just && Date.now() - just.at < 1000) {
-              const kind = (e.nativeEvent as InputEvent).inputType;
-              if (kind === "insertReplacementText" || e.target.value.trim() === just.text) {
-                e.target.value = "";
-                return;
+        <div className="chat-field">
+          <Shade what={what} shade={shade} />
+          <textarea
+            ref={box}
+            rows={1}
+            value={text}
+            className={what.kind === "shell" || (what.kind === "command" && what.known) ? "shaded" : undefined}
+            role="combobox"
+            aria-expanded={offered.length > 0}
+            aria-controls={offered.length > 0 ? listId : undefined}
+            aria-activedescendant={offered.length > 0 ? `${listId}-${Math.min(active, offered.length - 1)}` : undefined}
+            aria-autocomplete="list"
+            // A command is code: corrected, `wc` became "we".
+            spellCheck={!(what.kind === "shell" || query !== null)}
+            autoCorrect={what.kind === "shell" || query !== null ? "off" : undefined}
+            autoCapitalize={what.kind === "shell" || query !== null ? "off" : undefined}
+            placeholder={
+              working
+                ? "queue a message for when this turn is done"
+                : commands.length || state?.shell
+                  ? `tell the agent what to do${commands.length ? " · / for commands" : ""}${state?.shell ? " · ! for the shell" : ""}`
+                  : "tell the agent what to do"
+            }
+            onScroll={(e) => {
+              if (shade.current) shade.current.scrollTop = e.currentTarget.scrollTop;
+            }}
+            onChange={(e) => {
+              const just = sent.current;
+              if (just && Date.now() - just.at < 1000) {
+                const kind = (e.nativeEvent as InputEvent).inputType;
+                if (kind === "insertReplacementText" || e.target.value.trim() === just.text) {
+                  e.target.value = "";
+                  return;
+                }
               }
-            }
-            sent.current = null;
-            setText(e.target.value);
-          }}
-          // A screenshot on the clipboard is a file to send rather than text
-          // to type. Text pastes as text, even when a file came with it, as
-          // an office suite's cells do.
-          onPaste={(e) => {
-            const pasted = [...e.clipboardData.files];
-            if (!pasted.length || e.clipboardData.getData("text/plain")) return;
-            e.preventDefault();
-            onAttach(pasted);
-          }}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing) return;
-            if (e.key === "Tab" && offered.length) {
+              sent.current = null;
+              setText(e.target.value);
+              if (naming(e.target.value) !== dismissed) setDismissed(null);
+            }}
+            // A screenshot on the clipboard is a file to send rather than text
+            // to type. Text pastes as text, even when a file came with it, as
+            // an office suite's cells do.
+            onPaste={(e) => {
+              const pasted = [...e.clipboardData.files];
+              if (!pasted.length || e.clipboardData.getData("text/plain")) return;
               e.preventDefault();
-              setText(`/${offered[0]} `);
-            } else if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send();
-            } else if (e.key === "Escape" && working) {
-              e.preventDefault();
-              onCommand({ op: "interrupt" });
-            }
-          }}
-        />
+              onAttach(pasted);
+            }}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return;
+              if (picked && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+                e.preventDefault();
+                const step = e.key === "ArrowDown" ? 1 : -1;
+                setActive((active + step + offered.length) % offered.length);
+              } else if (picked && e.key === "Tab") {
+                e.preventDefault();
+                complete(picked);
+              } else if (picked && e.key === "Enter" && !e.shiftKey && query !== picked.name) {
+                // The name, completed. Sent only once it is whole, so a
+                // command is never run by a key meant to finish typing it.
+                e.preventDefault();
+                complete(picked);
+              } else if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              } else if (e.key === "Escape" && picked) {
+                e.preventDefault();
+                setDismissed(query);
+              } else if (e.key === "Escape" && working) {
+                e.preventDefault();
+                onCommand({ op: "interrupt" });
+              }
+            }}
+          />
+        </div>
+        <ModeNote what={what} open={offered.length > 0} />
         <div className="chat-controls">
           {state?.files && (
             <>
@@ -420,8 +580,13 @@ function Composer({
               <Stop aria-label="stop" />
             </button>
           ) : null}
-          <button className="go chat-send" title="send (Enter)" disabled={!text.trim() && !files.length} onClick={send}>
-            <Send aria-label="send" />
+          <button
+            className="go chat-send"
+            title={what.kind === "shell" ? "run it in the sandbox (Enter)" : "send (Enter)"}
+            disabled={!sendable}
+            onClick={send}
+          >
+            {what.kind === "shell" ? <Shell aria-label="run" /> : <Send aria-label="send" />}
           </button>
         </div>
       </div>
@@ -549,6 +714,9 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
   const pending = view.state?.pending ?? [];
   const receipts = !receiptsOn ? "off" : view.state?.activity === "idle" ? "idle" : "working";
   const nothing = items.length === 0 && queued.length === 0 && !view.live;
+  // A `!` command running says so in its own card.
+  const last = items.at(-1);
+  const shellRunning = last?.kind === "shell" && last.output === null;
 
   return (
     <div className="chat-split">
@@ -596,7 +764,7 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
               {/* Under whatever is being written, for the whole turn, so a reply
                   that has paused between two tool calls still says it is not
                   finished. The word only while there is nothing else to look at. */}
-              {view.state?.activity === "running" && pending.length === 0 && (
+              {view.state?.activity === "running" && pending.length === 0 && !shellRunning && (
                 <p className="chat-working" role="status" aria-label="working">
                   <Working size={22} />
                   {!view.live && "working"}

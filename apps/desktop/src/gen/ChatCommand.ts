@@ -9,4 +9,4 @@ export type ChatCommand = { "op": "send", text: string,
 /**
  * Files sent with it: a screenshot dropped on the composer, say.
  */
-files?: Array<ChatUpload>, } | { "op": "interrupt" } | { "op": "answer", id: string, decision: ChatDecision, } | { "op": "mode", mode: string, } | { "op": "model", model: string | null, } | { "op": "effort", effort: string | null, };
+files?: Array<ChatUpload>, } | { "op": "interrupt" } | { "op": "answer", id: string, decision: ChatDecision, } | { "op": "mode", mode: string, } | { "op": "model", model: string | null, } | { "op": "effort", effort: string | null, } | { "op": "shell", command: string, };

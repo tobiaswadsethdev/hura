@@ -62,7 +62,7 @@ struct ChatRows: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if !prompt.text.isEmpty {
-                        Text(prompt.text)
+                        Text(Self.bubble(prompt.text))
                             .textSelection(.enabled)
                             .padding(.horizontal, 13)
                             .padding(.vertical, 7)
@@ -88,6 +88,8 @@ struct ChatRows: View {
             ThinkingView(text: text)
         case let .tool(_, call):
             ToolCard(call: call, cwd: cwd, working: working)
+        case let .shell(_, run):
+            ShellCard(run: run)
         case let .day(_, date):
             HStack {
                 VStack { Divider() }
@@ -112,6 +114,18 @@ struct ChatRows: View {
                 .foregroundStyle(isError ? Color.red.opacity(0.85) : .secondary)
                 .textSelection(.enabled)
         }
+    }
+}
+
+extension ChatRows {
+    /// Your message, with a slash command it starts with set apart as code,
+    /// on a lighter patch of the bubble, as the desktop draws it.
+    static func bubble(_ text: String) -> AttributedString {
+        guard let lead = ComposerInput.leadingCommand(text) else { return AttributedString(text) }
+        var command = AttributedString(lead.command)
+        command.font = Font.body.monospaced().weight(.semibold)
+        command.backgroundColor = Color.white.opacity(0.2)
+        return command + AttributedString(lead.rest)
     }
 }
 

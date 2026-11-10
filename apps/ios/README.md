@@ -5,7 +5,10 @@ server's worktrees are grouped under their projects; you can make a project
 from a repository on the server, start a worktree in it with the same form
 the desktop uses, and delete one. A chat session's conversations are live:
 answer a permission request, a question or a plan, switch the permission mode
-or the model, and open more conversations beside the agent's. A terminal
+or the model, and open more conversations beside the agent's. A `/` lists the
+session's slash commands with what each takes and does, and a message that
+starts with `!` is a command run in the sandbox, whose output Claude reads with
+the next message. A terminal
 session's agent, and any shell beside it, is a terminal ([SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)),
 with a key bar for esc, ctrl, tab and the arrows. A permission request can
 also be answered from its notification. Images in a chat are drawn, as on the

@@ -228,6 +228,24 @@ struct MarkdownImageTests {
                       .turnEnd(id: "2.0", ms: 4200, at: Date(timeIntervalSince1970: 1_790_000_002))])
 }
 
+/// A `!` command is one card: running until its end arrives, then with what it
+/// printed and how it ended. Its bubble's text is not a message's.
+@Test func aShellCommandIsOneCardFilledInWhenItEnds() {
+    let raw = [
+        #"{"seq":1,"at":1790000001000,"ev":{"kind":"shell","uuid":"s1","command":"npm test"}}"#,
+        #"{"seq":2,"at":1790000002000,"ev":{"kind":"shell","uuid":"s2","command":"sleep 99"}}"#,
+        #"{"seq":3,"at":1790000003000,"ev":{"kind":"exited","uuid":"s1","output":"1 failing\n","code":1,"stopped":false,"truncated":false}}"#,
+    ].compactMap { ChatTranscript.entry(try! JSONDecoder().decode(JSONValue.self, from: Data($0.utf8))) }
+    let runs: [ShellRun] = ChatItem.fold(raw).items.compactMap { if case let .shell(_, run) = $0 { run } else { nil } }
+    #expect(runs.map(\.command) == ["npm test", "sleep 99"])
+    #expect(runs[0].output == "1 failing\n")
+    #expect(runs[0].code == 1)
+    #expect(runs[0].failed)
+    #expect(runs[1].running)
+    #expect(!runs[1].failed)
+    #expect(ChatRows.bubble("/review 119").characters.count == "/review 119".count)
+}
+
 /// A subagent is listed from its task events, a resumed one stays one agent,
 /// and its messages are its own thread rather than the conversation's.
 @Test func subagentsAreListedAndFollowedApart() {
