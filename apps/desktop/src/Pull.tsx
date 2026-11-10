@@ -272,11 +272,11 @@ export function PullPanel({
         {session ? (
           <button
             className="inbox-worktree pull-go"
-            title={`Go to ${session.name}`}
+            title={`Go to ${session.title ?? session.name}`}
             onClick={() => onSelect(session.name)}
           >
             <StateDot state={session.state} />
-            <span>{session.name}</span>
+            <span>{session.title ?? session.name}</span>
           </button>
         ) : fork ? (
           <span className="hint">

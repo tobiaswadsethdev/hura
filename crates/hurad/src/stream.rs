@@ -586,7 +586,7 @@ async fn events(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>)
 ///
 /// Only on change, which is what makes this cheaper than the client asking:
 /// most polls of a session that is thinking return the same answer.
-async fn status(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>) {
+async fn status(id: ChannelId, mut session: Session, out: mpsc::Sender<ServerFrame>) {
     let mut last: Option<ops::Poll> = None;
 
     loop {
@@ -599,6 +599,11 @@ async fn status(id: ChannelId, session: Session, out: mpsc::Sender<ServerFrame>)
         else {
             return;
         };
+        // `ops::poll` has written a moved branch to the record; this copy
+        // follows, or every poll after would see the same move and write it.
+        if let Some(branch) = &poll.branch {
+            session.work_branch.clone_from(branch);
+        }
 
         if last.as_ref() != Some(&poll) {
             last = Some(poll.clone());

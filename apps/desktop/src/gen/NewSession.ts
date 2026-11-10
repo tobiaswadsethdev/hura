@@ -23,8 +23,17 @@ project: string | null,
  * without `--name` does. Derived here rather than in a client, because a
  * second implementation of the slug rule is a second answer to what a
  * session is called.
+ *
+ * Either a slug, kept as it is, or words -- "Fix the login test" -- which
+ * become the session's title, with a slug made from them. A form has one
+ * field for a name and a person types a name into it, not a slug.
  */
-name: string | null, repo: string, task: string, base: string | null, 
+name: string | null, 
+/**
+ * The title to show for it, when the client has one in mind beside a
+ * slug it chose: a ticket's key and summary, say. See [`Session::title`].
+ */
+title: string | null, repo: string, task: string, base: string | null, 
 /**
  * The work branch. `None` means `<branch_prefix>/<name>`, which is what
  * every session had before the inbox existed.

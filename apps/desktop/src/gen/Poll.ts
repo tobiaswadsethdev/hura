@@ -36,4 +36,15 @@ usage: Usage | null,
  * Defaulted so a reply from an older server, which has no such field, is
  * a session with nothing listening rather than an unreadable poll.
  */
-ports: Array<Listening>, };
+ports: Array<Listening>, 
+/**
+ * The branch the working copy is on now, which is not always the one the
+ * session was made on: an agent asked to may well `git checkout -b`.
+ *
+ * Read here because it costs one more line in a script already running,
+ * and kept on the record by [`poll`] when it differs, so the list, the
+ * pull request a session is matched to and a push all follow it. `None`
+ * for a detached `HEAD` and for a repository not there yet, neither of
+ * which is a branch to follow.
+ */
+branch: string | null, };

@@ -13,6 +13,7 @@ use crate::endpoints;
 use crate::events;
 use crate::forge;
 use crate::mcp;
+use crate::naming;
 use crate::policy;
 use crate::removed;
 use crate::seed;
@@ -453,7 +454,15 @@ pub struct NewSession {
     /// without `--name` does. Derived here rather than in a client, because a
     /// second implementation of the slug rule is a second answer to what a
     /// session is called.
+    ///
+    /// Either a slug, kept as it is, or words -- "Fix the login test" -- which
+    /// become the session's title, with a slug made from them. A form has one
+    /// field for a name and a person types a name into it, not a slug.
     pub name: Option<String>,
+    /// The title to show for it, when the client has one in mind beside a
+    /// slug it chose: a ticket's key and summary, say. See [`Session::title`].
+    #[serde(default)]
+    pub title: Option<String>,
     pub repo: String,
     pub task: String,
     pub base: Option<String>,
@@ -515,15 +524,29 @@ impl NewSession {
         cfg: &crate::config::Config,
         taken: &[String],
     ) -> Result<Draft, String> {
-        let name = match self
+        let typed = self
             .name
             .map(|n| n.trim().to_string())
-            .filter(|n| !n.is_empty())
-        {
-            Some(n) => n,
-            None => session::derive_name(&self.task, &self.repo)
-                .map(|n| session::unique_name(&n, taken))
-                .ok_or("could not work out a name for this session; give it one")?,
+            .filter(|n| !n.is_empty());
+        let asked_title = self.title.as_deref().and_then(session::clean_title);
+        let (name, title) = match typed {
+            Some(n) if session::validate_name(&n).is_ok() => (n, asked_title),
+            // Words rather than a slug: they are the title, and the slug is
+            // made from them -- every word kept, since they were chosen. A
+            // counter like a derived name's, because nobody typed this slug.
+            Some(n) => {
+                let slug =
+                    session::kebab(&n).ok_or("a name needs a letter or a digit in it somewhere")?;
+                (
+                    session::unique_name(&slug, taken),
+                    asked_title.or_else(|| session::clean_title(&n)),
+                )
+            }
+            None => {
+                let named = naming::name(&self.task, &self.repo, cfg.naming(), taken)
+                    .ok_or("could not work out a name for this session; give it one")?;
+                (named.name, asked_title.or(named.title))
+            }
         };
         session::validate_name(&name).map_err(|e| e.to_string())?;
         let branch = match self
@@ -545,6 +568,7 @@ impl NewSession {
         }
         Ok(Draft {
             name,
+            title,
             project: self.project,
             repo: self.repo,
             task: self.task,
@@ -594,6 +618,8 @@ fn with_library(configured: &[skills::Skill]) -> Vec<skills::Skill> {
 #[derive(Debug, Clone, Default)]
 pub struct Draft {
     pub name: String,
+    /// What the session is called where it is shown. See [`Session::title`].
+    pub title: Option<String>,
     /// The work branch, already validated. `None` means the convention.
     pub branch: Option<String>,
     /// The ticket this session is for, if any. Recorded on the session as a
@@ -917,6 +943,7 @@ fn save(session: Session, warnings: &mut Vec<String>) {
 /// The record a draft becomes, before anything has been made for it.
 fn record(draft: &Draft) -> Session {
     let mut s = Session::new(draft.name.clone(), draft.repo.clone(), draft.task.clone());
+    s.title = draft.title.clone();
     s.base_branch = draft.base.clone();
     s.ticket = draft.ticket.clone();
     s.pull = draft.pull.clone();
@@ -1709,6 +1736,16 @@ pub struct Poll {
     /// a session with nothing listening rather than an unreadable poll.
     #[serde(default)]
     pub ports: Vec<crate::ports::Listening>,
+    /// The branch the working copy is on now, which is not always the one the
+    /// session was made on: an agent asked to may well `git checkout -b`.
+    ///
+    /// Read here because it costs one more line in a script already running,
+    /// and kept on the record by [`poll`] when it differs, so the list, the
+    /// pull request a session is matched to and a push all follow it. `None`
+    /// for a detached `HEAD` and for a repository not there yet, neither of
+    /// which is a branch to follow.
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 /// Read a session's diff stat and agent state in a single exec.
@@ -1727,7 +1764,50 @@ pub fn poll(backend: &dyn Backend, session: &Session) -> Poll {
     if !out.ok() {
         return Poll::default();
     }
-    parse_poll(&out.stdout, session::now_epoch())
+    let poll = parse_poll(&out.stdout, session::now_epoch());
+    if let Some(branch) = &poll.branch
+        && *branch != session.work_branch
+    {
+        follow_branch(&session.name, branch);
+    }
+    poll
+}
+
+/// Keep the branch a session's working copy has moved to on its record.
+///
+/// Compared again under the lock, against the record rather than the copy the
+/// poll was handed: a poller holding a session from before the last change
+/// would otherwise write the same branch every second. A failure is left for
+/// the next poll, which will see the same difference.
+fn follow_branch(name: &str, branch: &str) {
+    let _ = store::update(|store| {
+        if let Some(record) = store.get(name)
+            && record.work_branch != branch
+        {
+            let mut record = record.clone();
+            record.work_branch = branch.to_string();
+            store.upsert(record);
+        }
+    });
+}
+
+/// Give a session a new title, or take its title away with a blank one.
+///
+/// The one thing about a session that can be renamed, because it is the one
+/// thing nothing else is keyed by: see [`Session::title`]. What comes back is
+/// the record as it now is.
+pub fn retitle(name: &str, title: &str) -> Result<Session, String> {
+    let title = session::clean_title(title);
+    store::update(|store| {
+        let mut record = store
+            .get(name)
+            .cloned()
+            .ok_or_else(|| format!("no session called `{name}`"))?;
+        record.title = title;
+        store.upsert(record.clone());
+        Ok(record)
+    })
+    .map_err(|e| format!("could not update the session cache: {e}"))?
 }
 
 /// The script [`poll`] runs. Separate so its shape can be asserted on.
@@ -1760,7 +1840,8 @@ tracked=$(git --no-pager diff --numstat "$mb" 2>/dev/null |
   awk '{{a+=$1; d+=$2}} END {{printf "%d %d", a+0, d+0}}')
 untracked=$(git ls-files --others --exclude-standard --directory 2>/dev/null | wc -l)
 printf '%s %s
-' "$tracked" "$untracked" )
+' "$tracked" "$untracked"
+git symbolic-ref --quiet --short HEAD 2>/dev/null )
 printf '%s
 ' {status_marker}
 cat {status_path} 2>/dev/null
@@ -1819,8 +1900,18 @@ fn parse_poll(stdout: &str, now: u64) -> Poll {
     // inside it is not findable. One strip, used for the search only.
     let plain = crate::ansi::strip(pane_part);
 
+    // The stat line, then the branch on the line after it -- absent for a
+    // detached `HEAD`, which `symbolic-ref` declines to name.
+    let mut stat_lines = stat_part.lines().map(str::trim).filter(|l| !l.is_empty());
+    let stat_line = stat_lines.next().unwrap_or_default();
+    let branch = stat_lines
+        .next()
+        .filter(|b| session::validate_branch(b).is_ok())
+        .map(str::to_string);
+
     Poll {
-        stat: DiffStat::parse(stat_part.trim()),
+        branch,
+        stat: DiffStat::parse(stat_line),
         status: status::combine(
             status::parse_hook(hook_part).as_ref(),
             status::scrape_pane(&plain),
@@ -2038,6 +2129,22 @@ mod tests {
         let status = p.status.expect("a status");
         assert_eq!(status.state, crate::session::State::Running);
         assert_eq!(status.detail.as_deref(), Some("Bash"));
+    }
+
+    /// The branch is the line after the stat, and only a branch git would
+    /// accept is one: a detached `HEAD` prints nothing there.
+    #[test]
+    fn the_branch_follows_the_stat_line() {
+        let poll = |head: &str| parse_poll(&format!("4 1 0\n{head}{}\n", status::STATUS_MARKER), 0);
+        let p = poll("agent/other-idea\n");
+        assert_eq!(p.branch.as_deref(), Some("agent/other-idea"));
+        assert_eq!(
+            p.stat.map(|s| s.added),
+            Some(4),
+            "the stat is still the first line"
+        );
+        assert_eq!(poll("").branch, None, "a detached HEAD names no branch");
+        assert_eq!(poll("not a branch; rm -rf\n").branch, None);
     }
 
     /// The ports sit between the usage and the pane, and a listener named in
@@ -2275,19 +2382,73 @@ mod tests {
         assert!(err.contains("name"), "{err}");
     }
 
-    /// The name is validated where it is made, so a client cannot get a session
-    /// called `../..` past the form by sending one.
+    /// A name that is not a slug is words, and becomes the title -- so a
+    /// client cannot get a session *keyed* `../..` past the form by sending
+    /// one: the slug is made from it, and only the title keeps the text.
     #[test]
-    fn a_name_that_is_not_a_name_is_refused() {
+    fn a_name_that_is_not_a_slug_is_a_title() {
         let cfg = crate::config::Config::default();
-        let err = NewSession {
+        let draft = NewSession {
             name: Some("../../etc".into()),
             repo: "https://github.com/o/thing.git".into(),
             ..Default::default()
         }
         .into_draft(&cfg, &[])
+        .unwrap();
+        assert_eq!(draft.name, "etc");
+        assert_eq!(draft.title.as_deref(), Some("../../etc"));
+
+        let draft = NewSession {
+            name: Some("Fix the login test".into()),
+            repo: "https://github.com/o/thing.git".into(),
+            ..Default::default()
+        }
+        .into_draft(&cfg, &["fix-the-login-test".into()])
+        .unwrap();
+        assert_eq!(
+            draft.name, "fix-the-login-test-2",
+            "every word kept, then a counter"
+        );
+        assert_eq!(draft.title.as_deref(), Some("Fix the login test"));
+
+        let err = NewSession {
+            name: Some("!!!".into()),
+            repo: "https://github.com/o/thing.git".into(),
+            ..Default::default()
+        }
+        .into_draft(&cfg, &[])
         .unwrap_err();
-        assert!(!err.is_empty());
+        assert!(err.contains("letter"), "{err}");
+    }
+
+    /// A slug is kept as typed, and a title sent beside it is the title.
+    #[test]
+    fn a_slug_and_a_title_are_both_kept() {
+        let cfg = crate::config::Config::default();
+        let draft = NewSession {
+            name: Some("proj-123-add-the-changelog".into()),
+            title: Some("PROJ-123 Add the changelog".into()),
+            repo: "https://github.com/o/thing.git".into(),
+            ..Default::default()
+        }
+        .into_draft(&cfg, &[])
+        .unwrap();
+        assert_eq!(draft.name, "proj-123-add-the-changelog");
+        assert_eq!(draft.title.as_deref(), Some("PROJ-123 Add the changelog"));
+    }
+
+    /// With nothing typed, the task names it and titles it.
+    #[test]
+    fn a_derived_name_comes_with_a_title() {
+        let cfg = crate::config::Config::default();
+        let draft = NewSession {
+            repo: "https://github.com/o/thing.git".into(),
+            task: "fix the flaky login test. It fails on CI.".into(),
+            ..Default::default()
+        }
+        .into_draft(&cfg, &[])
+        .unwrap();
+        assert_eq!(draft.title.as_deref(), Some("Fix the flaky login test"));
     }
 
     /// An unknown toolchain fails against the request that named it, rather

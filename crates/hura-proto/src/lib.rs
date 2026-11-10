@@ -303,6 +303,11 @@ pub enum Request {
     /// likely to disagree with one -- a sandbox that was already gone still
     /// removes the record, and reconciliation may have more to say besides.
     Destroy { name: String },
+    /// Rename a session: its title, which is the part of its name nothing is
+    /// keyed by. A blank title takes it away, and the session shows its slug.
+    ///
+    /// Answered with the list, for the reason [`Request::Destroy`] is.
+    Retitle { name: String, title: String },
 
     /// What the server holds on a session's behalf: the MCP catalog and what
     /// each managed container is doing, the secret *names* it has, and the
@@ -427,7 +432,7 @@ impl Request {
             | Request::SendComments { name }
             | Request::Answer { name, .. } => Some(name),
             Request::Create(new) | Request::CreateFromPull(new) => new.name.as_deref(),
-            Request::Destroy { name } => Some(name),
+            Request::Destroy { name } | Request::Retitle { name, .. } => Some(name),
         }
     }
 }
@@ -853,6 +858,7 @@ mod tests {
             status: None,
             pane: Some("? for shortcuts".into()),
             usage: None,
+            branch: Some("hura/x".into()),
             ports: vec![hura_core::ports::Listening {
                 port: 5173,
                 host: hura_core::ports::Loopback::V6,

@@ -68,6 +68,7 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `ops.rs` | the operations the CLI and the window both need, so neither reimplements the other. Everything here takes a `Backend` rather than a runtime client |
 | `backend.rs` | *where* a session runs, as a trait, so the scripts never name the runtime. `backend/sandboxed.rs` is the one implementation: making a sandbox, its rules, its secrets, finding hura's among the runtime's. There used to be a second, a `git worktree` on the server with no isolation; it was removed to keep one of everything |
 | `session.rs` | what a session *is*: identity, the derived branch and sandbox names, and the metadata record written inside the sandbox |
+| `naming.rs` | naming a session from its task: a slug and a title from Claude Haiku, through the API or the `claude` command, and the slug rules when neither answers |
 | `store.rs` | the local cache and its reconciliation against the sandboxes that exist; every write is locked |
 | `removed.rs` | the names of destroyed sessions, kept until the sandbox behind them has actually gone. Deletion is asynchronous, and a sandbox still listed with its record already dropped is the exact shape of an orphan worth adopting -- so without this a removed session came back on the next refresh, and the name could not be used again |
 | `seed.rs` | the detached script that clones, cuts the branch, writes the record and starts the agent |

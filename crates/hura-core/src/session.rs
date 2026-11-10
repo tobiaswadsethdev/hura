@@ -161,6 +161,69 @@ fn slug(text: &str, drop_filler: bool) -> Option<String> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
+/// Text as a slug, every word kept.
+///
+/// For text that is already a name -- what a model was asked to make one of,
+/// or a title somebody typed -- where the words were chosen on purpose and
+/// dropping `to` or `the` from them would be second-guessing.
+pub fn kebab(text: &str) -> Option<String> {
+    slug(text, false)
+}
+
+/// How long a title may be. Long enough for a ticket key and a sentence;
+/// short enough that a sidebar row still says something before it ellipses.
+pub const MAX_TITLE: usize = 80;
+
+/// A title as it is kept: one line, single spaces, no control characters, at
+/// most [`MAX_TITLE`] characters -- cut between words, with an ellipsis, when
+/// it is longer. `None` when nothing is left.
+///
+/// Everything that becomes a title goes through this, whoever wrote it: a
+/// model's answer is text from outside, and a title is drawn in a notification
+/// as well as in a list.
+pub fn clean_title(text: &str) -> Option<String> {
+    let words: Vec<&str> = text
+        .split(|c: char| c.is_whitespace() || c.is_control())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let mut out = String::new();
+    for word in words {
+        let extra = if out.is_empty() { 0 } else { 1 } + word.chars().count();
+        if out.chars().count() + extra > MAX_TITLE {
+            if out.is_empty() {
+                out = word.chars().take(MAX_TITLE - 1).collect();
+            }
+            out.push('…');
+            break;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// A title from the task alone, for when no model was asked or none answered.
+///
+/// The task's first line, up to the end of its first sentence: a task is
+/// written as instructions, and what the work *is* is nearly always said
+/// first. Capitalised, so a title reads like one whichever way the task was
+/// typed.
+pub fn title_from_task(task: &str) -> Option<String> {
+    let line = task.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let sentence = [". ", "? ", "! "]
+        .iter()
+        .filter_map(|end| line.find(end).map(|at| at + 1))
+        .min()
+        .map_or(line, |at| &line[..at]);
+    let sentence = sentence.trim_end_matches(['.', ':', ';', ',']);
+    let title = clean_title(sentence)?;
+    let mut chars = title.chars();
+    let first = chars.next()?;
+    Some(first.to_uppercase().chain(chars).collect())
+}
+
 /// A session name from the task, falling back to the repository's last path
 /// segment.
 ///
@@ -372,7 +435,20 @@ impl std::fmt::Display for State {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
+    /// What the session is keyed by: its sandbox, its worktree directory, its
+    /// default branch, every request about it. A slug, because it is all of
+    /// those, and fixed for the session's life, for the same reason.
     pub name: String,
+    /// What the session is called where a person reads it: "Fix the flaky
+    /// login test" rather than `fix-flaky-login-test`.
+    ///
+    /// Apart from the name because the name cannot change and this can: it
+    /// keys nothing, so renaming a session is writing this field and nothing
+    /// else. `None` on a record from before there was one, and on a session
+    /// whose task said nothing to make one from, which shows its name instead;
+    /// see [`Session::label`].
+    #[serde(default)]
+    pub title: Option<String>,
     /// Where this session runs. See [`Kind`]; a record without it is a
     /// sandbox, which every session was until the server could say otherwise.
     #[serde(default)]
@@ -506,6 +582,12 @@ pub fn humanize_age(created_at: u64, now: u64) -> String {
 }
 
 impl Session {
+    /// What to call this session in a list: its title, or its name when it
+    /// has none.
+    pub fn label(&self) -> &str {
+        self.title.as_deref().unwrap_or(&self.name)
+    }
+
     pub fn new(name: String, repo: String, task: String) -> Self {
         Session {
             backend: Kind::Sandbox,
@@ -515,6 +597,7 @@ impl Session {
             tmux: TMUX_SESSION.to_string(),
             work_branch: format!("{DEFAULT_BRANCH_PREFIX}/{name}"),
             name,
+            title: None,
             repo,
             project: None,
             base_branch: None,

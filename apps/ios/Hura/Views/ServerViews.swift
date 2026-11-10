@@ -66,6 +66,8 @@ struct ServerView: View {
     @State private var addingProject = false
     @State private var creatingIn: Project?
     @State private var destroying: Session?
+    @State private var renaming: Session?
+    @State private var newTitle = ""
     @State private var forgetting: Project?
     @State private var screen: ServerScreen?
     @State private var error: String?
@@ -198,7 +200,26 @@ struct ServerView: View {
         }
         // On the row, not the list, so it opens over the row it is about
         // rather than at the top of the screen.
-        .confirmationDialog("Delete \(s.name)?", isPresented: Binding(
+        .contextMenu {
+            Button("Rename", systemImage: "pencil") {
+                newTitle = s.title ?? ""
+                renaming = s
+            }
+        }
+        .alert("Rename", isPresented: Binding(
+            get: { renaming?.name == s.name },
+            set: { if !$0 { renaming = nil } }
+        )) {
+            TextField(s.name, text: $newTitle)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") {
+                let title = newTitle
+                act { try await server.retitle(s.name, to: title) }
+            }
+        } message: {
+            Text("Leave it empty to show \(s.name).")
+        }
+        .confirmationDialog("Delete \(s.label)?", isPresented: Binding(
             get: { destroying?.name == s.name },
             set: { if !$0 { destroying = nil } }
         ), titleVisibility: .visible) {
@@ -253,7 +274,7 @@ struct SessionRow: View {
             StateMark(state: liveState(session, report))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(session.name).font(.body.weight(.medium)).lineLimit(1)
+                    Text(session.label).font(.body.weight(.medium)).lineLimit(1)
                     if session.isWorktree {
                         Image(glyph: .unsandboxed)
                             .font(.caption)

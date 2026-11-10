@@ -630,6 +630,21 @@ html.mac .sidebar { border-right-color: rgb(0 0 0 / 0.35); }
   .worktree.on:hover { background: var(--selected); }
 }
 .worktree.on { background: var(--selected); }
+/* A row being renamed: the field sits where the name was, in the name's own
+   type, so the row changes as little as it can while it is being typed in. */
+.wt-rename { cursor: default; }
+.wt-rename input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--bg, transparent);
+  border: 1px solid var(--accent, currentColor);
+  border-radius: var(--r-sm, 4px);
+  padding: 0 4px;
+}
 
 /* The state's column. Fixed width and aligned to the first line of text, so
    the names of eleven worktrees line up whatever their agents are doing --
