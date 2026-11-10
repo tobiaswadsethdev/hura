@@ -8,10 +8,11 @@
 // file the agent read for its own benefit. A `!` command you ran is a card
 // too, open, since its output is why it was run.
 
-import { createContext, memo, useContext, useState } from "react";
+import { createContext, memo, useContext, useLayoutEffect, useRef, useState } from "react";
 
+import { Fold, scrollParent, slide } from "../Fold";
 import type { ChatFile } from "../gen/ChatFile";
-import { Attach, Chevron, Chosen, Close, Delivered, Read, Working } from "../icons";
+import { Attach, Chosen, Close, Delivered, Read, Twisty, Working } from "../icons";
 import { Markdown } from "../Markdown";
 import { leadingCommand } from "./commands";
 import type { Item, ToolCall } from "./transcript";
@@ -292,7 +293,7 @@ export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolC
   return (
     <div className={`chat-tool ${state}`}>
       <button className="chat-tool-head" aria-expanded={shown} onClick={() => setOpen(!shown)}>
-        <Chevron open={shown} />
+        <Twisty open={shown} />
         {/* One group, so the two faces share a baseline: centring them as
             separate boxes sets the sans verb and the mono subject at
             different heights, because their metrics differ. */}
@@ -313,7 +314,7 @@ export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolC
           {(state === "declined" || state === "stopped") && <span className="declined">{state}</span>}
         </span>
       </button>
-      {shown && (
+      <Fold open={shown}>
         <div className="chat-tool-body">
           <ToolBody call={call} />
           {call.result?.images.map((p, i) => (
@@ -323,7 +324,7 @@ export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolC
             <p className="chat-quiet">you said: {call.answer.message}</p>
           )}
         </div>
-      )}
+      </Fold>
     </div>
   );
 });
@@ -337,7 +338,7 @@ const ShellCard = memo(function ShellCard({ item }: { item: Extract<Item, { kind
   return (
     <div className={`chat-tool chat-shell ${state}`}>
       <button className="chat-tool-head" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <Chevron open={open} />
+        <Twisty open={open} />
         <span className="what">
           <span className="verb">You ran</span>
           <span className="subject" title={item.command}>
@@ -352,32 +353,14 @@ const ShellCard = memo(function ShellCard({ item }: { item: Extract<Item, { kind
           )}
         </span>
       </button>
-      {open && item.output !== null && (
+      <Fold open={open && item.output !== null}>
         <div className="chat-tool-body">
-          <Output text={item.output} />
+          <Output text={item.output ?? ""} />
         </div>
-      )}
+      </Fold>
     </div>
   );
 });
-
-/// Your message, with a slash command it starts with set apart, as it was
-/// while you typed it.
-function PromptText({ text }: { text: string }) {
-  const lead = leadingCommand(text);
-  return (
-    <div className="chat-prompt">
-      {lead ? (
-        <>
-          <span className="chat-slash">{lead.command}</span>
-          {lead.rest}
-        </>
-      ) : (
-        text
-      )}
-    </div>
-  );
-}
 
 /// What was sent with a message: a picture the model saw as itself, and any
 /// other file as the path the agent was given.
@@ -407,10 +390,153 @@ function Thinking({ text }: { text: string }) {
   return (
     <div className="chat-thinking">
       <button aria-expanded={open} onClick={() => setOpen(!open)}>
-        <Chevron open={open} />
+        <Twisty open={open} />
         thinking
       </button>
-      {open && <div className="body">{text}</div>}
+      <Fold open={open}>
+        <div className="body">{text}</div>
+      </Fold>
+    </div>
+  );
+}
+
+/// Lets go of the bottom of the conversation, which it otherwise keeps to
+/// while it is there. Unset where nothing is kept to the bottom.
+export const Unpin = createContext<(() => void) | null>(null);
+
+/// How many lines of a long message show until the rest is asked for, and how
+/// many more it has to have before it counts as long: folding away a single
+/// line saves no more room than the button to unfold it takes. The iPhone
+/// app's `PromptBubble` cuts at the same numbers.
+const SHOWN_LINES = 5;
+const LONG_LINES = SHOWN_LINES + 2;
+
+/// Space kept above a message that "show less" has brought back into view.
+const ABOVE = 12;
+
+/// Something you said. A long one shows its first lines, fading out, with the
+/// rest a click away: a pasted log or a page of instructions would otherwise
+/// fill the window and push the conversation around it out of sight.
+///
+/// Long is measured, not counted, since how many lines some text takes
+/// depends on how wide the pane is; and measured again when the pane is
+/// resized.
+/// What you wrote, with a slash command it starts with set apart, as it was
+/// while you typed it.
+function PromptWords({ text }: { text: string }) {
+  const lead = leadingCommand(text);
+  if (!lead) return <>{text}</>;
+  return (
+    <>
+      <span className="chat-slash">{lead.command}</span>
+      {lead.rest}
+    </>
+  );
+}
+
+function Prompt({ text }: { text: string }) {
+  const unpin = useContext(Unpin);
+  const bubble = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  /// The height it is cut to, while it is long enough to be.
+  const [cut, setCut] = useState<number | null>(null);
+  const [all, setAll] = useState(false);
+  /// Where it was when it was last opened or closed, for the move to start
+  /// from.
+  const before = useRef<{ height: number; scroller: HTMLElement | null; scrollTop: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const el = body.current;
+    if (!el) return;
+    const measure = () => {
+      const style = getComputedStyle(el);
+      const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.3;
+      // In lines, with half of one to spare: `scrollHeight` is a whole number
+      // of pixels, so seven lines of 19.5 measure 137, which is over 136.5.
+      setCut(el.scrollHeight / line > LONG_LINES + 0.5 ? Math.round(line * SHOWN_LINES) : null);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text]);
+
+  const toggle = () => {
+    const el = body.current;
+    const box = bubble.current;
+    if (!el || !box) return;
+    const scroller = scrollParent(box);
+    before.current = {
+      height: el.getBoundingClientRect().height,
+      scroller,
+      scrollTop: scroller?.scrollTop ?? 0,
+      top: box.getBoundingClientRect().top - (scroller?.getBoundingClientRect().top ?? 0),
+    };
+    // Opened to be read from where it was cut, so the conversation stops
+    // following its bottom: kept there, the message would grow upwards and
+    // show its end instead.
+    if (!all) unpin?.();
+    setAll(!all);
+  };
+
+  useLayoutEffect(() => {
+    const el = body.current;
+    const was = before.current;
+    before.current = null;
+    if (!el || !was) return;
+    for (const a of el.getAnimations()) a.cancel();
+    // Closing, the height it ends at is the cut, and is not measured: laying
+    // the message out at that height before the move has started shrinks the
+    // conversation under the scroll position, which the browser then pulls
+    // back, and the window jumps for a frame.
+    const to = all || cut === null ? el.getBoundingClientRect().height : cut;
+    const moving = slide(el, "maxHeight", was.height, to);
+    // Closing, the button you pressed sits at the bottom of a message that may
+    // have started well above the window. Kept under the pointer while the
+    // message shrinks towards it, by scrolling up as much as it shrinks; but
+    // no further than it takes to bring the top of the message into view.
+    const shrink = was.height - to;
+    const { scroller } = was;
+    if (all || shrink <= 0 || !scroller) return;
+    const back = Math.min(shrink, Math.max(0, ABOVE - was.top));
+    if (back === 0) return;
+    if (!moving) {
+      scroller.scrollTop = was.scrollTop - back;
+      return;
+    }
+    // On each change of its size rather than each animation frame: an
+    // observer is told after layout and before paint, so the scroll moves in
+    // the frame the message shrank in, where a frame callback can see the
+    // size of the one before.
+    const follow = new ResizeObserver(() => {
+      const gone = was.height - el.getBoundingClientRect().height;
+      scroller.scrollTop = was.scrollTop - back * Math.min(1, gone / shrink);
+    });
+    follow.observe(el);
+    const stop = () => follow.disconnect();
+    moving.addEventListener("finish", () => {
+      stop();
+      scroller.scrollTop = was.scrollTop - back;
+    });
+    moving.addEventListener("cancel", stop);
+    return stop;
+  }, [all]);
+
+  const long = cut !== null;
+  return (
+    <div className={`chat-prompt${long ? " long" : ""}`} ref={bubble}>
+      <div
+        className={`chat-prompt-text${long && !all ? " cut" : ""}`}
+        ref={body}
+        style={long && !all ? { maxHeight: cut } : undefined}
+      >
+        <PromptWords text={text} />
+      </div>
+      {long && (
+        <button className="chat-prompt-more" aria-expanded={all} onClick={toggle}>
+          {all ? "show less" : "show more"}
+        </button>
+      )}
     </div>
   );
 }
@@ -485,7 +611,7 @@ export const ItemView = memo(function ItemView({
       return (
         <>
           {item.files.length > 0 && <SentFiles files={item.files} />}
-          {item.text && <PromptText text={item.text} />}
+          {item.text && <Prompt text={item.text} />}
           <Receipt at={item.at} read={item.read} receipts={receipts} />
         </>
       );

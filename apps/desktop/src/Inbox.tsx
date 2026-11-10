@@ -245,7 +245,7 @@ export function InboxBar({
         </span>
       </header>
 
-      <div className="inbox-body scrollbar-sleek">
+      <div className="inbox-body">
         {(error || (inbox?.warnings.length ?? 0) > 0) && (
           <div className="inbox-notes">
             {error && <p className="error">{error}</p>}

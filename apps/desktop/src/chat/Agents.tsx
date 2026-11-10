@@ -9,7 +9,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { Agent as AgentGlyph, Chevron, Chosen, Close, Working } from "../icons";
+import { Fold } from "../Fold";
+import { Agent as AgentGlyph, Chosen, Close, Twisty, Working } from "../icons";
 import { Markdown } from "../Markdown";
 import { Items } from "./Items";
 import type { Agent } from "./transcript";
@@ -147,14 +148,14 @@ export function AgentPanel({
         {agent.prompt && (
           <div className="chat-thinking">
             <button aria-expanded={instructions} onClick={() => setInstructions(!instructions)}>
-              <Chevron open={instructions} />
+              <Twisty open={instructions} />
               instructions
             </button>
-            {instructions && (
+            <Fold open={instructions}>
               <div className="body">
                 <Markdown text={agent.prompt} />
               </div>
-            )}
+            </Fold>
           </div>
         )}
         <div className="chat-log">

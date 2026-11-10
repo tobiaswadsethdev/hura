@@ -73,7 +73,7 @@ export function Screen({
           one screen is open at a time and the app is what knows which. Four
           copies of the same key handler is how two of them end up disagreeing
           about what Escape does. */}
-      <div className="screen-body scrollbar-sleek">
+      <div className="screen-body">
         <div className={`screen-inner${narrow ? " narrow" : ""}`}>{children}</div>
       </div>
     </section>

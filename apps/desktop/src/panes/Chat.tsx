@@ -28,7 +28,7 @@ import { chat, close, nextChannelId, open } from "../stream";
 import { AskCard } from "../chat/Ask";
 import { matching, naming, offeredCommands, type Typed, typed } from "../chat/commands";
 import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/files";
-import { Items, OpenAgent } from "../chat/Items";
+import { Items, OpenAgent, Unpin } from "../chat/Items";
 import { arrived, build } from "../chat/transcript";
 import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
 
@@ -696,6 +696,7 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
   const scroller = useRef<HTMLDivElement>(null);
   const log = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const unpin = useMemo(() => () => void (pinned.current = false), []);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
@@ -721,79 +722,81 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
   return (
     <div className="chat-split">
       <OpenAgent.Provider value={openAgent}>
-        <div
-          className={`chat${dropping ? " dropping" : ""}`}
-          onDragOver={(e) => {
-            if (!carriesFiles(e)) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = takesFiles ? "copy" : "none";
-            setDropping(true);
-          }}
-          onDragLeave={(e) => {
-            // Left the pane, rather than moved from one of its children to another.
-            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
-          }}
-          onDrop={(e) => {
-            if (!carriesFiles(e)) return;
-            e.preventDefault();
-            setDropping(false);
-            attach([...e.dataTransfer.files]);
-          }}
-        >
+        <Unpin.Provider value={unpin}>
           <div
-            className="chat-scroll"
-            ref={scroller}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+            className={`chat${dropping ? " dropping" : ""}`}
+            onDragOver={(e) => {
+              if (!carriesFiles(e)) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = takesFiles ? "copy" : "none";
+              setDropping(true);
+            }}
+            onDragLeave={(e) => {
+              // Left the pane, rather than moved from one of its children to another.
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false);
+            }}
+            onDrop={(e) => {
+              if (!carriesFiles(e)) return;
+              e.preventDefault();
+              setDropping(false);
+              attach([...e.dataTransfer.files]);
             }}
           >
-            <div className="chat-log" ref={log}>
-              {nothing &&
-                (view.notice ? (
-                  <Empty icon={Working} note={view.notice} />
-                ) : !view.caughtUp && view.entries.length > 0 ? (
-                  <Empty icon={Working} />
-                ) : view.state ? (
-                  <Empty icon={ChatGlyph} />
-                ) : null)}
-              <Pictures.Provider value={readPicture}>
-                <Items items={items} progress={view.progress} receipts={receipts} />
-                <Writing live={view.live} entries={view.entries} />
-              </Pictures.Provider>
-              {/* Under whatever is being written, for the whole turn, so a reply
-                  that has paused between two tool calls still says it is not
-                  finished. The word only while there is nothing else to look at. */}
-              {view.state?.activity === "running" && pending.length === 0 && !shellRunning && (
-                <p className="chat-working" role="status" aria-label="working">
-                  <Working size={22} />
-                  {!view.live && "working"}
-                </p>
-              )}
-              {pending.map((ask) => (
-                <AskCard key={ask.id} ask={ask} onAnswer={(decision) => command({ op: "answer", id: ask.id, decision })} />
-              ))}
-              {/* Sent and not yet read: after everything the turn in progress is
-                  still doing, since Claude reads them when it is done. */}
-              <Items items={queued} receipts={receipts} />
+            <div
+              className="chat-scroll"
+              ref={scroller}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+              }}
+            >
+              <div className="chat-log" ref={log}>
+                {nothing &&
+                  (view.notice ? (
+                    <Empty icon={Working} note={view.notice} />
+                  ) : !view.caughtUp && view.entries.length > 0 ? (
+                    <Empty icon={Working} />
+                  ) : view.state ? (
+                    <Empty icon={ChatGlyph} />
+                  ) : null)}
+                <Pictures.Provider value={readPicture}>
+                  <Items items={items} progress={view.progress} receipts={receipts} />
+                  <Writing live={view.live} entries={view.entries} />
+                </Pictures.Provider>
+                {/* Under whatever is being written, for the whole turn, so a reply
+                    that has paused between two tool calls still says it is not
+                    finished. The word only while there is nothing else to look at. */}
+                {view.state?.activity === "running" && pending.length === 0 && !shellRunning && (
+                  <p className="chat-working" role="status" aria-label="working">
+                    <Working size={22} />
+                    {!view.live && "working"}
+                  </p>
+                )}
+                {pending.map((ask) => (
+                  <AskCard key={ask.id} ask={ask} onAnswer={(decision) => command({ op: "answer", id: ask.id, decision })} />
+                ))}
+                {/* Sent and not yet read: after everything the turn in progress is
+                    still doing, since Claude reads them when it is done. */}
+                <Items items={queued} receipts={receipts} />
+              </div>
             </div>
+            <AgentsBar agents={agents} open={following} onOpen={setFollowing} />
+            {(view.down || view.error || refused) && (
+              <p className="error chat-banner">{view.down ?? refused ?? view.error}</p>
+            )}
+            <Composer
+              state={view.state}
+              onCommand={command}
+              files={files}
+              onAttach={attach}
+              onRemove={(key) => setFiles((had) => had.filter((f) => f.key !== key))}
+              onSent={() => {
+                setFiles([]);
+                setRefused(null);
+              }}
+            />
           </div>
-          <AgentsBar agents={agents} open={following} onOpen={setFollowing} />
-          {(view.down || view.error || refused) && (
-            <p className="error chat-banner">{view.down ?? refused ?? view.error}</p>
-          )}
-          <Composer
-            state={view.state}
-            onCommand={command}
-            files={files}
-            onAttach={attach}
-            onRemove={(key) => setFiles((had) => had.filter((f) => f.key !== key))}
-            onSent={() => {
-              setFiles([]);
-              setRefused(null);
-            }}
-          />
-        </div>
+        </Unpin.Provider>
       </OpenAgent.Provider>
       {followed && (
         <Pictures.Provider value={readPicture}>

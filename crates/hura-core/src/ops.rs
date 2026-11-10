@@ -1406,8 +1406,10 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
     } else {
         String::new()
     };
+    // The fallback below can be what starts the tmux server, in a session
+    // with no agent, so this exec's environment is every pane's.
     format!(
-        "{resume}{bin} has-session -t ={tmux} 2>/dev/null \
+        "{no_proxy}\n{resume}{bin} has-session -t ={tmux} 2>/dev/null \
          || {bin} new-session -d -s {tmux} -c {repo}; \
          {bin} set -t ={tmux}: status off 2>/dev/null; \
          {bin} set -t ={tmux}: mouse on 2>/dev/null; \
@@ -1415,6 +1417,7 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
          {bin} resize-window -t {tmux} -x {cols} -y {rows} 2>/dev/null; \
          {bin} set -w -t {tmux} window-size latest 2>/dev/null; \
          true",
+        no_proxy = seed::LOOPBACK_NO_PROXY,
         tmux = seed::sh_quote(tmux),
         repo = seed::sh_quote(&backend.paths(session).repo),
     )
@@ -1553,12 +1556,7 @@ pub fn new_shell(backend: &dyn Backend, session: &Session) -> Result<String, Str
         .find(|candidate| !taken.contains(candidate))
         .ok_or("no free shell name")?;
 
-    let script = format!(
-        "{bin} new-session -d -s {name} -c {repo}",
-        bin = backend.tmux(),
-        name = seed::sh_quote(&name),
-        repo = seed::sh_quote(&backend.paths(session).repo),
-    );
+    let script = new_shell_script(backend, session, &name);
     let out = backend
         .exec(session, &["sh", "-c", &script])
         .map_err(|e| e.to_string())?;
@@ -1566,6 +1564,20 @@ pub fn new_shell(backend: &dyn Backend, session: &Session) -> Result<String, Str
         return Err(format!("could not open a shell: {}", out.stderr.trim()));
     }
     Ok(name)
+}
+
+/// What [`new_shell`] runs to open the shell called `name`.
+///
+/// A shell can be what starts the tmux server, when no agent did, so this
+/// exec's environment is every pane's. See [`seed::LOOPBACK_NO_PROXY`].
+fn new_shell_script(backend: &dyn Backend, session: &Session, name: &str) -> String {
+    format!(
+        "{no_proxy}\n{bin} new-session -d -s {name} -c {repo}",
+        no_proxy = seed::LOOPBACK_NO_PROXY,
+        bin = backend.tmux(),
+        name = seed::sh_quote(name),
+        repo = seed::sh_quote(&backend.paths(session).repo),
+    )
 }
 
 /// Close one, killing whatever is running in it.
@@ -1895,6 +1907,14 @@ mod tests {
         );
         assert!(script.contains("LANG=C.UTF-8"), "{script}");
         assert!(script.contains("new-session"), "a killed agent still opens");
+        // The fallback can start the tmux server, and every pane inherits it.
+        let no_proxy = script
+            .find(seed::LOOPBACK_NO_PROXY)
+            .unwrap_or_else(|| panic!("no proxy exception for [::1]: {script}"));
+        assert!(
+            Some(no_proxy) < script.find("new-session"),
+            "it has to be in place before a server starts: {script}"
+        );
         let (cols, rows) = session::SCRAPE_SIZE;
         assert!(
             script.contains(&format!("resize-window -t 'agent' -x {cols} -y {rows}")),
@@ -1907,6 +1927,21 @@ mod tests {
         assert!(
             script.trim_end().ends_with("true"),
             "the tidy-up must not fail the attach: {script}"
+        );
+    }
+
+    /// A shell can be the first thing in a sandbox to start tmux, so it says
+    /// what the agent's start says about the proxy, before the server exists.
+    #[test]
+    fn a_new_shell_is_not_proxied_to_its_own_loopback() {
+        let s = session();
+        let script = new_shell_script(&crate::backend::testing::sandboxed(), &s, "shell-1");
+        let no_proxy = script
+            .find(seed::LOOPBACK_NO_PROXY)
+            .unwrap_or_else(|| panic!("no proxy exception for [::1]: {script}"));
+        assert!(
+            Some(no_proxy) < script.find("new-session -d -s 'shell-1'"),
+            "{script}"
         );
     }
 
