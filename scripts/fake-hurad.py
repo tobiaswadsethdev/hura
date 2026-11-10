@@ -209,7 +209,8 @@ def chat_frames(name, cid):
     state = {"activity": activity, "pending": pending, "mode": "default",
              "model": "sonnet" if name == "price-rounding" else "opus", "effort": "high", "models": MODELS,
              "commands": [], "status": None, "cost_usd": use and use["cost_usd"],
-             "context_percentage": use and use["context_used_percentage"], "started": True, "files": True, "receipts": True}
+             "context_percentage": use and use["context_used_percentage"],
+             "context_size": use and use["context_size"], "started": True, "files": True, "receipts": True}
     return [{"is": "chat", "id": cid, "frame": {"t": "replay", "seq": len(entries), "entries": entries}},
             {"is": "chat", "id": cid, "frame": {"t": "state", "state": state}}]
 

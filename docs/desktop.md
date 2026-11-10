@@ -635,13 +635,18 @@ no file it writes them to and no endpoint to ask; what it has is a `statusLine`
 command it invokes on every render with a JSON payload. The image bakes one in
 whose real job is to keep the payload where a poll can read it -- see
 [sandbox-image.md](sandbox-image.md) -- so the facts pane can show what a session
-has spent and how full its context is, and the header can show the account's
+has done, and the chat composer how full its context is and the account's
 rate-limit windows.
 
-The windows are in the header and the cost is on the session, and that split is
-deliberate: a rate-limit window belongs to the *account*, so two sessions report
-the same percentages and showing them per session would be a lie about what is
-being measured.
+**The context is a ring in the composer**, hollow when a conversation is new and
+closing as it fills, yellow past 70% and red past 90%. It is there rather than
+in the facts pane because whether the next message will be the one that
+compacts is a question asked while writing it, when the facts pane is not open.
+It is the conversation's own figure, from its chat state, not the session's: two
+conversations in one session have two contexts. A click opens the figures --
+the context against the window's size, then the 5-hour and 7-day windows with
+when each resets. Those are labelled as the *account's*, since every session
+reports the same percentages.
 
 ## Keeping it current
 

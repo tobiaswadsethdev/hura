@@ -765,6 +765,7 @@ class Conversation {
       status: this.status,
       cost_usd: this.spend.cost ?? null,
       context_percentage: this.context?.percentage ?? null,
+      context_size: this.context?.max ?? null,
       started: this.query !== null,
       files: true,
       receipts: true,

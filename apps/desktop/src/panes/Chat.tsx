@@ -24,6 +24,7 @@ import type { ChatEntry } from "../gen/ChatEntry";
 import type { ChatFrame } from "../gen/ChatFrame";
 import type { ChatState } from "../gen/ChatState";
 import type { SlashCommand } from "../gen/SlashCommand";
+import type { Usage } from "../gen/Usage";
 import { Attach, Chat as ChatGlyph, Close, Plus, Send, Shell, Skill, Stop, Working } from "../icons";
 import { api } from "../api";
 import { keyFor, Remembered } from "../cache";
@@ -37,6 +38,7 @@ import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/file
 import { Items, OpenAgent, Unpin } from "../chat/Items";
 import { arrived, build, group } from "../chat/transcript";
 import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
+import { ContextRing } from "../chat/Usage";
 
 /// The reply being written, from the stream events: the main thread's
 /// current message, block by block.
@@ -362,6 +364,7 @@ function ModeNote({ what, open }: { what: Typed; open: boolean }) {
 
 function Composer({
   state,
+  usage,
   onCommand,
   files,
   onAttach,
@@ -369,6 +372,7 @@ function Composer({
   onSent,
 }: {
   state: ChatState | null;
+  usage: Usage | null;
   onCommand: (command: ChatCommand) => void;
   files: Attached[];
   onAttach: (files: File[]) => void;
@@ -599,12 +603,14 @@ function Composer({
               onChange={(next) => onCommand({ op: "effort", effort: next || null })}
             />
           )}
-          <span className="chat-facts">
-            {state?.status === "compacting" && <span>compacting</span>}
-            {state?.context_percentage != null && (
-              <span title="Context used">ctx {Math.round(state.context_percentage)}%</span>
-            )}
-          </span>
+          <span className="chat-facts">{state?.status === "compacting" && <span>compacting</span>}</span>
+          {(state?.started || usage) && (
+            <ContextRing
+              percentage={state?.context_percentage ?? null}
+              size={state?.context_size ?? null}
+              usage={usage}
+            />
+          )}
           {/* One round button at the end, as on the phone: Stop while a turn
               runs and nothing is written, Send otherwise -- a message
               written during a turn is queued, so it is still sent. */}
@@ -634,7 +640,18 @@ function Composer({
   );
 }
 
-export function ChatPane({ server, name, conv }: { server: string; name: string; conv: string }) {
+export function ChatPane({
+  server,
+  name,
+  conv,
+  usage,
+}: {
+  server: string;
+  name: string;
+  conv: string;
+  /// The session's, from its poll: what the account's limits are.
+  usage: Usage | null;
+}) {
   const key = keyFor(server, name, "chat", conv);
   const [view, dispatch] = useReducer(reduce, key, restore);
   const channel = useRef(0);
@@ -845,6 +862,7 @@ export function ChatPane({ server, name, conv }: { server: string; name: string;
             )}
             <Composer
               state={view.state}
+              usage={usage}
               onCommand={command}
               files={files}
               onAttach={attach}

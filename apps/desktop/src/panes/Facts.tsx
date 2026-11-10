@@ -9,7 +9,8 @@
 // has it got, where is the work, and what was it given to do it with. It used to
 // be one sixteen-row grid in monospace, which answered all four at the same
 // volume -- the task, a sentence, wrapped as code, and the context meter, the
-// one number that says a session is about to compact, came last.
+// one number that says a session is about to compact, came last. That meter
+// has since moved to the chat composer, beside the message it is about.
 
 import type { Session } from "../gen/Session";
 import type { Usage } from "../gen/Usage";
@@ -40,9 +41,8 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
         )}
       </section>
 
-      {/* What this session has done, and the account's limits as this
-          session's agent last saw them. `null` until the agent's status line
-          has run once. */}
+      {/* What this session has done. `null` until the agent's status line has
+          run once. */}
       {usage ? <Spend usage={usage} /> : <p className="facts-note">Progress shows here once the agent has reported.</p>}
 
       <section>
@@ -98,10 +98,10 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
   );
 }
 
-/// The two numbers, and the meters under them: the context, and the account's
-/// limits as this session last saw them.
+/// The two numbers. How full the context is, and the account's limits, are
+/// in the chat composer, where the next message is written: that is when they
+/// are wanted, and this pane is not open then.
 function Spend({ usage }: { usage: Usage }) {
-  const context = usage.context_used_percentage;
   return (
     <section className="facts-spend">
       <div className="tiles">
@@ -120,76 +120,7 @@ function Spend({ usage }: { usage: Usage }) {
           }
         />
       </div>
-      {/* How full the context is, which is what says whether this session is
-          about to compact -- the most useful number in the payload. A meter
-          rather than a figure, and it turns yellow, then red, as it fills:
-          the warning is the point of it. */}
-      {context !== null && (
-        <Meter
-          label="Context"
-          name="Context used"
-          pct={context}
-          tone={context >= 90 ? "bad" : context >= 70 ? "warn" : ""}
-        >
-          {usage.context_size ? <span className="quiet"> of {Math.round(usage.context_size / 1000)}k</span> : null}
-        </Meter>
-      )}
-      {/* The account's rate-limit windows, here and nowhere else: as *this*
-          session's agent last reported them, beside the session they came
-          from. They used to sit in the toolbar as though they were the
-          window's, which an idle session's day-old reading made a claim about
-          now that nobody could check -- and a session can run on a provider
-          that has no such windows at all. Orange past 80%, the reading that
-          decides whether starting another session is a good idea. */}
-      {usage.windows.map((w) => (
-        <Meter
-          key={w.label}
-          label={w.label}
-          name={`${w.label} limit used`}
-          pct={w.used_percentage}
-          tone={w.used_percentage >= 80 ? "warn" : ""}
-          title={w.resets_at ? `Resets ${new Date(w.resets_at * 1000).toLocaleString()}` : undefined}
-        />
-      ))}
     </section>
-  );
-}
-
-/// One percentage as a bar, its label before it and the figure after.
-function Meter({
-  label,
-  name,
-  pct,
-  tone,
-  title,
-  children,
-}: {
-  label: string;
-  /// What a screen reader calls it.
-  name: string;
-  pct: number;
-  tone: "" | "warn" | "bad";
-  title?: string;
-  /// Said after the figure, quieter.
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="meter-row" title={title}>
-      <span className="meter-label">{label}</span>
-      <span
-        className={`meter ${tone}`}
-        role="meter"
-        aria-label={name}
-        aria-valuenow={Math.round(pct)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-      >
-        <span style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
-      </span>
-      <span className="meter-value">
-        {Math.round(pct)}%{children}
-      </span>
-    </div>
   );
 }
 

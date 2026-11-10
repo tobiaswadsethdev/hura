@@ -153,7 +153,9 @@ struct WorktreeView: View {
         switch tab {
         case let .chat(conv):
             if let c = chats[conv] {
-                ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? ""))
+                ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? "")) { [server, name] in
+                    try? await server.api.poll(name).usage
+                }
                     .environment(\.readPicture) { [server, name] path in
                         try? await server.api.file(name, path: path).image
                     }

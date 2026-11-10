@@ -16,6 +16,7 @@ import { ChatPane } from "./panes/Chat";
 import { FilePane } from "./panes/File";
 import { FileDiffPane } from "./panes/FileDiff";
 import type { Against } from "./gen/Against";
+import type { Usage } from "./gen/Usage";
 import { Agent, Chat, Close, Plus, Shell } from "./icons";
 import { TerminalPane } from "./panes/Terminal";
 
@@ -74,6 +75,7 @@ export function Tabs({
   onReorder,
   failure,
   listed,
+  usage,
 }: {
   server: string;
   name: string;
@@ -87,6 +89,8 @@ export function Tabs({
   /// Whether the sandbox has said what is open in it yet. Until then no tabs
   /// is not yet nothing, and the empty editor would only flash past.
   listed: boolean;
+  /// The session's, for a chat composer to show the account's limits.
+  usage: Usage | null;
   onActivate: (key: string) => void;
   onNewShell: () => void;
   /// Another conversation, in a chat session. Absent in a terminal session,
@@ -282,7 +286,13 @@ export function Tabs({
               />
             )}
             {tab.kind === "chat" && (
-              <ChatPane key={`${name}:chat:${tab.conv}`} server={server} name={name} conv={tab.conv} />
+              <ChatPane
+                key={`${name}:chat:${tab.conv}`}
+                server={server}
+                name={name}
+                conv={tab.conv}
+                usage={usage}
+              />
             )}
             {tab.kind === "filediff" && (
               <FileDiffPane

@@ -397,6 +397,9 @@ public final class Chat {
     /// What Claude Code is doing that isn't a turn: `compacting`.
     public private(set) var status: String?
     public private(set) var contextPercentage: Double?
+    /// How big this conversation's context window is, in tokens. Nil from a
+    /// host built before it said.
+    public private(set) var contextSize: Int64?
     /// The reply so far, before its message arrives whole.
     public private(set) var streaming = ""
     /// What each running subagent last said it was doing (an SDK
@@ -618,6 +621,7 @@ public final class Chat {
             }
             status = s["status"]?.string
             if case let .number(n)? = s["context_percentage"] { contextPercentage = n } else { contextPercentage = nil }
+            if case let .number(n)? = s["context_size"] { contextSize = Int64(n) } else { contextSize = nil }
             takesFiles = s["files"]?.bool ?? false
             receipts = s["receipts"]?.bool ?? false
             runsShell = s["shell"]?.bool ?? false

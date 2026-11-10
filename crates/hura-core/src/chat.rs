@@ -336,6 +336,12 @@ pub struct ChatState {
     pub status: Option<String>,
     pub cost_usd: Option<f64>,
     pub context_percentage: Option<f64>,
+    /// How big this conversation's context window is, in tokens, so the
+    /// percentage has something to be a percentage of. `None` from a host
+    /// built before it said.
+    #[serde(default)]
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub context_size: Option<u64>,
     /// Whether Claude Code is running for this conversation. One that has not
     /// been spoken to since the host started is not, until it is.
     #[serde(default)]
