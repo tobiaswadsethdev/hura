@@ -74,13 +74,16 @@ jobs:
           esac
 
       # musl, so one binary runs on every distribution rather than on the ones
-      # whose glibc is new enough. The dependency tree is pure Rust, so this
-      # needs nothing but the linker.
-      - name: Install Rust and musl
+      # whose glibc is new enough. Rust brings musl's own C runtime with the
+      # target, so nothing comes from apt: the Ubuntu mirrors are one more
+      # thing that has to be up for a release, and for v0.47.0 to v0.47.2 the
+      # runners could not reach them. The one C compiled in is ring's, which
+      # needs no libc headers musl does not share, so the runner's own gcc
+      # builds it; cc-rs would otherwise look for `<arch>-linux-musl-gcc`.
+      - name: Install Rust
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get update
-            sudo apt-get install -y musl-tools
+            echo "CC_$(echo '${{ matrix.target }}' | tr - _)=gcc" >> "$GITHUB_ENV"
           fi
           rustup toolchain install stable --profile minimal
           rustup target add ${{ matrix.target }}
