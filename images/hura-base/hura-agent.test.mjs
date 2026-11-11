@@ -14,6 +14,7 @@ import {
   UPLOAD_BYTES,
   attach,
   describeAsk,
+  forkReceipt,
   holding,
   kept,
   namedCommands,
@@ -292,15 +293,55 @@ test("a picture too large for an image block is only saved", () => {
 });
 
 test("a message is read when Claude Code acknowledges it, once", () => {
-  const sent = new Set(["u1"]);
+  const sent = new Map([["u1", "hi"]]);
   const read = new Set();
   const ack = { type: "user", isReplay: true, uuid: "u1", message: { role: "user", content: "hi" } };
   assert.equal(receipt(ack, sent, read), "u1");
   read.add("u1");
   assert.equal(receipt(ack, sent, read), null, "already read");
   assert.equal(receipt({ ...ack, uuid: "other" }, sent, read), null, "not one of ours");
-  assert.equal(receipt({ ...ack, isReplay: undefined, uuid: "u2" }, new Set(["u2"]), read), null, "not an acknowledgement");
+  assert.equal(
+    receipt({ ...ack, isReplay: undefined, uuid: "u2" }, new Map([["u2", "hi"]]), read),
+    null,
+    "not an acknowledgement",
+  );
   assert.equal(receipt({ type: "assistant", isReplay: true, uuid: "u1" }, sent, new Set()), null);
+});
+
+test("a skill typed as a command is read when its subagent starts", () => {
+  // As Claude Code 2.1.322 starts `/code-review xhigh`, typed: at once, where
+  // the echo of the message comes only when the review is done.
+  const started = {
+    type: "system",
+    subtype: "task_started",
+    task_id: "ae6b318a1fae7c4e9",
+    description: "/code-review",
+    subagent_type: "general-purpose",
+    is_backgrounded: false,
+    task_type: "local_agent",
+    prompt: "You are reviewing for recall",
+    skip_transcript: true,
+    ambient: true,
+  };
+  const sent = new Map([
+    ["old", "/code-review high"],
+    ["u1", "  /code-review xhigh"],
+    ["u2", "/code-review"],
+  ]);
+  const read = new Set(["old"]);
+  assert.equal(forkReceipt(started, sent, read), "u1", "the oldest unread one");
+  read.add("u1");
+  assert.equal(forkReceipt(started, sent, read), "u2");
+  assert.equal(forkReceipt(started, new Map([["u3", "/code-reviewer"]]), new Set()), null, "another command");
+  assert.equal(forkReceipt(started, new Map([["u3", "run /code-review"]]), new Set()), null, "not a command");
+  // Started by the Skill tool, inside a turn whose message was read already.
+  const unread = new Map([["u4", "/code-review"]]);
+  assert.equal(forkReceipt({ ...started, tool_use_id: "toolu_1" }, unread, new Set()), null);
+  // An Agent call's subagent, and a task that is no subagent.
+  assert.equal(forkReceipt({ ...started, skip_transcript: undefined, ambient: undefined }, unread, new Set()), null);
+  assert.equal(forkReceipt({ ...started, task_type: "local_bash" }, unread, new Set()), null);
+  assert.equal(forkReceipt({ ...started, description: "/" }, new Map([["u5", "/"]]), new Set()), null);
+  assert.equal(forkReceipt({ ...started, subtype: "task_notification" }, unread, new Set()), null);
 });
 
 test("slash commands are described once each, Claude Code's own winning a shared name", () => {

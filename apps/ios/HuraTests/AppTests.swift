@@ -281,6 +281,26 @@ struct MarkdownImageTests {
     #expect(texts(ChatItem.fold(entries, thread: "toolu_1").items) == ["reading", "more reading"])
 }
 
+/// A forked skill is an agent, though Claude Code marks its task as
+/// housekeeping: started by the Skill tool, it is followed under that call;
+/// typed as a command, under the name Claude Code gives its messages.
+@Test func forkedSkillsAreAgents() {
+    func task(_ seq: UInt64, _ json: String) -> TranscriptEntry {
+        let v = try! JSONDecoder().decode(JSONValue.self, from: Data(json.utf8))
+        return TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.task, at: Date(timeIntervalSince1970: Double(seq)), task: v)
+    }
+    let entries = [
+        task(1, #"{"subtype":"task_started","task_id":"t1","description":"/code-review","subagent_type":"general-purpose","task_type":"local_agent","skip_transcript":true,"ambient":true}"#),
+        task(2, #"{"subtype":"task_notification","task_id":"t1","status":"stopped","skip_transcript":true,"ambient":true}"#),
+        task(3, #"{"subtype":"task_started","task_id":"t2","tool_use_id":"toolu_1","description":"/code-review","task_type":"local_agent","skip_transcript":true,"ambient":true}"#),
+        task(4, #"{"subtype":"task_started","task_id":"t3","description":"memory","task_type":"local_agent","skip_transcript":true,"ambient":true}"#),
+    ]
+    let agents = AgentInfo.all(entries)
+    #expect(agents.map(\.id) == ["t1", "t2"], "housekeeping is still left out")
+    #expect(agents.map(\.call) == ["forked-command-code-review", "toolu_1"])
+    #expect(agents.map(\.status) == ["stopped", "running"])
+}
+
 /// A turn's steps fold into one row, with the answer it ends with left out
 /// of it, as on the desktop; a run of one is left alone, and only the turn
 /// still running is live.
