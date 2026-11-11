@@ -608,6 +608,11 @@ public final class Chat {
         return opened
     }
 
+    /// Sets a property only when it is something else.
+    private func update<T: Equatable>(_ key: ReferenceWritableKeyPath<Chat, T>, _ value: T) {
+        if self[keyPath: key] != value { self[keyPath: key] = value }
+    }
+
     func apply(_ f: JSONValue) {
         switch f["t"]?.string {
         case "replay":
@@ -619,28 +624,33 @@ public final class Chat {
         case "partial":
             if let ev = f["ev"], let text = ChatTranscript.streamedText(ev) { streaming += text }
         case "state":
+            // A state frame comes with every step and says mostly what the
+            // last one did. Only what changed is set: an observed property
+            // set to what it was is still a change, and redrew everything
+            // that reads it -- an open model menu came back to its top at
+            // every step.
             guard let s = f["state"] else { return }
-            activity = s["activity"]?.string ?? "idle"
-            if case let .array(list)? = s["pending"] { pending = list.compactMap(Ask.init) } else { pending = [] }
-            mode = s["mode"]?.string
-            model = s["model"]?.string
-            effort = s["effort"]?.string
-            if case let .array(list)? = s["models"] { models = list.compactMap(ChatModel.init) } else { models = [] }
+            update(\.activity, s["activity"]?.string ?? "idle")
+            if case let .array(list)? = s["pending"] { update(\.pending, list.compactMap(Ask.init)) } else { update(\.pending, []) }
+            update(\.mode, s["mode"]?.string)
+            update(\.model, s["model"]?.string)
+            update(\.effort, s["effort"]?.string)
+            if case let .array(list)? = s["models"] { update(\.models, list.compactMap(ChatModel.init)) } else { update(\.models, []) }
             if case let .array(list)? = s["slash_commands"], !list.isEmpty {
-                commands = list.compactMap { SlashCommand($0) }
+                update(\.commands, list.compactMap { SlashCommand($0) })
             } else if case let .array(list)? = s["commands"] {
-                commands = list.compactMap(\.string).map { SlashCommand(name: $0) }
+                update(\.commands, list.compactMap(\.string).map { SlashCommand(name: $0) })
             } else {
-                commands = []
+                update(\.commands, [])
             }
-            status = s["status"]?.string
-            if case let .number(n)? = s["context_percentage"] { contextPercentage = n } else { contextPercentage = nil }
-            if case let .number(n)? = s["context_size"] { contextSize = Int64(n) } else { contextSize = nil }
-            takesFiles = s["files"]?.bool ?? false
-            receipts = s["receipts"]?.bool ?? false
-            runsShell = s["shell"]?.bool ?? false
-            if activity == "idle" { streaming = "" }
-            loaded = true
+            update(\.status, s["status"]?.string)
+            if case let .number(n)? = s["context_percentage"] { update(\.contextPercentage, n) } else { update(\.contextPercentage, nil) }
+            if case let .number(n)? = s["context_size"] { update(\.contextSize, Int64(n)) } else { update(\.contextSize, nil) }
+            update(\.takesFiles, s["files"]?.bool ?? false)
+            update(\.receipts, s["receipts"]?.bool ?? false)
+            update(\.runsShell, s["shell"]?.bool ?? false)
+            if activity == "idle" { update(\.streaming, "") }
+            update(\.loaded, true)
         case "error":
             error = f["message"]?.string
         case "notice":
