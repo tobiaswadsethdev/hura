@@ -93,7 +93,12 @@ struct ChatView: View {
                             ChatRows(items: queued, cwd: Self.cwd, working: working, receipts: chat.receipts)
                             Color.clear.frame(height: 1).id("bottom")
                                 .onAppear { atBottom = true }
-                                .onDisappear { atBottom = false }
+                                // Not the empty one's, going as the history
+                                // arrives: that came after the new one's
+                                // appearing, and left the arrow up for good.
+                                .onDisappear { [empty = items.isEmpty] in
+                                    if items.isEmpty == empty { atBottom = false }
+                                }
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
@@ -117,37 +122,18 @@ struct ChatView: View {
                         } label: {
                             Image(systemName: "arrow.down")
                                 .font(.headline)
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: Circle())
+                                .frame(width: 40, height: 40)
+                                .contentShape(Circle())
+                                .glass(in: Circle(), interactive: true)
                         }
+                        .buttonStyle(.plain)
                         .padding(14)
                     }
                 }
+                // Over the transcript rather than under it, which scrolls on
+                // beneath the glass.
+                .safeAreaInset(edge: .bottom, spacing: 0) { bottom }
             }
-            // The oldest first; the rest wait their turn, as in the terminal.
-            if let ask = chat.pending.first {
-                ScrollView {
-                    AskCard(ask: ask, enabled: answering == nil && chat.phase == .live) { answer(ask, $0) }
-                        .id(ask.id)
-                    if chat.pending.count > 1 {
-                        Text("\(chat.pending.count - 1) more after this").font(.caption).foregroundStyle(.secondary)
-                            .padding(.bottom, 6)
-                    }
-                }
-                .scrollBounceBehavior(.basedOnSize)
-                .frame(maxHeight: 420)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            if !agents.isEmpty {
-                AgentsStrip(agents: agents) { following = Following(id: $0.id) }
-            }
-            if let pull { PullBar(pull: pull) }
-            if !suggestions.isEmpty {
-                Divider()
-                CommandSuggestions(commands: suggestions) { draft = "/\($0.name) " }
-                    .background(.bar)
-            }
-            composer
         }
         .background(Color.black)
         // Dark whatever the system setting: the rows and tool cards are drawn
@@ -175,6 +161,44 @@ struct ChatView: View {
         if had, atBottom {
             withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
         }
+    }
+
+    /// What floats over the end of the transcript: what is waiting on you,
+    /// the subagents, the pull request, and the composer, each its own glass.
+    private var bottom: some View {
+        VStack(spacing: 8) {
+            // The oldest first; the rest wait their turn, as in the terminal.
+            if let ask = chat.pending.first {
+                ScrollView {
+                    AskCard(ask: ask, enabled: answering == nil && chat.phase == .live) { answer(ask, $0) }
+                        .id(ask.id)
+                    if chat.pending.count > 1 {
+                        Text("\(chat.pending.count - 1) more after this").font(.caption).foregroundStyle(.secondary)
+                            .padding(.bottom, 6)
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(maxHeight: 420)
+                .fixedSize(horizontal: false, vertical: true)
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+                .glass(in: RoundedRectangle(cornerRadius: 24))
+                .padding(.horizontal, 12)
+            }
+            if !agents.isEmpty {
+                AgentsStrip(agents: agents) { following = Following(id: $0.id) }
+            }
+            if let pull { PullBar(pull: pull) }
+            if !suggestions.isEmpty {
+                CommandSuggestions(commands: suggestions) { draft = "/\($0.name) " }
+                    .padding(.vertical, 4)
+                    .clipShape(RoundedRectangle(cornerRadius: 22))
+                    .glass(in: RoundedRectangle(cornerRadius: 22))
+                    .padding(.horizontal, 12)
+            }
+            composer
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder
@@ -213,8 +237,8 @@ struct ChatView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.top, 6)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
         case let .command(_, known?, _) where suggestions.isEmpty:
             HStack(spacing: 6) {
                 Text("/\(known.name)")
@@ -227,8 +251,8 @@ struct ChatView: View {
             }
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.top, 6)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
         default:
             EmptyView()
         }
@@ -239,12 +263,13 @@ struct ChatView: View {
         return !(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attached.isEmpty)
     }
 
-    /// Claude Code's permission modes, in the desktop window's words.
-    static let modes: [(value: String, label: String, hint: String)] = [
-        ("auto", "Auto", "Decides what to ask"),
-        ("default", "Ask", "Before edits and commands"),
-        ("acceptEdits", "Accept Edits", "Asks for the rest"),
-        ("plan", "Plan", "Changes nothing"),
+    /// Claude Code's permission modes, in the desktop window's words, and
+    /// shorter for the composer, where they share a line with the model.
+    static let modes: [(value: String, label: String, short: String, hint: String)] = [
+        ("auto", "Auto", "Auto", "Decides what to ask"),
+        ("default", "Ask", "Ask", "Before edits and commands"),
+        ("acceptEdits", "Accept Edits", "Edits", "Asks for the rest"),
+        ("plan", "Plan", "Plan", "Changes nothing"),
     ]
 
     /// A reasoning effort as Claude Code's `/effort` says it.
@@ -252,81 +277,135 @@ struct ChatView: View {
         e == "xhigh" ? "Extra High" : e.prefix(1).uppercased() + e.dropFirst()
     }
 
-    private var settingsBar: some View {
-        HStack(spacing: 12) {
+    /// The model and its effort, in one menu, as Claude Code's app has them:
+    /// "Opus 5.5 Medium".
+    @ViewBuilder
+    private var modelMenu: some View {
+        if !chat.models.isEmpty || !chat.efforts.isEmpty {
             Menu {
-                Picker("Permission mode", selection: Binding(get: { chat.mode ?? "auto" }, set: { m in
-                    Task { do { try await chat.setMode(m) } catch { chat.error = error.localizedDescription } }
-                })) {
-                    ForEach(Self.modes, id: \.value) { m in
-                        Text("\(m.label) — \(m.hint)").tag(m.value)
+                if !chat.models.isEmpty {
+                    Section("Model") {
+                        Picker("Model", selection: Binding(get: { chat.model ?? chat.models[0].value }, set: { m in
+                            Task { do { try await chat.setModel(m) } catch { chat.error = error.localizedDescription } }
+                        })) {
+                            ForEach(chat.models) { m in
+                                Text(m.displayName).tag(m.value)
+                            }
+                        }
+                        .pickerStyle(.inline)
+                    }
+                }
+                if !chat.efforts.isEmpty {
+                    Section("Effort") {
+                        Picker("Effort", selection: Binding(get: { chat.effort ?? "" }, set: { e in
+                            Task { do { try await chat.setEffort(e.isEmpty ? nil : e) } catch { chat.error = error.localizedDescription } }
+                        })) {
+                            Text("Model's Default").tag("")
+                            ForEach(chat.efforts, id: \.self) { e in
+                                Text(Self.effortName(e)).tag(e)
+                            }
+                        }
+                        .pickerStyle(.inline)
                     }
                 }
             } label: {
-                Label(Self.modes.first { $0.value == (chat.mode ?? "auto") }?.label ?? (chat.mode ?? "Auto"),
-                      glyph: .policy)
-            }
-            if !chat.models.isEmpty {
-                Menu {
-                    Picker("Model", selection: Binding(get: { chat.model ?? chat.models[0].value }, set: { m in
-                        Task { do { try await chat.setModel(m) } catch { chat.error = error.localizedDescription } }
-                    })) {
-                        ForEach(chat.models) { m in
-                            Text(m.displayName).tag(m.value)
-                        }
+                HStack(spacing: 4) {
+                    if let model = modelLabel {
+                        Text(model).foregroundStyle(.primary)
                     }
-                } label: {
-                    Label(chat.model.map(modelName) ?? chat.models[0].displayName, glyph: .model)
-                }
-            }
-            if !chat.efforts.isEmpty {
-                Menu {
-                    Picker("Effort", selection: Binding(get: { chat.effort ?? "" }, set: { e in
-                        Task { do { try await chat.setEffort(e.isEmpty ? nil : e) } catch { chat.error = error.localizedDescription } }
-                    })) {
-                        Text("Model's Default").tag("")
-                        ForEach(chat.efforts, id: \.self) { e in
-                            Text(Self.effortName(e)).tag(e)
-                        }
+                    if let effort = chat.effort {
+                        Text(Self.effortName(effort)).foregroundStyle(.secondary)
                     }
-                } label: {
-                    Label(chat.effort.map(Self.effortName) ?? "Effort", glyph: .effort)
                 }
+                .modifier(Chip())
             }
-            // After the settings rather than at the end of the row: the end
-            // is over the stop button, and a tap meant for one hit the other.
-            if chat.loaded {
-                ContextRing(percentage: chat.contextPercentage, size: chat.contextSize, usage: usage)
-            }
-            Spacer()
-            if chat.status == "compacting" { Text("compacting") }
+            // The model first, as the pill says it, though the menu opens
+            // upwards from the bottom of the screen.
+            .menuOrder(.fixed)
+            .accessibilityLabel("Model and effort")
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .padding(.horizontal, 14)
-        .padding(.top, 6)
     }
 
-    private var composer: some View {
-        VStack(spacing: 0) {
-        settingsBar
-        if !attached.isEmpty {
-            AttachedStrip(files: attached) { f in attached.removeAll { $0.id == f.id } }
-        }
-        modeNote
-        HStack(alignment: .bottom, spacing: 8) {
-            // Only for a host that keeps them: an older one drops them.
-            if chat.takesFiles {
-                Menu {
-                    Button("Photo Library", systemImage: "photo.on.rectangle") { choosingPhotos = true }
-                    Button("Files", glyph: .folder) { choosingFiles = true }
-                } label: {
-                    Image(systemName: "plus.circle.fill").font(.system(size: 30))
+    /// The model as its menu names it: the session's model is often an
+    /// alias, `sonnet`, which only the list says is Sonnet 5.5.
+    private var modelLabel: String? {
+        guard let model = chat.model else { return chat.models.first?.displayName }
+        return chat.models.first { $0.value == model }?.displayName ?? modelName(model)
+    }
+
+    private var modeMenu: some View {
+        let mode = Self.modes.first { $0.value == (chat.mode ?? "auto") }
+        return Menu {
+            Picker("Permission mode", selection: Binding(get: { chat.mode ?? "auto" }, set: { m in
+                Task { do { try await chat.setMode(m) } catch { chat.error = error.localizedDescription } }
+            })) {
+                ForEach(Self.modes, id: \.value) { m in
+                    Text("\(m.label) — \(m.hint)").tag(m.value)
                 }
-                .tint(.secondary)
-                .accessibilityLabel("Attach")
             }
+        } label: {
+            Label(mode?.short ?? (chat.mode ?? "Auto"), glyph: .policy)
+                .labelStyle(TightLabel())
+                .foregroundStyle(chat.mode == "plan" ? Color.accentColor : .primary)
+                .modifier(Chip())
+                .fixedSize()
+        }
+        .accessibilityLabel("Permission mode, \(mode?.label ?? chat.mode ?? "Auto")")
+    }
+
+    private var attachMenu: some View {
+        Menu {
+            Button("Photo Library", systemImage: "photo.on.rectangle") { choosingPhotos = true }
+            Button("Files", glyph: .folder) { choosingFiles = true }
+        } label: {
+            Image(systemName: "plus")
+                .font(.body.weight(.medium))
+                .foregroundStyle(.primary)
+                .frame(width: 34, height: 34)
+                .background(Color.white.opacity(0.1), in: Circle())
+                .contentShape(Circle())
+        }
+        .accessibilityLabel("Attach")
+    }
+
+    /// Stop while Claude works and nothing is typed; send otherwise.
+    @ViewBuilder
+    private var sendButton: some View {
+        if working && draft.isEmpty && attached.isEmpty {
+            Button {
+                Task { try? await chat.interrupt() }
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Color.red, in: Circle())
+            }
+            .accessibilityLabel("Stop Claude")
+        } else {
+            Button(action: send) {
+                Image(systemName: "arrow.up")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Color.accentColor, in: Circle())
+                    .opacity(!canSend || sending ? 0.4 : 1)
+            }
+            .disabled(!canSend || sending)
+            .accessibilityLabel(isShell ? "Run" : "Send")
+        }
+    }
+
+    /// One glass card, as Claude Code's app has it: what is attached, the
+    /// message, and under it a line of what it goes with -- files, the model
+    /// and its effort, the permission mode, how full the context is -- and
+    /// send.
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !attached.isEmpty {
+                AttachedStrip(files: attached) { f in attached.removeAll { $0.id == f.id } }
+            }
+            modeNote
             TextField("Message Claude", text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 // A `!` command is code, and set as code.
@@ -344,33 +423,31 @@ struct ChatView: View {
                         justSent = nil
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
-                .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(isShell ? Color.accentColor : .clear, lineWidth: 1))
-            if working && draft.isEmpty && attached.isEmpty {
-                Button {
-                    Task { try? await chat.interrupt() }
-                } label: {
-                    Image(systemName: "stop.circle.fill").font(.system(size: 30))
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+            HStack(spacing: 6) {
+                // Only for a host that keeps them: an older one drops them.
+                if chat.takesFiles { attachMenu }
+                modelMenu
+                modeMenu
+                Spacer(minLength: 0)
+                if chat.status == "compacting" {
+                    Text("compacting").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                .tint(.red)
-                .accessibilityLabel("Stop Claude")
-            } else {
-                Button(action: send) {
-                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 30))
+                if chat.loaded {
+                    ContextRing(percentage: chat.contextPercentage, size: chat.contextSize, usage: usage)
                 }
-                .disabled(!canSend || sending)
-                .accessibilityLabel(isShell ? "Run" : "Send")
+                sendButton
             }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        }
+        .glass(in: RoundedRectangle(cornerRadius: 26))
+        .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(isShell ? Color.accentColor : .clear, lineWidth: 1))
+        .padding(.horizontal, 12)
         .disabled(chat.phase != .live)
-        // Carried on behind the keyboard: its top corners are rounded, and
-        // a bar that stopped at its edge left the chat's black in them.
-        .background { Rectangle().fill(.bar).ignoresSafeArea() }
         .photosPicker(isPresented: $choosingPhotos, selection: $photos, maxSelectionCount: 10, matching: .images)
         .onChange(of: photos) {
             let picked = photos
@@ -511,6 +588,29 @@ private struct CommandSuggestions: View {
         guard !c.aliases.isEmpty else { return c.description }
         let also = "also " + c.aliases.map { "/\($0)" }.joined(separator: ", ")
         return c.description.isEmpty ? also : "\(c.description) (\(also))"
+    }
+}
+
+/// A pill in the composer's line, a shade lighter than the glass it is on.
+private struct Chip: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.subheadline)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(Color.white.opacity(0.1), in: Capsule())
+            .contentShape(Capsule())
+    }
+}
+
+/// A label's icon close to its title, for a pill.
+private struct TightLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.imageScale(.small)
+            configuration.title
+        }
     }
 }
 
