@@ -71,6 +71,18 @@ stops to ask:
 | `env` | the auto-updater, non-essential traffic and the plugin marketplace, all off |
 | `hooks` | the status reporter, so the state column has something to read |
 
+**The reasoning effort is yours.** The image's settings say nothing about
+effort, so the seeder copies the server user's own default in when a sandbox is
+made: `effortLevel`, and each model's `modelSettings.<model>.effortLevel`, from
+`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`, which is
+where `/effort` writes them. Nothing else from that file is copied, since its
+hooks, permissions and plugins describe another machine. It is a copy, like the
+skills: a later `/effort` on the host is the next session's default, and a
+choice made in the session wins, as it would on the host. `max` is left out,
+because Claude Code does not keep it in a settings file either. A file that
+cannot be read is a warning at create time and the model's own default. A
+worktree session needs none of this, since its agent reads that file itself.
+
 `.claude.json` also marks onboarding as done and trusts `/sandbox` and
 `/sandbox/repo`, so a session does not open on the theme picker and then the
 "do you trust this folder?" prompt.
