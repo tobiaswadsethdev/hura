@@ -27,6 +27,12 @@ export type Prefs = {
   dockWidth: number;
   /// The sidebar of your tickets and pull requests, on the far right.
   inboxWidth: number;
+  /// The ticket and the pull request read beside that sidebar, which float
+  /// over the workspace rather than taking a column of it. Two widths, because
+  /// a pull request has a diff in it and a ticket is mostly prose: one number
+  /// would be too narrow for the one or too wide for the other.
+  ticketWidth: number;
+  pullWidth: number;
   /// Whether the OS is told when an agent starts waiting.
   ///
   /// On by default, because it is the largest thing this window has over a
@@ -70,7 +76,24 @@ export const LIMITS = {
   // 240 still fits a key, a status and a title's first words; past 520 it is
   // taking the width a diff needs, for rows that are two lines tall.
   inboxWidth: { min: 240, max: 520 },
+  // 360 still fits the field grid's label column beside a value; the maxima
+  // are a wide monitor, and the window's own width caps them before that --
+  // see `flyoutMax`.
+  ticketWidth: { min: 360, max: 1400 },
+  // 480 is where a diff stops being readable at all.
+  pullWidth: { min: 480, max: 1800 },
 } as const;
+
+/// How much of the workspace a flyout always leaves showing, so there is still
+/// something to click back to.
+export const FLYOUT_GAP = 80;
+
+/// The widest a flyout may be dragged in this window: the room left of the
+/// sidebar, less the gap. The CSS cap in `App` is the same sum, and is what
+/// keeps a width remembered from a wider window from running off this one.
+export function flyoutMax(limit: { max: number }, right: number): number {
+  return Math.max(0, Math.min(limit.max, window.innerWidth - right - FLYOUT_GAP));
+}
 
 export const DEFAULTS: Prefs = {
   // The widths the window shipped with, so an existing install looks the same
@@ -78,6 +101,8 @@ export const DEFAULTS: Prefs = {
   treeWidth: 260,
   dockWidth: 400,
   inboxWidth: 300,
+  ticketWidth: 560,
+  pullWidth: 860,
   notify: true,
   notifyTickets: true,
   inboxOpen: true,
@@ -107,6 +132,8 @@ export function sanitize(stored: unknown): Prefs {
     treeWidth: number(raw.treeWidth, LIMITS.treeWidth, DEFAULTS.treeWidth),
     dockWidth: number(raw.dockWidth, LIMITS.dockWidth, DEFAULTS.dockWidth),
     inboxWidth: number(raw.inboxWidth, LIMITS.inboxWidth, DEFAULTS.inboxWidth),
+    ticketWidth: number(raw.ticketWidth, LIMITS.ticketWidth, DEFAULTS.ticketWidth),
+    pullWidth: number(raw.pullWidth, LIMITS.pullWidth, DEFAULTS.pullWidth),
     notify: typeof raw.notify === "boolean" ? raw.notify : DEFAULTS.notify,
     notifyTickets:
       typeof raw.notifyTickets === "boolean" ? raw.notifyTickets : DEFAULTS.notifyTickets,
