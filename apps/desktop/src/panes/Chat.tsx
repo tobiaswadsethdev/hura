@@ -36,7 +36,7 @@ import { AskCard } from "../chat/Ask";
 import { matching, naming, offeredCommands, type Typed, typed } from "../chat/commands";
 import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/files";
 import { Items, OpenAgent, Unpin } from "../chat/Items";
-import { arrived, build, group } from "../chat/transcript";
+import { arrived, build, group, type Item, settle } from "../chat/transcript";
 import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
 import { PullBar } from "../chat/PullBar";
 import type { PullRequest as Pull } from "../gen/PullRequest";
@@ -757,7 +757,9 @@ export function ChatPane({
     [view.caughtUp, view.entries],
   );
   const working = view.state?.activity === "running" || view.state?.activity === "waiting";
-  const items = useMemo(() => group(built, working), [built, working]);
+  // The rows that have not changed kept as they were, so only the new ones draw.
+  const settled = useRef<Item[]>([]);
+  const items = useMemo(() => (settled.current = settle(settled.current, group(built, working))), [built, working]);
   const [following, setFollowing] = useState<string | null>(null);
   const followed = agents.find((a) => a.id === following) ?? null;
   const openAgent = useMemo(

@@ -739,7 +739,17 @@ export const ItemView = memo(function ItemView({
     case "steps":
       return <StepsCard item={item} progress={progress} />;
   }
-});
+}, (a, b) =>
+  a.item === b.item &&
+  a.receipts === b.receipts &&
+  // A tick of a call's time is new progress for every row, and only one still
+  // running has a clock to show it on.
+  (a.progress === b.progress || !running(a.item)));
+
+function running(item: Item): boolean {
+  if (item.kind === "tool") return item.call.result === null;
+  return item.kind === "steps" && item.items.some(running);
+}
 
 export function Items({
   items,

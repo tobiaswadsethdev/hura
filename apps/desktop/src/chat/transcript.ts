@@ -552,3 +552,40 @@ export function group(items: Item[], working: boolean): Item[] {
   }
   return out;
 }
+
+/// `next`, with every part of it that equals the same part of `prev` swapped
+/// for `prev`'s: the transcript is built again from the start at every entry,
+/// so without this nothing in it is ever the same object twice, and every row
+/// of a long conversation drew itself again for each step -- enough work, while
+/// a turn ran, to leave the log blank under a scroll until it caught up.
+/// Lists of items are matched by key, since grouping shifts what is where.
+export function settle<T>(prev: T, next: T): T {
+  if (Object.is(prev, next)) return prev;
+  if (typeof prev !== "object" || typeof next !== "object" || prev === null || next === null) return next;
+  if (Array.isArray(prev) !== Array.isArray(next)) return next;
+  let same = true;
+  if (Array.isArray(next)) {
+    const was = prev as unknown[];
+    const byKey = new Map<string, unknown>();
+    for (const v of was) if (keyOf(v) !== undefined) byKey.set(keyOf(v)!, v);
+    const out = next.map((v, i) => {
+      const k = keyOf(v);
+      const s = settle(k !== undefined ? byKey.get(k) : was[i], v);
+      if (s !== was[i]) same = false;
+      return s;
+    });
+    return (same && out.length === was.length ? prev : out) as T;
+  }
+  const was = prev as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(next)) {
+    out[k] = settle(was[k], v);
+    if (out[k] !== was[k]) same = false;
+  }
+  return (same && Object.keys(was).length === Object.keys(out).length ? prev : out) as T;
+}
+
+function keyOf(v: unknown): string | undefined {
+  const k = typeof v === "object" && v !== null ? (v as { key?: unknown }).key : undefined;
+  return typeof k === "string" ? k : undefined;
+}

@@ -143,8 +143,13 @@ function List({
       const t = e.target as Node;
       if (!ref.current?.contains(t) && !anchor.contains(t)) onClose(false);
     };
+    // Only a scroll that carries the trigger with it: the list is placed once,
+    // and would be left hanging where the trigger was. Others leave it be --
+    // the chat log keeps itself at the bottom while a reply comes in, and that
+    // closed the composer's lists under the pointer at every step.
     const scrolled = (e: Event) => {
-      if (!ref.current?.contains(e.target as Node)) onClose(false);
+      const t = e.target as Node;
+      if (!ref.current?.contains(t) && t.contains(anchor)) onClose(false);
     };
     const gone = () => onClose(false);
     window.addEventListener("mousedown", away, true);
