@@ -60,14 +60,24 @@ request becomes](#what-a-pull-request-becomes)). The tree says it the other way
 round: a worktree on one of these pull requests' branches has the pull
 request's number and checks on its branch line, and a click on them opens it.
 
-**Click a Jira ticket** (or focus it and press Enter) and it opens in full
-beside the sidebar, over the dock: its status, assignee, reporter, priority,
-parent, labels and dates, the description, and the comments oldest first.
-Escape closes it, and so does clicking the row again. The ↗ in its header, and
-*Open in the browser* in a row's right-click menu, still go to Jira for what
-only Jira does: attaching, linking, logging work. GitHub, Azure DevOps and
-Fizzy tickets open in the browser; pull requests open here, as [Reading and
-reviewing a pull request](#reading-and-reviewing-a-pull-request) describes.
+**Click a Jira ticket or a Fizzy card** (or focus it and press Enter) and it
+opens in full beside the sidebar, over the dock: its status, assignee,
+reporter, priority, parent, labels and dates, the description, and the
+comments oldest first. Escape closes it, and so does clicking the row again.
+The ↗ in its header, and *Open in the browser* in a row's right-click menu,
+still go to the tracker for what only it does: attaching, linking, logging
+work. GitHub and Azure DevOps tickets open in the browser; pull requests open
+here, as [Reading and reviewing a pull request](#reading-and-reviewing-a-pull-request)
+describes.
+
+A Fizzy card shows its board where a Jira ticket shows its type, everybody
+assigned to it as the assignee, its creator as the reporter, its tags as
+labels, *Golden* as its priority when it is marked so, and its steps as a
+checklist. It is `GET /{account}/cards/{number}` and its `comments`; the
+description and comments arrive as HTML, which is read into the same shapes a
+Jira document becomes (paragraphs, headings, lists, code, quotes, links,
+mentions) and never put into the window as markup. An image in one shows as its
+file name: Fizzy keeps its files behind a redirect hura cloud does not follow.
 
 It is one `GET /rest/api/3/issue/{key}` with the tracker's own token. The
 description and comments arrive in Jira's document format and are drawn from
@@ -209,6 +219,32 @@ if they matter.
 | comments | `POST`, `PUT` and `DELETE /rest/api/3/issue/{key}/comment[/{id}]` |
 | people | `GET /rest/api/3/user/assignable/search` for the assignee, `/user/search` otherwise |
 
+**Fizzy cards** are changed from the same panel, in Fizzy's terms:
+
+* **Status.** A card is in *Maybe?*, in one of its board's columns, *Not Now*
+  or *Done*, and the status line lists every one of those it is not in. Moving
+  a done or postponed card into a column or back to *Maybe?* reopens it, as in
+  Fizzy.
+* **The card.** The pencil edits its title and description (Markdown here,
+  HTML there, with the same warning about what Markdown cannot hold), who is
+  assigned (everybody in the account, ticked), its tags, its steps (one per
+  line, `- [x]` for a done one), and its board. Assignees and tags are toggles
+  in Fizzy, so a save reads the card again and toggles only what differs from
+  what you asked for. A card with more than five people on it shows them
+  read-only, since Fizzy only says who the first five are.
+* **Comments**, as for Jira: a new one at the bottom, and your own edited or
+  deleted in place.
+
+| What | Request |
+| --- | --- |
+| the card | `GET /{account}/cards/{n}`, its `comments`, and the account's `users` and `boards` for the form |
+| save | `PUT /{account}/cards/{n}`; `POST …/assignments` and `…/taggings` per toggle; `POST`, `PUT` and `DELETE …/steps[/{id}]`; `PUT …/board` |
+| status | `POST …/triage` with a column, `DELETE …/triage` for *Maybe?*, `POST …/not_now`, `POST …/closure` |
+| comments | `POST`, `PUT` and `DELETE …/comments[/{id}]` |
+
+Changing a card needs a token with *Read + Write*; one that can only read
+gets Fizzy's refusal, repeated.
+
 GitHub and Azure DevOps tickets are still changed in the browser.
 
 ## Reading and reviewing a pull request
@@ -262,7 +298,7 @@ with none set up, its **add a tracker** does the same.
 | Jira | the site (`https://your-org.atlassian.net`) and the email of the account the token belongs to | an API token, from id.atlassian.com → Security → API tokens |
 | Azure DevOps | the organisation and the project | a personal access token with *Work Items (read)* for the tickets and *Code (read)* for the pull requests, or *Code (read & write)* to comment and vote on them |
 | GitHub | a repository (`owner/name`), or nothing for every repository the token can see | a token that can read issues and pull requests, and write pull requests to comment and review |
-| Fizzy | the site, or nothing for `https://app.fizzy.do`; and an account, by its name or the number in its address, or nothing for every account | a personal access token, from your profile → API → Personal access tokens; *Read* is enough |
+| Fizzy | the site, or nothing for `https://app.fizzy.do`; and an account, by its name or the number in its address, or nothing for every account | a personal access token, from your profile → API → Personal access tokens; *Read* lists your cards, *Read + Write* also changes them and adds the [webhooks](#notifications) |
 
 A **name** is optional, and only worth giving a second tracker of the same kind.
 
@@ -302,6 +338,19 @@ device, and never twice. The first read is the baseline and says nothing, and so
 you have just added. A tracker that could not be read is not a list of things
 that left it, and it coming back is not a list of arrivals. A filter that could
 not be read starts again from a baseline when it next answers.
+
+**A Fizzy tracker is told at once.** As it is added, given a token or pointed
+at another account, hura cloud puts a webhook on every board in each account
+the token runs (an owner's or an admin's: Fizzy lets nobody else add one),
+named *hura*, sending every card and comment event. A delivery makes the
+account due, and it is read within seconds rather than at its next turn; what
+changed is still found by reading, never taken from the delivery. The boards
+are looked at again every six hours, for a board added since or a webhook Fizzy
+turned off after failed deliveries, and removing the tracker removes its
+webhooks. The tracker's row on the settings screen says what was found
+(`webhooks on 3 boards`), or why there are none: a token that can only read, or
+an account you are only a member of, which is read every minute or so as
+before.
 
 **The desktop** is told over a connection it keeps open to the service while
 its window is, as an OS notification, and reads the sidebar again. It is

@@ -42,6 +42,9 @@ struct TrackersView: View {
                                     Text(t.source.jqlFilters.map(\.name).joined(separator: " · "))
                                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
+                                if t.hasToken, let hooks = t.webhooks {
+                                    Text(hooks).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
                             }
                             Spacer()
                             if let who = t.connected {
@@ -182,7 +185,7 @@ struct AddTrackerView: View {
                 } footer: {
                     Text(kind == "jira" ? "Jira Cloud signs in with your email and an API token."
                          : kind == "azure-dev-ops" ? "A personal access token with Work Items and Code read and write."
-                         : kind == "fizzy" ? "A personal access token from your Fizzy profile. Leave the site blank for Fizzy by 37signals; your own has to be reachable from the internet over HTTPS."
+                         : kind == "fizzy" ? "A personal access token from your Fizzy profile: Read + Write to change cards here and, if you run the account, to add the webhooks that make notifications immediate. Leave the site blank for Fizzy by 37signals; your own has to be reachable from the internet over HTTPS."
                          : "A token that can read your repositories' issues and pull requests.")
                 }
                 Section("Token") {

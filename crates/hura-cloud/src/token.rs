@@ -42,3 +42,13 @@ pub fn number(below: u32) -> Result<u32> {
 pub fn hash(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
 }
+
+/// A random UUID (version 4), from the OS: for an ID that is also part of an
+/// address nobody should be able to guess.
+pub fn id() -> Result<uuid::Uuid> {
+    let mut bytes = [0u8; 16];
+    rand::rngs::SysRng
+        .try_fill_bytes(&mut bytes)
+        .map_err(Error::internal)?;
+    Ok(uuid::Builder::from_random_bytes(bytes).into_uuid())
+}

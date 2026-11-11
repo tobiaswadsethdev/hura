@@ -82,6 +82,11 @@ pub async fn tick(state: &Shared) -> Result<usize> {
 
 /// One account: read, tell, and say when it is next due.
 async fn watch(state: &Shared, account: Uuid) -> Result<()> {
+    // Now and then, the webhooks that make the next read come sooner. Never
+    // a reason not to read.
+    if let Err(e) = crate::fizzy_hooks::refresh_due(state, account).await {
+        eprintln!("watch {account}: fizzy webhooks: {e:?}");
+    }
     let trackers = crate::trackers::stored(state, account).await?;
     let answered = !trackers.is_empty();
     let inbox = if trackers.is_empty() {

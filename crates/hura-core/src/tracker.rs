@@ -41,6 +41,7 @@ pub mod changes;
 pub mod doc;
 mod edit;
 mod fizzy;
+mod html;
 mod issue;
 pub mod markdown;
 mod pictures;
@@ -53,6 +54,7 @@ pub use edit::{
     Choice, EditField, EditForm, Editable, FieldChange, Transition, UserChoice, comment,
     delete_comment, edit_comment, edit_form, save, transition, transitions, users,
 };
+pub use fizzy::hooks as fizzy_hooks;
 pub use issue::{
     CustomField as IssueCustomField, Image as IssueImage, Issue, IssueComment,
     Parent as IssueParent, Person as IssuePerson, Stage as IssueStage, attachment, issue,
@@ -508,6 +510,12 @@ pub struct Configured {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(optional))]
     pub connected: Option<String>,
+    /// Whether hura cloud hears of a change on the tracker the moment it
+    /// happens, in words: `webhooks on 3 boards`, or why it reads on its
+    /// timer instead. Fizzy's only, for now; `None` until it has looked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub webhooks: Option<String>,
 }
 
 impl From<&Stored> for Configured {
@@ -516,6 +524,7 @@ impl From<&Stored> for Configured {
             token_set: s.token.as_deref().is_some_and(|t| !t.trim().is_empty()),
             source: s.source.clone(),
             connected: None,
+            webhooks: None,
         }
     }
 }

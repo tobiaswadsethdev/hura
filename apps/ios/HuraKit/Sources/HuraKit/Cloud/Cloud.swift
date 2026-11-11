@@ -346,9 +346,10 @@ public actor Cloud {
             var source: TrackerSource
             var token_set: Bool
             var connected: String?
+            var webhooks: String?
         }
         return try JSONDecoder().decode([Configured].self, from: data).map {
-            StoredTracker(source: $0.source, hasToken: $0.token_set, connected: $0.connected)
+            StoredTracker(source: $0.source, hasToken: $0.token_set, connected: $0.connected, webhooks: $0.webhooks)
         }
     }
 

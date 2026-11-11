@@ -22,6 +22,7 @@ pub mod config;
 pub mod crypto;
 mod devices;
 mod error;
+mod fizzy_hooks;
 pub mod integrations;
 mod live;
 pub mod mail;
@@ -115,6 +116,7 @@ pub fn app(state: Shared) -> Router {
         .route("/v1/oauth/jira/callback", get(oauth::jira_callback))
         .route("/v1/oauth/confirm", post(oauth::confirm))
         .route("/v1/webhooks/github", post(webhooks::github))
+        .route("/v1/webhooks/fizzy/{id}", post(webhooks::fizzy))
         .route("/setup", get(integrations::page))
         .route("/setup/github/done", get(integrations::github_done))
         .route("/setup/jira", post(integrations::jira_save))

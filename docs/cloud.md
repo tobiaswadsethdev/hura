@@ -118,9 +118,11 @@ renews them before they run out.
 | `POST /v1/connect/{provider}` `{return}` | `{url}`, where to send the browser. `return` is `app`, to come back on `hura://cloud/connected`, or `browser`, to end on a page saying to go back |
 | `GET /v1/oauth/{github,jira}/callback` | where the providers send the browser back |
 | `POST /v1/webhooks/github` | the GitHub App's webhook: signed with its secret, and every account whose GitHub login is in a delivery is read at the watcher's next pass |
+| `POST /v1/webhooks/fizzy/{id}` | a webhook the service put on a Fizzy board with the tracker's own token (see [tickets.md](tickets.md#notifications)): `X-Webhook-Signature` is checked against that webhook's own secret, kept encrypted with the account's key, and its account is read at the watcher's next pass |
 
 A connected tracker's list entry carries `connected`, who it is connected as;
-its token cannot be set by hand.
+its token cannot be set by hand. A Fizzy tracker's carries `webhooks`, what the last look at its
+boards found, in words.
 
 **Nothing is saved before it is confirmed.** Back from the provider, the
 browser is shown a page naming the hura account the connection would join,

@@ -3,8 +3,9 @@
 // The card says what a ticket is called and where it stands; this says what it
 // is. Description, conversation, who asked for it and who has it -- the reasons
 // to open a ticket at all, which used to mean leaving the window for a browser.
-// A Jira ticket is also changed here: its status from the status line, which
-// lists the workflow's ways out of it, its fields behind the edit button, and
+// A Jira ticket or a Fizzy card is also changed here: its status from the
+// status line, which lists the workflow's ways out of it (a card's, every
+// place it can go), its fields behind the edit button, and
 // its comments where they are read -- a new one at the bottom, your own ones
 // edited or deleted in place. The browser is still one click away in the
 // header, for what only the tracker does: attach, link, log work.
@@ -46,8 +47,8 @@ export function TicketPanel({
 }) {
   const [issue, setIssue] = useState<Issue | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Only Jira's tickets are changed here so far.
-  const writable = task.kind === "jira";
+  // Only Jira's tickets and Fizzy's cards are changed here so far.
+  const writable = task.kind === "jira" || task.kind === "fizzy";
   const [editing, setEditing] = useState(false);
   // The ways out of the current status, read with the ticket.
   const [moves, setMoves] = useState<Transition[] | null>(null);
@@ -156,7 +157,7 @@ export function TicketPanel({
             href={task.url}
             target="_blank"
             rel="noreferrer"
-            title={`Open in ${task.kind === "jira" ? "Jira" : "the Browser"}`}
+            title={`Open in ${task.kind === "jira" ? "Jira" : task.kind === "fizzy" ? "Fizzy" : "the Browser"}`}
           >
             <Elsewhere aria-label="Open in the Browser" />
           </a>

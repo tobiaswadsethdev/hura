@@ -2,7 +2,8 @@ import HuraKit
 import SwiftUI
 
 /// A Jira ticket's fields, as the controls Jira says this account may use,
-/// saved together. Only what changed is sent.
+/// or a Fizzy card's (title, description, people, tags, steps, board), saved
+/// together. Only what changed is sent.
 struct TicketEditView: View {
     let tracker: StoredTracker
     let key: String

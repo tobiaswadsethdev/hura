@@ -157,7 +157,7 @@ pub fn plain(text: &str) -> Vec<Block> {
         .collect()
 }
 
-fn text_run(text: &str) -> Inline {
+pub(super) fn text_run(text: &str) -> Inline {
     Inline::Text {
         text: text.to_string(),
         bold: false,
@@ -410,7 +410,7 @@ fn inlines(content: Option<&Value>, depth: usize) -> Vec<Inline> {
 
 /// A URL a link may point at. `javascript:` and `data:` are the reasons this
 /// exists; anything that is not plainly a web or mail address goes with them.
-fn safe(url: &str) -> Option<String> {
+pub(super) fn safe(url: &str) -> Option<String> {
     let url = url.trim();
     let lower = url.to_ascii_lowercase();
     (lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:"))
