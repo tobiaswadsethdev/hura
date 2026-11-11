@@ -19,7 +19,7 @@ import type { Against } from "./gen/Against";
 import type { Session } from "./gen/Session";
 import type { Usage } from "./gen/Usage";
 import { GitView } from "./GitView";
-import { Branch, Events, Files, Policy, Ports, Record } from "./icons";
+import { Branch, Events, Files, Fold, Policy, Ports, Record, Unfold } from "./icons";
 import { Facts } from "./panes/Facts";
 import { PolicyPane } from "./panes/Policy";
 import { EventsPane } from "./panes/Events";
@@ -58,6 +58,9 @@ const SANDBOX_ONLY: readonly View[] = ["events", "policy", "ports"];
 
 export function Dock({
   width,
+  open,
+  keys,
+  onFold,
   server,
   session,
   usage,
@@ -69,6 +72,13 @@ export function Dock({
   /// How wide, in pixels. From the window's own preferences and written by the
   /// handle on this sidebar's left edge -- see `prefs.ts` and `Split.tsx`.
   width: number;
+  /// Open, or folded to a rail of the panes' glyphs -- the way the tickets
+  /// sidebar folds, and for the same reason: the middle wants the width back.
+  open: boolean;
+  /// The shortcut that folds it, for the tooltips.
+  keys: { label: string; aria: string };
+  /// Fold it if it is open, open it if it is folded.
+  onFold: () => void;
   server: string;
   session: Session;
   /// What this session has spent, from the status channel. `null` until its
@@ -88,6 +98,41 @@ export function Dock({
   const views = VIEWS.filter(({ key }) => sandboxed || !SANDBOX_ONLY.includes(key));
   // A pane picked on a sandbox, then a worktree selected: back to the files.
   const view: View = views.some(({ key }) => key === chosen) ? chosen : "files";
+
+  // Folded: the way back, and a glyph per pane that opens straight onto it.
+  // Rendered from here rather than by `App` so the pane picked before folding
+  // is still the one showing after.
+  if (!open) {
+    return (
+      <aside className="dock-rail" aria-label="What is true about this worktree, folded">
+        <button
+          className="quiet-icon"
+          title={`Open This Sidebar (${keys.label})`}
+          aria-keyshortcuts={keys.aria}
+          onClick={onFold}
+        >
+          <Unfold aria-label="Open" />
+        </button>
+        {views.map(({ key, label, icon: Mark }) => (
+          <button
+            key={key}
+            className="dock-rail-pane"
+            title={label}
+            aria-label={label}
+            onClick={() => {
+              setView(key);
+              onFold();
+            }}
+          >
+            <Mark />
+            {key === "ports" && listening.length > 0 && (
+              <span className="tab-count">{listening.length}</span>
+            )}
+          </button>
+        ))}
+      </aside>
+    );
+  }
 
   return (
     <aside className="dock" style={{ width }}>
@@ -109,6 +154,14 @@ export function Dock({
             )}
           </button>
         ))}
+        <button
+          className="quiet-icon dock-fold"
+          title={`Fold This Sidebar (${keys.label})`}
+          aria-keyshortcuts={keys.aria}
+          onClick={onFold}
+        >
+          <Fold aria-label="Fold" />
+        </button>
       </nav>
       <div className="dock-body">
         {/* Keyed on the worktree so switching tears each down rather than

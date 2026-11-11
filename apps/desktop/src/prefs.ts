@@ -42,6 +42,9 @@ export type Prefs = {
   notifyTickets: boolean;
   /// Whether the sidebar is open, or folded to its rail of counts.
   inboxOpen: boolean;
+  /// Whether the dock -- files, git and the rest -- is open, or folded to its
+  /// rail of pane glyphs, which gives its width to the middle.
+  dockOpen: boolean;
   /// The sidebar's groups that are shut, by key: `tickets:created`, say.
   /// Remembered because the one somebody shuts is the one they never read.
   inboxShut: string[];
@@ -78,6 +81,7 @@ export const DEFAULTS: Prefs = {
   notify: true,
   notifyTickets: true,
   inboxOpen: true,
+  dockOpen: true,
   inboxShut: [],
   inboxView: "tickets",
 };
@@ -107,6 +111,7 @@ export function sanitize(stored: unknown): Prefs {
     notifyTickets:
       typeof raw.notifyTickets === "boolean" ? raw.notifyTickets : DEFAULTS.notifyTickets,
     inboxOpen: typeof raw.inboxOpen === "boolean" ? raw.inboxOpen : DEFAULTS.inboxOpen,
+    dockOpen: typeof raw.dockOpen === "boolean" ? raw.dockOpen : DEFAULTS.dockOpen,
     inboxShut: Array.isArray(raw.inboxShut)
       ? raw.inboxShut.filter((k): k is string => typeof k === "string")
       : DEFAULTS.inboxShut,
