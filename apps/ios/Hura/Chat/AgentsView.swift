@@ -18,16 +18,20 @@ struct AgentsStrip: View {
                             Text(a.description).lineLimit(1)
                         }
                         .font(.caption)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.08), in: Capsule())
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .contentShape(Capsule())
+                        .glass(interactive: true)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("\(a.description), \(a.running ? "running" : a.status)")
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .glassGroup(spacing: 6)
+            // Room for the glass's edge and shadow, which the scroll view
+            // would otherwise clip.
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
         }
     }
 

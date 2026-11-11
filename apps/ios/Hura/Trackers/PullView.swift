@@ -598,7 +598,7 @@ struct PullChip: View {
 
 /// The pull request a chat's session is on, over the composer as Claude
 /// Code's desktop app has it: what it is and where it stands, a tap from the
-/// whole of it.
+/// whole of it. Glass, floating over the transcript as the composer does.
 struct PullBar: View {
     let pull: PullRequestSummary
 
@@ -623,12 +623,12 @@ struct PullBar: View {
             }
             .font(.footnote)
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            .padding(.vertical, 9)
+            .contentShape(Capsule())
+            .glass(interactive: true)
         }
         .buttonStyle(.plain)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+        .padding(.horizontal, 12)
         .accessibilityHint("Opens the pull request")
     }
 }
