@@ -28,6 +28,7 @@ pub mod config;
 pub mod credentials;
 pub mod doctor;
 pub mod dotnet;
+pub mod effort;
 pub mod endpoints;
 pub mod events;
 pub mod files;

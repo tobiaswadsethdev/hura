@@ -233,7 +233,12 @@ pub enum SeedState {
 /// to write no reason at all into the state file, leaving the host to infer
 /// "stopped" from a missing process. The last lines of the log say more than a
 /// line number would.
-pub fn detached_script(backend: &dyn Backend, session: &Session, start_agent: bool) -> String {
+pub fn detached_script(
+    backend: &dyn Backend,
+    session: &Session,
+    start_agent: bool,
+    effort: &crate::effort::Effort,
+) -> String {
     let meta =
         serde_json::to_string_pretty(session).expect("Session is plain data and always serializes");
     let paths = backend.paths(session);
@@ -247,6 +252,14 @@ pub fn detached_script(backend: &dyn Backend, session: &Session, start_agent: bo
         String::new()
     } else {
         format!("step skills\n{skills_script}")
+    };
+
+    // Before the agent too, which reads its default effort when it starts.
+    // Skipped when there is none to carry, like the steps either side.
+    let effort = if effort.is_empty() {
+        String::new()
+    } else {
+        format!("step effort\n{}", effort.script())
     };
 
     // Before the agent, because the agent reads its MCP servers at startup:
@@ -295,7 +308,7 @@ step clone
 step branch
 step meta
 {write_meta}
-{skills}{mcp}{agent}trap - EXIT INT TERM
+{skills}{effort}{mcp}{agent}trap - EXIT INT TERM
 say done
 "#,
         hura = sh_quote(&paths.hura),
@@ -304,6 +317,7 @@ say done
         clone = backend.fetch_script(session).trim_end(),
         write_meta = meta_write_command(&meta, &paths),
         skills = skills,
+        effort = effort,
         mcp = mcp,
         agent = agent,
     )
@@ -323,9 +337,10 @@ pub fn launch(
     backend: &dyn Backend,
     session: &Session,
     start_agent: bool,
+    effort: &crate::effort::Effort,
 ) -> Result<(), SeedError> {
     let paths = backend.paths(session);
-    let script = detached_script(backend, session, start_agent);
+    let script = detached_script(backend, session, start_agent, effort);
     // The script arrives on stdin, since it carries the task and every skill
     // and an argument is capped at 128 KiB. It is written before anything is
     // put in the background: a background job in a non-interactive shell has
@@ -626,6 +641,7 @@ pub fn parse_meta(out: &crate::backend::ExecOutput) -> Result<Session, SeedError
 mod tests {
     use super::*;
     use crate::backend::testing::sandboxed;
+    use crate::effort::Effort;
     use crate::session::Session;
 
     /// Ask a real shell what the quoted value expands to. Inspecting the
@@ -792,7 +808,7 @@ mod tests {
     #[test]
     fn the_detached_script_reports_every_step_and_traps_failure() {
         let s = Session::new("x".into(), "https://github.com/o/r.git".into(), "t".into());
-        let script = detached_script(&sandboxed(), &s, true);
+        let script = detached_script(&sandboxed(), &s, true, &Effort::default());
 
         // Announced before the work, or a watcher shows the wrong step.
         let clone_at = script.find("step clone").expect("a clone step");
@@ -824,16 +840,48 @@ mod tests {
     #[test]
     fn the_agent_is_only_started_when_asked_for() {
         let s = Session::new("x".into(), "https://github.com/o/r.git".into(), "t".into());
-        assert!(!detached_script(&sandboxed(), &s, false).contains("step agent"));
-        assert!(!detached_script(&sandboxed(), &s, false).contains("new-session"));
-        assert!(detached_script(&sandboxed(), &s, true).contains("new-session"));
+        assert!(
+            !detached_script(&sandboxed(), &s, false, &Effort::default()).contains("step agent")
+        );
+        assert!(
+            !detached_script(&sandboxed(), &s, false, &Effort::default()).contains("new-session")
+        );
+        assert!(
+            detached_script(&sandboxed(), &s, true, &Effort::default()).contains("new-session")
+        );
+    }
+
+    /// The server user's effort lands in the agent's settings before the agent
+    /// reads them, and a host with none to carry gets the script it always had.
+    #[test]
+    fn the_effort_step_comes_before_the_agent_and_only_with_an_effort() {
+        let s = Session::new("x".into(), "https://github.com/o/r.git".into(), "t".into());
+        let effort = Effort {
+            level: Some("xhigh".into()),
+            models: Default::default(),
+        };
+        let script = detached_script(&sandboxed(), &s, true, &effort);
+        let step = script.find("step effort").expect("an effort step");
+        let merge = script
+            .find(crate::effort::SANDBOX_SETTINGS)
+            .expect("the merge");
+        let agent = script.find("step agent").expect("an agent step");
+        assert!(step < merge && merge < agent, "{script}");
+        assert!(script.contains(r#"{"effortLevel":"xhigh"}"#), "{script}");
+
+        let without = detached_script(&sandboxed(), &s, true, &Effort::default());
+        assert!(!without.contains("step effort"), "{without}");
+        assert!(
+            !without.contains(crate::effort::SANDBOX_SETTINGS),
+            "{without}"
+        );
     }
 
     #[test]
     fn seed_script_interpolates_nothing_raw() {
         let mut s = Session::new("x".into(), "https://example.com/a'b.git".into(), "t".into());
         s.base_branch = Some("main".into());
-        let script = detached_script(&sandboxed(), &s, true);
+        let script = detached_script(&sandboxed(), &s, true, &Effort::default());
         // The raw, unquoted URL must never appear.
         assert!(!script.contains("https://example.com/a'b.git"));
         assert!(script.contains(r"a'\''b.git"));
@@ -1071,7 +1119,7 @@ mkdir -p "$dest/.git"
     #[test]
     fn seed_script_omits_branch_flag_when_unset() {
         let s = Session::new("x".into(), "url".into(), "t".into());
-        let script = detached_script(&sandboxed(), &s, true);
+        let script = detached_script(&sandboxed(), &s, true, &Effort::default());
         assert!(!script.contains("--branch"));
         assert!(script.contains("gitc clone --quiet -- 'url'"));
     }
@@ -1082,7 +1130,7 @@ mkdir -p "$dest/.git"
     #[test]
     fn an_unrecognised_host_still_seeds() {
         let s = Session::new("x".into(), "https://gitlab.com/o/r.git".into(), "t".into());
-        let script = detached_script(&sandboxed(), &s, true);
+        let script = detached_script(&sandboxed(), &s, true, &Effort::default());
         assert!(script.contains("gitc clone"), "{script}");
         assert!(script.contains("git_auth=''"), "must be defined: {script}");
         assert!(
@@ -1106,7 +1154,7 @@ mkdir -p "$dest/.git"
             "https://contoso@dev.azure.com/contoso/proj/_git/repo".into(),
             "t".into(),
         );
-        let script = detached_script(&sandboxed(), &s, true);
+        let script = detached_script(&sandboxed(), &s, true, &Effort::default());
         assert!(script.contains("AZURE_DEVOPS_PAT"), "{script}");
         assert!(
             script.contains("Basic"),
@@ -1140,7 +1188,7 @@ mkdir -p "$dest/.git"
             "https://github.com/octocat/Hello-World.git".into(),
             "t".into(),
         );
-        let script = detached_script(&sandboxed(), &s, true);
+        let script = detached_script(&sandboxed(), &s, true, &Effort::default());
         assert!(script.contains("Bearer $GITHUB_TOKEN"), "{script}");
         assert!(
             !script.contains("base64"),
@@ -1167,7 +1215,7 @@ mkdir -p "$dest/.git"
             crate::mcp::Server::parse("jira", "http://mcp-jira:9000/mcp", Default::default())
                 .unwrap(),
         ];
-        let script = detached_script(&sandboxed(), &s, true);
+        let script = detached_script(&sandboxed(), &s, true, &Effort::default());
         let mcp = script.find("step mcp").expect("an mcp step");
         let agent = script.find("step agent").expect("an agent step");
         assert!(mcp < agent, "{script}");
@@ -1179,7 +1227,7 @@ mkdir -p "$dest/.git"
     #[test]
     fn no_mcp_servers_is_no_mcp_step() {
         let s = Session::new("x".into(), "url".into(), "t".into());
-        assert!(!detached_script(&sandboxed(), &s, true).contains("step mcp"));
+        assert!(!detached_script(&sandboxed(), &s, true, &Effort::default()).contains("step mcp"));
     }
 
     #[test]
@@ -1215,7 +1263,7 @@ mkdir -p "$dest/.git"
     #[test]
     fn seed_script_embeds_recoverable_metadata() {
         let s = Session::new("x".into(), "url".into(), "do the thing".into());
-        let script = detached_script(&sandboxed(), &s, true);
+        let script = detached_script(&sandboxed(), &s, true, &Effort::default());
         assert!(script.contains("/sandbox/.hura/meta.json"));
         assert!(
             script.contains("do the thing"),

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::backend::{Backend, Backends, Torn};
 use crate::comments;
+use crate::effort;
 use crate::endpoints;
 use crate::events;
 use crate::forge;
@@ -688,15 +689,16 @@ impl Step {
 
     /// The step a seeder's own report corresponds to.
     ///
-    /// The seeder names its steps (`clone`, `branch`, `meta`, `skills`, `mcp`,
-    /// `agent`) and this maps them onto what the interface already shows.
+    /// The seeder names its steps (`clone`, `branch`, `meta`, `skills`,
+    /// `effort`, `mcp`, `agent`) and this maps them onto what the interface
+    /// already shows.
     /// Everything between the clone and the agent is part of cloning as far as
     /// anyone watching is
     /// concerned: each is a fraction of a second, and a stage that flashes past
     /// is noise rather than progress.
     pub fn for_seed(step: &str) -> Option<Step> {
         match step {
-            "clone" | "branch" | "meta" | "skills" | "mcp" => Some(Step::Clone),
+            "clone" | "branch" | "meta" | "skills" | "effort" | "mcp" => Some(Step::Clone),
             "agent" => Some(Step::Agent),
             _ => None,
         }
@@ -848,11 +850,23 @@ pub fn create(
     // something it used to know.
     warnings.extend(skills::pack(&s.skills).1);
 
+    // The server user's own default effort, read now so a later `/effort` on
+    // the host is the next session's. Only for a sandbox: a worktree's agent
+    // runs as that user and reads the same file itself. A file that cannot be
+    // read is a warning and the model's default, not a failed session.
+    let effort = match s.backend {
+        session::Kind::Sandbox => effort::host().unwrap_or_else(|e| {
+            warnings.push(e);
+            effort::Effort::default()
+        }),
+        session::Kind::Worktree => effort::Effort::default(),
+    };
+
     s.state = State::Seeding;
     save(s.clone(), &mut warnings);
 
     progress(Step::Clone);
-    if let Err(e) = seed::launch(backend, &s, draft.start) {
+    if let Err(e) = seed::launch(backend, &s, draft.start, &effort) {
         return Err(fail(s, e.to_string(), &mut warnings));
     }
 
