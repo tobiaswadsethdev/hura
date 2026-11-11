@@ -299,6 +299,10 @@ function TrackerRow({
       {!tracker.token_set && tracker.connected && (
         <p className="problem">Its sign-in ran out or was taken back; connect it again below.</p>
       )}
+      {/* Whether a change on it is heard of at once, or at the next read. */}
+      {tracker.token_set && tracker.webhooks && (
+        <p className="tracker-webhooks">{tracker.webhooks}</p>
+      )}
       <Shows source={t} working={working} onSave={onEdit} />
     </div>
   );
@@ -600,5 +604,6 @@ const TOKEN_HINT: Record<TrackerKind, string> = {
     "A personal access token with Work Items (read) for the tickets and Code (read) for the pull requests, or Code (read & write) to comment and vote on them.",
   "git-hub":
     "A token that can read issues and pull requests, and write pull requests to comment and review.",
-  fizzy: "A personal access token, from your profile → API → Personal access tokens. Read is enough.",
+  fizzy:
+    "A personal access token, from your profile → API → Personal access tokens. Read is enough to list cards; Read + Write changes them from here and, if you run the account, adds the webhooks that make notifications immediate.",
 };

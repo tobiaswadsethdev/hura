@@ -13,9 +13,10 @@
 //! serves nothing to a request without one, and through this side rather than
 //! the window, which loads nothing from the network.
 //!
-//! Jira only, for now. A GitHub issue or an Azure DevOps work item is the same
-//! shape, and a reader for either is a function here; until there is one, the
-//! row links out as it always did.
+//! Jira here, and a Fizzy card in `fizzy::card`, read into the same shape. A
+//! GitHub issue or an Azure DevOps work item is the same shape too, and a
+//! reader for either is a function; until there is one, the row links out as
+//! it always did.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -165,9 +166,12 @@ const NOT_SHOWN: &[&str] = &[
 /// Read one ticket from the tracker it came from.
 pub fn issue(tracker: &Stored, key: &str) -> Result<Issue, String> {
     let source = &tracker.source;
+    if source.kind == Kind::Fizzy {
+        return super::fizzy::card::issue(tracker, key);
+    }
     if source.kind != Kind::Jira {
         return Err(format!(
-            "{} tickets open in the browser; only Jira is read here so far",
+            "{} tickets open in the browser; only Jira and Fizzy are read here so far",
             source.kind.label()
         ));
     }

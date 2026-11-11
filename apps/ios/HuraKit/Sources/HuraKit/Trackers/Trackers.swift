@@ -136,11 +136,15 @@ public struct StoredTracker: Equatable, Sendable {
     /// (`@octocat`, or a Jira site). Its token is renewed there, and
     /// there is none to paste.
     public var connected: String?
+    /// Whether hura cloud hears of a change on it at once, in words
+    /// (`webhooks on 3 boards`), or why it reads on its timer. Fizzy's only.
+    public var webhooks: String?
 
-    public init(source: TrackerSource, hasToken: Bool = false, connected: String? = nil) {
+    public init(source: TrackerSource, hasToken: Bool = false, connected: String? = nil, webhooks: String? = nil) {
         self.source = source
         self.hasToken = hasToken
         self.connected = connected
+        self.webhooks = webhooks
     }
 }
 

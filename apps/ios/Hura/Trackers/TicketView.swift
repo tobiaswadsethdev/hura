@@ -3,8 +3,8 @@ import SwiftUI
 
 /// One ticket in full: its status (which can be moved), its fields (which
 /// can be edited), its description and its comments (yours can be edited or
-/// deleted), and a start into a worktree. A Jira ticket is read here; the
-/// others open in the browser, as on the desktop.
+/// deleted), and a start into a worktree. A Jira ticket or a Fizzy card is
+/// read here; the others open in the browser, as on the desktop.
 struct TicketView: View {
     let task: TrackerTask
     @Binding var starting: WorkOrigin?
@@ -21,7 +21,7 @@ struct TicketView: View {
     @State private var deleting: IssueComment?
 
     private var stored: StoredTracker? { trackers.tracker(named: task.tracker) }
-    private var readsHere: Bool { task.kind == "jira" }
+    private var readsHere: Bool { task.kind == "jira" || task.kind == "fizzy" }
 
     var body: some View {
         Group {

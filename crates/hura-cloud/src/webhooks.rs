@@ -1,5 +1,5 @@
-//! GitHub's webhooks: a tracker read the moment something on it changes,
-//! rather than at its next turn.
+//! GitHub's and Fizzy's webhooks: a tracker read the moment something on it
+//! changes, rather than at its next turn.
 //!
 //! **A delivery only says when to read.** Its signature is checked against
 //! the GitHub App's webhook secret, and every GitHub login in it (the
@@ -8,9 +8,13 @@
 //! are made due at once, and the watcher reads them within its next pass,
 //! with the same comparison as any read: what a delivery says is never
 //! trusted to say what changed.
+//!
+//! **A Fizzy delivery names its webhook in its address** (see
+//! [`crate::fizzy_hooks`]), which says whose it is; its signature is checked
+//! against that webhook's own secret, and that account is made due.
 
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use ring::hmac;
 use serde_json::Value;
@@ -18,6 +22,7 @@ use serde_json::Value;
 use crate::Shared;
 use crate::error::{Error, Result};
 use crate::integrations;
+use uuid::Uuid;
 
 /// `POST /v1/webhooks/github`
 pub async fn github(
@@ -54,6 +59,42 @@ pub async fn github(
     .bind(&logins)
     .execute(&state.db)
     .await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// `POST /v1/webhooks/fizzy/{id}`
+pub async fn fizzy(
+    State(state): State<Shared>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<StatusCode> {
+    let hook: Option<(Uuid, Vec<u8>)> =
+        sqlx::query_as("select account_id, secret from fizzy_hooks where id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?;
+    // Gone with its tracker: Fizzy turns off a webhook that keeps failing.
+    let Some((account, sealed)) = hook else {
+        return Ok(StatusCode::NOT_FOUND);
+    };
+    // Fizzy's is the bare hex, with no `sha256=` in front.
+    let signature = headers
+        .get("x-webhook-signature")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| hex(v.trim()))
+        .ok_or_else(Error::unauthorized)?;
+    let secret = state
+        .keys
+        .account(&state.db, account)
+        .await?
+        .open(&crate::fizzy_hooks::label(id), &sealed)?;
+    let key = hmac::Key::new(hmac::HMAC_SHA256, &secret);
+    hmac::verify(&key, &body, &signature).map_err(|_| Error::unauthorized())?;
+    sqlx::query("update watches set next_read_at = now() where account_id = $1")
+        .bind(account)
+        .execute(&state.db)
+        .await?;
     Ok(StatusCode::ACCEPTED)
 }
 

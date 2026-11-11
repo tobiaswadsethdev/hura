@@ -1,5 +1,6 @@
 //! Changing a Jira ticket from the window: its fields, its status, its
-//! comments.
+//! comments. A Fizzy card is changed through the same functions, which hand
+//! it to `fizzy::card`: the same form, moves and comments, in Fizzy's terms.
 //!
 //! The tickets screen began as a reader, on the reasoning that REST is for
 //! what the interface shows and an agent's MCP server for what changes. That
@@ -151,6 +152,9 @@ const NOT_FORM: &[&str] = &[
 /// The edit screen for one ticket: one request, the values and the metadata
 /// together.
 pub fn edit_form(stored: &Stored, key: &str) -> Result<EditForm, String> {
+    if is_fizzy(stored) {
+        return super::fizzy::card::edit_form(stored, key);
+    }
     let (site, auth) = connect(stored, key)?;
     let body = get(
         &format!("{site}/rest/api/3/issue/{key}?expand=editmeta&fields=*all"),
@@ -335,6 +339,9 @@ pub(super) fn shown(value: &Value) -> String {
 /// Save some fields. Only what changed is sent, so a field somebody else
 /// edited a minute ago is not written back over with what the form loaded.
 pub fn save(stored: &Stored, key: &str, changes: &[FieldChange]) -> Result<(), String> {
+    if is_fizzy(stored) {
+        return super::fizzy::card::save(stored, key, changes);
+    }
     if changes.is_empty() {
         return Ok(());
     }
@@ -417,6 +424,9 @@ fn is_day(s: &str) -> bool {
 
 /// The moves out of the ticket's current status.
 pub fn transitions(stored: &Stored, key: &str) -> Result<Vec<Transition>, String> {
+    if is_fizzy(stored) {
+        return super::fizzy::card::transitions(stored, key);
+    }
     let (site, auth) = connect(stored, key)?;
     let body = get(
         &format!("{site}/rest/api/3/issue/{key}/transitions"),
@@ -453,6 +463,9 @@ fn parse_transitions(body: &Value) -> Vec<Transition> {
 
 /// Move the ticket along one transition.
 pub fn transition(stored: &Stored, key: &str, id: &str) -> Result<(), String> {
+    if is_fizzy(stored) {
+        return super::fizzy::card::transition(stored, key, id);
+    }
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
         return Err(format!("`{id}` is not a transition"));
     }
@@ -468,6 +481,9 @@ pub fn transition(stored: &Stored, key: &str, id: &str) -> Result<(), String> {
 
 /// Add a comment, written in Markdown.
 pub fn comment(stored: &Stored, key: &str, markdown: &str) -> Result<(), String> {
+    if is_fizzy(stored) {
+        return super::fizzy::card::comment(stored, key, markdown);
+    }
     if markdown.trim().is_empty() {
         return Err("that comment is empty".into());
     }
@@ -483,6 +499,9 @@ pub fn comment(stored: &Stored, key: &str, markdown: &str) -> Result<(), String>
 
 /// Rewrite one of your comments.
 pub fn edit_comment(stored: &Stored, key: &str, id: &str, markdown: &str) -> Result<(), String> {
+    if is_fizzy(stored) {
+        return super::fizzy::card::edit_comment(stored, key, id, markdown);
+    }
     if markdown.trim().is_empty() {
         return Err("that comment is empty; delete it instead".into());
     }
@@ -498,6 +517,9 @@ pub fn edit_comment(stored: &Stored, key: &str, id: &str, markdown: &str) -> Res
 }
 
 pub fn delete_comment(stored: &Stored, key: &str, id: &str) -> Result<(), String> {
+    if is_fizzy(stored) {
+        return super::fizzy::card::delete_comment(stored, key, id);
+    }
     let (site, auth) = connect(stored, key)?;
     check_comment(id)?;
     send(
@@ -553,6 +575,11 @@ fn parse_users(body: &Value) -> Vec<UserChoice> {
         .unwrap_or_default()
 }
 
+/// A Fizzy card, which `fizzy::card` changes in its own terms.
+fn is_fizzy(stored: &Stored) -> bool {
+    stored.source.kind == Kind::Fizzy
+}
+
 /// The site and the credential for writing to `key`, or why not.
 fn connect(stored: &Stored, key: &str) -> Result<(String, String), String> {
     // It goes into a URL path, so it has to be a key and nothing else.
@@ -566,7 +593,7 @@ fn connect_any(stored: &Stored) -> Result<(String, String), String> {
     let source = &stored.source;
     if source.kind != Kind::Jira {
         return Err(format!(
-            "{} tickets are changed in the browser; only Jira's are changed here so far",
+            "{} tickets are changed in the browser; only Jira's and Fizzy's are changed here so far",
             source.kind.label()
         ));
     }

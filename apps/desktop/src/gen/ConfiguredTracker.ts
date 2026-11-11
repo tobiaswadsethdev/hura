@@ -11,4 +11,10 @@ export type ConfiguredTracker = { source: Tracker, token_set: boolean,
  * the site (`acme.atlassian.net`) on Jira. There is no token to paste for one of these;
  * connecting again replaces it.
  */
-connected?: string, };
+connected?: string, 
+/**
+ * Whether hura cloud hears of a change on the tracker the moment it
+ * happens, in words: `webhooks on 3 boards`, or why it reads on its
+ * timer instead. Fizzy's only, for now; `None` until it has looked.
+ */
+webhooks?: string, };

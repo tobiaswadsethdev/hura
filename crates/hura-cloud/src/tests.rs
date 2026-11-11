@@ -1611,3 +1611,103 @@ async fn a_read_asked_for_while_one_runs_is_not_put_off() {
             .unwrap();
     assert!(wait <= 1.0, "{wait}");
 }
+
+#[tokio::test]
+async fn a_signed_fizzy_delivery_makes_its_webhooks_account_due() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("a@example.com", "iPhone").await;
+    let at = token(&me, "access_token");
+    let account: uuid::Uuid = me["account"].as_str().unwrap().parse().unwrap();
+    // No token, so nothing is sent to Fizzy: the webhook is put in by hand.
+    let (status, list) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": { "kind": "fizzy", "name": "cards" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(
+        list[0].get("webhooks").is_none(),
+        "not looked at without a token"
+    );
+    let id = crate::token::id().unwrap();
+    let key = t.state.keys.account(&t.state.db, account).await.unwrap();
+    sqlx::query(
+        "insert into fizzy_hooks (id, account_id, tracker, fizzy_account, board_id, webhook_id, secret)
+         values ($1, $2, 'cards', '897362094', 'b1', 'w1', $3)",
+    )
+    .bind(id)
+    .bind(account)
+    .bind(key.seal(&crate::fizzy_hooks::label(id), b"s3cret").unwrap())
+    .execute(&t.state.db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into watches (account_id, next_read_at) values ($1, now() + interval '1 hour')
+         on conflict (account_id) do update set next_read_at = now() + interval '1 hour'",
+    )
+    .bind(account)
+    .execute(&t.state.db)
+    .await
+    .unwrap();
+
+    let body = r#"{"id":"e1","action":"comment_created","eventable":{"id":"c1"}}"#;
+    let sign = |secret: &[u8]| {
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret);
+        ring::hmac::sign(&key, body.as_bytes())
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    };
+    let deliver = |to: uuid::Uuid, signature: String| {
+        Request::builder()
+            .method(Method::POST)
+            .uri(format!("/v1/webhooks/fizzy/{to}"))
+            .header("X-Webhook-Signature", signature)
+            .header("Content-Type", "application/json")
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let send = |r| t.app.clone().oneshot(r);
+    assert_eq!(
+        send(deliver(id, sign(b"wrong"))).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        send(deliver(crate::token::id().unwrap(), sign(b"s3cret")))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND,
+        "a webhook that is not one of ours"
+    );
+    let due = || async {
+        sqlx::query_scalar::<_, bool>(
+            "select next_read_at <= now() from watches where account_id = $1",
+        )
+        .bind(account)
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap()
+    };
+    assert!(!due().await);
+    assert_eq!(
+        send(deliver(id, sign(b"s3cret"))).await.unwrap().status(),
+        StatusCode::ACCEPTED
+    );
+    assert!(due().await, "read at the watcher's next pass");
+
+    // Gone with its tracker.
+    let (status, _) = t
+        .call(Method::DELETE, "/v1/trackers/cards", Some(at), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let left: i64 = sqlx::query_scalar("select count(*) from fizzy_hooks")
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}

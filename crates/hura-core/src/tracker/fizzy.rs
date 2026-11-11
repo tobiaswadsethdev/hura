@@ -16,8 +16,15 @@
 //! their process; one not yet triaged into a column is in Fizzy's *Maybe?*.
 //! Fizzy has no pull requests, and its card list says nothing about comments,
 //! so a Fizzy ticket is never announced for one.
+//!
+//! A card is also read in full and changed from the apps ([`card`]), and
+//! hura cloud puts a webhook on each board it can so that a change is read
+//! at once rather than at the next turn ([`hooks`]).
 
 use serde_json::Value;
+
+pub(super) mod card;
+pub mod hooks;
 
 use super::{
     Kind, Relation, Source, Task, answer, branch, raw, session_name, slug, string, urlencode,
@@ -66,6 +73,9 @@ struct Account {
     /// one account (`acme#4`), since every account has a `#4` and the apps
     /// tell tickets apart by tracker and key. `None` with only one.
     label: Option<String>,
+    /// Whether the token's owner runs the account -- an owner or an admin --
+    /// which is who Fizzy lets put a webhook on a board.
+    admin: bool,
 }
 
 /// What one Fizzy tracker holds.
@@ -111,7 +121,7 @@ pub(super) fn read(source: &Source, token: &str, prefix: &str) -> Result<Read, S
                 urlencode(&format!("{filter}[]")),
                 urlencode(&account.user)
             );
-            match cards(&url, token) {
+            match pages(&url, token) {
                 Ok((cards, all)) => {
                     if !all {
                         read.complete = false;
@@ -151,15 +161,16 @@ pub(super) fn read(source: &Source, token: &str, prefix: &str) -> Result<Read, S
     Ok(read)
 }
 
-/// Every page of one search, up to [`MAX_PAGES`], and whether that was all
-/// of them.
-fn cards(url: &str, token: &str) -> Result<(Vec<Value>, bool), String> {
+/// Every page of one list -- cards, comments, people, boards -- up to
+/// [`MAX_PAGES`], and whether that was all of them.
+fn pages(url: &str, token: &str) -> Result<(Vec<Value>, bool), String> {
     let mut all = Vec::new();
+    let join = if url.contains('?') { '&' } else { '?' };
     for page in 1..=MAX_PAGES {
         let paged = if page == 1 {
             url.to_string()
         } else {
-            format!("{url}&page={page}")
+            format!("{url}{join}page={page}")
         };
         let (code, body) = raw(&paged, &auth(token), super::JSON, &[], None)?;
         // A page past the end is an answer, not a failure: a 404, or nothing.
@@ -169,7 +180,7 @@ fn cards(url: &str, token: &str) -> Result<(Vec<Value>, bool), String> {
         let list = match answer(&String::from_utf8_lossy(&body), code)? {
             Value::Null => Vec::new(),
             Value::Array(list) => list,
-            _ => return Err("fizzy did not answer with a list of cards".into()),
+            _ => return Err("fizzy did not answer with a list".into()),
         };
         if list.is_empty() {
             return Ok((all, true));
@@ -183,6 +194,47 @@ fn get(url: &str, token: &str) -> Result<Value, String> {
     super::get(url, &auth(token), &[])
 }
 
+/// A write with a JSON body, or none.
+fn send(method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
+    super::send(method, url, &auth(token), body)
+}
+
+/// A tracker's site, its token and the accounts it reads, labelled as its
+/// tickets are: what every request about one card or board starts from.
+struct Connection<'a> {
+    site: String,
+    token: &'a str,
+    accounts: Vec<Account>,
+}
+
+fn connect(stored: &super::Stored) -> Result<Connection<'_>, String> {
+    let source = &stored.source;
+    if source.kind != Kind::Fizzy {
+        return Err(format!("`{}` is not a fizzy tracker", source.name));
+    }
+    if let Some(problem) = source.problem() {
+        return Err(problem);
+    }
+    let token = stored
+        .token
+        .as_deref()
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| format!("{}: no token yet", source.name))?;
+    let site = site(source);
+    let identity = get(&format!("{site}/my/identity"), token)?;
+    let accounts = labelled(chosen(parse_identity(&identity)?, source.org.as_deref())?);
+    Ok(Connection {
+        site,
+        token,
+        accounts,
+    })
+}
+
+/// An id Fizzy made, before it goes into a path: letters and digits.
+fn is_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
 fn parse_identity(body: &Value) -> Result<Vec<Account>, String> {
     let accounts = body
         .get("accounts")
@@ -193,6 +245,7 @@ fn parse_identity(body: &Value) -> Result<Vec<Account>, String> {
         .filter_map(|a| {
             let slug = string(a, "slug");
             let user = a.get("user").map(|u| string(u, "id")).unwrap_or_default();
+            let role = a.get("user").map(|u| string(u, "role")).unwrap_or_default();
             if slug.is_empty() || user.is_empty() {
                 return None;
             }
@@ -204,6 +257,7 @@ fn parse_identity(body: &Value) -> Result<Vec<Account>, String> {
                 name: string(a, "name"),
                 user,
                 label: None,
+                admin: role == "owner" || role == "admin",
             })
         })
         .collect())
@@ -330,6 +384,7 @@ mod tests {
             name: "37signals".into(),
             user: "03f5v9zjw7pz8717a4no1h8a7".into(),
             label: None,
+            admin: true,
         }
     }
 
@@ -349,7 +404,7 @@ mod tests {
             "id": "x",
             "accounts": [
                 { "id": "a", "name": "37signals", "slug": "/897362094",
-                  "user": { "id": "03f5v9zjw7pz8717a4no1h8a7", "name": "David" } },
+                  "user": { "id": "03f5v9zjw7pz8717a4no1h8a7", "name": "David", "role": "owner" } },
                 { "id": "b", "name": "Side project", "slug": "1234567",
                   "user": { "id": "u2" } },
                 { "id": "c", "name": "No user", "slug": "/1" }
@@ -371,6 +426,7 @@ mod tests {
                     name: "Side project".into(),
                     user: "u2".into(),
                     label: None,
+                    admin: false,
                 },
             ]
         };
@@ -460,6 +516,7 @@ mod tests {
                     name: b.into(),
                     user: "u2".into(),
                     label: None,
+                    admin: false,
                 },
             ])
         };

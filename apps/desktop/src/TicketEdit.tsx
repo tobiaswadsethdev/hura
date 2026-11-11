@@ -1,9 +1,12 @@
-// A Jira ticket's edit screen, in the panel beside the board.
+// A Jira ticket's edit screen, or a Fizzy card's, in the panel beside the
+// board.
 //
-// What is on it is Jira's answer, not ours: the fields the ticket's edit
-// screen has, each as the control its type wants. A field of a type this does
-// not edit is shown as its value, so the form is still the whole ticket; a
-// field Jira will not let this account change is not on it at all.
+// What is on it is the tracker's answer, not ours: for Jira, the fields the
+// ticket's edit screen has, each as the control its type wants. A field of a
+// type this does not edit is shown as its value, so the form is still the
+// whole ticket; a field Jira will not let this account change is not on it at
+// all. A Fizzy card's is the card: title, description, people, tags, steps
+// and board.
 //
 // Only what changed is saved. The form is a snapshot, and writing back every
 // field would quietly undo whatever somebody else changed in Jira since it
@@ -233,7 +236,7 @@ function Control({
       );
     case "read-only":
       return (
-        <span className="edit-readonly" title="Change this in Jira">
+        <span className="edit-readonly" title="Change This on the Tracker's Site">
           {value.value || "None"}
         </span>
       );
@@ -270,7 +273,7 @@ export function MarkdownBox({
       {value.lost.length > 0 && (
         <p className="warn markdown-lost">
           This holds what Markdown cannot: {value.lost.join(", ")}. Saving it from here flattens
-          those. Edit it in Jira to keep them.
+          those. Edit it on the tracker's site to keep them.
         </p>
       )}
     </div>

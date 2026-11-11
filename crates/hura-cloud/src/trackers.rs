@@ -83,6 +83,7 @@ pub async fn add(
             format!("there is already a tracker called `{}`", source.name),
         ));
     }
+    hooks(&state, signed.account, &source.name).await;
     views(&state, signed.account).await
 }
 
@@ -122,6 +123,7 @@ pub async fn edit(
     .execute(&state.db)
     .await?;
     found(changed.rows_affected(), &name)?;
+    hooks(&state, signed.account, &name).await;
     views(&state, signed.account).await
 }
 
@@ -158,6 +160,7 @@ pub async fn set_token(
     .execute(&state.db)
     .await?;
     found(changed.rows_affected(), &name)?;
+    hooks(&state, signed.account, &name).await;
     views(&state, signed.account).await
 }
 
@@ -167,6 +170,10 @@ pub async fn forget(
     signed: Signed,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<Configured>>> {
+    // Off its boards first, while its token is still here to do it with.
+    if let Err(e) = crate::fizzy_hooks::remove(&state, signed.account, &name).await {
+        eprintln!("forget {name}: fizzy webhooks: {e:?}");
+    }
     let gone = sqlx::query("delete from trackers where account_id = $1 and name = $2")
         .bind(signed.account)
         .bind(&name)
@@ -270,11 +277,15 @@ pub(crate) async fn stored(state: &Shared, account: Uuid) -> Result<Vec<Stored>>
 }
 
 async fn views(state: &Shared, account: Uuid) -> Result<Json<Vec<Configured>>> {
-    let rows: Vec<(Jsonb<Source>, bool, Option<String>)> = sqlx::query_as(
+    /// Its source, whether it has a token, who it is connected as, and what
+    /// its webhooks are.
+    type Row = (Jsonb<Source>, bool, Option<String>, Option<String>);
+    let rows: Vec<Row> = sqlx::query_as(
         "select source, token is not null,
                 case connection->>'provider'
                     when 'github' then '@' || (connection->>'login')
-                    else connection->>'login' end
+                    else connection->>'login' end,
+                webhooks
          from trackers where account_id = $1 order by created_at",
     )
     .bind(account)
@@ -282,10 +293,11 @@ async fn views(state: &Shared, account: Uuid) -> Result<Json<Vec<Configured>>> {
     .await?;
     Ok(Json(
         rows.into_iter()
-            .map(|(source, token_set, connected)| Configured {
+            .map(|(source, token_set, connected, webhooks)| Configured {
                 source: source.0,
                 token_set,
                 connected,
+                webhooks,
             })
             .collect(),
     ))
@@ -310,6 +322,14 @@ fn checked(source: &Source) -> Result<Source> {
         )));
     }
     Ok(source)
+}
+
+/// A Fizzy tracker's webhooks, put on its boards or brought up to date as
+/// it changes. A failure is said on its row, never as the change failing.
+async fn hooks(state: &Shared, account: Uuid, name: &str) {
+    if let Err(e) = crate::fizzy_hooks::sync(state, account, name).await {
+        eprintln!("tracker {name}: fizzy webhooks: {e:?}");
+    }
 }
 
 fn found(rows: u64, name: &str) -> Result<()> {

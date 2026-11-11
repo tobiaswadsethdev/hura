@@ -450,8 +450,9 @@ function TicketRow({
 }) {
   const menu = useContextMenu();
   const startMenu = useButtonMenu();
-  // A Jira ticket is read here; the others are still read in the browser.
-  const readsHere = task.kind === "jira";
+  // A Jira ticket or a Fizzy card is read here; the others are still read in
+  // the browser.
+  const readsHere = task.kind === "jira" || task.kind === "fizzy";
   const open = () => (readsHere ? onShow(task) : openExternal(task.url));
   // The selected worktree's project first: that is where a ticket picked
   // while looking at it most likely belongs.

@@ -2754,6 +2754,14 @@ main { position: relative; }
 .panel .tracker-shows .setting-actions { margin-top: 8px; }
 .panel .tracker-shows .setting-actions .unsaved { margin-right: auto; }
 
+.panel .tracker-webhooks {
+  flex-basis: 100%;
+  min-width: 100%;
+  margin: 3px 0 0;
+  color: var(--dim);
+  font-size: 12px;
+  max-width: 72ch;
+}
 .panel .problem {
   flex-basis: 100%;
   min-width: 100%;

@@ -295,7 +295,7 @@ fn link_target(url: &str) -> String {
 }
 
 /// Epoch milliseconds as `YYYY-MM-DD`, in UTC.
-fn iso_date(ms: i64) -> String {
+pub(super) fn iso_date(ms: i64) -> String {
     // Howard Hinnant's days-to-civil.
     let z = ms.div_euclid(86_400_000) + 719_468;
     let era = z.div_euclid(146_097);
