@@ -76,20 +76,11 @@ struct ChatView: View {
                             if items.isEmpty && queued.isEmpty { emptyState }
                             ChatRows(items: ChatItem.group(items, working: working), cwd: Self.cwd, working: working,
                                      receipts: chat.receipts)
-                            if !chat.streaming.isEmpty {
-                                MarkdownText(text: chat.streaming).opacity(0.8)
-                            }
                             // Under whatever is being written, for the whole
                             // turn, as on the desktop; not while a tool call
-                            // is running, whose card says so already. The word
-                            // only while there is nothing else to look at.
-                            if working && chat.pending.isEmpty && !callRunning && !shellRunning {
-                                HStack(spacing: 6) {
-                                    WorkingDots(size: 22)
-                                    if chat.streaming.isEmpty { Text("working").font(.caption) }
-                                }
-                                .foregroundStyle(Color.working)
-                            }
+                            // is running, whose card says so already.
+                            Writing(chat: chat,
+                                    showsWorking: working && chat.pending.isEmpty && !callRunning && !shellRunning)
                             ChatRows(items: queued, cwd: Self.cwd, working: working, receipts: chat.receipts)
                             Color.clear.frame(height: 1).id("bottom")
                                 .onAppear { atBottom = true }
@@ -111,8 +102,10 @@ struct ChatView: View {
                     .id(items.isEmpty)
                     .onChange(of: chat.entries.count, initial: true) { fold(proxy) }
                     .onChange(of: chat.loaded) { fold(proxy) }
-                    .onChange(of: chat.streaming) {
-                        if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+                    .background {
+                        FollowsReply(chat: chat) {
+                            if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+                        }
                     }
                     .scrollDismissesKeyboard(.interactively)
                     .defaultScrollAnchor(.bottom)
@@ -277,82 +270,6 @@ struct ChatView: View {
         e == "xhigh" ? "Extra High" : e.prefix(1).uppercased() + e.dropFirst()
     }
 
-    /// The model and its effort, in one menu, as Claude Code's app has them:
-    /// "Opus 5.5 Medium".
-    @ViewBuilder
-    private var modelMenu: some View {
-        if !chat.models.isEmpty || !chat.efforts.isEmpty {
-            Menu {
-                if !chat.models.isEmpty {
-                    Section("Model") {
-                        Picker("Model", selection: Binding(get: { chat.model ?? chat.models[0].value }, set: { m in
-                            Task { do { try await chat.setModel(m) } catch { chat.error = error.localizedDescription } }
-                        })) {
-                            ForEach(chat.models) { m in
-                                Text(m.displayName).tag(m.value)
-                            }
-                        }
-                        .pickerStyle(.inline)
-                    }
-                }
-                if !chat.efforts.isEmpty {
-                    Section("Effort") {
-                        Picker("Effort", selection: Binding(get: { chat.effort ?? "" }, set: { e in
-                            Task { do { try await chat.setEffort(e.isEmpty ? nil : e) } catch { chat.error = error.localizedDescription } }
-                        })) {
-                            Text("Model's Default").tag("")
-                            ForEach(chat.efforts, id: \.self) { e in
-                                Text(Self.effortName(e)).tag(e)
-                            }
-                        }
-                        .pickerStyle(.inline)
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    if let model = modelLabel {
-                        Text(model).foregroundStyle(.primary)
-                    }
-                    if let effort = chat.effort {
-                        Text(Self.effortName(effort)).foregroundStyle(.secondary)
-                    }
-                }
-                .modifier(Chip())
-            }
-            // The model first, as the pill says it, though the menu opens
-            // upwards from the bottom of the screen.
-            .menuOrder(.fixed)
-            .accessibilityLabel("Model and effort")
-        }
-    }
-
-    /// The model as its menu names it: the session's model is often an
-    /// alias, `sonnet`, which only the list says is Sonnet 5.5.
-    private var modelLabel: String? {
-        guard let model = chat.model else { return chat.models.first?.displayName }
-        return chat.models.first { $0.value == model }?.displayName ?? modelName(model)
-    }
-
-    private var modeMenu: some View {
-        let mode = Self.modes.first { $0.value == (chat.mode ?? "auto") }
-        return Menu {
-            Picker("Permission mode", selection: Binding(get: { chat.mode ?? "auto" }, set: { m in
-                Task { do { try await chat.setMode(m) } catch { chat.error = error.localizedDescription } }
-            })) {
-                ForEach(Self.modes, id: \.value) { m in
-                    Text("\(m.label) — \(m.hint)").tag(m.value)
-                }
-            }
-        } label: {
-            Label(mode?.short ?? (chat.mode ?? "Auto"), glyph: .policy)
-                .labelStyle(TightLabel())
-                .foregroundStyle(chat.mode == "plan" ? Color.accentColor : .primary)
-                .modifier(Chip())
-                .fixedSize()
-        }
-        .accessibilityLabel("Permission mode, \(mode?.label ?? chat.mode ?? "Auto")")
-    }
-
     private var attachMenu: some View {
         Menu {
             Button("Photo Library", systemImage: "photo.on.rectangle") { choosingPhotos = true }
@@ -429,8 +346,8 @@ struct ChatView: View {
             HStack(spacing: 6) {
                 // Only for a host that keeps them: an older one drops them.
                 if chat.takesFiles { attachMenu }
-                modelMenu
-                modeMenu
+                ModelMenu(chat: chat)
+                ModeMenu(chat: chat)
                 Spacer(minLength: 0)
                 if chat.status == "compacting" {
                     Text("compacting").font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -588,6 +505,127 @@ private struct CommandSuggestions: View {
         guard !c.aliases.isEmpty else { return c.description }
         let also = "also " + c.aliases.map { "/\($0)" }.joined(separator: ", ")
         return c.description.isEmpty ? also : "\(c.description) (\(also))"
+    }
+}
+
+/// The reply as Claude writes it, and that it is still working. The only
+/// rows that read the reply: when the transcript's own view did, every word
+/// drew the whole lazy stack again, and rows scrolled to while it was busy
+/// came up blank until it caught up.
+private struct Writing: View {
+    let chat: Chat
+    let showsWorking: Bool
+
+    var body: some View {
+        if !chat.streaming.isEmpty {
+            MarkdownText(text: chat.streaming).opacity(0.8)
+        }
+        if showsWorking {
+            HStack(spacing: 6) {
+                WorkingDots(size: 22)
+                // The word only while there is nothing else to look at.
+                if chat.streaming.isEmpty { Text("working").font(.caption) }
+            }
+            .foregroundStyle(Color.working)
+        }
+    }
+}
+
+/// Keeps the transcript at its bottom as the reply grows, from outside it,
+/// for the same reason.
+private struct FollowsReply: View {
+    let chat: Chat
+    let follow: () -> Void
+
+    var body: some View {
+        Color.clear.onChange(of: chat.streaming) { follow() }
+    }
+}
+
+/// The model and its effort, in one menu, as Claude Code's app has them:
+/// "Opus 5.5 Medium". A view of its own, so that only the model's state draws
+/// it again: a menu drawn again while it is open goes back to its top, and the
+/// chat around it is drawn again with every word Claude writes.
+private struct ModelMenu: View {
+    let chat: Chat
+
+    @ViewBuilder
+    var body: some View {
+        if !chat.models.isEmpty || !chat.efforts.isEmpty {
+            Menu {
+                if !chat.models.isEmpty {
+                    Section("Model") {
+                        Picker("Model", selection: Binding(get: { chat.model ?? chat.models[0].value }, set: { m in
+                            Task { do { try await chat.setModel(m) } catch { chat.error = error.localizedDescription } }
+                        })) {
+                            ForEach(chat.models) { m in
+                                Text(m.displayName).tag(m.value)
+                            }
+                        }
+                        .pickerStyle(.inline)
+                    }
+                }
+                if !chat.efforts.isEmpty {
+                    Section("Effort") {
+                        Picker("Effort", selection: Binding(get: { chat.effort ?? "" }, set: { e in
+                            Task { do { try await chat.setEffort(e.isEmpty ? nil : e) } catch { chat.error = error.localizedDescription } }
+                        })) {
+                            Text("Model's Default").tag("")
+                            ForEach(chat.efforts, id: \.self) { e in
+                                Text(ChatView.effortName(e)).tag(e)
+                            }
+                        }
+                        .pickerStyle(.inline)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if let model = modelLabel {
+                        Text(model).foregroundStyle(.primary)
+                    }
+                    if let effort = chat.effort {
+                        Text(ChatView.effortName(effort)).foregroundStyle(.secondary)
+                    }
+                }
+                .modifier(Chip())
+            }
+            // The model first, as the pill says it, though the menu opens
+            // upwards from the bottom of the screen.
+            .menuOrder(.fixed)
+            .accessibilityLabel("Model and effort")
+        }
+    }
+
+    /// The model as its menu names it: the session's model is often an
+    /// alias, `sonnet`, which only the list says is Sonnet 5.5.
+    private var modelLabel: String? {
+        guard let model = chat.model else { return chat.models.first?.displayName }
+        return chat.models.first { $0.value == model }?.displayName ?? modelName(model)
+    }
+}
+
+/// The permission mode, a view of its own for the same reason as the model's.
+private struct ModeMenu: View {
+    let chat: Chat
+
+    var body: some View {
+        let mode = ChatView.modes.first { $0.value == (chat.mode ?? "auto") }
+        return Menu {
+            Picker("Permission mode", selection: Binding(get: { chat.mode ?? "auto" }, set: { m in
+                Task { do { try await chat.setMode(m) } catch { chat.error = error.localizedDescription } }
+            })) {
+                ForEach(ChatView.modes, id: \.value) { m in
+                    Text("\(m.label) — \(m.hint)").tag(m.value)
+                }
+            }
+        } label: {
+            Label(mode?.short ?? (chat.mode ?? "Auto"), glyph: .policy)
+                .labelStyle(TightLabel())
+                .foregroundStyle(chat.mode == "plan" ? Color.accentColor : .primary)
+                .modifier(Chip())
+                .fixedSize()
+        }
+        .accessibilityLabel("Permission mode, \(mode?.label ?? chat.mode ?? "Auto")")
     }
 }
 
