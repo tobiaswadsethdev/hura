@@ -12,6 +12,8 @@ struct ChatView: View {
     /// until it is, and that is not news: the chat says what is happening, so
     /// a banner saying the server cannot be reached would be a false alarm.
     var preparing = false
+    /// The open pull request the session is on: a bar over the composer.
+    var pull: PullRequestSummary?
     /// The session's figures, asked for when the context ring is opened: the
     /// account's limits are in a poll, not in the conversation.
     var usage: (() async -> Usage?)?
@@ -139,6 +141,7 @@ struct ChatView: View {
             if !agents.isEmpty {
                 AgentsStrip(agents: agents) { following = Following(id: $0.id) }
             }
+            if let pull { PullBar(pull: pull) }
             if !suggestions.isEmpty {
                 Divider()
                 CommandSuggestions(commands: suggestions) { draft = "/\($0.name) " }

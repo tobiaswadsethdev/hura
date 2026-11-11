@@ -564,3 +564,71 @@ private struct PullFileDiffView: View {
         }
     }
 }
+
+/// A pull request opened from a worktree that is on it rather than from the
+/// inbox: the same screen, starting its own work where the inbox would.
+struct LinkedPullView: View {
+    let pull: PullRequestSummary
+    @State private var starting: WorkOrigin?
+
+    var body: some View {
+        PullView(pull: pull, starting: $starting)
+            .sheet(item: $starting) { origin in StartWorkView(origin: origin) }
+    }
+}
+
+/// The pull request a session is on, as the desktop's sidebar row shows it:
+/// its number and how its checks stand.
+struct PullChip: View {
+    let pull: PullRequestSummary
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(glyph: .pullRequest)
+            Text(pull.key)
+            ChecksMark(checks: pull.checks)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Pull request \(pullName(pull))")
+    }
+}
+
+/// The pull request a chat's session is on, over the composer as Claude
+/// Code's desktop app has it: what it is and where it stands, a tap from the
+/// whole of it.
+struct PullBar: View {
+    let pull: PullRequestSummary
+
+    var body: some View {
+        NavigationLink(value: pull) {
+            HStack(spacing: 8) {
+                Image(glyph: .pullRequest)
+                    .foregroundStyle(pull.draft ? Color.secondary : Color.green)
+                Text(pull.key).fontWeight(.semibold)
+                Text(pull.title).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 4)
+                if pull.conflicts { Image(glyph: .warning).foregroundStyle(.orange).accessibilityLabel("Conflicts") }
+                ChecksMark(checks: pull.checks)
+                if let r = pull.review {
+                    Text(reviewWord(r))
+                        .foregroundStyle(r == "approved" ? .green : r == "changes-requested" ? .red : .secondary)
+                        .fixedSize()
+                } else if pull.draft {
+                    Text("draft").foregroundStyle(.secondary)
+                }
+                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .font(.footnote)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
+        .accessibilityHint("Opens the pull request")
+    }
+}

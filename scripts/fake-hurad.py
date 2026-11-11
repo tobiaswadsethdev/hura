@@ -422,11 +422,11 @@ def task(key, title, status, relation, hours, item_type="Story", comments=None, 
             "url": f"https://acme.atlassian.net/browse/{key}", "status": status, "item_type": item_type,
             "session_name": session or key.lower(), "branch": f"tobias/{key}", "repo": None, "relation": relation,
             "filters": [], "updated": iso(hours), "comments": comments, "last_commenter": by, "last_comment_mine": mine}
-def pull(n, title, review, hours, checks="passing", verdict=None, draft=False, conflicts=False, comments=None):
+def pull(n, title, review, hours, checks="passing", verdict=None, draft=False, conflicts=False, comments=None, branch=None):
     return {"tracker": "github", "kind": "git-hub", "id": str(n), "key": f"#{n}", "title": title,
             "url": f"https://github.com/acme/storefront/pull/{n}", "repo": "acme/storefront",
             "repo_url": "https://github.com/acme/storefront.git", "relation": "assigned" if review else "created",
-            "review_requested": review, "author": "sam" if review else "tobias", "branch": f"feature/{n}",
+            "review_requested": review, "author": "sam" if review else "tobias", "branch": branch or f"feature/{n}",
             "base": "main", "draft": draft, "fork": False, "conflicts": conflicts, "checks": checks,
             "review": verdict, "comments": comments, "updated": iso(hours)}
 inbox = {
@@ -437,8 +437,9 @@ inbox = {
         task("SHOP-350", "Spike: one-page checkout", "To Do", "created", 120, "Task"),
     ],
     "pulls": [
-        pull(231, "Price rounding: round once, after tax", False, 1, "pending", comments=2),
-        pull(229, "Cart: keep saved carts across sessions", False, 20, "failing", conflicts=True),
+        # On the branches of two worktrees, which show them in the tree and over their chats.
+        pull(231, "Price rounding: round once, after tax", False, 1, "pending", comments=2, branch="tobias/SHOP-412"),
+        pull(229, "Cart: keep saved carts across sessions", False, 20, "failing", conflicts=True, branch="tobias/SHOP-398"),
         pull(233, "Search: debounce the filter input", True, 3, "passing", comments=4),
         pull(227, "Payments: retry declined 3DS once", True, 30, "passing", "approved"),
     ],

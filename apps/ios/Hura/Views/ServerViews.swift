@@ -63,6 +63,7 @@ struct ServerDot: View {
 struct ServerView: View {
     let server: Server
     @Environment(AppModel.self) private var model
+    @Environment(TrackersModel.self) private var trackers
     @State private var addingProject = false
     @State private var creatingIn: Project?
     @State private var destroying: Session?
@@ -70,6 +71,7 @@ struct ServerView: View {
     @State private var newTitle = ""
     @State private var forgetting: Project?
     @State private var screen: ServerScreen?
+    @State private var openPull: PullRequestSummary?
     @State private var error: String?
 
     var body: some View {
@@ -157,6 +159,7 @@ struct ServerView: View {
             case .about: AboutView(server: server)
             }
         }
+        .navigationDestination(item: $openPull) { LinkedPullView(pull: $0) }
         .sheet(isPresented: $addingProject) {
             NewProjectView(server: server)
         }
@@ -188,8 +191,9 @@ struct ServerView: View {
     }
 
     private func row(_ s: Session) -> some View {
-        NavigationLink(value: Route.session(serverID: server.id, name: s.name)) {
-            SessionRow(session: s, report: server.reports[s.name])
+        let pull = sessionPull(s, in: trackers.inbox?.pulls ?? [])
+        return NavigationLink(value: Route.session(serverID: server.id, name: s.name)) {
+            SessionRow(session: s, report: server.reports[s.name], pull: pull)
         }
         .swipeActions {
             // Red by tint rather than `role: .destructive`: a destructive
@@ -201,6 +205,9 @@ struct ServerView: View {
         // On the row, not the list, so it opens over the row it is about
         // rather than at the top of the screen.
         .contextMenu {
+            if let pull {
+                Button("Open \(pullName(pull))", glyph: .pullRequest) { openPull = pull }
+            }
             Button("Rename", systemImage: "pencil") {
                 newTitle = s.title ?? ""
                 renaming = s
@@ -262,6 +269,8 @@ private struct ProjectHeader: View {
 struct SessionRow: View {
     let session: Session
     let report: AgentReport?
+    /// The open pull request it is on, if the inbox knows it.
+    var pull: PullRequestSummary?
 
     var body: some View {
         // The desktop sidebar's row, as a message in Mail is laid out: the
@@ -281,6 +290,7 @@ struct SessionRow: View {
                             .foregroundStyle(.orange)
                             .accessibilityLabel("Worktree on the server, not isolated")
                     }
+                    if let pull { PullChip(pull: pull) }
                 }
                 if let failure = session.failure, ["failed", "dead"].contains(session.state) {
                     Text(failure)

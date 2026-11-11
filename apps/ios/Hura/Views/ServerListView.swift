@@ -48,6 +48,8 @@ struct ServerListView: View {
                     if let s = model.server(serverID) { WorktreeView(server: s, name: name) }
                 }
             }
+            // A worktree's pull request, from its chat.
+            .navigationDestination(for: PullRequestSummary.self) { LinkedPullView(pull: $0) }
             .sheet(isPresented: $pairing) {
                 PairView(initialURL: pendingPairURL) { server in
                     pairing = false

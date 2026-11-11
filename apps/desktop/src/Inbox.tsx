@@ -666,7 +666,7 @@ export function ChecksMark({ checks }: { checks: Pull["checks"] }) {
 
 /// Where the reviews stand, in a word, on the ones you opened. On the ones
 /// waiting on you the answer is you.
-function ReviewWord({ pull }: { pull: Pull }) {
+export function ReviewWord({ pull }: { pull: Pull }) {
   if (pull.relation === "assigned") {
     return <span className="inbox-review">{pull.review_requested ? "review" : "assigned"}</span>;
   }

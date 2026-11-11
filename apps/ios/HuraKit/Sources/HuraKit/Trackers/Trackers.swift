@@ -744,6 +744,14 @@ public func pullName(_ p: PullRequestSummary) -> String {
     "\(p.repo.split(separator: "/").last.map(String.init) ?? p.repo) \(p.key)"
 }
 
+/// The open pull request a session is on, of the ones the inbox knows: the
+/// one it was started from, or else one from its branch in its repository
+/// (`sessionPull` in the desktop's Inbox.tsx).
+public func sessionPull(_ session: Session, in pulls: [PullRequestSummary]) -> PullRequestSummary? {
+    pulls.first { session.pull?.tracker == $0.tracker && session.pull?.repo == $0.repo && session.pull?.id == $0.id }
+        ?? pulls.first { !session.workBranch.isEmpty && session.workBranch == $0.branch && bareRepo(session.repo) == bareRepo($0.repoURL) }
+}
+
 /// A repository's address with what varies between two spellings taken off,
 /// so a project cloned over SSH is still the repository its pull requests
 /// name over HTTPS (`bare` in the desktop's Inbox.tsx).

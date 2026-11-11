@@ -16,6 +16,7 @@ import { ChatPane } from "./panes/Chat";
 import { FilePane } from "./panes/File";
 import { FileDiffPane } from "./panes/FileDiff";
 import type { Against } from "./gen/Against";
+import type { PullRequest as Pull } from "./gen/PullRequest";
 import type { Usage } from "./gen/Usage";
 import { Agent, Chat, Close, Plus, Shell } from "./icons";
 import { TerminalPane } from "./panes/Terminal";
@@ -76,6 +77,8 @@ export function Tabs({
   failure,
   listed,
   usage,
+  pull,
+  onPull,
 }: {
   server: string;
   name: string;
@@ -91,6 +94,10 @@ export function Tabs({
   listed: boolean;
   /// The session's, for a chat composer to show the account's limits.
   usage: Usage | null;
+  /// The open pull request the worktree is on, for a chat to show over its
+  /// composer.
+  pull: Pull | null;
+  onPull: (pull: Pull) => void;
   onActivate: (key: string) => void;
   onNewShell: () => void;
   /// Another conversation, in a chat session. Absent in a terminal session,
@@ -292,6 +299,8 @@ export function Tabs({
                 name={name}
                 conv={tab.conv}
                 usage={usage}
+                pull={pull}
+                onPull={onPull}
               />
             )}
             {tab.kind === "filediff" && (

@@ -27,6 +27,7 @@ struct WorktreeView: View {
     let server: Server
     let name: String
     @Environment(AppModel.self) private var model
+    @Environment(TrackersModel.self) private var trackers
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var tab: WorkTab?
@@ -44,6 +45,8 @@ struct WorktreeView: View {
     private var session: Session? { server.session(named: name) }
     /// The title it is shown by, or its name before the list has it.
     private var label: String { session?.label ?? name }
+    /// The open pull request it is on, if the inbox knows it.
+    private var pull: PullRequestSummary? { session.flatMap { sessionPull($0, in: trackers.inbox?.pulls ?? []) } }
 
     /// A terminal can't attach before the sandbox is up, and a session that
     /// failed or died has nothing to attach to. A chat shows hurad's own
@@ -153,7 +156,7 @@ struct WorktreeView: View {
         switch tab {
         case let .chat(conv):
             if let c = chats[conv] {
-                ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? "")) { [server, name] in
+                ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? ""), pull: pull) { [server, name] in
                     try? await server.api.poll(name).usage
                 }
                     .environment(\.readPicture) { [server, name] path in
