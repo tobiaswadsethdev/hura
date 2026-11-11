@@ -1252,12 +1252,11 @@ main { position: relative; }
   right: 40px;
   z-index: 20;
   display: flex;
-  width: min(560px, 60%);
+  /* The width and its cap are inline styles: the width is dragged by the
+     `.split` on the left edge -- see `flyoutMax` in `prefs.ts`. */
   box-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
 }
 .inbox-flyout > .ticket-panel { flex: 1; }
-/* A pull request wants more room than a ticket: one of its tabs is a diff. */
-.inbox-flyout.wide { width: min(860px, 72%); }
 
 /* ------------------------------------------------------------------------- */
 /* the file tree, in the dock                                                */

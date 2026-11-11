@@ -56,7 +56,7 @@ import { close, nextChannelId, open } from "./stream";
 import { NewProjectDialog } from "./NewProject";
 import { forgetChat } from "./panes/Chat";
 import { NewWorktreeDialog } from "./NewWorktree";
-import { DEFAULTS, LIMITS, usePrefs } from "./prefs";
+import { DEFAULTS, FLYOUT_GAP, flyoutMax, LIMITS, usePrefs } from "./prefs";
 import { SettingsScreen } from "./Settings";
 import { AccountScreen } from "./Account";
 import { PullPanel, type PullStart } from "./Pull";
@@ -286,6 +286,9 @@ export default function App() {
   // change under it.
   const dialogOpen = creatingProject || creatingIn !== null || confirmation !== null;
   const inboxOpen = prefs.inboxOpen;
+  // Where the ticket and pull request flyouts stand: against the sidebar, or
+  // against its folded rail.
+  const flyoutRight = inboxOpen ? prefs.inboxWidth : 40;
   const dockOpen = prefs.dockOpen;
   useEffect(() => {
     if (!server || dialogOpen) return;
@@ -1217,8 +1220,22 @@ export default function App() {
         {showing && (
           <div
             className="inbox-flyout"
-            style={{ right: inboxOpen ? prefs.inboxWidth : undefined }}
+            style={{
+              right: flyoutRight,
+              width: prefs.ticketWidth,
+              maxWidth: `calc(100% - ${flyoutRight + FLYOUT_GAP}px)`,
+            }}
           >
+            {/* On the flyout's left edge, so a drag left widens it. */}
+            <Split
+              label="Ticket width"
+              value={prefs.ticketWidth}
+              min={LIMITS.ticketWidth.min}
+              max={flyoutMax(LIMITS.ticketWidth, flyoutRight)}
+              reset={DEFAULTS.ticketWidth}
+              grows="left"
+              onChange={(ticketWidth) => setPrefs({ ticketWidth })}
+            />
             <TicketPanel
               key={`${showing.tracker}:${showing.key}`}
               task={showing}
@@ -1232,9 +1249,22 @@ export default function App() {
         )}
         {showingPull && (
           <div
-            className="inbox-flyout wide"
-            style={{ right: inboxOpen ? prefs.inboxWidth : undefined }}
+            className="inbox-flyout"
+            style={{
+              right: flyoutRight,
+              width: prefs.pullWidth,
+              maxWidth: `calc(100% - ${flyoutRight + FLYOUT_GAP}px)`,
+            }}
           >
+            <Split
+              label="Pull request width"
+              value={prefs.pullWidth}
+              min={LIMITS.pullWidth.min}
+              max={flyoutMax(LIMITS.pullWidth, flyoutRight)}
+              reset={DEFAULTS.pullWidth}
+              grows="left"
+              onChange={(pullWidth) => setPrefs({ pullWidth })}
+            />
             <PullPanel
               key={`${showingPull.tracker}:${showingPull.repo}:${showingPull.id}`}
               pull={showingPull}
