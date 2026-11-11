@@ -49,7 +49,8 @@
 // stdout when it starts the turn that carries it, not when it reads it from
 // stdin (asked for with --replay-user-messages), so a message queued behind a
 // running turn stays unread until that turn is over: which is what a receipt
-// is for.
+// is for. A skill typed as a command that runs as a subagent is echoed only
+// when it is done, so its receipt is the subagent starting: `forkReceipt`.
 //
 // Nothing here is a security boundary, and nothing could be: the agent runs as
 // the same user and can reach this port, just as a terminal agent can type into
@@ -301,6 +302,26 @@ export function receipt(msg, sent, read) {
   if (msg.type !== "user" || !msg.isReplay || !msg.uuid) return null;
   if (!sent.has(msg.uuid) || read.has(msg.uuid)) return null;
   return msg.uuid;
+}
+
+/// The message of yours that a forked skill's start acknowledges, by its
+/// uuid, or null. `sent` maps each uuid to what you wrote.
+///
+/// A skill typed as a command (`/code-review`) that runs as a subagent
+/// (`context: fork`) is not a turn: Claude Code echoes the message only once
+/// the skill is done, minutes later, and until then a window shows it waiting
+/// as if nothing had taken it. Its task starts at once, though, with no tool
+/// call behind it and named after the command. The oldest unread message
+/// that starts with that command is the one it took.
+export function forkReceipt(msg, sent, read) {
+  if (msg.type !== "system" || msg.subtype !== "task_started" || msg.task_type !== "local_agent") return null;
+  if (msg.tool_use_id || !(msg.skip_transcript || msg.ambient)) return null;
+  const command = typeof msg.description === "string" ? msg.description.split(/\s/)[0] : "";
+  if (command.length < 2 || !command.startsWith("/")) return null;
+  for (const [uuid, text] of sent) {
+    if (!read.has(uuid) && text.trimStart().split(/\s/)[0] === command) return uuid;
+  }
+  return null;
 }
 
 /// Whether a message belongs in the transcript.
@@ -668,7 +689,8 @@ class Conversation {
     this.inbox = null;
     /** @type {Map<string, {request: object, resolve: Function, input: object, suggestions?: object[]}>} */
     this.pending = new Map();
-    this.sent = new Set();
+    /// Your messages, uuid to what you wrote.
+    this.sent = new Map();
     /// Those of `sent` that Claude Code has taken into a turn.
     this.read = new Set();
     this.activity = "idle";
@@ -908,9 +930,13 @@ class Conversation {
       case "tool_progress":
         this.broadcast({ t: "progress", ev: msg });
         break;
-      case "system":
+      case "system": {
+        // Before the task itself, so a window places your message above it.
+        const uuid = forkReceipt(msg, this.sent, this.read);
+        if (uuid) this.#read(uuid);
         this.#system(msg);
         break;
+      }
       case "assistant": {
         if (msg.context_usage) {
           this.context = { percentage: msg.context_usage.percentage, max: msg.context_usage.raw_max_tokens };
@@ -951,10 +977,7 @@ class Conversation {
         // the transcript already, as you wrote it; what is new is that it has
         // been read.
         const uuid = receipt(msg, this.sent, this.read);
-        if (uuid) {
-          this.read.add(uuid);
-          this.append({ kind: "read", uuid });
-        }
+        if (uuid) this.#read(uuid);
         if (msg.isReplay || (msg.uuid && (this.sent.has(msg.uuid) || this.quiet.has(msg.uuid)))) return;
         break;
       }
@@ -962,6 +985,12 @@ class Conversation {
 
     if (kept(msg)) this.append({ kind: "sdk", msg });
     if (msg.type === "result" || msg.type === "assistant") this.changed();
+  }
+
+  /// A message of yours taken into a turn: its receipt.
+  #read(uuid) {
+    this.read.add(uuid);
+    this.append({ kind: "read", uuid });
   }
 
   /// How full the context is, asked once a turn ends: assistant messages carry
@@ -1099,7 +1128,7 @@ class Conversation {
     } else if (!text) {
       throw new Error("nothing to send");
     }
-    this.sent.add(uuid);
+    this.sent.set(uuid, text);
     this.append({ kind: "prompt", text, uuid, files: saved, receipt: true });
     await this.#running();
     this.inbox.push({

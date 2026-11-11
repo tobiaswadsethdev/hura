@@ -341,6 +341,14 @@ with a new message stays one agent. The host forwards a subagent's text and
 thinking as well as its tool calls, which makes a transcript with many
 subagents longer than it was. The phone has the same strip, opening a sheet.
 
+A skill that runs as a subagent of its own, as `/code-review` does, is one of
+these agents too, though Claude Code marks it as housekeeping: its Skill card
+holds everything it did, and its chip says it is running. Typed as a command,
+it has no tool call behind it, so the conversation gets a Skill card of its
+own, and the message counts as read once the skill starts. Claude Code hands
+over what a typed skill did only when it is done, so until then the card and
+the chip are all there is to see: running, for as long as it takes.
+
 **Files go in with the message.** Drop them anywhere on the conversation, paste
 a screenshot into the box, or pick them with the paperclip; they wait above
 what you write until it is sent, a picture as itself and anything else by name.

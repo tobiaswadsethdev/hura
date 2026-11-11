@@ -145,6 +145,24 @@ export type Agent = {
 /// the subagents, oldest first.
 export type Built = { items: Item[]; queued: Item[]; agents: Agent[] };
 
+/// What Claude Code names the parent of a typed skill's messages, before the
+/// skill's name: they have no tool call to name.
+export const TYPED_SKILL = "forked-command-";
+
+/// The skill a task runs, when it is a forked one (`context: fork`), or null.
+///
+/// Claude Code marks a forked skill's task `skip_transcript` and `ambient`,
+/// as it does housekeeping, and names it after the command: `/code-review`.
+/// It is no housekeeping here. Started by the Skill tool, it is that call's
+/// whole work; typed as a command, it is the turn's, with nothing else to show
+/// for minutes. So it is drawn, and the name is what tells it apart.
+export function forkedSkill(m: SystemMessage): string | null {
+  if (m.task_type !== "local_agent" || !(m.skip_transcript || m.ambient)) return null;
+  const description = typeof m.description === "string" ? m.description : "";
+  const name = description.startsWith("/") ? description.slice(1).split(/\s/)[0] : "";
+  return name || null;
+}
+
 /// A task's status in the words of one of four: `killed` is a stop, and
 /// `pending` and `paused` are still going.
 function status(s: unknown): Agent["status"] {
@@ -189,6 +207,8 @@ export function build(entries: ChatEntry[]): Built {
   const prompts = new Map<string, Extract<Item, { kind: "prompt" }>>();
   /// Your `!` commands, so each one's end can be filled in when it comes.
   const shells = new Map<string, Extract<Item, { kind: "shell" }>>();
+  /// The cards made for skills you typed, by the id their messages carry.
+  const forks = new Set<string>();
   let day: number | null = null;
 
   for (const entry of entries) {
@@ -349,6 +369,20 @@ export function build(entries: ChatEntry[]): Built {
     }
   }
 
+  /// A card for a skill you typed as a command, which runs with no tool call
+  /// of its own. Its messages name `forked-command-<skill>` as their parent
+  /// instead, so that is this card's id, and they fold into it as an agent's
+  /// fold into its call. Claude Code holds them back until the skill is done;
+  /// until then the card, and the agent's chip, say it is running.
+  function typed(skill: string, key: string): string {
+    const id = `${TYPED_SKILL}${skill}`;
+    const call: ToolCall = { id, name: "Skill", input: { skill }, result: null, children: [], answer: null };
+    calls.set(id, call);
+    forks.add(id);
+    items.push({ kind: "tool", key, call });
+    return id;
+  }
+
   /// Text in a user message that is not yours: a synthetic note from Claude
   /// Code, like an interrupt, or a skill's content. Yours is a prompt entry.
   function note(m: UserMessage, text: string, key: string) {
@@ -362,15 +396,19 @@ export function build(entries: ChatEntry[]): Built {
     const text = (field: string) => (typeof m[field] === "string" ? (m[field] as string) : "");
     switch (m.subtype) {
       // Subagents only: a background shell's output is a file in the sandbox,
-      // not a conversation, and an ambient task is housekeeping.
+      // not a conversation, and an ambient task is housekeeping. Except a
+      // forked skill, which is the whole of the work while it runs.
       case "task_started": {
-        if (m.task_type !== "local_agent" || m.skip_transcript || m.ambient) break;
+        if (m.task_type !== "local_agent") break;
+        const fork = forkedSkill(m);
+        if ((m.skip_transcript || m.ambient) && !fork) break;
         const id = text("task_id");
         const had = agents.get(id);
+        const callId = had?.callId ?? (text("tool_use_id") || (fork && typed(fork, key)) || null);
         agents.set(id, {
           id,
           // A resumed agent's messages stay under the call that first started it.
-          callId: had?.callId ?? (text("tool_use_id") || null),
+          callId,
           call: null,
           description: text("description") || had?.description || "Agent",
           type: text("subagent_type") || null,
@@ -398,6 +436,17 @@ export function build(entries: ChatEntry[]): Built {
         agent.status = status(m.status);
         agent.ended ??= at;
         if (m.usage) agent.usage = m.usage as Agent["usage"];
+        // The card of a skill you typed has no tool result to end it: this
+        // is the end of it.
+        const call = agent.callId && forks.has(agent.callId) ? calls.get(agent.callId) : undefined;
+        if (call && !call.result) {
+          call.result = {
+            text: "",
+            isError: agent.status !== "completed",
+            stopped: agent.status === "stopped",
+            images: [],
+          };
+        }
         break;
       }
       case "compact_boundary":

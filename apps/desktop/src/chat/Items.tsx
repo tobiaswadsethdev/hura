@@ -17,7 +17,7 @@ import type { ChatFile } from "../gen/ChatFile";
 import { Attach, Chosen, Close, Delivered, Read, Twisty, Working } from "../icons";
 import { Markdown } from "../Markdown";
 import { leadingCommand } from "./commands";
-import type { Item, ToolCall } from "./transcript";
+import { type Item, type ToolCall, type ToolResult, TYPED_SKILL } from "./transcript";
 
 /// Where the working copy is in the sandbox. Paths under it are shown relative
 /// to it, which is how the file tree and the git pane show them.
@@ -173,6 +173,39 @@ function said(call: ToolCall): Record<string, string> {
 /// its card. Unset where there is nowhere to open one.
 export const OpenAgent = createContext<((callId: string) => void) | null>(null);
 
+/// Whether a Skill call ran its skill as a subagent: one typed as a command,
+/// or one whose subagent's messages have started to arrive.
+function forkedCall(call: ToolCall): boolean {
+  return call.children.length > 0 || call.id.startsWith(TYPED_SKILL);
+}
+
+/// What a subagent did, inside the call that started it, and what it reported.
+function Subagent({
+  call,
+  result,
+  follow,
+}: {
+  call: ToolCall;
+  result: ToolResult | null;
+  follow: ((callId: string) => void) | null;
+}) {
+  return (
+    <>
+      {follow && (
+        <button className="chat-follow" onClick={() => follow(call.id)}>
+          Follow this agent beside the conversation
+        </button>
+      )}
+      {call.children.length > 0 && (
+        <div className="chat-nested">
+          <Items items={call.children} />
+        </div>
+      )}
+      {result?.text.trim() && (result.isError ? <Output text={result.text} error /> : <Markdown text={result.text} />)}
+    </>
+  );
+}
+
 function ToolBody({ call }: { call: ToolCall }) {
   const openAgent = useContext(OpenAgent);
   const { input } = call;
@@ -226,21 +259,13 @@ function ToolBody({ call }: { call: ToolCall }) {
       return <Markdown text={str(input.message)} />;
     case "Task":
     case "Agent":
-      return (
-        <>
-          {openAgent && (
-            <button className="chat-follow" onClick={() => openAgent(call.id)}>
-              Follow this agent beside the conversation
-            </button>
-          )}
-          {call.children.length > 0 && (
-            <div className="chat-nested">
-              <Items items={call.children} />
-            </div>
-          )}
-          {result && (result.isError ? <Output text={result.text} error /> : <Markdown text={result.text} />)}
-        </>
-      );
+      return <Subagent call={call} result={result} follow={openAgent} />;
+    // A forked skill runs as a subagent and is drawn as one. An inline skill
+    // has nothing inside it: its input and Claude Code's line about it, as
+    // any other call.
+    case "Skill":
+      if (forkedCall(call)) return <Subagent call={call} result={result} follow={openAgent} />;
+      break;
   }
   return (
     <>
@@ -274,6 +299,8 @@ function opensItself(call: ToolCall): boolean {
     case "Task":
     case "Agent":
       return call.result === null;
+    case "Skill":
+      return call.result === null && forkedCall(call);
   }
   return false;
 }

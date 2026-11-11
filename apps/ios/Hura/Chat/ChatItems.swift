@@ -365,8 +365,26 @@ struct AgentInfo: Identifiable, Equatable {
 
     var running: Bool { status == "running" }
 
+    /// What Claude Code names the parent of a typed skill's messages, before
+    /// the skill's name: they have no tool call to name.
+    static let typedSkill = "forked-command-"
+
+    /// The skill a task runs, when it is a forked one (`context: fork`), as
+    /// the desktop's `forkedSkill` reads it. Claude Code marks one
+    /// `skip_transcript` and `ambient`, as it does housekeeping, and names it
+    /// after the command; but it is the whole of the work while it runs.
+    static func forkedSkill(_ t: JSONValue) -> String? {
+        guard t["task_type"]?.string == "local_agent",
+              t["skip_transcript"]?.bool == true || t["ambient"]?.bool == true,
+              let description = t["description"]?.string, description.hasPrefix("/")
+        else { return nil }
+        let name = description.dropFirst().split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+        return name.isEmpty ? nil : name
+    }
+
     /// Subagents only: a background shell's output is a file in the sandbox,
-    /// not a conversation, and an ambient task is housekeeping. Oldest first.
+    /// not a conversation, and an ambient task is housekeeping, except a
+    /// forked skill. Oldest first.
     static func all(_ entries: [TranscriptEntry]) -> [AgentInfo] {
         var agents: [String: AgentInfo] = [:]
         var order: [String] = []
@@ -381,14 +399,15 @@ struct AgentInfo: Identifiable, Equatable {
             guard let t = e.task, let id = t["task_id"]?.string else { continue }
             switch t["subtype"]?.string {
             case "task_started":
-                guard t["task_type"]?.string == "local_agent", t["skip_transcript"]?.bool != true,
-                      t["ambient"]?.bool != true else { continue }
+                guard t["task_type"]?.string == "local_agent" else { continue }
+                let fork = forkedSkill(t)
+                if t["skip_transcript"]?.bool == true || t["ambient"]?.bool == true, fork == nil { continue }
                 let had = agents[id]
                 if had == nil { order.append(id) }
                 agents[id] = AgentInfo(
                     id: id,
                     // A resumed agent's messages stay under the call that first started it.
-                    call: had?.call ?? t["tool_use_id"]?.string,
+                    call: had?.call ?? t["tool_use_id"]?.string ?? fork.map { typedSkill + $0 },
                     description: t["description"]?.string ?? had?.description ?? "Agent",
                     type: t["subagent_type"]?.string,
                     background: t["is_backgrounded"]?.bool ?? false,
