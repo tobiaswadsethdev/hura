@@ -98,12 +98,19 @@ const TICKETS_KEYS = MAC
   ? { label: "⌘⇧T", aria: "Meta+Shift+T" }
   : { label: "Ctrl+Shift+T", aria: "Control+Shift+T" };
 
-function isTicketsKey(e: KeyboardEvent): boolean {
+/// Fold or unfold the dock -- files, git and the rest. B, as the editors'
+/// sidebar toggle is, and with Shift for the reason the tickets one has it:
+/// Ctrl+B is readline's back-a-character.
+const DOCK_KEYS = MAC
+  ? { label: "⌘⇧B", aria: "Meta+Shift+B" }
+  : { label: "Ctrl+Shift+B", aria: "Control+Shift+B" };
+
+function isShortcut(e: KeyboardEvent, key: string): boolean {
   return (
     e.shiftKey &&
     !e.altKey &&
     (MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
-    e.key.toLowerCase() === "t"
+    e.key.toLowerCase() === key
   );
 }
 
@@ -273,23 +280,29 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [screen]);
 
-  // The sidebar's shortcut. In the capture phase, so it is this window's
+  // The sidebars' shortcuts. In the capture phase, so it is this window's
   // before a focused terminal takes the key and sends it to the sandbox. Not
   // while a dialog is up: that is asking a question, and the window would
   // change under it.
   const dialogOpen = creatingProject || creatingIn !== null || confirmation !== null;
   const inboxOpen = prefs.inboxOpen;
+  const dockOpen = prefs.dockOpen;
   useEffect(() => {
     if (!server || dialogOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!isTicketsKey(e)) return;
+      const change = isShortcut(e, "t")
+        ? { inboxOpen: !inboxOpen }
+        : isShortcut(e, "b")
+          ? { dockOpen: !dockOpen }
+          : null;
+      if (!change) return;
       e.preventDefault();
       e.stopPropagation();
-      setPrefs({ inboxOpen: !inboxOpen });
+      setPrefs(change);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [server, dialogOpen, inboxOpen, setPrefs]);
+  }, [server, dialogOpen, inboxOpen, dockOpen, setPrefs]);
 
   // Keyed on the *names*, joined, rather than on the array: the list is a new
   // array every few seconds and re-subscribing to four sandboxes that often
@@ -1045,17 +1058,22 @@ export default function App() {
               {/* Between the editor and the dock, so a drag on it takes width
                   from the middle and gives it to the right -- which is why
                   this one `grows="left"`. */}
-              <Split
-                label="Dock width"
-                value={prefs.dockWidth}
-                min={LIMITS.dockWidth.min}
-                max={LIMITS.dockWidth.max}
-                reset={DEFAULTS.dockWidth}
-                grows="left"
-                onChange={(dockWidth) => setPrefs({ dockWidth })}
-              />
+              {dockOpen && (
+                <Split
+                  label="Dock width"
+                  value={prefs.dockWidth}
+                  min={LIMITS.dockWidth.min}
+                  max={LIMITS.dockWidth.max}
+                  reset={DEFAULTS.dockWidth}
+                  grows="left"
+                  onChange={(dockWidth) => setPrefs({ dockWidth })}
+                />
+              )}
               <Dock
                 width={prefs.dockWidth}
+                open={dockOpen}
+                keys={DOCK_KEYS}
+                onFold={() => setPrefs({ dockOpen: !dockOpen })}
                 server={server}
                 session={session}
                 usage={(selected ? polls[selected]?.usage : undefined) ?? null}
