@@ -139,7 +139,7 @@ per minute.
 → {
     "event_id": "h_4pgsopgu-42",
     "kind": "claude_permission",
-    "title": "fix-tests",
+    "title": "Fix the tests",
     "subtitle": "studio",
     "body": "Bash: npm test",
     "session": "fix-tests",
@@ -209,7 +209,7 @@ answers events with `device_unregistered`.
 ```json
 {
   "aps": {
-    "alert": {"title": "fix-tests", "subtitle": "studio", "body": "Bash: npm test"},
+    "alert": {"title": "Fix the tests", "subtitle": "studio", "body": "Bash: npm test"},
     "sound": "default",
     "category": "CLAUDE_PERMISSION",
     "thread-id": "h_…:fix-tests",

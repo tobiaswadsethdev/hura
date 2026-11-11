@@ -39,6 +39,9 @@ const EVERY: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seen {
     pub name: String,
+    /// What a person calls it, which is what a notification is titled with;
+    /// the name is for typing and for the phone to open it by.
+    pub title: Option<String>,
     /// The project it is filed under, which is what a notification is
     /// subtitled with: a person knows their projects, not their host names.
     pub project: Option<String>,
@@ -206,6 +209,7 @@ fn observe() -> Vec<Seen> {
             };
             Seen {
                 name: s.name.clone(),
+                title: s.title.clone(),
                 project: s.project.clone(),
                 record: s.state,
                 agent: report.as_ref().map(|r| r.state),
@@ -215,6 +219,15 @@ fn observe() -> Vec<Seen> {
             }
         })
         .collect()
+}
+
+/// What a session's notification is titled with: its title, or its name for
+/// one that has none, as the lists show it.
+fn title(seen: &[Seen], session: &str) -> String {
+    seen.iter()
+        .find(|s| s.name == session)
+        .and_then(|s| s.title.clone())
+        .unwrap_or_else(|| session.to_string())
 }
 
 /// What a session's notification is subtitled with: its project, or the
@@ -249,12 +262,13 @@ pub async fn run(server: Arc<Server>, pusher: Arc<Pusher>) {
             continue;
         };
         for said in watch.look(&seen) {
+            let title = title(&seen, &said.session);
             let subtitle = subtitle(&seen, &said.session, &host);
             pusher.enqueue(
                 Notification {
                     event_id: pusher.event_id(),
                     kind: said.kind.into(),
-                    title: said.session.clone(),
+                    title,
                     subtitle,
                     body: said.body,
                     session: Some(said.session),
@@ -273,6 +287,7 @@ mod tests {
     fn seen(name: &str, record: State, agent: Option<State>) -> Seen {
         Seen {
             name: name.into(),
+            title: None,
             project: None,
             record,
             agent,
@@ -375,6 +390,23 @@ mod tests {
             ..asking_for("a", "Bash", "toolu_1")
         }]);
         assert_eq!(said[0].body, "Bash: npm test");
+    }
+
+    #[test]
+    fn a_notification_is_titled_with_the_sessions_title_or_else_its_name() {
+        let seen = [
+            Seen {
+                title: Some("Fix the flaky login test".into()),
+                ..seen("fix-flaky-login-test", State::Running, None)
+            },
+            seen("b", State::Running, None),
+        ];
+        assert_eq!(
+            title(&seen, "fix-flaky-login-test"),
+            "Fix the flaky login test"
+        );
+        assert_eq!(title(&seen, "b"), "b");
+        assert_eq!(title(&seen, "gone"), "gone");
     }
 
     #[test]
