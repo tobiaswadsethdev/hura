@@ -245,7 +245,7 @@ struct PullRow: View {
                 Text(pullName(pull)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 if pull.draft { Text("draft").font(.caption2).foregroundStyle(.secondary) }
                 if pull.conflicts { Image(glyph: .warning).font(.caption2).foregroundStyle(.orange) }
-                checks
+                ChecksMark(checks: pull.checks)
                 Spacer()
                 if let session {
                     Label(session, glyph: .branch).font(.caption2).foregroundStyle(.green).lineLimit(1)
@@ -262,22 +262,28 @@ struct PullRow: View {
         }
     }
 
-    @ViewBuilder
-    private var checks: some View {
-        switch pull.checks {
-        case "passing": Image(glyph: .passing).font(.caption2).foregroundStyle(.green)
-        case "failing": Image(glyph: .failing).font(.caption2).foregroundStyle(.red)
-        case "pending": Image(glyph: .pending).font(.caption2).foregroundStyle(.yellow)
+}
+
+/// A pull request's checks as one mark, as the desktop's `ChecksMark`; none
+/// where the forge didn't say.
+struct ChecksMark: View {
+    let checks: String?
+
+    var body: some View {
+        switch checks {
+        case "passing": Image(glyph: .passing).font(.caption2).foregroundStyle(.green).accessibilityLabel("Checks passed")
+        case "failing": Image(glyph: .failing).font(.caption2).foregroundStyle(.red).accessibilityLabel("Checks failed")
+        case "pending": Image(glyph: .pending).font(.caption2).foregroundStyle(.yellow).accessibilityLabel("Checks running")
         default: EmptyView()
         }
     }
+}
 
-    private func reviewWord(_ r: String) -> String {
-        switch r {
-        case "approved": "approved"
-        case "changes-requested": "changes requested"
-        default: "review pending"
-        }
+func reviewWord(_ r: String) -> String {
+    switch r {
+    case "approved": "approved"
+    case "changes-requested": "changes requested"
+    default: "review pending"
     }
 }
 

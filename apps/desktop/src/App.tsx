@@ -39,7 +39,7 @@ import {
   Account,
   Working,
 } from "./icons";
-import { InboxBar, pullProjects, pullSession, samePull } from "./Inbox";
+import { InboxBar, pullProjects, pullSession, samePull, sessionPull } from "./Inbox";
 import { IntegrationsScreen } from "./Integrations";
 import { ServersScreen } from "./Connect";
 import type { ConfiguredTracker } from "./gen/ConfiguredTracker";
@@ -935,6 +935,8 @@ export default function App() {
                 failure={session.state === "failed" ? session.failure : null}
                 listed={!!shells[session.name] && (session.interface !== "chat" || !!chats[session.name])}
                 usage={polls[session.name]?.usage ?? null}
+                pull={sessionPull(session, inbox?.pulls ?? [])}
+                onPull={showPull}
                 onActivate={(key) => setActive((a) => ({ ...a, [session.name]: key }))}
                 onReorder={(moved, onto) =>
                   setOrder((all) => ({

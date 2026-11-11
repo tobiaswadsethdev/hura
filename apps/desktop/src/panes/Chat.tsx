@@ -38,6 +38,8 @@ import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/file
 import { Items, OpenAgent, Unpin } from "../chat/Items";
 import { arrived, build, group } from "../chat/transcript";
 import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
+import { PullBar } from "../chat/PullBar";
+import type { PullRequest as Pull } from "../gen/PullRequest";
 import { ContextRing } from "../chat/Usage";
 
 /// The reply being written, from the stream events: the main thread's
@@ -645,12 +647,17 @@ export function ChatPane({
   name,
   conv,
   usage,
+  pull,
+  onPull,
 }: {
   server: string;
   name: string;
   conv: string;
   /// The session's, from its poll: what the account's limits are.
   usage: Usage | null;
+  /// The open pull request the worktree is on, if the inbox knows it.
+  pull: Pull | null;
+  onPull: (pull: Pull) => void;
 }) {
   const key = keyFor(server, name, "chat", conv);
   const [view, dispatch] = useReducer(reduce, key, restore);
@@ -857,6 +864,7 @@ export function ChatPane({
               </div>
             </div>
             <AgentsBar agents={agents} open={following} onOpen={setFollowing} />
+            <PullBar pull={pull} onOpen={onPull} />
             {(view.down || view.error || refused) && (
               <p className="error chat-banner">{view.down ?? refused ?? view.error}</p>
             )}

@@ -89,6 +89,7 @@ enum Glyph: String, CaseIterable {
 
     // Tickets and pull requests
     case tracker = "tag"
+    case pullRequest = "git-pull-request"
     case comment = "message-square"
     /// Somebody else had the last word.
     case commentNew = "message-square-dot"

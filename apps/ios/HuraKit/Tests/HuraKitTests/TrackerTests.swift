@@ -28,6 +28,25 @@ struct TrackerCoreTests {
         #expect(bareRepo("https://org@dev.azure.com/org/p/_git/r") == "dev.azure.com/org/p/_git/r")
     }
 
+    @Test func findsTheSessionsPullRequest() throws {
+        func pull(_ id: String, branch: String) throws -> PullRequestSummary {
+            try JSONDecoder().decode(PullRequestSummary.self, from: Data("""
+            {"tracker":"gh","kind":"git-hub","id":"\(id)","key":"#\(id)","title":"t","url":"u","repo":"tobias/hura",
+             "repo_url":"https://github.com/tobias/hura","relation":"created","review_requested":false,"author":"me",
+             "branch":"\(branch)","base":"main","draft":false,"fork":false,"conflicts":false}
+            """.utf8))
+        }
+        let pulls = [try pull("1", branch: "fix"), try pull("2", branch: "other")]
+        var s = Session(name: "s", state: "ready", workBranch: "fix", repo: "git@github.com:Tobias/Hura.git")
+        #expect(sessionPull(s, in: pulls)?.id == "1")
+        // Started from one wins over the branch.
+        s.pull = PullOrigin(tracker: "gh", kind: "git-hub", id: "2", key: "#2", url: "u", repo: "tobias/hura")
+        #expect(sessionPull(s, in: pulls)?.id == "2")
+        // The same branch in another repository is someone else's.
+        let elsewhere = Session(name: "e", state: "ready", workBranch: "fix", repo: "https://github.com/other/hura")
+        #expect(sessionPull(elsewhere, in: pulls) == nil)
+    }
+
     @Test func sendsAnEditableAsHuraCoreReadsIt() throws {
         let v = try TrackerCore.json(FieldChange(id: "assignee", edit: .user(UserChoice(accountID: "a1", name: "Ann"), assignable: true)))
         #expect(v["edit"]?["kind"]?.string == "user")
