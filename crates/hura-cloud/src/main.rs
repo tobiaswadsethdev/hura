@@ -48,6 +48,7 @@ async fn run() -> Result<(), String> {
         Err(e) => eprintln!("setup: could not tell whether anything needs it: {e:?}"),
     }
     tokio::spawn(hura_cloud::watch::run(state.clone()));
+    tokio::spawn(hura_cloud::jira_filters::run(state.clone()));
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
         .map_err(|e| format!("could not listen on {}: {e}", config.listen))?;

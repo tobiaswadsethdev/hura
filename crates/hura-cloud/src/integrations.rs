@@ -130,7 +130,7 @@ pub async fn page(State(state): State<Shared>, Query(q): Query<Token>) -> Result
         None => format!(
             "<ol>
                <li>At <a href=\"https://developer.atlassian.com/console/myapps/\">developer.atlassian.com/console/myapps</a>, <b>Create → OAuth 2.0 integration</b>.</li>
-               <li><b>Permissions</b>: add <b>Jira API</b> with <code>read:jira-work</code>, <code>write:jira-work</code> and <code>read:jira-user</code>.</li>
+               <li><b>Permissions</b>: add <b>Jira API</b> with <code>read:jira-work</code>, <code>write:jira-work</code>, <code>read:jira-user</code> and <code>manage:jira-webhook</code>. The last lets hura put a webhook on each site, sent to <code>{url}/v1/webhooks/jira</code>, so a change is told at once.</li>
                <li><b>Authorization</b>: OAuth 2.0 (3LO), callback URL <code>{url}/v1/oauth/jira/callback</code>.</li>
                <li><b>Settings</b>: copy the client ID and secret here.</li>
              </ol>

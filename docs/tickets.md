@@ -352,6 +352,24 @@ webhooks. The tracker's row on the settings screen says what was found
 an account you are only a member of, which is read every minute or so as
 before.
 
+**So is a Jira site connected through Atlassian.** As it is connected, hura
+cloud registers a webhook on the site with that connection's token, for every
+issue and comment event. Atlassian allows an app five per person and site, and
+a little JQL with no `currentUser()` and no saved filters, so it asks for
+everything and the service sorts it: a delivery makes the account due when its
+issue is assigned to you or reported by you (or was assigned to you until
+then), or was in the last read of the tracker, a filter's included. Any
+other issue on a tracker with filters is asked about a few seconds later,
+when Jira's search has caught up: every such issue of the tracker's in one
+search, `issuekey in (…) AND ((filter) OR (filter) …)` with each filter's
+`ORDER BY` left off, and the account is due if any filter holds one. A filter
+Jira refuses is left out of that and the rest asked again. Jira stops
+sending a webhook thirty days after it was made or renewed, so it is renewed
+every day, and made again if it is gone; removing the tracker removes it. A
+Jira tracker with a pasted API token cannot have one and is read every minute
+or so, and so is one connected before hura asked for `manage:jira-webhook`,
+whose row says to connect it again.
+
 **The desktop** is told over a connection it keeps open to the service while
 its window is, as an OS notification, and reads the sidebar again. It is
 **notify when my tickets or pull requests change** on the settings screen.

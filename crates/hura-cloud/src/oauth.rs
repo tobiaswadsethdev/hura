@@ -40,7 +40,8 @@ const JIRA_TOKEN: &str = "https://auth.atlassian.com/oauth/token";
 /// No `read:me`: who the token belongs to is never kept, so the service holds
 /// no Atlassian personal data (and Atlassian's personal data reporting does
 /// not apply). Jira's own `/myself` answers it for each read, in memory.
-const JIRA_SCOPES: &str = "read:jira-work write:jira-work read:jira-user offline_access";
+const JIRA_SCOPES: &str =
+    "read:jira-work write:jira-work read:jira-user manage:jira-webhook offline_access";
 /// How long before it runs out an access token is renewed.
 const EARLY: i64 = 5 * 60;
 
@@ -503,6 +504,7 @@ async fn apply_jira(
     // changes at each use: the sites share it as a grant, renewed together.
     let grant = token::mint("")?;
     let mut tx = state.db.begin().await?;
+    let mut names = Vec::new();
     for (cloud_id, url) in &sites {
         let url = url.as_str();
         let existing: Option<(String, Jsonb<Source>)> = sqlx::query_as(
@@ -551,8 +553,16 @@ async fn apply_jira(
             "grant": grant,
         });
         keep(state, &mut tx, account, &source, &tokens, connection).await?;
+        names.push(source.name);
     }
     tx.commit().await?;
+    // A webhook on each site, to read it the moment something of yours
+    // changes. Its row says what happened; the connection stands either way.
+    for name in names {
+        if let Err(e) = crate::jira_hooks::sync(state, account, &name).await {
+            eprintln!("connect {name}: jira webhook: {e:?}");
+        }
+    }
     Ok(done(state, return_to, "Jira", Ok(())))
 }
 

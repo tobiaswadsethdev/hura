@@ -87,6 +87,9 @@ async fn watch(state: &Shared, account: Uuid) -> Result<()> {
     if let Err(e) = crate::fizzy_hooks::refresh_due(state, account).await {
         eprintln!("watch {account}: fizzy webhooks: {e:?}");
     }
+    if let Err(e) = crate::jira_hooks::refresh_due(state, account).await {
+        eprintln!("watch {account}: jira webhooks: {e:?}");
+    }
     let trackers = crate::trackers::stored(state, account).await?;
     let answered = !trackers.is_empty();
     let inbox = if trackers.is_empty() {

@@ -124,6 +124,12 @@ fn filter_key(tracker: &str, filter: &str) -> String {
 }
 
 impl Seen {
+    /// Whether a ticket was in the last read of its tracker: for hura cloud,
+    /// whether a webhook's delivery about it is about something of yours.
+    pub fn has_ticket(&self, tracker: &str, id: &str) -> bool {
+        self.tickets.contains_key(&ticket_key(tracker, id))
+    }
+
     /// What this becomes once a read is taken into account.
     ///
     /// A tracker that was read is replaced wholesale, so what left it is
