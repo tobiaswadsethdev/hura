@@ -85,10 +85,3 @@ export type PartialMessage = {
   event: StreamEvent;
   parent_tool_use_id: string | null;
 };
-
-export type ToolProgress = {
-  type: "tool_progress";
-  tool_use_id: string;
-  tool_name: string;
-  elapsed_time_seconds: number;
-};

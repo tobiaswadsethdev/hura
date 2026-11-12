@@ -20,6 +20,7 @@ import type { ChatFile } from "../gen/ChatFile";
 import { Attach, Chosen, Close, Delivered, Read, Twisty, Working } from "../icons";
 import { Markdown } from "../Markdown";
 import { leadingCommand } from "./commands";
+import { since, Ticking, useNow } from "./elapsed";
 import { type Item, type Located, type ToolCall, type ToolResult, TYPED_SKILL } from "./transcript";
 
 /// Where the working copy is in the sandbox. Paths under it are shown relative
@@ -308,7 +309,7 @@ function opensItself(call: ToolCall): boolean {
   return false;
 }
 
-export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolCall; progress?: number }) {
+export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
   const [open, setOpen] = useState<boolean | null>(null);
   const shown = open ?? opensItself(call);
   const { verb, subject } = describe(call.name, call.input);
@@ -322,6 +323,8 @@ export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolC
           : call.result.isError
             ? "failed"
             : "done";
+  const ticking = useContext(Ticking) && state === "running";
+  const now = useNow(ticking);
   return (
     <div className={`chat-tool ${state}`}>
       <button className="chat-tool-head" aria-expanded={shown} onClick={() => setOpen(!shown)}>
@@ -338,7 +341,8 @@ export const ToolCard = memo(function ToolCard({ call, progress }: { call: ToolC
         <span className="mark" aria-label={state}>
           {state === "running" && (
             <>
-              {progress !== undefined && progress >= 5 && <span className="elapsed">{Math.round(progress)}s</span>}
+              {/* Not for the moment most calls take, when it would only flicker. */}
+              {ticking && now - call.at >= 5000 && <span className="elapsed">{since(now - call.at)}</span>}
               <Working />
             </>
           )}
@@ -473,13 +477,7 @@ export function summarize(items: Item[]): string {
 /// A turn's steps, as one row. Open while the turn runs, so the work can be
 /// watched, and shut when it ends, leaving the answer under it; either way
 /// until it is clicked, after which it stays as it was put.
-const StepsCard = memo(function StepsCard({
-  item,
-  progress,
-}: {
-  item: Extract<Item, { kind: "steps" }>;
-  progress?: Map<string, number>;
-}) {
+const StepsCard = memo(function StepsCard({ item }: { item: Extract<Item, { kind: "steps" }> }) {
   const [open, setOpen] = useState<boolean | null>(null);
   const found = useContext(Found);
   // Opened for the row a search led to, each time it leads there.
@@ -503,7 +501,7 @@ const StepsCard = memo(function StepsCard({
       </button>
       <Fold open={shown}>
         <div className="chat-steps-body">
-          <Items items={item.items} progress={progress} />
+          <Items items={item.items} />
         </div>
       </Fold>
     </div>
@@ -732,15 +730,7 @@ function Receipt({ at, read, receipts }: { at: number; read: number | null; rece
   );
 }
 
-export const ItemView = memo(function ItemView({
-  item,
-  progress,
-  receipts = "off",
-}: {
-  item: Item;
-  progress?: Map<string, number>;
-  receipts?: Receipts;
-}) {
+export const ItemView = memo(function ItemView({ item, receipts = "off" }: { item: Item; receipts?: Receipts }) {
   switch (item.kind) {
     case "prompt":
       return (
@@ -757,7 +747,7 @@ export const ItemView = memo(function ItemView({
     case "thinking":
       return <Thinking text={item.text} />;
     case "tool":
-      return <ToolCard call={item.call} progress={progress?.get(item.call.id)} />;
+      return <ToolCard call={item.call} />;
     case "shell":
       return <ShellCard item={item} />;
     case "note":
@@ -771,35 +761,17 @@ export const ItemView = memo(function ItemView({
     case "divider":
       return <p className="chat-divider">{item.text}</p>;
     case "steps":
-      return <StepsCard item={item} progress={progress} />;
+      return <StepsCard item={item} />;
   }
-}, (a, b) =>
-  a.item === b.item &&
-  a.receipts === b.receipts &&
-  // A tick of a call's time is new progress for every row, and only one still
-  // running has a clock to show it on.
-  (a.progress === b.progress || !running(a.item)));
+});
 
-function running(item: Item): boolean {
-  if (item.kind === "tool") return item.call.result === null;
-  return item.kind === "steps" && item.items.some(running);
-}
-
-export function Items({
-  items,
-  progress,
-  receipts,
-}: {
-  items: Item[];
-  progress?: Map<string, number>;
-  receipts?: Receipts;
-}) {
+export function Items({ items, receipts }: { items: Item[]; receipts?: Receipts }) {
   const found = useContext(Found);
   return (
     <>
       {items.map((item) => {
         const view = (
-          <ItemView key={item.key} item={item} progress={progress} receipts={item.kind === "prompt" ? receipts : undefined} />
+          <ItemView key={item.key} item={item} receipts={item.kind === "prompt" ? receipts : undefined} />
         );
         return found?.key === item.key ? (
           <FoundRow key={item.key} nonce={found.nonce}>

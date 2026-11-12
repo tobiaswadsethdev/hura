@@ -35,6 +35,9 @@ export type ToolCall = {
   id: string;
   name: string;
   input: Record<string, unknown>;
+  /// When Claude made the call, which is when it started: epoch milliseconds
+  /// from the sandbox's clock.
+  at: number;
   /// `null` while it is running.
   result: ToolResult | null;
   /// What a subagent did inside this call, when the call started one.
@@ -310,6 +313,7 @@ export function build(entries: ChatEntry[]): Built {
               id: block.id,
               name: block.name,
               input: block.input ?? {},
+              at,
               result: null,
               children: [],
               answer: null,
@@ -374,9 +378,9 @@ export function build(entries: ChatEntry[]): Built {
   /// instead, so that is this card's id, and they fold into it as an agent's
   /// fold into its call. Claude Code holds them back until the skill is done;
   /// until then the card, and the agent's chip, say it is running.
-  function typed(skill: string, key: string): string {
+  function typed(skill: string, key: string, at: number): string {
     const id = `${TYPED_SKILL}${skill}`;
-    const call: ToolCall = { id, name: "Skill", input: { skill }, result: null, children: [], answer: null };
+    const call: ToolCall = { id, name: "Skill", input: { skill }, at, result: null, children: [], answer: null };
     calls.set(id, call);
     forks.add(id);
     items.push({ kind: "tool", key, call });
@@ -404,7 +408,7 @@ export function build(entries: ChatEntry[]): Built {
         if ((m.skip_transcript || m.ambient) && !fork) break;
         const id = text("task_id");
         const had = agents.get(id);
-        const callId = had?.callId ?? (text("tool_use_id") || (fork && typed(fork, key)) || null);
+        const callId = had?.callId ?? (text("tool_use_id") || (fork && typed(fork, key, at)) || null);
         agents.set(id, {
           id,
           // A resumed agent's messages stay under the call that first started it.
@@ -477,6 +481,33 @@ export function build(entries: ChatEntry[]): Built {
         break;
     }
   }
+}
+
+/// When the turn in progress started: the first thing after the last turn
+/// ended that is part of a turn, which is your message going in, or the main
+/// thread's first message when nothing of yours started it. Not a `!` command
+/// run between turns, and not a background agent's work, which goes on after
+/// the turn that started it has ended. `null` when nothing has: a turn whose
+/// entries have not arrived yet.
+///
+/// Only the conversation's state says whether a turn is in progress; this
+/// says since when, should it be.
+export function turnStart(entries: ChatEntry[]): number | null {
+  let start: number | null = null;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const ev = entries[i].ev;
+    if (ev.kind === "sdk" && (ev.msg as SdkMessage).type === "result") break;
+    // The host's own failure ends the conversation, and the turn with it.
+    if (ev.kind === "error") break;
+    if (ev.kind === "prompt" || ev.kind === "read" || (ev.kind === "sdk" && mainThread(ev.msg as SdkMessage))) {
+      start = entries[i].at;
+    }
+  }
+  return start;
+}
+
+function mainThread(m: SdkMessage): boolean {
+  return (m.type === "assistant" || m.type === "user") && (m as AssistantMessage | UserMessage).parent_tool_use_id === null;
 }
 
 /// How many content blocks of one assistant message have arrived whole, so the
