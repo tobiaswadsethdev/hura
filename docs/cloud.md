@@ -119,10 +119,11 @@ renews them before they run out.
 | `GET /v1/oauth/{github,jira}/callback` | where the providers send the browser back |
 | `POST /v1/webhooks/github` | the GitHub App's webhook: signed with its secret, and every account whose GitHub login is in a delivery is read at the watcher's next pass |
 | `POST /v1/webhooks/fizzy/{id}` | a webhook the service put on a Fizzy board with the tracker's own token (see [tickets.md](tickets.md#notifications)): `X-Webhook-Signature` is checked against that webhook's own secret, kept encrypted with the account's key, and its account is read at the watcher's next pass |
+| `POST /v1/webhooks/jira` | the webhook the service put on each connected Jira site (see [tickets.md](tickets.md#notifications)): the bearer token is a JWT signed with the Jira OAuth app's secret, and an account named by `matchedWebhookIds` is read at the watcher's next pass when the issue is assigned to or reported by whoever connected, or was in its last read. Any other issue, on a tracker with filters, is queued and asked of Jira a few seconds later, a tracker's together in one search; a match makes the account due. Each pass logs a `jira filters:` line with what it asked and how long it took, and a site that says to slow down is logged as such |
 
 A connected tracker's list entry carries `connected`, who it is connected as;
-its token cannot be set by hand. A Fizzy tracker's carries `webhooks`, what the last look at its
-boards found, in words.
+its token cannot be set by hand. A Fizzy tracker's, or a connected Jira tracker's, carries `webhooks`:
+what the last look at its boards or its site found, in words.
 
 **Nothing is saved before it is confirmed.** Back from the provider, the
 browser is shown a page naming the hura account the connection would join,

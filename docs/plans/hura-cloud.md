@@ -193,8 +193,13 @@ deleted.
     manifest flow; Jira through Atlassian's OAuth 2.0 (3LO), set up from the
     same page; tokens renewed before they run out; connect buttons in both
     apps; GitHub's webhooks making the people in a delivery due at once.
-  - [ ] Jira's webhooks: they cannot say `currentUser()` or a saved filter,
-    and expire every thirty days, so Jira is read on the timer for now.
+  - [x] Jira's webhooks: one per connected site, with an empty filter since
+    they cannot say `currentUser()` or a saved filter, matched to the account
+    on the service by the webhook IDs in a delivery and to what is yours by
+    assignee, reporter or the last read, and for any other issue by asking
+    Jira whether a filter holds it (a tracker's queue in one search every few
+    seconds); renewed daily, as they expire every thirty days. A pasted API
+    token is still read on the timer.
   - [x] "Seen" shared between devices: kept per account, set by whichever
     device last looked at its inbox, and the other phones woken by a
     background push (`inbox_seen`) to clear their badge and notifications.

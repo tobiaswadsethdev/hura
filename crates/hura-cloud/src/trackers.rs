@@ -170,9 +170,13 @@ pub async fn forget(
     signed: Signed,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<Configured>>> {
-    // Off its boards first, while its token is still here to do it with.
+    // Off its boards or its site first, while its token is still here to do
+    // it with.
     if let Err(e) = crate::fizzy_hooks::remove(&state, signed.account, &name).await {
         eprintln!("forget {name}: fizzy webhooks: {e:?}");
+    }
+    if let Err(e) = crate::jira_hooks::remove(&state, signed.account, &name).await {
+        eprintln!("forget {name}: jira webhook: {e:?}");
     }
     let gone = sqlx::query("delete from trackers where account_id = $1 and name = $2")
         .bind(signed.account)

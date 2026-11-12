@@ -1711,3 +1711,248 @@ async fn a_signed_fizzy_delivery_makes_its_webhooks_account_due() {
         .unwrap();
     assert_eq!(left, 0);
 }
+
+#[tokio::test]
+async fn a_connected_jira_site_gets_a_webhook_and_its_deliveries_make_yours_due() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("a@example.com", "iPhone").await;
+    let at = token(&me, "access_token");
+    let account: uuid::Uuid = me["account"].as_str().unwrap().parse().unwrap();
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/setup/jira?token=setup-token")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(Body::from(
+            "client_id=jira-client&client_secret=jira-secret",
+        ))
+        .unwrap();
+    t.app.clone().oneshot(request).await.unwrap();
+
+    let web = &t.state.web;
+    let api = "https://api.atlassian.com/ex/jira/cloud-1/rest/api/3";
+    web.on(
+        "POST https://auth.atlassian.com/oauth/token",
+        200,
+        r#"{"access_token":"jira-access","refresh_token":"jira-refresh-1","expires_in":3600}"#,
+    );
+    web.on(
+        "GET https://api.atlassian.com/oauth/token/accessible-resources",
+        200,
+        r#"[{"id":"cloud-1","url":"https://acme.atlassian.net","name":"acme"}]"#,
+    );
+    web.on(&format!("GET {api}/myself"), 200, r#"{"accountId":"me-1"}"#);
+    // A leftover of ours from before, and somebody else's app's address.
+    web.on(
+        &format!("GET {api}/webhook"),
+        200,
+        r#"{"isLast":true,"values":[{"id":7,"url":"https://cloud.example/v1/webhooks/jira"},{"id":8,"url":"https://other.example/hook"}]}"#,
+    );
+    // The next look's.
+    web.on(
+        &format!("GET {api}/webhook"),
+        200,
+        r#"{"isLast":true,"values":[{"id":1000,"url":"https://cloud.example/v1/webhooks/jira"}]}"#,
+    );
+    web.on(
+        &format!("POST {api}/webhook"),
+        200,
+        r#"{"webhookRegistrationResult":[{"createdWebhookId":1000}]}"#,
+    );
+    web.on(&format!("DELETE {api}/webhook"), 202, "");
+
+    let state = t.connect(at, "jira").await;
+    t.finish(
+        &format!("/v1/oauth/jira/callback?code=c&state={state}"),
+        false,
+    )
+    .await;
+    let made = web.sent(&format!("POST {api}/webhook"));
+    assert_eq!(made.len(), 1);
+    let made: Value = serde_json::from_str(made[0].as_deref().unwrap()).unwrap();
+    assert_eq!(made["url"], "https://cloud.example/v1/webhooks/jira");
+    assert_eq!(
+        made["webhooks"][0]["jqlFilter"], "",
+        "every issue: matched here"
+    );
+    let removed = web.sent(&format!("DELETE {api}/webhook"));
+    assert_eq!(
+        removed,
+        vec![Some(r#"{"webhookIds":[7]}"#.to_string())],
+        "the leftover, not the other app's"
+    );
+    let (_, list) = t.call(Method::GET, "/v1/trackers", Some(at), None).await;
+    assert_eq!(
+        list[0]["webhooks"],
+        "a webhook tells hura of changes at once"
+    );
+
+    // Looked at again: still there, so renewed rather than made again.
+    web.on(
+        &format!("PUT {api}/webhook/refresh"),
+        200,
+        r#"{"expirationDate":1900000000000}"#,
+    );
+    crate::jira_hooks::sync(&t.state, account, "jira")
+        .await
+        .unwrap();
+    assert_eq!(web.sent(&format!("POST {api}/webhook")).len(), 1);
+    assert_eq!(
+        web.sent(&format!("PUT {api}/webhook/refresh")),
+        vec![Some(r#"{"webhookIds":[1000]}"#.to_string())]
+    );
+
+    sqlx::query(
+        "insert into watches (account_id, next_read_at) values ($1, now() + interval '1 hour')
+         on conflict (account_id) do update set next_read_at = now() + interval '1 hour'",
+    )
+    .bind(account)
+    .execute(&t.state.db)
+    .await
+    .unwrap();
+    let due = || async {
+        sqlx::query_scalar::<_, bool>(
+            "select next_read_at <= now() from watches where account_id = $1",
+        )
+        .bind(account)
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap()
+    };
+    let jwt = |secret: &[u8]| {
+        use base64::Engine as _;
+        let b64 = |s: String| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s);
+        let signed = format!(
+            "{}.{}",
+            b64(json!({ "alg": "HS256", "typ": "JWT" }).to_string()),
+            b64(json!({ "iss": "atlassian" }).to_string())
+        );
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret);
+        let tag = ring::hmac::sign(&key, signed.as_bytes());
+        format!(
+            "{signed}.{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(tag.as_ref())
+        )
+    };
+    let deliver = |token: String, body: Value| {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/v1/webhooks/jira")
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let send = |r| t.app.clone().oneshot(r);
+    let somebody_elses = json!({ "webhookEvent": "jira:issue_updated", "matchedWebhookIds": [1000],
+        "issue": { "key": "ACME-2", "fields": { "assignee": { "accountId": "you-2" } } } });
+    let mine = json!({ "webhookEvent": "jira:issue_updated", "matchedWebhookIds": [1000],
+        "issue": { "key": "ACME-1", "fields": { "assignee": { "accountId": "me-1" } } } });
+
+    assert_eq!(
+        send(deliver(jwt(b"wrong"), mine.clone()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        send(deliver(jwt(b"jira-secret"), somebody_elses))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert!(
+        !due().await,
+        "an issue that is not yours waits for the timer"
+    );
+    assert_eq!(
+        send(deliver(jwt(b"jira-secret"), mine))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert!(due().await, "read at the watcher's next pass");
+
+    // Somebody else's issue, in a filter of the tracker's: queued, then asked
+    // of Jira with every filter at once, and due when one holds it.
+    let filters = json!({ "source": { "kind": "jira", "name": "jira", "site": "https://acme.atlassian.net",
+        "jql_filters": [{ "name": "ready", "jql": "status = Ready ORDER BY rank" },
+                        { "name": "mine", "jql": "labels = team" }] } });
+    let (status, body) = t
+        .call(Method::PUT, "/v1/trackers/jira", Some(at), Some(filters))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let _stream = t.state.live.subscribe(account);
+    let put_off = || async {
+        sqlx::query(
+            "update watches set next_read_at = now() + interval '1 hour' where account_id = $1",
+        )
+        .bind(account)
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    };
+    let settle = || async {
+        sqlx::query("update jira_checks set queued_at = now() - interval '1 minute'")
+            .execute(&t.state.db)
+            .await
+            .unwrap();
+    };
+    put_off().await;
+    let in_a_filter = |key: &str| {
+        json!({ "webhookEvent": "jira:issue_updated", "matchedWebhookIds": [1000],
+        "issue": { "key": key, "fields": { "assignee": { "accountId": "you-2" } } } })
+    };
+    for key in ["ACME-3", "ACME-4", "ACME-3"] {
+        let r = send(deliver(jwt(b"jira-secret"), in_a_filter(key)))
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+    assert!(!due().await, "not before Jira is asked");
+    let search = format!("POST {api}/search/jql");
+    web.on(&search, 200, r#"{"issues":[]}"#);
+    web.on(&search, 200, r#"{"issues":[{"key":"ACME-4"}]}"#);
+    let pass = crate::jira_filters::tick(&t.state).await.unwrap();
+    assert_eq!(pass.issues, 0, "nothing has waited long enough");
+    settle().await;
+    let pass = crate::jira_filters::tick(&t.state).await.unwrap();
+    assert_eq!(
+        (pass.issues, pass.searches, pass.due),
+        (2, 1, 0),
+        "one search for both"
+    );
+    let asked: Value = serde_json::from_str(web.sent(&search)[0].as_deref().unwrap()).unwrap();
+    assert_eq!(
+        asked["jql"],
+        "issuekey in (ACME-3, ACME-4) AND ((status = Ready) OR (labels = team))"
+    );
+    assert!(!due().await, "in none of them");
+    send(deliver(jwt(b"jira-secret"), in_a_filter("ACME-4")))
+        .await
+        .unwrap();
+    settle().await;
+    let pass = crate::jira_filters::tick(&t.state).await.unwrap();
+    assert_eq!(pass.due, 1);
+    assert!(due().await, "a filter holds it");
+
+    // Gone with its tracker, off the site too.
+    let (status, _) = t
+        .call(Method::DELETE, "/v1/trackers/jira", Some(at), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        web.sent(&format!("DELETE {api}/webhook"))
+            .last()
+            .cloned()
+            .flatten(),
+        Some(r#"{"webhookIds":[1000]}"#.to_string())
+    );
+    let left: i64 = sqlx::query_scalar("select count(*) from jira_hooks")
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}
