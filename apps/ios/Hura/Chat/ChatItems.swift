@@ -116,6 +116,38 @@ enum ChatItem: Identifiable, Equatable {
         return out
     }
 
+    /// Where an entry is drawn: the row to mark, and the folded turn it is
+    /// in, which has to open for the row to be seen. As `locate` in the
+    /// desktop's `transcript.ts`: a row's id starts with its entry's seq, so
+    /// the entry a search found is the first row whose id does; one that
+    /// draws nothing here -- a subagent's message, an answer folded into its
+    /// call -- falls back to the last row before it.
+    struct Located: Equatable {
+        var id: String
+        var steps: String?
+    }
+
+    static func locate(_ items: [ChatItem], seq: UInt64) -> Located? {
+        func of(_ item: ChatItem) -> UInt64? { item.id.split(separator: ".").first.flatMap { UInt64($0) } }
+        var near: (at: UInt64, found: Located)?
+        func walk(_ list: [ChatItem], steps: String?) -> Located? {
+            for item in list {
+                switch item {
+                case let .steps(id, inner, _):
+                    if let found = walk(inner, steps: id) { return found }
+                case .day:
+                    continue
+                default:
+                    guard let at = of(item) else { continue }
+                    if at == seq { return Located(id: item.id, steps: steps) }
+                    if at < seq, at >= (near?.at ?? 0) { near = (at, Located(id: item.id, steps: steps)) }
+                }
+            }
+            return nil
+        }
+        return walk(items, steps: nil) ?? near?.found
+    }
+
     /// What a turn's steps came to, in a few words: "Read 3 files, ran 2
     /// commands". Kinds of work in the order they were first done.
     static func summary(_ items: [ChatItem]) -> String {

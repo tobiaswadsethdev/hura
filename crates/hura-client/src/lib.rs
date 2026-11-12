@@ -17,6 +17,7 @@
 //! tries to use it.
 
 pub mod cloud;
+pub mod history;
 mod http;
 mod pin;
 mod ws;

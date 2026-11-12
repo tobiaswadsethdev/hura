@@ -18,6 +18,20 @@ final class AppModel {
     /// Where to go next (a tapped notification, a worktree just made); the
     /// server list consumes it.
     var pendingRoute: [Route]?
+    /// A search result being opened: the worktree it is in takes it, once
+    /// `pendingRoute` has put it on screen.
+    var pendingJump: Jump?
+
+    struct Jump: Equatable {
+        var serverID: String
+        var session: String
+        var conv: String
+        var seq: UInt64
+        var nonce: Int
+    }
+
+    /// Where every server's conversations are kept, and searched.
+    let history: ChatHistory
 
     @ObservationIgnored private let store: ServerStore
     @ObservationIgnored private var active = false
@@ -37,14 +51,18 @@ final class AppModel {
         #endif
     }
 
-    init(store: ServerStore = KeychainServerStore(), push: PushManager = PushManager(relayURL: AppModel.relayURL)) {
+    init(store: ServerStore = KeychainServerStore(), push: PushManager = PushManager(relayURL: AppModel.relayURL),
+         history: ChatHistory = .shared) {
         self.store = store
         self.push = push
+        self.history = history
         do {
             servers = try store.loadAll().map { Server(record: $0) }
+            for s in servers { s.history = history }
         } catch {
             loadError = error.localizedDescription
         }
+        history.warm()
     }
 
     func server(_ id: String) -> Server? {
@@ -79,6 +97,7 @@ final class AppModel {
         }
         try store.save(record)
         let server = Server(record: record)
+        server.history = history
         servers.append(server)
         if active { server.resume() }
         return server

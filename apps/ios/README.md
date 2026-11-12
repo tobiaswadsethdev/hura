@@ -26,6 +26,15 @@ processes; and what it has spent. A port can be previewed: it is opened on
 the phone's own loopback, at the same number when that's free, tunnelled to
 the sandbox over the paired connection, and shown in Safari's in-app browser.
 
+The Search tab searches every conversation the phone has seen, including
+ended ones and deleted sessions: words in what was said, `file:` for the files
+a tool call touched and `tool:` for the tool, as on the desktop. A result opens
+its conversation at the message, or, when it exists nowhere else, what the
+phone kept of it. The copy is the phone's own (`ChatHistory` in HuraKit),
+kept in Application Support and out of backups, written as each entry arrives
+and caught up from the host when a turn ends, before a session is deleted and
+before a conversation is closed.
+
 The Inbox tab is what is yours on GitHub, Azure DevOps and Jira: tickets
 assigned to you or created by you, a section for each of a Jira tracker's JQL
 filters, and pull requests you opened or that wait on your review. The

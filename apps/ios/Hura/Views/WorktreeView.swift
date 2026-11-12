@@ -41,6 +41,8 @@ struct WorktreeView: View {
     @State private var showingDock = false
     @State private var confirmingDelete = false
     @State private var error: String?
+    /// A search result being opened in one of the conversations.
+    @State private var jump: (conv: String, to: ChatJump)?
 
     private var session: Session? { server.session(named: name) }
     /// The title it is shown by, or its name before the list has it.
@@ -122,6 +124,13 @@ struct WorktreeView: View {
         .task(id: tabs) {
             if tab == nil, let home { switchTo(home) }
         }
+        // A search result: its conversation in front, at the message.
+        .task(id: model.pendingJump) {
+            guard let j = model.pendingJump, j.serverID == server.id, j.session == name else { return }
+            model.pendingJump = nil
+            switchTo(.chat(j.conv))
+            jump = (j.conv, ChatJump(seq: j.seq, nonce: j.nonce))
+        }
         .task(id: hasWorkspace) {
             guard hasWorkspace else { return }
             while !Task.isCancelled {
@@ -156,9 +165,9 @@ struct WorktreeView: View {
         switch tab {
         case let .chat(conv):
             if let c = chats[conv] {
-                ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? ""), pull: pull) { [server, name] in
-                    try? await server.api.poll(name).usage
-                }
+                ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? ""), pull: pull,
+                         usage: { [server, name] in try? await server.api.poll(name).usage },
+                         jump: jump?.conv == conv ? jump?.to : nil, onJumped: { jump = nil })
                     .environment(\.readPicture) { [server, name] path in
                         try? await server.api.file(name, path: path).image
                     }
@@ -311,7 +320,7 @@ struct WorktreeView: View {
 
     private func chat(_ conv: String) -> Chat {
         if let c = chats[conv] { return c }
-        let c = Chat(record: server.record, session: name, conversation: conv)
+        let c = Chat(record: server.record, session: name, conversation: conv, history: server.history)
         chats[conv] = c
         return c
     }
@@ -386,7 +395,11 @@ struct WorktreeView: View {
             forget(t)
             switch t {
             case let .chat(conv):
+                // The host forgets its transcript, so what this phone has not
+                // kept of it is asked for first.
+                await server.catchUp(name, conversation: conv, waiting: true)
                 conversations = try await server.api.closeChat(name, conversation: conv).chats
+                server.history?.ended(ChatHistory.Conversation(serverID: server.id, session: name, conv: conv))
             case let .terminal(tmux?):
                 shells = try await server.api.killShell(name, tmux: tmux)
             case .terminal(nil):

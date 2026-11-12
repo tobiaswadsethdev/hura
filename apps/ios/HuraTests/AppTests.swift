@@ -330,3 +330,20 @@ struct MarkdownImageTests {
         #expect(ChatItem.summary(steps) == "Read 2 files")
     }
 }
+
+/// A search result is found where it is drawn: the row itself, the folded
+/// turn it is in, and the last row before an entry that draws nothing here.
+@Test func aSearchResultIsFoundWhereItIsDrawn() {
+    func tool(_ id: String) -> ChatItem {
+        .tool(id: id, call: ToolCall(id: id, name: "Read", input: .object([:]), inputTruncated: false, result: nil))
+    }
+    let prompt = Prompt(text: "go", pictures: [], files: [], sent: nil, read: nil)
+    let items = ChatItem.group([
+        .day(id: "1.0.day", date: .now), .prompt(id: "1.0", prompt: prompt), tool("2.0"), tool("3.1"),
+        .text(id: "4.0", text: "done", at: nil), .prompt(id: "9.0", prompt: prompt),
+    ], working: false)
+    #expect(ChatItem.locate(items, seq: 1) == ChatItem.Located(id: "1.0", steps: nil))
+    #expect(ChatItem.locate(items, seq: 3) == ChatItem.Located(id: "3.1", steps: "2.0.steps"))
+    #expect(ChatItem.locate(items, seq: 6) == ChatItem.Located(id: "4.0", steps: nil))
+    #expect(ChatItem.locate([], seq: 1) == nil)
+}

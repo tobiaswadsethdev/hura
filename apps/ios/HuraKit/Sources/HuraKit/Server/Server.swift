@@ -47,6 +47,11 @@ public final class Server: Identifiable {
 
     /// Ports in this server's sandboxes, forwarded to this phone.
     public let previews: PreviewHub
+    /// Where its conversations are kept, when they are: see `ChatHistory`.
+    /// A session's names are written there on each refresh, its
+    /// conversations caught up when a turn in it ends and before it is
+    /// deleted, since the sandbox is then the only place they are.
+    @ObservationIgnored public var history: ChatHistory?
     @ObservationIgnored fileprivate var client: ServerClient
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private let every: Duration
@@ -96,6 +101,9 @@ public final class Server: Identifiable {
             if let named = try? await named { projects = named }
             problem = nil
             state = .online
+            for s in listed {
+                history?.name(serverID: serverID, session: s.name, title: s.title, project: s.project)
+            }
             let live = listed.filter(\.isLive).map(\.name)
             let polled = await withTaskGroup(of: (String, AgentReport?).self) { group in
                 for name in live {
@@ -106,6 +114,14 @@ public final class Server: Identifiable {
                     if let report { out[name] = report }
                 }
                 return out
+            }
+            // A turn has ended in a chat session: what it said is kept, in
+            // case no screen had the conversation open. On a turn's end, not
+            // a timer, because asking execs into the sandbox, and one that
+            // has stopped would be started by being asked.
+            let chats = Set(listed.filter(\.isChat).map(\.name))
+            for (name, now) in polled where chats.contains(name) {
+                if reports[name]?.state == "running", now.state != "running" { catchUpLater(name) }
             }
             // A poll that could not tell keeps what was known.
             reports = Dictionary(uniqueKeysWithValues: live.compactMap { name in
@@ -167,11 +183,14 @@ public final class Server: Identifiable {
     /// Deletes a session in the background: it leaves the list now, and
     /// comes back with `deleteFailure` set if hurad couldn't delete it.
     public func destroy(_ name: String) {
+        let chat = session(named: name)?.isChat == true
         deleting.insert(name)
         reports[name] = nil
         Task {
             do {
+                if chat { await catchUp(name, waiting: true) }
                 listed = try await client.destroy(name)
+                history?.removed(serverID: serverID, session: name)
             } catch {
                 deleting.remove(name)
                 deleteFailure = "\(name) wasn't deleted: \(error.localizedDescription)"
@@ -182,6 +201,27 @@ public final class Server: Identifiable {
     /// Renames a session: its title, which nothing is keyed by.
     public func retitle(_ name: String, to title: String) async throws {
         listed = try await client.retitle(name, title: title)
+    }
+
+    /// Keeps what a chat session's hosts have that this phone has not: every
+    /// conversation, or one. In the background unless `waiting`.
+    public func catchUp(_ name: String, conversation: String? = nil, waiting: Bool = false) async {
+        guard let history else { return }
+        let client = self.client
+        let record = self.record
+        let work = Task { @MainActor in
+            let convs: [String]
+            if let conversation { convs = [conversation] } else {
+                guard let listed = try? await client.chats(name) else { return }
+                convs = listed.chats
+            }
+            await history.catchUp(record: record, session: name, conversations: convs)
+        }
+        if waiting { await work.value }
+    }
+
+    private func catchUpLater(_ name: String) {
+        Task { await catchUp(name) }
     }
 
     public func session(named name: String) -> Session? {

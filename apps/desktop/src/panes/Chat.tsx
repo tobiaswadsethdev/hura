@@ -15,6 +15,9 @@
 // what came after, rather than having the whole conversation replayed. A host
 // that answers with less than was remembered has started its transcript again,
 // and is asked for all of it.
+//
+// A search result opens a conversation at the message it found: the pane is
+// handed the entry, marks the row it is drawn in, and scrolls there.
 
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 
@@ -35,8 +38,8 @@ import { chat, close, nextChannelId, open } from "../stream";
 import { AskCard } from "../chat/Ask";
 import { matching, naming, offeredCommands, type Typed, typed } from "../chat/commands";
 import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/files";
-import { Items, OpenAgent, Unpin } from "../chat/Items";
-import { arrived, build, group, type Item, settle } from "../chat/transcript";
+import { Found, Items, OpenAgent, Unpin } from "../chat/Items";
+import { arrived, build, group, type Item, locate, settle } from "../chat/transcript";
 import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
 import { PullBar } from "../chat/PullBar";
 import type { PullRequest as Pull } from "../gen/PullRequest";
@@ -649,6 +652,8 @@ export function ChatPane({
   usage,
   pull,
   onPull,
+  jump = null,
+  onJumped,
 }: {
   server: string;
   name: string;
@@ -658,6 +663,11 @@ export function ChatPane({
   /// The open pull request the worktree is on, if the inbox knows it.
   pull: Pull | null;
   onPull: (pull: Pull) => void;
+  /// An entry a search found here, to open the conversation at. Taken, and
+  /// `onJumped` said, so that coming back to the worktree later does not
+  /// take the conversation there again.
+  jump?: { seq: number; nonce: number } | null;
+  onJumped?: () => void;
 }) {
   const key = keyFor(server, name, "chat", conv);
   const [view, dispatch] = useReducer(reduce, key, restore);
@@ -760,6 +770,16 @@ export function ChatPane({
   // The rows that have not changed kept as they were, so only the new ones draw.
   const settled = useRef<Item[]>([]);
   const items = useMemo(() => (settled.current = settle(settled.current, group(built, working))), [built, working]);
+  const [target, setTarget] = useState<{ seq: number; nonce: number } | null>(null);
+  useEffect(() => {
+    if (!jump) return;
+    setTarget(jump);
+    onJumped?.();
+  }, [jump, onJumped]);
+  const located = useMemo(() => {
+    const at = target && locate(items, target.seq);
+    return at && target ? { ...at, nonce: target.nonce } : null;
+  }, [items, target]);
   const [following, setFollowing] = useState<string | null>(null);
   const followed = agents.find((a) => a.id === following) ?? null;
   const openAgent = useMemo(
@@ -835,6 +855,7 @@ export function ChatPane({
                 pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
               }}
             >
+              <Found.Provider value={located}>
               <div className="chat-log" ref={log}>
                 {nothing &&
                   (view.notice ? (
@@ -864,6 +885,7 @@ export function ChatPane({
                     still doing, since Claude reads them when it is done. */}
                 <Items items={queued} receipts={receipts} />
               </div>
+              </Found.Provider>
             </div>
             <AgentsBar agents={agents} open={following} onOpen={setFollowing} />
             <PullBar pull={pull} onOpen={onPull} />

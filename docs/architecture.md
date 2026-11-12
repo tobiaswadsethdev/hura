@@ -98,6 +98,7 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `pane.rs` | the markup the text panes share, so styling stays in one place |
 | `attach.rs` | *(hurad)* raw mode, and handing this terminal to the agent |
 | `lib.rs` | *(hura-client)* the servers this machine is paired with, pairing with one, and one request against one. `pair` is shared: `hurad connect` and the desktop application's servers screen are both it |
+| `history.rs` | *(hura-client)* every conversation this machine has seen, kept on it as it passed to the window, and searched: what was said, the tools used and the files touched. A copy rather than an index on the server, so a removed session's conversations outlive its sandbox without `hurad` storing anything about it |
 | `cloud.rs` | *(hura-client)* this machine signed in to hura cloud: the session, the account's trackers and the requests read on them, and the stream of what changed |
 | `pin.rs` | *(hura-client)* judging a server by its certificate's fingerprint and nothing else |
 | `http.rs` | *(hura-client)* enough HTTP/1.1 to ask an `hurad` a question |
@@ -112,6 +113,7 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `charSize.ts` | *(desktop)* the font metrics WebKit gets wrong, and the probe that corrects them |
 | `panes/` | *(desktop)* the terminal, a conversation, a file in Monaco, and a file's diff with the review on it |
 | `chat/` | *(desktop)* a transcript folded into things to draw, tool calls as cards, and what the agent is waiting on you for |
+| `Search.tsx` | *(desktop)* searching the kept conversations, and reading one that exists nowhere else |
 | `hura-agent.mjs` | *(the image)* the process that runs the Agent SDK inside a chat session's sandbox: conversations, their transcripts, permission requests, and the status and usage files. `images/hura-base/` |
 
 ## Three rules worth knowing before you change anything

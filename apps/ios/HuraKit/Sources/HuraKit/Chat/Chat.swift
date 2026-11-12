@@ -381,7 +381,8 @@ public typealias TransportFactory = @MainActor (_ record: ServerRecord) -> WebSo
 /// One conversation in a hura chat session, live: its transcript, what is
 /// waiting on you, and the reply as it is written. One websocket, one chat
 /// channel on it; after a drop it opens again from the last entry it has, so
-/// nothing arrives twice and nothing is missed.
+/// nothing arrives twice and nothing is missed. Every entry that arrives is
+/// kept in `history` as well, when there is one: see `ChatHistory`.
 @MainActor
 @Observable
 public final class Chat {
@@ -444,14 +445,23 @@ public final class Chat {
     @ObservationIgnored private var socket: WebSocketTransport?
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var lastSeq: UInt64 = 0
+    /// What the channel open now asked from, which a replay ending before
+    /// says is a host whose transcript started again.
+    @ObservationIgnored private var since: UInt64 = 0
+    @ObservationIgnored private let history: ChatHistory?
     private static let channel = 1
 
     public init(record: ServerRecord, session: String, conversation: String = "agent",
-                transport: @escaping TransportFactory = Chat.network) {
+                transport: @escaping TransportFactory = Chat.network, history: ChatHistory? = nil) {
         self.record = record
         self.session = session
         self.conversation = conversation
         self.transport = transport
+        self.history = history
+    }
+
+    private var kept: ChatHistory.Conversation {
+        ChatHistory.Conversation(serverID: record.serverID, session: session, conv: conversation)
     }
 
     public static let network: TransportFactory = { record in
@@ -572,6 +582,7 @@ public final class Chat {
         let socket = transport(record)
         self.socket = socket
         if phase != .live { phase = .connecting }
+        since = lastSeq
         let open: [String: RequestJSON] = [
             "do": .string("open"), "id": .number(Self.channel),
             "channel": .object(["kind": .string("chat"), "session": .string(session),
@@ -616,9 +627,15 @@ public final class Chat {
     func apply(_ f: JSONValue) {
         switch f["t"]?.string {
         case "replay":
-            if case let .array(list)? = f["entries"] { list.forEach(append) }
+            if case let .array(list)? = f["entries"] {
+                history?.replay(kept, since: since, seq: f["seq"]?.uint ?? 0, entries: list)
+                list.forEach(append)
+            }
         case "entry":
-            if let e = f["entry"] { append(e) }
+            if let e = f["entry"] {
+                history?.keep(kept, [e])
+                append(e)
+            }
         case "task":
             if let ev = f["ev"], let id = ev["task_id"]?.string { tasks[id] = ev }
         case "partial":
