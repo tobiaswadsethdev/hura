@@ -32,12 +32,15 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 mod previews;
 
+use hura_client::history::{Found, History};
 use hura_client::{Incoming, Remote, Remotes, Sink};
-use hura_core::chat::ChatCommand;
+use hura_core::chat::{ChatCommand, ChatEntry, ChatFrame};
 use hura_core::cloud::{Account as CloudAccount, Device as CloudDevice, Status as CloudStatus};
 use hura_core::comments::{Comment, NewComment};
 use hura_core::endpoints::Route;
@@ -218,9 +221,17 @@ macro_rules! expect_reply {
 }
 
 #[tauri::command(async)]
-fn sessions(server: String) -> Result<Vec<Session>, Failed> {
+fn sessions(app: tauri::AppHandle, server: String) -> Result<Vec<Session>, Failed> {
     let reply = remote(&server)?.call(Request::Ls).map_err(to_message)?;
-    expect_reply!(reply, Reply::Ls { sessions, .. } => sessions, "a session list")
+    let sessions = expect_reply!(reply, Reply::Ls { sessions, .. } => sessions, "a session list")?;
+    // What each is called, for when the list no longer says: a removed
+    // session's conversations are still searched, under its title.
+    if let Ok(mut history) = app.state::<Kept>().0.lock() {
+        for s in &sessions {
+            let _ = history.name(&server, &s.name, s.title.as_deref(), s.project.as_deref());
+        }
+    }
+    Ok(sessions)
 }
 
 /// End a session: its sandbox, and its record.
@@ -229,12 +240,21 @@ fn sessions(server: String) -> Result<Vec<Session>, Failed> {
 /// account rather than dropping the row it had. The confirmation belongs to the
 /// window -- see `Tree.tsx` -- because this is not undoable and the agent
 /// inside may be part-way through something.
+///
+/// Its conversations are caught up first, since the sandbox is the only place
+/// they are and it is about to go; a session with no host to ask, or none
+/// answering, is removed all the same with what was already kept.
 #[tauri::command(async)]
-fn destroy(server: String, name: String) -> Result<Vec<Session>, Failed> {
+fn destroy(app: tauri::AppHandle, server: String, name: String) -> Result<Vec<Session>, Failed> {
+    let _ = catch_up(&app, &server, &name, None);
     let reply = remote(&server)?
-        .call(Request::Destroy { name })
+        .call(Request::Destroy { name: name.clone() })
         .map_err(to_message)?;
-    expect_reply!(reply, Reply::Ls { sessions, .. } => sessions, "a session list")
+    let sessions = expect_reply!(reply, Reply::Ls { sessions, .. } => sessions, "a session list")?;
+    if let Ok(mut history) = app.state::<Kept>().0.lock() {
+        let _ = history.removed(&server, &name);
+    }
+    Ok(sessions)
 }
 
 /// Rename a session: its title, the one part of its name nothing is keyed
@@ -509,13 +529,59 @@ fn new_chat(server: String, name: String) -> Result<Chats, Failed> {
     )
 }
 
+/// Ending a conversation forgets its transcript on the host, so it is caught
+/// up here first, as a removed session's are.
 #[tauri::command(async)]
-fn close_chat(server: String, name: String, conv: String) -> Result<Chats, Failed> {
-    chats_of(
+fn close_chat(
+    app: tauri::AppHandle,
+    server: String,
+    name: String,
+    conv: String,
+) -> Result<Chats, Failed> {
+    let _ = catch_up(&app, &server, &name, Some(&conv));
+    let chats = chats_of(
         remote(&server)?
-            .call(Request::CloseChat { name, conv })
+            .call(Request::CloseChat {
+                name: name.clone(),
+                conv: conv.clone(),
+            })
             .map_err(to_message)?,
-    )
+    )?;
+    if let Ok(mut history) = app.state::<Kept>().0.lock() {
+        let _ = history.ended(&server, &name, &conv);
+    }
+    Ok(chats)
+}
+
+/// Every conversation this machine has kept, searched. See
+/// [`hura_client::history`].
+#[tauri::command(async)]
+fn history_search(app: tauri::AppHandle, query: String) -> Result<Found, Failed> {
+    let kept = app.state::<Kept>();
+    let mut history = kept.0.lock().map_err(failed)?;
+    history.search(&query).map_err(failed)
+}
+
+/// One kept conversation whole, for one that exists nowhere else.
+#[tauri::command(async)]
+fn history_transcript(
+    app: tauri::AppHandle,
+    server: String,
+    session_key: String,
+    conv_key: String,
+) -> Result<Vec<ChatEntry>, Failed> {
+    let kept = app.state::<Kept>();
+    let history = kept.0.lock().map_err(failed)?;
+    history
+        .transcript(&server, &session_key, &conv_key)
+        .map_err(failed)
+}
+
+/// Keep what a session's hosts have that this machine has not seen: the
+/// conversations no pane has had open.
+#[tauri::command(async)]
+fn history_catch_up(app: tauri::AppHandle, server: String, name: String) -> Result<(), Failed> {
+    catch_up(&app, &server, &name, None)
 }
 
 #[tauri::command(async)]
@@ -1228,6 +1294,139 @@ fn set_settings(server: String, settings: Settings) -> Result<SettingsView, Fail
 #[derive(Default)]
 struct Streaming {
     open: Mutex<Option<Open>>,
+    /// The chat channels open on it, by id, and which conversation each is:
+    /// what passes on them is kept, see [`Kept`].
+    chats: Mutex<HashMap<ChannelId, Conversation>>,
+}
+
+/// A conversation, as the history files it, and the entry its channel asked
+/// from: a replay ending before that is a host whose transcript started again.
+#[derive(Clone)]
+struct Conversation {
+    server: String,
+    session: String,
+    conv: String,
+    since: u64,
+}
+
+/// Every conversation this machine has seen, kept as it passes. See
+/// [`hura_client::history`].
+///
+/// Fed here rather than by the panes: every chat frame the window draws comes
+/// through this side first, so keeping it here keeps exactly what the window's
+/// chat cache has, without the webview handing back what it was just given.
+struct Kept(Mutex<History>);
+
+/// Keep a chat frame's entries, if it carries any.
+fn keep(app: &tauri::AppHandle, c: &Conversation, frame: &ChatFrame) {
+    let kept = app.state::<Kept>();
+    let Ok(mut history) = kept.0.lock() else {
+        return;
+    };
+    // A failure to write is not the window's: the conversation goes on, and
+    // the next frame, or a catch-up, writes what this one did not.
+    let (server, session, conv) = (c.server.as_str(), c.session.as_str(), c.conv.as_str());
+    let _ = match frame {
+        ChatFrame::Replay { seq, entries } => {
+            history.replay((server, session, conv), c.since, *seq, entries)
+        }
+        ChatFrame::Entry { entry } => {
+            history.keep(server, session, conv, std::slice::from_ref(entry))
+        }
+        _ => Ok(()),
+    };
+}
+
+/// How long a catch-up waits for a session's hosts, all of them together.
+/// Bounded because a removal waits for it, and a host that is not answering
+/// should not keep a sandbox from going.
+const CATCH_UP: Duration = Duration::from_secs(20);
+
+/// Ask a session's hosts for what this machine has not kept, on a connection
+/// of its own: the window's is one server's, and the channels on it are the
+/// panes'. Every conversation at once, since the protocol multiplexes; each is
+/// done when its state arrives, which the host sends after the last of its
+/// replay, or when it says it has no host yet. `only` is one conversation.
+fn catch_up(
+    app: &tauri::AppHandle,
+    server: &str,
+    name: &str,
+    only: Option<&str>,
+) -> Result<(), Failed> {
+    let remote = remote(server)?;
+    let convs: Vec<String> = match only {
+        Some(conv) => vec![conv.to_string()],
+        None => {
+            chats_of(
+                remote
+                    .call(Request::Chats {
+                        name: name.to_string(),
+                    })
+                    .map_err(to_message)?,
+            )?
+            .chats
+        }
+    };
+    if convs.is_empty() {
+        return Ok(());
+    }
+    let (sink, frames) = remote.stream().map_err(to_message)?.split();
+    let mut waiting: HashMap<ChannelId, Conversation> = HashMap::new();
+    for (i, conv) in convs.into_iter().enumerate() {
+        let id = i as ChannelId + 1;
+        let since = app
+            .state::<Kept>()
+            .0
+            .lock()
+            .map_err(failed)?
+            .last(server, name, &conv);
+        let channel = Channel::Chat {
+            session: name.to_string(),
+            conv: conv.clone(),
+            since,
+        };
+        if sink.send(ClientFrame::Open { id, channel }) {
+            let c = Conversation {
+                server: server.to_string(),
+                session: name.to_string(),
+                conv,
+                since,
+            };
+            waiting.insert(id, c);
+        }
+    }
+    let deadline = Instant::now() + CATCH_UP;
+    while !waiting.is_empty() {
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        match frames.recv_timeout(left) {
+            Ok(Incoming::Frame(frame)) => match *frame {
+                ServerFrame::Chat { id, frame } => {
+                    let Some(conv) = waiting.get(&id) else {
+                        continue;
+                    };
+                    keep(app, conv, &frame);
+                    if matches!(
+                        frame,
+                        ChatFrame::State { .. }
+                            | ChatFrame::Notice { .. }
+                            | ChatFrame::Error { .. }
+                    ) {
+                        waiting.remove(&id);
+                    }
+                }
+                ServerFrame::Closed { id, .. } => {
+                    waiting.remove(&id);
+                }
+                _ => {}
+            },
+            Ok(Incoming::Ended(_)) | Err(_) => break,
+        }
+    }
+    // Dropping the sink ends the connection, and every channel on it.
+    drop(sink);
+    Ok(())
 }
 
 struct Open {
@@ -1259,6 +1458,8 @@ fn connected(app: &tauri::AppHandle, server: &str) -> Result<(), Failed> {
     // Previews of another server's sessions would go down this connection to
     // the wrong machine.
     app.state::<previews::Previews>().keep_only(server);
+    // And the old connection's chat channels went with it.
+    state.chats.lock().map_err(failed)?.clear();
 
     let handle = app.clone();
     std::thread::spawn(move || {
@@ -1268,6 +1469,21 @@ fn connected(app: &tauri::AppHandle, server: &str) -> Result<(), Failed> {
                 // window's: they are bytes for a socket, not something to draw.
                 Incoming::Frame(frame) if handle.state::<previews::Previews>().route(&frame) => {}
                 Incoming::Frame(frame) => {
+                    let streaming = handle.state::<Streaming>();
+                    match &*frame {
+                        ServerFrame::Chat { id, frame } => {
+                            let conv = streaming.chats.lock().ok().and_then(|c| c.get(id).cloned());
+                            if let Some(conv) = conv {
+                                keep(&handle, &conv, frame);
+                            }
+                        }
+                        ServerFrame::Closed { id, .. } => {
+                            if let Ok(mut chats) = streaming.chats.lock() {
+                                chats.remove(id);
+                            }
+                        }
+                        _ => {}
+                    }
                     let _ = handle.emit(FRAME, *frame);
                 }
                 // The connection has gone. Every open channel is closed by it,
@@ -1275,6 +1491,9 @@ fn connected(app: &tauri::AppHandle, server: &str) -> Result<(), Failed> {
                 // not come.
                 Incoming::Ended(reason) => {
                     handle.state::<previews::Previews>().connection_ended();
+                    if let Ok(mut chats) = handle.state::<Streaming>().chats.lock() {
+                        chats.clear();
+                    }
                     let _ = handle.emit(
                         FRAME,
                         ServerFrame::Closed {
@@ -1319,11 +1538,32 @@ fn watch(
     channel: Channel,
 ) -> Result<(), Failed> {
     connected(&app, &server)?;
+    if let Channel::Chat {
+        session,
+        conv,
+        since,
+    } = &channel
+    {
+        let c = Conversation {
+            server: server.clone(),
+            session: session.clone(),
+            conv: conv.clone(),
+            since: *since,
+        };
+        app.state::<Streaming>()
+            .chats
+            .lock()
+            .map_err(failed)?
+            .insert(id, c);
+    }
     send(&app, ClientFrame::Open { id, channel })
 }
 
 #[tauri::command(async)]
 fn unwatch(app: tauri::AppHandle, id: ChannelId) -> Result<(), Failed> {
+    if let Ok(mut chats) = app.state::<Streaming>().chats.lock() {
+        chats.remove(&id);
+    }
     send(&app, ClientFrame::Close { id })
 }
 
@@ -1354,6 +1594,7 @@ fn main() {
     // tooling see the surface, not a way to run.
     let builder = tauri::Builder::default()
         .manage(Streaming::default())
+        .manage(Kept(Mutex::new(History::open())))
         .manage(previews::Previews::default())
         // An OS notification when a session starts waiting on a permission
         // prompt is the single largest quality-of-life gain this window has
@@ -1390,6 +1631,12 @@ fn main() {
     builder
         .setup(|app| {
             listen(app.handle().clone());
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                if let Ok(mut history) = handle.state::<Kept>().0.lock() {
+                    history.warm();
+                }
+            });
             // Debug builds open the inspector. There is no other way to see a
             // console message from inside this window.
             #[cfg(debug_assertions)]
@@ -1437,6 +1684,9 @@ fn main() {
             chats,
             new_chat,
             close_chat,
+            history_search,
+            history_transcript,
+            history_catch_up,
             chat_command,
             comments,
             comment,

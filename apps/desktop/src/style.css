@@ -4156,3 +4156,65 @@ p.chat-quiet { margin: 0; font-size: 12px; }
 .chat-pull-key { flex: none; font-weight: 600; }
 .chat-pull-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
 .chat-pull-state { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+
+/* Search: every conversation this machine has kept. A row per entry found,
+   saying where it was, who said it and what it touched; the words looked for
+   lit as a find in a page lights them. */
+.history-field { position: relative; display: block; }
+.history-field .lucide { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--dimmer); }
+.history-field input { width: 100%; padding: 8px 10px 8px 30px; font-size: 14px; }
+.history-help { margin: 8px 0 16px; }
+.history-help code { color: var(--dim); }
+.history-hits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.history-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.history-hit:hover { background: var(--hover); }
+.history-hit:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.history-where { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; color: var(--dimmer); }
+.history-where b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-where time { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; }
+.history-gone { color: var(--warn); }
+.history-said { font-size: 13px; color: var(--dim); line-height: 1.45; overflow-wrap: anywhere; }
+.history-said mark { background: color-mix(in srgb, var(--working) 30%, transparent); color: var(--text); border-radius: 2px; }
+.history-role { margin-right: 6px; color: var(--dimmer); font-size: 12px; }
+.history-role.you { color: var(--accent); }
+.history-role.error { color: var(--bad); }
+.history-used { display: flex; flex-wrap: wrap; gap: 4px; }
+.history-tool, .history-file {
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: 11px;
+  color: var(--dim);
+}
+.history-file { color: var(--dimmer); }
+.history-kept-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.history-kept-head .history-where { flex: 1; }
+.history-log { max-width: none; padding: 8px 0 24px; }
+
+/* The row a search led to: lit for a moment, so the eye lands on it, and
+   laid out as the log around it is. */
+.chat-found {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: -6px;
+  padding: 6px;
+  border-radius: var(--r-md);
+  animation: chat-found 2.4s ease-out;
+}
+@keyframes chat-found {
+  0%, 40% { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  100% { background: transparent; }
+}

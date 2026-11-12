@@ -6,6 +6,13 @@ import SwiftUI
 /// written, what is waiting on you, and a composer. hura runs Claude Code
 /// through the Agent SDK, so a permission request is a request with an id,
 /// answered with a button.
+/// An entry a search found, for a conversation to open at, and which time:
+/// a second tap on the same result goes there again.
+struct ChatJump: Equatable {
+    var seq: UInt64
+    var nonce: Int
+}
+
 struct ChatView: View {
     let chat: Chat
     /// The sandbox is still being made. The conversation cannot be reached
@@ -17,6 +24,12 @@ struct ChatView: View {
     /// The session's figures, asked for when the context ring is opened: the
     /// account's limits are in a poll, not in the conversation.
     var usage: (() async -> Usage?)?
+    /// An entry a search found here, to open the conversation at. Taken, and
+    /// `onJumped` said, so that coming back later does not go there again.
+    var jump: ChatJump?
+    var onJumped: (() -> Void)?
+    @State private var target: ChatJump?
+    @State private var found: FoundRow?
     @State private var draft = ""
     @State private var sending = false
     /// What was just sent, and when: the keyboard commits a pending
@@ -93,6 +106,7 @@ struct ChatView: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
+                        .environment(\.foundRow, found)
                     }
                     // Made again once the history is in, so it opens at the
                     // bottom by its default anchor. Scrolling a lazy stack
@@ -102,6 +116,12 @@ struct ChatView: View {
                     .id(items.isEmpty)
                     .onChange(of: chat.entries.count, initial: true) { fold(proxy) }
                     .onChange(of: chat.loaded) { fold(proxy) }
+                    .onChange(of: jump, initial: true) {
+                        guard let jump else { return }
+                        target = jump
+                        onJumped?()
+                    }
+                    .onChange(of: target) { fold(proxy) }
                     .background {
                         FollowsReply(chat: chat) {
                             if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -151,8 +171,25 @@ struct ChatView: View {
         let had = !items.isEmpty
         (items, queued) = ChatItem.fold(chat.entries)
         agents = AgentInfo.all(chat.entries)
-        if had, atBottom {
+        if let target, found?.nonce != target.nonce,
+           let at = ChatItem.locate(ChatItem.group(items, working: working), seq: target.seq) {
+            found = FoundRow(id: at.id, nonce: target.nonce)
+            atBottom = false
+            ChatView.reveal(at.id, in: proxy)
+        } else if had, atBottom {
             withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+        }
+    }
+
+    /// Scrolls a row to the middle: once the stack has been made again with
+    /// the history in it, and again once a turn opening around the row, or
+    /// rows above it measuring themselves, has moved it.
+    static func reveal(_ id: String, in proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            for wait in [150, 450] {
+                try? await Task.sleep(for: .milliseconds(wait))
+                proxy.scrollTo(id, anchor: .center)
+            }
         }
     }
 

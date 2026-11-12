@@ -22,7 +22,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { api, messageOf, type Paired, type ServerSummary, type Shells } from "./api";
+import { api, type HistoryHit, messageOf, type Paired, type ServerSummary, type Shells } from "./api";
 import { forgetSession } from "./cache";
 import { useConfirm } from "./Confirm";
 import { Dock } from "./Dock";
@@ -37,6 +37,7 @@ import {
   Servers,
   Settings,
   Account,
+  Find,
   Working,
 } from "./icons";
 import { InboxBar, pullProjects, pullSession, samePull, sessionPull } from "./Inbox";
@@ -57,6 +58,7 @@ import { NewProjectDialog } from "./NewProject";
 import { forgetChat } from "./panes/Chat";
 import { NewWorktreeDialog } from "./NewWorktree";
 import { DEFAULTS, FLYOUT_GAP, flyoutMax, LIMITS, usePrefs } from "./prefs";
+import { SearchScreen } from "./Search";
 import { SettingsScreen } from "./Settings";
 import { AccountScreen } from "./Account";
 import { PullPanel, type PullStart } from "./Pull";
@@ -77,7 +79,7 @@ import { Select } from "./Select";
 /// is what the window *is* when nothing is over it. Writing it as one of six
 /// equal names would invite code that tears it down to show another, which is
 /// the one thing that must not happen -- the terminals live in it.
-type Screen = "integrations" | "servers" | "account" | "settings" | "about";
+type Screen = "search" | "integrations" | "servers" | "account" | "settings" | "about";
 
 /// How often your tickets and pull requests are read. See the effect that
 /// uses it.
@@ -97,6 +99,12 @@ const REFRESH_MS = 3000;
 const TICKETS_KEYS = MAC
   ? { label: "⌘⇧T", aria: "Meta+Shift+T" }
   : { label: "Ctrl+Shift+T", aria: "Control+Shift+T" };
+
+/// Search every conversation. F, as every find is, with Shift for the reason
+/// the others have it: Ctrl+F is readline's forward-a-character.
+const SEARCH_KEYS = MAC
+  ? { label: "⌘⇧F", aria: "Meta+Shift+F" }
+  : { label: "Ctrl+Shift+F", aria: "Control+Shift+F" };
 
 /// Fold or unfold the dock -- files, git and the rest. B, as the editors'
 /// sidebar toggle is, and with Shift for the reason the tickets one has it:
@@ -183,6 +191,21 @@ function reordered(tabs: Tab[], moved: string, onto: string): string[] {
 }
 
 
+/// One catch-up at a time, and a session asked for again while it is waiting
+/// asked once: two turns ending together would otherwise open two connections
+/// to replay the same entries.
+let catching: Promise<void> = Promise.resolve();
+const queued = new Set<string>();
+function catchUp(server: string, name: string) {
+  const key = `${server}\n${name}`;
+  if (queued.has(key)) return;
+  queued.add(key);
+  catching = catching.then(() => {
+    queued.delete(key);
+    return api.historyCatchUp(server, name).catch(() => {});
+  });
+}
+
 export default function App() {
   // How wide the sidebars are, how often the list is re-read, and whether the
   // OS is told when an agent waits. This window's own, kept on this machine:
@@ -253,6 +276,12 @@ export default function App() {
   /// Tab keys per worktree, in the order they were dragged into. Window state
   /// like `files` and not persisted: see `arrange`.
   const [order, setOrder] = useState<Record<string, string[]>>({});
+  /// A search result being opened: the conversation's pane takes it, opens at
+  /// the entry and says so, which clears it. See `ChatPane`.
+  const [jump, setJump] = useState<{ server: string; session: string; conv: string; seq: number; nonce: number } | null>(
+    null,
+  );
+  const jumped = useCallback(() => setJump(null), []);
 
   useEffect(() => {
     api
@@ -293,6 +322,12 @@ export default function App() {
   useEffect(() => {
     if (!server || dialogOpen) return;
     const onKey = (e: KeyboardEvent) => {
+      if (isShortcut(e, "f")) {
+        e.preventDefault();
+        e.stopPropagation();
+        setScreen((now) => (now === "search" ? null : "search"));
+        return;
+      }
       const change = isShortcut(e, "t")
         ? { inboxOpen: !inboxOpen }
         : isShortcut(e, "b")
@@ -352,6 +387,26 @@ export default function App() {
       }),
     [sessions, polls],
   );
+
+  // A chat session's conversations kept, each time a turn in one ends: what
+  // arrived in a conversation no pane had open is otherwise only in the
+  // sandbox. On the end of a turn rather than a timer, because asking execs
+  // into the sandbox, and one that has stopped would be started by being
+  // asked -- an agent that has just finished a turn is in one that is running.
+  // Removing a session and ending a conversation catch up on the Rust side.
+  const turns = useRef<Record<string, string>>({});
+  useEffect(() => {
+    turns.current = {};
+  }, [server]);
+  useEffect(() => {
+    if (!server) return;
+    for (const s of live) {
+      if (s.interface !== "chat") continue;
+      const was = turns.current[s.name];
+      turns.current[s.name] = s.state;
+      if (was === "running" && s.state !== "running") catchUp(server, s.name);
+    }
+  }, [server, live]);
 
   /// A session that has been asked for but is not in the list yet.
   ///
@@ -655,6 +710,16 @@ export default function App() {
     });
   };
 
+  /// A search result, opened where it happened: its server, its worktree, its
+  /// conversation in front, at the message.
+  const openHit = (hit: HistoryHit) => {
+    if (hit.server !== server) setServer(hit.server);
+    setSelected(hit.session);
+    setActive((a) => ({ ...a, [hit.session]: `chat:${hit.conv}` }));
+    setJump({ server: hit.server, session: hit.session, conv: hit.conv, seq: hit.seq, nonce: Date.now() });
+    setScreen(null);
+  };
+
   /// Open a tab if it is not already open, and bring it to the front either way.
   const openTab = (worktree: string, tab: Tab) => {
     const key = keyOf(tab);
@@ -833,6 +898,14 @@ export default function App() {
           </button>
           <span className="dest-split" />
           <Destination
+            icon={Find}
+            label="Search"
+            keys={SEARCH_KEYS}
+            on={screen === "search"}
+            onOpen={() => setScreen("search")}
+            onClose={() => setScreen(null)}
+          />
+          <Destination
             icon={Integrations}
             label="Integrations"
             on={screen === "integrations"}
@@ -953,6 +1026,8 @@ export default function App() {
                 usage={polls[session.name]?.usage ?? null}
                 pull={sessionPull(session, inbox?.pulls ?? [])}
                 onPull={showPull}
+                jump={jump && jump.server === server && jump.session === session.name ? jump : null}
+                onJumped={jumped}
                 onActivate={(key) => setActive((a) => ({ ...a, [session.name]: key }))}
                 onReorder={(moved, onto) =>
                   setOrder((all) => ({
@@ -1113,6 +1188,10 @@ export default function App() {
             />
           )}
         </div>
+
+        {screen === "search" && (
+          <SearchScreen server={server} sessions={sessions} onOpen={openHit} onClose={() => setScreen(null)} />
+        )}
 
         {screen === "integrations" && server && (
           <IntegrationsScreen server={server} onClose={() => setScreen(null)} />

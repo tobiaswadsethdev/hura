@@ -553,6 +553,48 @@ export function group(items: Item[], working: boolean): Item[] {
   return out;
 }
 
+/// Where an entry is drawn: the row to mark, and the folded turn it is in,
+/// which has to be opened for the row to be seen. `null` before anything is.
+///
+/// An item's key starts with its entry's seq, so the entry a search found is
+/// the first row whose key does. One a subagent made is inside the call that
+/// started it, which is the row marked; and an entry that draws nothing -- an
+/// answer folded into its call -- falls back to the last row before it.
+export type Located = { key: string; steps: string | null };
+
+export function locate(items: Item[], seq: number): Located | null {
+  const of = (item: Item) => Number(item.key.split(".")[0]);
+  const holds = (list: Item[]): boolean =>
+    list.some(
+      (i) =>
+        of(i) === seq ||
+        (i.kind === "tool" && holds(i.call.children)) ||
+        (i.kind === "steps" && holds(i.items)),
+    );
+  const found: { exact: Located | null; near: Located | null; at: number } = { exact: null, near: null, at: -1 };
+  const walk = (list: Item[], steps: string | null) => {
+    for (const item of list) {
+      if (found.exact) return;
+      if (item.kind === "steps") {
+        walk(item.items, item.key);
+        continue;
+      }
+      if (item.kind === "day") continue;
+      const at = of(item);
+      if (at === seq || (item.kind === "tool" && holds(item.call.children))) {
+        found.exact = { key: item.key, steps };
+        return;
+      }
+      if (at < seq && at > found.at) {
+        found.near = { key: item.key, steps };
+        found.at = at;
+      }
+    }
+  };
+  walk(items, null);
+  return found.exact ?? found.near;
+}
+
 /// `next`, with every part of it that equals the same part of `prev` swapped
 /// for `prev`'s: the transcript is built again from the start at every entry,
 /// so without this nothing in it is ever the same object twice, and every row

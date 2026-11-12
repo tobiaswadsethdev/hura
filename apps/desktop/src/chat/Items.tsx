@@ -9,15 +9,18 @@
 // too, open, since its output is why it was run. A turn's steps are one row
 // that says what they came to, open while the turn runs and shut once it has
 // answered -- see `group` in transcript.ts.
+//
+// A row a search led to is marked, and brought into view once it is drawn:
+// see `Found`.
 
-import { createContext, memo, useContext, useLayoutEffect, useRef, useState } from "react";
+import { createContext, memo, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Fold, scrollParent, slide } from "../Fold";
 import type { ChatFile } from "../gen/ChatFile";
 import { Attach, Chosen, Close, Delivered, Read, Twisty, Working } from "../icons";
 import { Markdown } from "../Markdown";
 import { leadingCommand } from "./commands";
-import { type Item, type ToolCall, type ToolResult, TYPED_SKILL } from "./transcript";
+import { type Item, type Located, type ToolCall, type ToolResult, TYPED_SKILL } from "./transcript";
 
 /// Where the working copy is in the sandbox. Paths under it are shown relative
 /// to it, which is how the file tree and the git pane show them.
@@ -478,6 +481,12 @@ const StepsCard = memo(function StepsCard({
   progress?: Map<string, number>;
 }) {
   const [open, setOpen] = useState<boolean | null>(null);
+  const found = useContext(Found);
+  // Opened for the row a search led to, each time it leads there.
+  const holds = found?.steps === item.key;
+  useEffect(() => {
+    if (holds) setOpen(true);
+  }, [holds, found?.nonce]);
   const shown = open ?? item.live;
   const calls = item.items.flatMap((i) => (i.kind === "tool" ? [i.call] : []));
   const running = calls.some((c) => c.result === null && !(c.answer && !c.answer.allow));
@@ -504,6 +513,31 @@ const StepsCard = memo(function StepsCard({
 /// Lets go of the bottom of the conversation, which it otherwise keeps to
 /// while it is there. Unset where nothing is kept to the bottom.
 export const Unpin = createContext<(() => void) | null>(null);
+
+/// The row a search led to, from `locate`, and which time it led there: a
+/// second click on the same result scrolls to it again.
+export const Found = createContext<(Located & { nonce: number }) | null>(null);
+
+/// The row a search led to, marked, and scrolled to the middle once drawn --
+/// and again a moment later, when a turn opening above it or a picture filling
+/// in has moved it. Not again as entries arrive: someone reading what they
+/// searched for is not to be taken anywhere by the agent's next message.
+function FoundRow({ nonce, children }: { nonce: number; children: React.ReactNode }) {
+  const row = useRef<HTMLDivElement>(null);
+  const unpin = useContext(Unpin);
+  useEffect(() => {
+    unpin?.();
+    const go = () => row.current?.scrollIntoView({ block: "center" });
+    go();
+    const again = setTimeout(go, 350);
+    return () => clearTimeout(again);
+  }, [nonce, unpin]);
+  return (
+    <div className="chat-found" ref={row}>
+      {children}
+    </div>
+  );
+}
 
 /// How many lines of a long message show until the rest is asked for, and how
 /// many more it has to have before it counts as long: folding away a single
@@ -760,11 +794,21 @@ export function Items({
   progress?: Map<string, number>;
   receipts?: Receipts;
 }) {
+  const found = useContext(Found);
   return (
     <>
-      {items.map((item) => (
-        <ItemView key={item.key} item={item} progress={progress} receipts={item.kind === "prompt" ? receipts : undefined} />
-      ))}
+      {items.map((item) => {
+        const view = (
+          <ItemView key={item.key} item={item} progress={progress} receipts={item.kind === "prompt" ? receipts : undefined} />
+        );
+        return found?.key === item.key ? (
+          <FoundRow key={item.key} nonce={found.nonce}>
+            {view}
+          </FoundRow>
+        ) : (
+          view
+        );
+      })}
     </>
   );
 }

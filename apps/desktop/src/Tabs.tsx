@@ -79,6 +79,8 @@ export function Tabs({
   usage,
   pull,
   onPull,
+  jump = null,
+  onJumped,
 }: {
   server: string;
   name: string;
@@ -98,6 +100,10 @@ export function Tabs({
   /// composer.
   pull: Pull | null;
   onPull: (pull: Pull) => void;
+  /// An entry a search found in one of this worktree's conversations, for
+  /// that conversation's pane to open at. See `ChatPane`.
+  jump?: { conv: string; seq: number; nonce: number } | null;
+  onJumped?: () => void;
   onActivate: (key: string) => void;
   onNewShell: () => void;
   /// Another conversation, in a chat session. Absent in a terminal session,
@@ -301,6 +307,8 @@ export function Tabs({
                 usage={usage}
                 pull={pull}
                 onPull={onPull}
+                jump={jump?.conv === tab.conv ? jump : null}
+                onJumped={onJumped}
               />
             )}
             {tab.kind === "filediff" && (

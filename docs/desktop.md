@@ -366,7 +366,9 @@ paperclip is not offered there and a drop says so; a new session takes them.
 same working copy and the same policy, with a context of its own. Two agents in
 one working copy edit the same files, which is what running `claude` in a shell
 beside the agent always meant. Closing one ends it and forgets its transcript,
-the agent's own included, which the host then does not start again. A review
+the agent's own included, which the host then does not start again; this
+computer keeps its copy, which [search](#searching-every-conversation) still
+finds. A review
 goes to the agent's conversation while there is one, then to the conversation
 most recently in use, or to a new one when every conversation has been closed.
 Shells are still there, on the same menu.
@@ -393,6 +395,39 @@ between `chat` and `terminal` for new sessions, and `interface` in the config
 file is the same choice. A session made before chat existed stays a terminal.
 `hurad attach` on a chat session shows the host's log, which is what is worth
 reading from a terminal when a conversation will not start.
+
+## Searching every conversation
+
+The magnifier in the header, or **Ctrl+Shift+F** (⌘⇧F on macOS), searches
+every conversation this computer has seen, on every paired server, including
+conversations that have ended and sessions that have been removed. Words are
+looked for in what was said, by you and by Claude. A tool call is found by the
+tool and by the files it touched: `file:auth.rs` lists the calls that read or
+edited it, `tool:Bash` the commands Claude ran, and `tool:shell` your own `!`
+commands. A phrase goes in double quotes. What a tool *answered*, the file it
+read or a command's output, is not searched, or every word in the repository
+would match the conversation that happened to read it.
+
+Results are newest first, each saying which worktree and conversation it is
+in, who said it and what it touched. Clicking one opens that conversation in
+front, scrolled to the message and lit for a moment, with the turn around it
+opened if it was folded. A conversation that exists nowhere else any more
+opens on the search screen instead, read from what was kept, with nothing to
+send.
+
+**What is searched is a copy this computer keeps**, under `history/` in the
+state directory beside the pairing tokens and readable only by you: every
+entry that reaches the window is written there as it arrives, which is the
+same stream the panes' cache is filled from. Pictures are left out, and a
+tool's result is cut to its start. A conversation no pane had open is caught up
+when a turn in it ends, and a session's conversations are caught up before it
+is destroyed, as a conversation is before it is closed: the host forgets
+both, and this is then the only copy. Neither catch-up starts a stopped
+sandbox, because a turn only ends in a running one, and a session being
+destroyed was going anyway. A session removed from the phone or the command
+line has only what this computer had seen of it. The phone keeps a copy of its
+own, by the same rules, and searches it from its Search tab; the two copies
+are not shared.
 
 ## The traffic pane
 
@@ -815,7 +850,8 @@ in it and no amount of bookkeeping removes one.
 
 **Destroy a worktree** -- in the row's context menu, in red at the bottom -- is
 the one that ends something. The sandbox goes, and with it anything the agent
-has not pushed. It asks first, and says so. It used to be an icon on the card,
+has not pushed. It asks first, and says so. Its conversations are kept on
+this computer, so [search](#searching-every-conversation) still finds them. It used to be an icon on the card,
 revealed on hover; a menu is a deliberate gesture, and the card gets its width
 back.
 

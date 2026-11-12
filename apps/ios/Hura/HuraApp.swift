@@ -26,6 +26,9 @@ struct HuraApp: App {
                     AccountView()
                         .tabItem { Label("Account", glyph: .account) }
                         .tag(2)
+                    SearchView()
+                        .tabItem { Label("Search", glyph: .search) }
+                        .tag(3)
                 }
                 .onChange(of: tab) { if tab == 1 { trackers.markSeen() } }
                 .onChange(of: trackers.inbox) { if tab == 1 { trackers.markSeen() } }
@@ -111,9 +114,10 @@ extension HuraApp {
     /// confirmation is skipped; the sign-in is the emailed-code one, with a
     /// code the stand-in takes.
     ///
-    /// `-HuraOpen inbox` or `account` opens that tab; `server` the first
-    /// server's list, and a session's name that session, by the same route a
-    /// tapped notification takes.
+    /// `-HuraOpen inbox`, `account` or `search` opens that tab, searching for
+    /// `-HuraSearch` when it is given; `server` the first server's list, and
+    /// a session's name that session, by the same route a tapped
+    /// notification takes.
     @MainActor
     func pairFromLaunchArguments() async {
         let defaults = UserDefaults.standard
@@ -137,6 +141,7 @@ extension HuraApp {
         switch open {
         case "inbox": tab = 1
         case "account": tab = 2
+        case "search": tab = 3
         default:
             guard let server = model.servers.first else { return }
             let id = server.record.serverID

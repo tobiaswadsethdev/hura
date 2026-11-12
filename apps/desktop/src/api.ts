@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { CloudAccount } from "./gen/CloudAccount";
 import type { CloudDevice } from "./gen/CloudDevice";
 import type { CloudStatus } from "./gen/CloudStatus";
+import type { ChatEntry } from "./gen/ChatEntry";
 import type { Comment } from "./gen/Comment";
 import type { FailureKind } from "./gen/FailureKind";
 import type { Inbox } from "./gen/Inbox";
@@ -60,6 +61,31 @@ export type Paired = { server: ServerSummary; servers: ServerSummary[]; version:
 /// A chat session's conversations, and the one just opened when that is what
 /// was asked: `Chats` in main.rs.
 export type Chats = { chats: string[]; opened: string | null };
+/// One entry of a kept conversation that matched a search: `Hit` in
+/// `hura_client::history`. Hand-written for the reason `Chats` is: it is the
+/// desktop's own, and nothing else speaks it.
+export type HistoryHit = {
+  server: string;
+  session: string;
+  /// Which of the sessions by that name, for `historyTranscript`.
+  session_key: string;
+  title: string | null;
+  project: string | null;
+  /// The session has been removed, so the conversation is only kept here.
+  removed: boolean;
+  conv: string;
+  conv_key: string;
+  /// The conversation has ended, or its host started it again.
+  ended: boolean;
+  seq: number;
+  at: number;
+  role: "you" | "claude" | "agent" | "shell" | "error";
+  snippet: string;
+  tools: string[];
+  files: string[];
+};
+export type HistoryFound = { hits: HistoryHit[]; more: boolean };
+
 /// A worktree's shells, and whether its agent is running beside them: `Shells`
 /// in main.rs.
 export type Shells = { shells: string[]; agent: boolean };
@@ -178,6 +204,14 @@ export const api = {
   newChat: (server: string, name: string) => invoke<Chats>("new_chat", { server, name }),
   closeChat: (server: string, name: string, conv: string) =>
     invoke<Chats>("close_chat", { server, name, conv }),
+
+  // Every conversation this machine has seen, kept as it passed: see
+  // `hura_client::history`. Searched, read back whole once it is nowhere
+  // else, and caught up with what a session's hosts have that no pane saw.
+  historySearch: (query: string) => invoke<HistoryFound>("history_search", { query }),
+  historyTranscript: (server: string, sessionKey: string, convKey: string) =>
+    invoke<ChatEntry[]>("history_transcript", { server, sessionKey, convKey }),
+  historyCatchUp: (server: string, name: string) => invoke<void>("history_catch_up", { server, name }),
 
   // The review. Kept on the server, per session, so an unsent one survives the
   // window closing -- see `hura_core::comments`.

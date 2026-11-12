@@ -41,9 +41,15 @@ struct ChatRows: View {
     /// and no receipts.
     var receipts = false
 
+    @Environment(\.foundRow) private var found
+
     var body: some View {
         ForEach(items) { item in
-            row(item).id(item.id)
+            if found?.id == item.id {
+                row(item).modifier(FoundMark(nonce: found?.nonce ?? 0)).id(item.id)
+            } else {
+                row(item).id(item.id)
+            }
         }
     }
 
@@ -121,6 +127,7 @@ struct StepsRow: View {
     let cwd: String
     let working: Bool
     @State private var open: Bool?
+    @Environment(\.foundRow) private var found
 
     private var shown: Bool { open ?? live }
     private var calls: [ToolCall] {
@@ -152,6 +159,10 @@ struct StepsRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // Opened for the row a search led to, each time it leads there.
+            .task(id: found) {
+                if let found, items.contains(where: { $0.id == found.id }) { open = true }
+            }
             if shown {
                 // The steps on a rule, indented, the way a subagent's are on
                 // the desktop. Erased, because the rows draw this row.
@@ -165,6 +176,34 @@ struct StepsRow: View {
                 .padding(.leading, 6)
             }
         }
+    }
+}
+
+/// The row a search led to, and which time it led there: see `ChatItem.locate`.
+struct FoundRow: Equatable {
+    var id: String
+    var nonce: Int
+}
+
+extension EnvironmentValues {
+    @Entry var foundRow: FoundRow?
+}
+
+/// The row a search led to, lit for a moment so the eye lands on it.
+private struct FoundMark: ViewModifier {
+    let nonce: Int
+    @State private var lit = true
+
+    func body(content: Content) -> some View {
+        content
+            .padding(6)
+            .background(Color.accentColor.opacity(lit ? 0.22 : 0), in: RoundedRectangle(cornerRadius: 8))
+            .padding(-6)
+            .task(id: nonce) {
+                lit = true
+                try? await Task.sleep(for: .seconds(1))
+                withAnimation(.easeOut(duration: 1.4)) { lit = false }
+            }
     }
 }
 
