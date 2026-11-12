@@ -90,10 +90,13 @@ struct ChatView: View {
                             ChatRows(items: ChatItem.group(items, working: working), cwd: Self.cwd, working: working,
                                      receipts: chat.receipts)
                             // Under whatever is being written, for the whole
-                            // turn, as on the desktop; not while a tool call
-                            // is running, whose card says so already.
+                            // turn, as on the desktop; not the dots while a
+                            // tool call is running, whose card has its own,
+                            // but still how long the turn has taken.
                             Writing(chat: chat,
-                                    showsWorking: working && chat.pending.isEmpty && !callRunning && !shellRunning)
+                                    showsWorking: working && chat.pending.isEmpty && !callRunning && !shellRunning,
+                                    started: working && chat.pending.isEmpty && !shellRunning
+                                        ? ChatTranscript.turnStart(chat.entries) : nil)
                             ChatRows(items: queued, cwd: Self.cwd, working: working, receipts: chat.receipts)
                             Color.clear.frame(height: 1).id("bottom")
                                 .onAppear { atBottom = true }
@@ -552,16 +555,19 @@ private struct CommandSuggestions: View {
 private struct Writing: View {
     let chat: Chat
     let showsWorking: Bool
+    /// When the turn in progress started, while there is one to time.
+    let started: Date?
 
     var body: some View {
         if !chat.streaming.isEmpty {
             MarkdownText(text: chat.streaming).opacity(0.8)
         }
-        if showsWorking {
+        if showsWorking || started != nil {
             HStack(spacing: 6) {
-                WorkingDots(size: 22)
+                if showsWorking { WorkingDots(size: 22) }
                 // The word only while there is nothing else to look at.
                 if chat.streaming.isEmpty { Text("working").font(.caption) }
+                if let started { Elapsed(since: started) }
             }
             .foregroundStyle(Color.working)
         }

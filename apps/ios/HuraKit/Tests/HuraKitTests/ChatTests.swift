@@ -99,6 +99,23 @@ struct ChatTranscriptTests {
         #expect(!ask.isQuestion)
         #expect(Ask(json(#"{"id":"q","tool":"AskUserQuestion","input":{}}"#))?.isQuestion == true)
     }
+
+    @Test func aTurnStartsWithWhatWentInAfterTheLastOne() {
+        let raw = [
+            #"{"seq":1,"at":1000,"ev":{"kind":"prompt","text":"first","uuid":"a"}}"#,
+            #"{"seq":2,"at":2000,"ev":{"kind":"sdk","msg":{"type":"result","subtype":"success","duration_ms":1000}}}"#,
+            // A `!` command and a background agent's work between turns.
+            #"{"seq":3,"at":3000,"ev":{"kind":"shell","command":"ls","uuid":"s"}}"#,
+            #"{"seq":4,"at":4000,"ev":{"kind":"sdk","msg":{"type":"assistant","parent_tool_use_id":"toolu_bg","message":{"content":[{"type":"text","text":"still going"}]}}}}"#,
+            #"{"seq":5,"at":5000,"ev":{"kind":"prompt","text":"second","uuid":"b"}}"#,
+            #"{"seq":6,"at":5100,"ev":{"kind":"read","uuid":"b"}}"#,
+            #"{"seq":7,"at":6000,"ev":{"kind":"sdk","msg":{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"On it."}]}}}}"#,
+        ].map(json)
+        let entries = raw.compactMap(ChatTranscript.entry)
+        #expect(ChatTranscript.turnStart(entries) == Date(timeIntervalSince1970: 5))
+        #expect(ChatTranscript.turnStart(Array(entries.prefix(4))) == nil)
+        #expect(ChatTranscript.turnStart([]) == nil)
+    }
 }
 
 struct SlashCommandTests {

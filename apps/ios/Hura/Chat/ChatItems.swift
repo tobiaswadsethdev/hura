@@ -8,6 +8,9 @@ struct ToolCall: Equatable {
     var input: JSONValue
     var inputTruncated: Bool
     var result: TranscriptBlock?
+    /// When Claude made the call, which is when it started, by the sandbox's
+    /// clock.
+    var at: Date? = nil
 
     var failed: Bool { result?.isError == true }
     /// Claude Code reports a tool cut short by Esc as an error; it's not one.
@@ -279,7 +282,7 @@ enum ChatItem: Identifiable, Equatable {
                         guard let toolID = b.id else { continue }
                         items.append(.tool(id: id(i), call: ToolCall(
                             id: toolID, name: b.name ?? "tool", input: b.input ?? .object([:]),
-                            inputTruncated: b.truncated == true, result: results[toolID])))
+                            inputTruncated: b.truncated == true, result: results[toolID], at: e.at)))
                     default: continue
                     }
                 }

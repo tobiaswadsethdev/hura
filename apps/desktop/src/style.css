@@ -3823,6 +3823,7 @@ p.chat-quiet { margin: 0; font-size: 12px; }
 }
 .chat-divider::before, .chat-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .chat-working { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--working); font-size: 12px; }
+.chat-working .elapsed { font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* Waiting on you. A raised card with the tree's waiting glyph at its corner,
    which is the one place in a conversation the attention hue appears: the

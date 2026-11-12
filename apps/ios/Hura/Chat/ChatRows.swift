@@ -31,6 +31,27 @@ enum ChatFormat {
     }
 }
 
+/// How long something has been going on, counted up once a second: a turn,
+/// or a tool call. Nothing until `after` has passed, so the many calls that
+/// take a moment don't flicker a "0s". The start is by the sandbox's clock and
+/// now by the phone's; one behind the other reads as nothing, not a negative.
+struct Elapsed: View {
+    let since: Date
+    var after: TimeInterval = 0
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let s = context.date.timeIntervalSince(since)
+            if s >= after {
+                Text(ChatFormat.duration(Int64(max(0, s) * 1000)))
+                    .font(.caption.monospacedDigit())
+                    // Read out once, not every second.
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
 /// The conversation's rows, a view of their own so that state the list
 /// doesn't use (scroll position, the draft) leaves them alone.
 struct ChatRows: View {

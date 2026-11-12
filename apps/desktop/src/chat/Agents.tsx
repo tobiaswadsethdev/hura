@@ -12,6 +12,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Fold } from "../Fold";
 import { Agent as AgentGlyph, Chosen, Close, Twisty, Working } from "../icons";
 import { Markdown } from "../Markdown";
+import { since, useNow } from "./elapsed";
 import { Items } from "./Items";
 import type { Agent } from "./transcript";
 
@@ -83,26 +84,8 @@ function useSideScroll(ref: React.RefObject<HTMLElement | null>, shown: boolean)
   }, [ref, shown]);
 }
 
-function since(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-}
-
 function tokens(n: number): string {
   return n < 1000 ? `${n}` : `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-}
-
-/// Now, once a second while `running`: how long a running agent has been at it.
-function useNow(running: boolean): number {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!running) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [running]);
-  return now;
 }
 
 function StatusGlyph({ agent }: { agent: Agent }) {

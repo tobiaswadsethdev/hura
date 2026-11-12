@@ -58,7 +58,13 @@ struct ToolCard: View {
     @ViewBuilder
     private var status: some View {
         if call.result == nil {
-            if working { WorkingDots().foregroundStyle(Color.working) }
+            if working {
+                HStack(spacing: 6) {
+                    if let at = call.at { Elapsed(since: at, after: 5) }
+                    WorkingDots()
+                }
+                .foregroundStyle(Color.working)
+            }
         } else if call.stopped {
             Text("stopped").font(.caption).foregroundStyle(.secondary)
         } else if call.failed {

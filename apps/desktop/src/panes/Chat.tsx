@@ -32,14 +32,15 @@ import { Attach, Chat as ChatGlyph, Close, Plus, Send, Shell, Skill, Stop, Worki
 import { api } from "../api";
 import { keyFor, Remembered } from "../cache";
 import { Markdown, Pictures, type ReadPicture } from "../Markdown";
-import type { PartialMessage, ToolProgress } from "../sdk";
+import type { PartialMessage } from "../sdk";
 import { Select } from "../Select";
 import { chat, close, nextChannelId, open } from "../stream";
 import { AskCard } from "../chat/Ask";
 import { matching, naming, offeredCommands, type Typed, typed } from "../chat/commands";
 import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/files";
 import { Found, Items, OpenAgent, Unpin } from "../chat/Items";
-import { arrived, build, group, type Item, locate, settle } from "../chat/transcript";
+import { arrived, build, group, type Item, locate, settle, turnStart } from "../chat/transcript";
+import { Since, Ticking } from "../chat/elapsed";
 import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
 import { PullBar } from "../chat/PullBar";
 import type { PullRequest as Pull } from "../gen/PullRequest";
@@ -60,8 +61,6 @@ type View = {
   caughtUp: boolean;
   state: ChatState | null;
   live: Live;
-  /// How long each running tool has been running, by tool use id.
-  progress: Map<string, number>;
   /// What each running subagent last said it was doing, by task id.
   tasks: Map<string, TaskProgress>;
   /// Why there is nothing yet, while the session is still being prepared.
@@ -77,7 +76,6 @@ const EMPTY: View = {
   caughtUp: false,
   state: null,
   live: null,
-  progress: new Map(),
   tasks: new Map(),
   notice: null,
   down: null,
@@ -124,17 +122,14 @@ function reduce(v: View, a: Action): View {
         entries: [...v.entries, f.entry],
         seq: f.entry.seq,
         live: done ? null : v.live,
-        progress: done ? new Map() : v.progress,
       };
     }
     case "partial":
       return { ...v, live: stream(v.live, f.ev as PartialMessage) };
-    case "progress": {
-      const p = f.ev as ToolProgress;
-      const progress = new Map(v.progress);
-      progress.set(p.tool_use_id, p.elapsed_time_seconds);
-      return { ...v, progress };
-    }
+    case "progress":
+      // A call's clock runs from when it was made (`ToolCall.at`), for every
+      // tool alike: only some of them say how long they have been going.
+      return v;
     case "task": {
       const t = f.ev as TaskProgress;
       const tasks = new Map(v.tasks);
@@ -148,7 +143,6 @@ function reduce(v: View, a: Action): View {
         state: f.state,
         caughtUp: true,
         live: idle ? null : v.live,
-        progress: idle ? new Map() : v.progress,
         notice: null,
         down: null,
       };
@@ -770,6 +764,7 @@ export function ChatPane({
   // The rows that have not changed kept as they were, so only the new ones draw.
   const settled = useRef<Item[]>([]);
   const items = useMemo(() => (settled.current = settle(settled.current, group(built, working))), [built, working]);
+  const started = useMemo(() => (working ? turnStart(view.entries) : null), [working, view.entries]);
   const [target, setTarget] = useState<{ seq: number; nonce: number } | null>(null);
   useEffect(() => {
     if (!jump) return;
@@ -826,6 +821,7 @@ export function ChatPane({
 
   return (
     <div className="chat-split">
+      <Ticking.Provider value={working}>
       <OpenAgent.Provider value={openAgent}>
         <Unpin.Provider value={unpin}>
           <div
@@ -866,7 +862,7 @@ export function ChatPane({
                     <Empty icon={ChatGlyph} />
                   ) : null)}
                 <Pictures.Provider value={readPicture}>
-                  <Items items={items} progress={view.progress} receipts={receipts} />
+                  <Items items={items} receipts={receipts} />
                   <Writing live={view.live} entries={view.entries} />
                 </Pictures.Provider>
                 {/* Under whatever is being written, for the whole turn, so a reply
@@ -876,6 +872,7 @@ export function ChatPane({
                   <p className="chat-working" role="status" aria-label="working">
                     <Working size={22} />
                     {!view.live && "working"}
+                    {started !== null && <Since start={started} />}
                   </p>
                 )}
                 {pending.map((ask) => (
@@ -912,6 +909,7 @@ export function ChatPane({
           <AgentPanel agent={followed} progress={view.tasks.get(followed.id)} onClose={() => setFollowing(null)} />
         </Pictures.Provider>
       )}
+      </Ticking.Provider>
     </div>
   );
 }

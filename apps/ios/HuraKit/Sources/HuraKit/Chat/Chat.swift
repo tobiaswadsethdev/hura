@@ -236,6 +236,29 @@ public enum ChatTranscript {
 
     /// A subagent's messages are kept, marked with the call that started it,
     /// for the screen that follows one; the conversation leaves them out.
+    /// When the turn in progress started: the first thing after the last
+    /// turn ended that is part of a turn, which is your message going in, or
+    /// the main thread's first message when nothing of yours started it. Not
+    /// a `!` command run between turns, and not a background agent's work,
+    /// which goes on after the turn that started it has ended. Nil when
+    /// nothing has. As `turnStart` in the desktop's `transcript.ts`.
+    ///
+    /// Only the conversation's activity says whether a turn is in progress;
+    /// this says since when, should it be.
+    public static func turnStart(_ entries: [TranscriptEntry]) -> Date? {
+        var start: Date?
+        for e in entries.reversed() {
+            if e.kind == TranscriptEntry.Kind.turnEnd { break }
+            // The host's own failure ends the conversation, and the turn with it.
+            if e.kind == TranscriptEntry.Kind.notice && e.level == "error" { break }
+            let mine = e.kind == TranscriptEntry.Kind.prompt || e.kind == TranscriptEntry.Kind.read
+            let claude = e.parent == nil
+                && (e.kind == TranscriptEntry.Kind.assistant || e.kind == TranscriptEntry.Kind.toolResult)
+            if mine || claude { start = e.at ?? start }
+        }
+        return start
+    }
+
     static func sdk(_ m: JSONValue, seq: UInt64) -> TranscriptEntry? {
         var entry = sdkEntry(m, seq: seq)
         entry?.parent = m["parent_tool_use_id"]?.string
