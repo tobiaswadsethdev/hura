@@ -19,7 +19,7 @@
 // A search result opens a conversation at the message it found: the pane is
 // handed the entry, marks the row it is drawn in, and scrolls there.
 
-import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { Empty } from "../Empty";
 import type { ChatCommand } from "../gen/ChatCommand";
@@ -389,15 +389,50 @@ function Composer({
   const sent = useRef<{ text: string; at: number } | null>(null);
   const working = state?.activity === "running" || state?.activity === "waiting";
 
+  const commands = useMemo(() => offeredCommands(state), [state?.slash_commands, state?.commands]);
+  const placeholder = working
+    ? "Queue a message for when this turn is done"
+    : commands.length || state?.shell
+      ? `Tell the agent what to do${commands.length ? " · / for commands" : ""}${state?.shell ? " · ! for the shell" : ""}`
+      : "Tell the agent what to do";
+
   // Grows with what is typed, up to a third of the pane, and no further.
-  useLayoutEffect(() => {
+  //
+  // Measured again when the box changes width as well as when the text or
+  // the placeholder changes, because the same words wrap to more lines in a
+  // narrower box. When only a change of text measured it, a composer drawn
+  // while the middle was squeezed to a sliver took its placeholder at a word
+  // to a line, stood 240 pixels tall, and stayed that tall and empty after the
+  // middle had its width back. Not while hidden: a tab out of sight has no
+  // width at all, and it is measured again as it comes back.
+  const fit = useCallback(() => {
     const el = box.current;
-    if (!el) return;
+    if (!el || el.clientWidth === 0) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
-  }, [text]);
+  }, []);
+  useLayoutEffect(fit, [fit, text, placeholder]);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    let width = el.clientWidth;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      // A change of height is this measuring itself.
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      // In the next frame rather than in here, where setting the height the
+      // observer is watching would be reported as a resize loop.
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fit);
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [fit]);
 
-  const commands = useMemo(() => offeredCommands(state), [state?.slash_commands, state?.commands]);
   const what = typed(text, commands, state?.shell ?? false);
   // The commands, offered while a name is being typed, until Esc puts them
   // away for that name.
@@ -478,13 +513,7 @@ function Composer({
             spellCheck={!(what.kind === "shell" || query !== null)}
             autoCorrect={what.kind === "shell" || query !== null ? "off" : undefined}
             autoCapitalize={what.kind === "shell" || query !== null ? "off" : undefined}
-            placeholder={
-              working
-                ? "Queue a message for when this turn is done"
-                : commands.length || state?.shell
-                  ? `Tell the agent what to do${commands.length ? " · / for commands" : ""}${state?.shell ? " · ! for the shell" : ""}`
-                  : "Tell the agent what to do"
-            }
+            placeholder={placeholder}
             onScroll={(e) => {
               if (shade.current) shade.current.scrollTop = e.currentTarget.scrollTop;
             }}
