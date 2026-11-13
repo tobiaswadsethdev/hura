@@ -112,6 +112,9 @@ async fn remember(
     return_to: &str,
 ) -> Result<String> {
     let made = token::mint("")?;
+    sqlx::query("delete from oauth_states where expires_at < now()")
+        .execute(db)
+        .await?;
     sqlx::query(
         "insert into oauth_states (state_hash, account_id, provider, return_to, expires_at)
          values ($1, $2, $3, $4, now() + interval '10 minutes')",

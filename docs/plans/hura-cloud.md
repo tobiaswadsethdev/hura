@@ -224,7 +224,8 @@ deleted.
     a subscription cancelled before its account is deleted. The iPhone only
     shows the plan, with nothing to buy there (Apple's in-app purchase rules).
     The price and what `free` and `pro` have room for are still to decide.
-  - [ ] A privacy policy.
+  - [ ] A privacy policy: drafted in [privacy-policy.md](../privacy-policy.md),
+    to fill in, have read, and publish.
   - The master key stays a Coolify secret for now (decided 2026-11-13), and
     Uptime Kuma, run beside it in Coolify, watches `/healthz`.
 
