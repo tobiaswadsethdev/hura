@@ -1,5 +1,5 @@
 // hura cloud, on a screen of its own: signing this computer in with an
-// emailed code, and once in, the account and the devices signed in to it.
+// emailed code or with Apple in the browser, and once in, the account and the devices signed in to it.
 //
 // Its own destination rather than a section of the settings screen, as it is
 // its own tab on the phone: settings are answers about this window and this
@@ -63,9 +63,11 @@ function AccountSection({
   );
 }
 
-/// An address, then the code emailed to it.
+/// An address, then the code emailed to it; or Apple, in the browser.
 function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
   const [email, setEmail] = useState("");
+  // Waiting for the browser to come back from Apple.
+  const [apple, setApple] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -91,13 +93,38 @@ function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
 
   const digits = code.replace(/\D/g, "");
 
+  // Left while the browser is still out: stop waiting for it.
+  useEffect(() => () => void api.cloudCancelApple(), []);
+
+  const signInWithApple = async () => {
+    setApple(true);
+    setError(null);
+    try {
+      onSignedIn(await api.cloudSignInWithApple());
+    } catch (e) {
+      const message = messageOf(e);
+      if (message !== "cancelled") setError(message);
+    } finally {
+      setApple(false);
+    }
+  };
+
   return (
     <>
       <p className="hint">
         Sign in to hura cloud to use trackers: your tickets and pull requests, kept in one place
         and the same on every device you sign in on, with notifications when they change.
       </p>
-      {sentTo === null ? (
+      {apple ? (
+        <>
+          <p className="hint">Finish signing in with Apple in your browser, then come back here.</p>
+          <div className="setting-actions">
+            <button className="quiet" onClick={() => void api.cloudCancelApple()}>
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : sentTo === null ? (
         <>
           <label>
             <span>Email</span>
@@ -112,6 +139,9 @@ function SignIn({ onSignedIn }: { onSignedIn: (status: CloudStatus) => void }) {
             />
           </label>
           <div className="setting-actions">
+            <button className="quiet" disabled={busy} onClick={() => void signInWithApple()}>
+              Sign In with Apple
+            </button>
             <button className="go" disabled={busy || !email.includes("@")} onClick={() => void send(email)}>
               {busy ? "Sending…" : "Email Me a Code"}
             </button>

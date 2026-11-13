@@ -1,4 +1,5 @@
-//! This machine and hura cloud: signing in with an emailed code, the account
+//! This machine and hura cloud: signing in with an emailed code or with
+//! Apple in the browser, the account
 //! and its devices, and the trackers kept there. The Rust half of the iOS
 //! app's `Cloud`, for the desktop application.
 //!
@@ -242,14 +243,6 @@ impl Cloud {
         device: &str,
         platform: &str,
     ) -> Result<Session, Failure> {
-        #[derive(Deserialize)]
-        struct Signed {
-            account: String,
-            device: String,
-            refresh_token: String,
-            access_token: String,
-            expires_in: u64,
-        }
         let body = json!({
             "email": email,
             "code": code,
@@ -262,9 +255,107 @@ impl Cloud {
             None,
             Some(&body),
         )?)?;
+        self.signed(signed, email.trim().to_lowercase())
+    }
+
+    /// Signs this machine in with Apple, in the browser, as `device` on
+    /// `platform`: waits on a port of 127.0.0.1, has `open` send the browser
+    /// to Apple, and once the browser comes back here with a code, swaps it
+    /// and this sign-in's secret for a session. Blocks until then, ten
+    /// minutes, or `stop` answers true.
+    pub fn sign_in_with_apple(
+        &self,
+        device: &str,
+        platform: &str,
+        open: &dyn Fn(&str) -> Result<(), String>,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<Session, Failure> {
+        let failure = |message: String| Failure { status: 0, message };
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .and_then(|l| l.set_nonblocking(true).map(|()| l))
+            .map_err(|e| failure(format!("could not wait for the browser: {e}")))?;
+        let port = listener
+            .local_addr()
+            .map_err(|e| failure(e.to_string()))?
+            .port();
+        let secret = secret().map_err(failure)?;
+        let body = json!({
+            "secret": secret,
+            "port": port,
+            "device": { "name": device, "platform": platform },
+        });
+        let started: Value = parse(&self.request(
+            DEFAULT_BASE,
+            "POST",
+            "/v1/sign-in/apple/start",
+            None,
+            Some(&body),
+        )?)?;
+        let url = started["url"]
+            .as_str()
+            .ok_or_else(|| failure("hura cloud gave no address to sign in at".into()))?;
+        open(url).map_err(|e| failure(format!("could not open the browser: {e}")))?;
+
+        let deadline = Instant::now() + Duration::from_secs(10 * 60);
+        loop {
+            if stop() {
+                return Err(failure("cancelled".into()));
+            }
+            if Instant::now() > deadline {
+                return Err(failure(
+                    "the browser did not come back in ten minutes".into(),
+                ));
+            }
+            let mut stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                Err(e) => return Err(failure(format!("could not wait for the browser: {e}"))),
+            };
+            let Some(back) = from_browser(&mut stream) else {
+                // Not the sign-in coming back (a favicon, a probe): not ours.
+                let _ = respond(&mut stream, "404 Not Found", "");
+                continue;
+            };
+            let result = match back {
+                Back::Code(code) => self.finish_apple(&secret, &code),
+                Back::Error(e) => Err(failure(e)),
+            };
+            let page = match &result {
+                Ok(_) => "Signed in to hura. You can close this tab and go back to the app.".into(),
+                Err(e) => format!("hura was not signed in: {e}. Go back to the app and try again."),
+            };
+            let _ = respond(&mut stream, "200 OK", &page);
+            return result;
+        }
+    }
+
+    fn finish_apple(&self, secret: &str, code: &str) -> Result<Session, Failure> {
+        #[derive(Deserialize)]
+        struct Finished {
+            #[serde(flatten)]
+            signed: Signed,
+            email: Option<String>,
+        }
+        let body = json!({ "secret": secret, "code": code });
+        let finished: Finished = parse(&self.request(
+            DEFAULT_BASE,
+            "POST",
+            "/v1/sign-in/apple/finish",
+            None,
+            Some(&body),
+        )?)?;
+        let email = finished.email.unwrap_or_else(|| "Apple ID".into());
+        self.signed(finished.signed, email)
+    }
+
+    /// A device the service just signed in, kept here as `email`.
+    fn signed(&self, signed: Signed, email: String) -> Result<Session, Failure> {
         let session = Session {
             base: DEFAULT_BASE.into(),
-            email: email.trim().to_lowercase(),
+            email,
             account: signed.account,
             device: signed.device,
             refresh_token: signed.refresh_token,
@@ -547,6 +638,111 @@ impl Cloud {
     }
 }
 
+/// What the service answers a sign-in with.
+#[derive(Deserialize)]
+struct Signed {
+    account: String,
+    device: String,
+    refresh_token: String,
+    access_token: String,
+    expires_in: u64,
+}
+
+/// What the browser brought back to the loopback.
+#[derive(Debug, PartialEq, Eq)]
+enum Back {
+    Code(String),
+    Error(String),
+}
+
+/// A browser sign-in's own secret: 32 random bytes, in hex.
+fn secret() -> Result<String, String> {
+    use ring::rand::SecureRandom as _;
+    let mut bytes = [0u8; 32];
+    ring::rand::SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| "no randomness to sign in with".to_string())?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The code or the error in a `GET /apple?…` from the browser, or `None` for
+/// any other request.
+fn from_browser(stream: &mut std::net::TcpStream) -> Option<Back> {
+    use std::io::Read as _;
+    stream.set_nonblocking(false).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    let mut head = Vec::new();
+    let mut buf = [0u8; 1024];
+    while !head.windows(4).any(|w| w == b"\r\n\r\n") && head.len() < 16 * 1024 {
+        let n = stream.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        head.extend_from_slice(&buf[..n]);
+    }
+    let text = String::from_utf8_lossy(&head);
+    back_from(text.lines().next()?)
+}
+
+/// The same, from the request line alone.
+fn back_from(line: &str) -> Option<Back> {
+    let target = line.strip_prefix("GET ")?.split(' ').next()?;
+    let query = target.strip_prefix("/apple?")?;
+    let param = |name: &str| {
+        query
+            .split('&')
+            .find_map(|p| p.strip_prefix(name)?.strip_prefix('='))
+            .map(percent_decoded)
+    };
+    match (param("code"), param("error")) {
+        (Some(code), _) if !code.is_empty() => Some(Back::Code(code)),
+        (_, Some(error)) => Some(Back::Error(error)),
+        _ => None,
+    }
+}
+
+fn percent_decoded(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = bytes
+            .get(i + 1..i + 3)
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (bytes[i], hex) {
+            (b'%', Some(b)) => {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+            (b'+', _) => out.push(b' '),
+            (b, _) => out.push(b),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A page for the browser, to say how it went.
+fn respond(stream: &mut std::net::TcpStream, status: &str, message: &str) -> io::Result<()> {
+    use std::io::Write as _;
+    let escaped = message
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let body = format!(
+        "<!doctype html><meta charset=\"utf-8\"><title>hura</title>\
+         <body style=\"font:16px/1.5 -apple-system,system-ui,sans-serif;max-width:640px;margin:2em auto;padding:0 1em\">\
+         <p>{escaped}</p></body>"
+    );
+    write!(
+        stream,
+        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
 impl Default for Cloud {
     fn default() -> Self {
         Cloud::new()
@@ -802,5 +998,70 @@ mod tests {
     fn names_are_one_path_segment() {
         assert_eq!(segment("my jira/prod"), "my%20jira%2Fprod");
         assert_eq!(segment("gh-1.x"), "gh-1.x");
+    }
+
+    #[test]
+    fn the_browser_brings_back_a_code_or_why_not() {
+        assert_eq!(
+            back_from("GET /apple?code=abc_-1 HTTP/1.1"),
+            Some(Back::Code("abc_-1".into()))
+        );
+        assert_eq!(
+            back_from("GET /apple?error=could%20not%20check HTTP/1.1"),
+            Some(Back::Error("could not check".into()))
+        );
+        assert_eq!(back_from("GET /favicon.ico HTTP/1.1"), None);
+        assert_eq!(back_from("POST /apple?code=abc HTTP/1.1"), None);
+        assert_eq!(percent_decoded("100%"), "100%");
+    }
+
+    #[test]
+    fn signs_in_with_apple_when_the_browser_comes_back() {
+        let dir = std::env::temp_dir().join(format!("hura-cloud-test-{}", rand_suffix()));
+        let service = Service::default();
+        service.on(
+            "POST /v1/sign-in/apple/start",
+            200,
+            r#"{"url":"https://appleid.apple.com/auth/authorize?state=s"}"#,
+        );
+        service.on(
+            "POST /v1/sign-in/apple/finish",
+            200,
+            r#"{"account":"acc","device":"dev","refresh_token":"hura_rt_r","access_token":"hura_at_1","expires_in":3600,"email":"me@example.com"}"#,
+        );
+        let cloud = Cloud::with(Box::new(service.clone()), dir.join("cloud.json"));
+        let sent = service.clone();
+        // The browser: once sent to Apple, back on the port the start named.
+        let open = move |url: &str| {
+            assert!(url.starts_with("https://appleid.apple.com/"));
+            let port = sent.sent("POST /v1/sign-in/apple/start")[0]
+                .body
+                .as_ref()
+                .unwrap()["port"]
+                .as_u64()
+                .unwrap();
+            std::thread::spawn(move || {
+                use std::io::{Read as _, Write as _};
+                let mut s = std::net::TcpStream::connect(("127.0.0.1", port as u16)).unwrap();
+                s.write_all(b"GET /apple?code=the-code HTTP/1.1\r\nHost: x\r\n\r\n")
+                    .unwrap();
+                let mut page = String::new();
+                s.read_to_string(&mut page).unwrap();
+                assert!(page.contains("Signed in to hura"), "{page}");
+            });
+            Ok(())
+        };
+        let session = cloud
+            .sign_in_with_apple("laptop", "macos", &open, &|| false)
+            .unwrap();
+        assert_eq!(session.email, "me@example.com");
+        assert!(cloud.signed_in());
+        let start = &service.sent("POST /v1/sign-in/apple/start")[0];
+        let finish = &service.sent("POST /v1/sign-in/apple/finish")[0];
+        let secret = start.body.as_ref().unwrap()["secret"].as_str().unwrap();
+        assert_eq!(secret.len(), 64);
+        assert_eq!(finish.body.as_ref().unwrap()["secret"], secret);
+        assert_eq!(finish.body.as_ref().unwrap()["code"], "the-code");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

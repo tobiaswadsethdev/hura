@@ -18,6 +18,10 @@
 //! - `HURA_CLOUD_APPLE_AUDIENCE`: the iOS app's bundle ID, which a Sign in
 //!   with Apple identity token must be for, `dev.tobiaswadseth.hura.ios`
 //!   unless set.
+//! - `HURA_CLOUD_APPLE_SERVICES_ID`: the Services ID a browser signs in with
+//!   Apple as, for the desktop; its return URL at Apple is
+//!   `{HURA_CLOUD_URL}/v1/oauth/apple/callback`. Without it, only the iOS
+//!   app signs in with Apple.
 //! - `HURA_CLOUD_URL`: where the service is reached from outside,
 //!   `https://api.gethura.app` unless set: the address in the callbacks and
 //!   the webhook it gives GitHub and Atlassian.
@@ -37,6 +41,7 @@ pub struct Config {
     pub keys: Keys,
     pub relay: String,
     pub apple_audience: String,
+    pub apple_services_id: Option<String>,
     pub url: String,
 }
 
@@ -68,6 +73,7 @@ impl Config {
         let relay = var("HURA_CLOUD_RELAY").unwrap_or_else(|| crate::push::DEFAULT_RELAY.into());
         let apple_audience =
             var("HURA_CLOUD_APPLE_AUDIENCE").unwrap_or_else(|| "dev.tobiaswadseth.hura.ios".into());
+        let apple_services_id = var("HURA_CLOUD_APPLE_SERVICES_ID");
         let url = var("HURA_CLOUD_URL")
             .unwrap_or_else(|| "https://api.gethura.app".into())
             .trim_end_matches('/')
@@ -79,6 +85,7 @@ impl Config {
             keys,
             relay,
             apple_audience,
+            apple_services_id,
             url,
         })
     }

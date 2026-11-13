@@ -92,8 +92,8 @@ an email; Jira and GitHub are connections added afterwards.
   where Apple's "hide my email" gives an address that matches nothing.
 
 **Each device has its own long-lived token**, listed and revocable from any
-other, and swaps it for short-lived access tokens. The desktop signs in in the
-browser and comes back on a `hura://` link, as pairing already does.
+other, and swaps it for short-lived access tokens. The desktop signs in with
+Apple in the browser, which comes back to the app on 127.0.0.1.
 
 ## Trackers on the service
 
@@ -152,14 +152,17 @@ deleted.
   the phone through hura-mobile's `changes` op; each keeps what was seen where
   it kept its snapshot before, in the same shape, so nothing is announced
   twice or missed across the update. The service will keep it per account.
-- [ ] **2. The service, bare.** `crates/hura-cloud` ([cloud.md](../cloud.md)):
+- [x] **2. The service, bare.** `crates/hura-cloud` ([cloud.md](../cloud.md)):
   - [x] The Postgres schema for accounts, sign-ins, devices and plans;
     emailed codes through Resend; refresh and access tokens; the device
     list; the image, its workflow and CI against a real Postgres.
   - [x] Sign in with Apple, in the iOS app: its identity token checked
-    against Apple's published keys, with a nonce. The desktop's, through the
-    browser, needs a Services ID and a key from the developer portal, which
-    no CLI of Apple's can make, and waits for them.
+    against Apple's published keys, with a nonce. And the desktop's, through
+    the browser with a Services ID: Apple posts the token back to the
+    service, which sends the browser on to the app waiting on 127.0.0.1, so
+    the sign-in only ever lands on the computer that started it. No key of
+    Apple's is used; it will be, to revoke an Apple ID's tokens when an
+    account is deleted.
   - [x] The encrypted tracker store and `POST /v1/tracker`, with the request
     surface moved from hura-mobile into `hura_core::tracker::request` so the
     phone and the service run the same code.
@@ -175,9 +178,9 @@ deleted.
   - [x] The desktop: an account section in settings with the same emailed
     code, the devices, moving this computer's trackers to the account, and
     every tracker command going to the service when signed in, through the
-    same `hura_core::tracker::request` either way. Signing in through the
-    browser and a `hura://` link waits for Sign in with Apple, which is
-    what needs it.
+    same `hura_core::tracker::request` either way, and Sign in with Apple
+    through the browser, back to the app on its loopback rather than a
+    `hura://` link.
 - [x] **4. Notifications from the service.** The scheduled reads, the phone
   through the relay (`tracker_change`), the desktop over a live connection.
   This is the phase that makes them timely.
@@ -186,7 +189,7 @@ deleted.
     "notify" switch, and the phone's own announcing stopped while it is.
   - [x] The desktop over a live connection: `GET /v1/events`, kept open by
     the desktop while signed in, which then leaves announcing to it.
-- [ ] **5. Better connections.** Jira's OAuth app and a GitHub App instead of
+- [x] **5. Better connections.** Jira's OAuth app and a GitHub App instead of
   pasted tokens, their webhooks to read a tracker the moment it changes, and
   "seen" shared between devices, clearing a notification on the others.
   - [x] A GitHub App with user tokens, made from a setup page by GitHub's

@@ -836,6 +836,38 @@ fn cloud_verify(email: String, code: String) -> Result<CloudStatus, Failed> {
     })
 }
 
+/// Sign this machine in with Apple, in the system's browser, under its
+/// computer name. Waits until the browser comes back, ten minutes pass, or
+/// another sign-in with Apple starts or is cancelled.
+#[tauri::command(async)]
+fn cloud_sign_in_with_apple(app: tauri::AppHandle) -> Result<CloudStatus, Failed> {
+    use std::sync::atomic::Ordering;
+    use tauri_plugin_opener::OpenerExt as _;
+    let mine = APPLE_SIGN_IN.fetch_add(1, Ordering::SeqCst) + 1;
+    let open = |url: &str| {
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|e| e.to_string())
+    };
+    let stop = || APPLE_SIGN_IN.load(Ordering::SeqCst) != mine;
+    let session = cloud()
+        .sign_in_with_apple(&computer_name(), std::env::consts::OS, &open, &stop)
+        .map_err(cloud_failed)?;
+    Ok(CloudStatus {
+        email: session.email,
+    })
+}
+
+/// Stops waiting for the browser.
+#[tauri::command(async)]
+fn cloud_cancel_apple() {
+    APPLE_SIGN_IN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Which sign-in with Apple is the one being waited for: each start, and
+/// each cancel, moves it on, and one that is not current gives up.
+static APPLE_SIGN_IN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[tauri::command(async)]
 fn cloud_sign_out() {
     cloud().sign_out();
@@ -1714,6 +1746,8 @@ fn main() {
             cloud_status,
             cloud_send_code,
             cloud_verify,
+            cloud_sign_in_with_apple,
+            cloud_cancel_apple,
             cloud_sign_out,
             cloud_account,
             cloud_devices,
