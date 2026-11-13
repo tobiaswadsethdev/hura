@@ -19,8 +19,8 @@ this policy is not about them.
 
 ## Who is responsible
 
-[Tobias Wadseth / company name, registration number], [postal address], Sweden,
-is the controller of your personal data. Write to **[privacy@gethura.app]** about
+[Tobias Wadseth / company name], Sweden, is the controller of your personal
+data. Write to **[privacy@gethura.app]** about
 anything in this policy.
 
 ## What is kept, and why
@@ -76,12 +76,12 @@ about you to anybody.
 
 ## Who else handles it
 
-Only to provide the service, under their own data processing terms:
+hura cloud, its database and its backups run on hura's own server, in the EU,
+and are not handed to a hosting company. Beyond that, only to provide the
+service, under their own data processing terms:
 
 | Who | For | Where |
 | --- | --- | --- |
-| [Hosting provider] | the server hura cloud and its database run on | [EU country] |
-| [Backup storage provider] | encrypted database backups | [EU region] |
 | Cloudflare | the network in front of hura cloud, and running the relay | worldwide, EU–US Data Privacy Framework |
 | Resend | sending sign-in codes by email | USA, EU–US Data Privacy Framework / standard contractual clauses |
 | Apple | Sign in with Apple, and delivering notifications to iPhones | worldwide |
@@ -98,7 +98,8 @@ or the European Commission's standard contractual clauses.
 ## How long it is kept
 
 As long as you have an account. When you delete it, everything above is deleted
-at once, except: database backups, which roll over within [30 days]; records of
+at once, except: database backups, on hura's own server, which roll over
+within [30 days]; records of
 payments, which Stripe and hura must keep for as long as accounting law
 requires ([7 years] in Sweden); and logs, within [30 days].
 
