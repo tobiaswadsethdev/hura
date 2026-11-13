@@ -396,6 +396,21 @@ impl Cloud {
         parse(&self.authorized("GET", "/v1/me", None)?)
     }
 
+    /// Where to send the browser to subscribe to the paid plan, or, `manage`,
+    /// to change or cancel the subscription and see its invoices.
+    pub fn billing_url(&self, manage: bool) -> Result<String, Failure> {
+        let path = if manage {
+            "/v1/billing/portal"
+        } else {
+            "/v1/billing/checkout"
+        };
+        let v: Value = parse(&self.authorized("POST", path, None)?)?;
+        v["url"].as_str().map(String::from).ok_or_else(|| Failure {
+            status: 0,
+            message: "hura cloud gave no address to pay at".into(),
+        })
+    }
+
     /// Everything the service keeps about the account, as it sends it:
     /// tokens said to be kept and never shown.
     pub fn export(&self) -> Result<Value, Failure> {

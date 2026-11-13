@@ -219,6 +219,13 @@ function SignedIn({
   const signedOut = useRef(onSignedOut);
   signedOut.current = onSignedOut;
 
+  // Back from Stripe in the browser: the plan may have changed.
+  useEffect(() => {
+    const again = () => void api.cloudAccount().then(setAccount, () => {});
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, []);
+
   useEffect(() => {
     let live = true;
     Promise.all([api.cloudAccount(), api.cloudDevices()]).then(
@@ -260,8 +267,24 @@ function SignedIn({
       {account && (
         <label>
           <span>Plan</span>
-          <span className="value">{account.plan}</span>
+          <span className="value">{planText(account)}</span>
         </label>
+      )}
+      {account?.can_subscribe && (
+        <div className="setting-actions">
+          <span className="hint">
+            {live(account)
+              ? "Change your plan or card, cancel, or see your invoices, at Stripe."
+              : "Subscribe at Stripe, in your browser. Your plan changes as soon as Stripe confirms it."}
+          </span>
+          <button
+            className={live(account) ? "quiet" : "go"}
+            disabled={busy !== null}
+            onClick={() => void act("billing", () => api.cloudBilling(live(account)))}
+          >
+            {live(account) ? "Manage Subscription" : "Upgrade"}
+          </button>
+        </div>
       )}
 
       <h4>Devices</h4>
@@ -364,6 +387,26 @@ function SignedIn({
       {error && <p className="error">{error}</p>}
     </>
   );
+}
+
+/// Whether the account's subscription is one it is paying for (or Stripe is
+/// still retrying the card for).
+function live(account: CloudAccount): boolean {
+  const status = account.subscription?.status;
+  return status === "active" || status === "trialing" || status === "past_due";
+}
+
+/// The plan, and what is next for its subscription.
+function planText(account: CloudAccount): string {
+  const plan = account.plan.charAt(0).toUpperCase() + account.plan.slice(1);
+  const sub = account.subscription;
+  if (!sub || !live(account)) return plan;
+  if (sub.status === "past_due") return `${plan} · the last payment failed: update your card`;
+  const end = sub.current_period_end
+    ? new Date(Number(sub.current_period_end) * 1000).toLocaleDateString()
+    : null;
+  if (!end) return plan;
+  return sub.cancel_at_period_end ? `${plan} · ends ${end}` : `${plan} · renews ${end}`;
 }
 
 /// How long ago, in the largest unit that fits.

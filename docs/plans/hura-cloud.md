@@ -219,7 +219,11 @@ deleted.
   - [x] Rate limits: per address, in memory, tightest on signing in.
   - [x] Plans enforced: a tracker or filter past the plan's limits is
     refused (402), checked inside the change's transaction.
-  - [ ] Billing, with Stripe.
+  - [x] Billing, with Stripe: Checkout to subscribe and the customer portal
+    to manage, from the desktop; the plan set by Stripe's signed webhook;
+    a subscription cancelled before its account is deleted. The iPhone only
+    shows the plan, with nothing to buy there (Apple's in-app purchase rules).
+    The price and what `free` and `pro` have room for are still to decide.
   - [ ] A privacy policy.
   - The master key stays a Coolify secret for now (decided 2026-11-13), and
     Uptime Kuma, run beside it in Coolify, watches `/healthz`.

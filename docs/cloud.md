@@ -23,6 +23,8 @@ runs anywhere else.
 | `HURA_CLOUD_APPLE_AUDIENCE` | the iOS app's bundle ID, which a Sign in with Apple token must be for: `dev.tobiaswadseth.hura.ios` unless set |
 | `HURA_CLOUD_APPLE_SERVICES_ID` | the Services ID the desktop signs in with Apple as, through the browser. Its return URL at Apple is `{HURA_CLOUD_URL}/v1/oauth/apple/callback`, under the iOS app as its primary App ID so an Apple ID is the same account on both. Unset, only the iOS app signs in with Apple |
 | `HURA_CLOUD_CLIENT_IP_HEADER` | the header the proxy in front puts the client's address in, which rate limits count by: `CF-Connecting-IP` unless set, for Cloudflare. Set it empty to count by the connection's address, with nothing in front. Only trust it when every request comes through that proxy |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID` | taking payments: the API's secret key, the signing secret of a webhook endpoint at `{HURA_CLOUD_URL}/v1/webhooks/stripe` (sending the `customer.subscription.*` events), and the subscription's price. Without all three there is nothing to buy |
+| `STRIPE_PLAN` | the plan the price buys, `pro` unless set. What each plan has room for is in the `plans` table |
 | `HURA_CLOUD_URL` | where the service is reached from outside, `https://api.gethura.app` unless set: the address in the callbacks and the webhook it gives GitHub and Atlassian |
 | `HURA_CLOUD_MAIL=log` | prints codes instead of sending them, for a laptop. Without this or a Resend key the service will not start |
 
@@ -83,6 +85,9 @@ hashes of either.
 | `GET /v1/me` | `{account, plan, sign_ins: [{provider, email}]}` |
 | (any) | **429** with `Retry-After` when an address asks too often: 20 a minute for signing in and `/v1/token` (bursts of 10), 240 for `/v1/tracker` (120), 600 for the rest (200). Webhooks and `/healthz` are not counted |
 | (adding or changing trackers) | **402** `your plan has room for N trackers` (or filters) when a change would take the account past its plan's `max_trackers` or `max_filters`, counted across all its trackers; connecting through GitHub or Jira says the same on its page. Only growing past a limit is refused: an account already over one can still edit and remove. `free` has no limits |
+| `POST /v1/billing/checkout` | `{url}`: Stripe Checkout, to subscribe. 409 when already subscribed, or with no Stripe configured |
+| `POST /v1/billing/portal` | `{url}`: Stripe's customer portal, to change or cancel the subscription and see invoices |
+| `POST /v1/webhooks/stripe` | Stripe's `customer.subscription.*` events, checked against `STRIPE_WEBHOOK_SECRET`. The account is the subscription's `metadata.account`, set at checkout; active, trialing or past due puts it on `STRIPE_PLAN`, anything else on `free`. An event older than the last applied is ignored. `GET /v1/me` says `can_subscribe` and the `subscription` (`status`, `current_period_end`, `cancel_at_period_end`) |
 | `GET /v1/me/export` | everything kept about the account, as JSON: the account, its sign-ins, devices, push routes, trackers (filters and connection included) and what was last seen. Tokens are said to be kept and never shown |
 | `DELETE /v1/me` `{confirm: "delete"}` | deletes the account now and for good: the webhooks made on Jira and Fizzy are taken off first, then the account and everything under it, every device signed out. Codes still out for its addresses go too. Backups keep it until they rotate out |
 | `GET /v1/devices` | `[{id, name, platform, created_at, last_seen_at, current}]`, newest first; times in Unix seconds |

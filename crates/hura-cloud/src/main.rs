@@ -38,6 +38,7 @@ async fn run() -> Result<(), String> {
         live: Default::default(),
         apple: hura_cloud::apple::Apple::new(config.apple_audience, config.apple_services_id),
         limits: hura_cloud::rate::Limits::new(config.client_ip_header),
+        stripe: hura_cloud::billing::Stripe::from_env(),
         web: hura_cloud::web::Web::https(),
         url: config.url,
         setup: hura_cloud::new_setup_token(),

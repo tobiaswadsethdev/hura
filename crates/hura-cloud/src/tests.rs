@@ -66,6 +66,12 @@ async fn service_with(limits: crate::rate::Limits) -> Option<Test> {
             include_str!("testdata/apple-test-key.n.b64url").trim(),
         ),
         limits,
+        stripe: Some(crate::billing::Stripe {
+            secret_key: "sk_test".into(),
+            webhook_secret: "whsec_test".into(),
+            price: "price_pro".into(),
+            plan: "pro".into(),
+        }),
         web: crate::web::Web::kept(),
         url: "https://cloud.example".into(),
         setup: "setup-token".into(),
@@ -1157,6 +1163,189 @@ async fn a_plan_with_limits_refuses_what_would_go_past_them() {
         )
         .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+impl Test {
+    async fn stripe_event(&self, event: Value, secret: &str) -> StatusCode {
+        let body = event.to_string();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/webhooks/stripe")
+            .header("Stripe-Signature", crate::billing::sign(secret, &body, now))
+            .body(Body::from(body))
+            .unwrap();
+        self.app.clone().oneshot(request).await.unwrap().status()
+    }
+}
+
+fn subscription_event(kind: &str, account: &Value, status: &str, created: i64) -> Value {
+    json!({
+        "type": kind, "created": created,
+        "data": { "object": {
+            "id": "sub_1", "customer": "cus_1", "status": status,
+            "cancel_at_period_end": false,
+            "items": { "data": [{ "current_period_end": 1_900_000_000 }] },
+            "metadata": { "account": account },
+        } },
+    })
+}
+
+#[tokio::test]
+async fn a_subscription_moves_the_account_to_the_paid_plan_and_back() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("payer@example.com", "Mac").await;
+    let at = token(&me, "access_token");
+    let crate::web::Web::Kept { .. } = &t.state.web else {
+        unreachable!()
+    };
+    t.state.web.on(
+        "POST https://api.stripe.com/v1/checkout/sessions",
+        200,
+        r#"{"url":"https://checkout.stripe.com/c/pay/cs_1"}"#,
+    );
+    let (status, v) = t
+        .call(Method::POST, "/v1/billing/checkout", Some(at), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["url"], "https://checkout.stripe.com/c/pay/cs_1");
+    let form = t
+        .state
+        .web
+        .sent("POST https://api.stripe.com/v1/checkout/sessions")[0]
+        .clone()
+        .unwrap();
+    let account = me["account"].as_str().unwrap();
+    assert!(
+        form.contains(&format!(
+            "subscription_data%5Bmetadata%5D%5Baccount%5D={account}"
+        )),
+        "{form}"
+    );
+    assert!(
+        form.contains("customer_email=payer%40example.com"),
+        "{form}"
+    );
+
+    // Not signed by Stripe: nothing changes.
+    let created = subscription_event(
+        "customer.subscription.created",
+        &me["account"],
+        "active",
+        100,
+    );
+    assert_eq!(
+        t.stripe_event(created.clone(), "whsec_other").await,
+        StatusCode::UNAUTHORIZED
+    );
+    let (_, mine) = t.call(Method::GET, "/v1/me", Some(at), None).await;
+    assert_eq!(mine["plan"], "free");
+    assert_eq!(mine["can_subscribe"], true);
+
+    assert_eq!(t.stripe_event(created, "whsec_test").await, StatusCode::OK);
+    let (_, mine) = t.call(Method::GET, "/v1/me", Some(at), None).await;
+    assert_eq!(mine["plan"], "pro");
+    assert_eq!(mine["subscription"]["status"], "active");
+    assert_eq!(mine["subscription"]["current_period_end"], 1_900_000_000);
+
+    // Subscribed: checkout again is refused, the portal is where to go.
+    let (status, _) = t
+        .call(Method::POST, "/v1/billing/checkout", Some(at), None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    t.state.web.on(
+        "POST https://api.stripe.com/v1/billing_portal/sessions",
+        200,
+        r#"{"url":"https://billing.stripe.com/p/session/x"}"#,
+    );
+    let (status, v) = t
+        .call(Method::POST, "/v1/billing/portal", Some(at), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let form = t
+        .state
+        .web
+        .sent("POST https://api.stripe.com/v1/billing_portal/sessions")[0]
+        .clone()
+        .unwrap();
+    assert!(form.contains("customer=cus_1"), "{form}");
+
+    // Ended; and an older event arriving after it does not bring it back.
+    let deleted = subscription_event(
+        "customer.subscription.deleted",
+        &me["account"],
+        "active",
+        300,
+    );
+    assert_eq!(t.stripe_event(deleted, "whsec_test").await, StatusCode::OK);
+    let late = subscription_event(
+        "customer.subscription.updated",
+        &me["account"],
+        "active",
+        200,
+    );
+    assert_eq!(t.stripe_event(late, "whsec_test").await, StatusCode::OK);
+    let (_, mine) = t.call(Method::GET, "/v1/me", Some(at), None).await;
+    assert_eq!(mine["plan"], "free");
+    assert_eq!(mine["subscription"]["status"], "canceled");
+}
+
+#[tokio::test]
+async fn deleting_a_subscribed_account_cancels_its_subscription_first() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("leaving@example.com", "Mac").await;
+    let at = token(&me, "access_token");
+    let created = subscription_event(
+        "customer.subscription.created",
+        &me["account"],
+        "active",
+        100,
+    );
+    assert_eq!(t.stripe_event(created, "whsec_test").await, StatusCode::OK);
+
+    // Stripe away the first time: the account stays, rather than go on
+    // being charged. Then it answers.
+    t.state.web.on(
+        "DELETE https://api.stripe.com/v1/subscriptions/sub_1",
+        500,
+        "{}",
+    );
+    t.state.web.on(
+        "DELETE https://api.stripe.com/v1/subscriptions/sub_1",
+        200,
+        r#"{"id":"sub_1","status":"canceled"}"#,
+    );
+    let (status, _) = t
+        .call(
+            Method::DELETE,
+            "/v1/me",
+            Some(at),
+            Some(json!({ "confirm": "delete" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    let (status, _) = t.call(Method::GET, "/v1/me", Some(at), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = t
+        .call(
+            Method::DELETE,
+            "/v1/me",
+            Some(at),
+            Some(json!({ "confirm": "delete" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        t.state
+            .web
+            .sent("DELETE https://api.stripe.com/v1/subscriptions/sub_1")
+            .len(),
+        2
+    );
 }
 
 const SECRET: &str = "a-secret-the-desktop-made-for-this-one";

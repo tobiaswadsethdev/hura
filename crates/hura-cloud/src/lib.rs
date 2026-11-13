@@ -20,6 +20,7 @@ mod account;
 pub mod apple;
 mod apple_web;
 mod auth;
+pub mod billing;
 pub mod config;
 pub mod crypto;
 mod devices;
@@ -57,6 +58,8 @@ pub struct State {
     pub live: live::Live,
     pub apple: apple::Apple,
     pub limits: rate::Limits,
+    /// Taking payments, when it is configured.
+    pub stripe: Option<billing::Stripe>,
     /// Requests to GitHub and Atlassian on the service's own behalf.
     pub web: web::Web,
     /// Where the service is reached, for the addresses it hands out.
@@ -126,6 +129,10 @@ pub fn app(state: Shared) -> Router {
         .route("/v1/oauth/github/callback", get(oauth::github_callback))
         .route("/v1/oauth/jira/callback", get(oauth::jira_callback))
         .route("/v1/oauth/confirm", post(oauth::confirm))
+        .route("/v1/billing/checkout", post(billing::checkout))
+        .route("/v1/billing/portal", post(billing::portal))
+        .route("/billing/done", get(billing::done))
+        .route("/v1/webhooks/stripe", post(billing::webhook))
         .route("/v1/webhooks/github", post(webhooks::github))
         .route("/v1/webhooks/fizzy/{id}", post(webhooks::fizzy))
         .route("/v1/webhooks/jira", post(webhooks::jira))

@@ -7,7 +7,8 @@
 //! shown. Everything else is as it is stored, what was last seen on the
 //! trackers included.
 //!
-//! **Deleting is at once and for good.** Webhooks the service made on Jira
+//! **Deleting is at once and for good.** A subscription is cancelled at
+//! Stripe first, and the account stays if it cannot be. Webhooks the service made on Jira
 //! and Fizzy are taken off first, while their tokens are still here to do
 //! it with; then the account goes, and with it (the schema cascades) every
 //! device, tracker, token and route. Codes still out for its addresses go
@@ -78,6 +79,8 @@ pub async fn delete(
     if body.confirm != "delete" {
         return Err(Error::bad("say `delete` to delete the account"));
     }
+    // Nobody charged for an account that is gone: no further if it cannot be.
+    crate::billing::cancel(&state, signed.account).await?;
     let trackers: Vec<String> =
         sqlx::query_scalar("select name from trackers where account_id = $1")
             .bind(signed.account)

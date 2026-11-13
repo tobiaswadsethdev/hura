@@ -900,6 +900,17 @@ fn cloud_export(app: tauri::AppHandle) -> Result<String, Failed> {
     Ok(path.display().to_string())
 }
 
+/// Opens the browser at Stripe to subscribe, or, `manage`, to change or
+/// cancel the subscription.
+#[tauri::command(async)]
+fn cloud_billing(app: tauri::AppHandle, manage: bool) -> Result<(), Failed> {
+    use tauri_plugin_opener::OpenerExt as _;
+    let url = cloud().billing_url(manage).map_err(cloud_failed)?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| failed(format!("could not open the browser: {e}")))
+}
+
 /// Deletes the account, on every device, and signs this machine out.
 #[tauri::command(async)]
 fn cloud_delete_account() -> Result<(), Failed> {
@@ -1776,6 +1787,7 @@ fn main() {
             cloud_verify,
             cloud_sign_in_with_apple,
             cloud_export,
+            cloud_billing,
             cloud_delete_account,
             cloud_cancel_apple,
             cloud_sign_out,

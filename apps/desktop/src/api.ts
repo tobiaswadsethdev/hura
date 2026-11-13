@@ -284,6 +284,8 @@ export const api = {
   // The account as JSON, saved in Downloads: answers where. Deleting it is
   // on every device and for good, and signs this computer out.
   cloudExport: () => invoke<string>("cloud_export"),
+  // Stripe in the browser: subscribing, or managing what was bought.
+  cloudBilling: (manage: boolean) => invoke<void>("cloud_billing", { manage }),
   cloudDeleteAccount: () => invoke<void>("cloud_delete_account"),
   cloudSignOutDevice: (id: string) => invoke<CloudDevice[]>("cloud_sign_out_device", { id }),
   // The inbox was looked at here, with these waiting (`tracker/id`): signed
