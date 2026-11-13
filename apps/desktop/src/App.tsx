@@ -57,7 +57,8 @@ import { close, nextChannelId, open } from "./stream";
 import { NewProjectDialog } from "./NewProject";
 import { forgetChat } from "./panes/Chat";
 import { NewWorktreeDialog } from "./NewWorktree";
-import { DEFAULTS, FLYOUT_GAP, flyoutMax, LIMITS, usePrefs } from "./prefs";
+import { fit, type Folding, RAIL, useRoom } from "./layout";
+import { DEFAULTS, FLYOUT_GAP, flyoutMax, LIMITS, type Prefs, usePrefs } from "./prefs";
 import { SearchScreen } from "./Search";
 import { SettingsScreen } from "./Settings";
 import { AccountScreen } from "./Account";
@@ -309,16 +310,94 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [screen]);
 
+  // The diff each worktree carries, lifted out of the polls for the tree.
+  //
+  // A projection rather than the whole record: `Poll` also carries the agent's
+  // captured screen, and handing the tree a prop it does not read would make
+  // the tree's own types claim it might. `polls` is a new object on every
+  // status frame, so this recomputes about as often either way -- the point is
+  // the narrower prop, not a saved comparison.
+  const session = sessions.find((s) => s.name === selected) ?? null;
+  // Selected but not ready to be looked at: asked for and not in the list yet,
+  // or in it and still being made. Every pane asks the sandbox about a working
+  // copy, and before the clone there is none -- so they are not mounted until
+  // there is, rather than each drawing its own error for half a minute.
+  const preparing =
+    (selected !== null && session === null) ||
+    session?.state === "creating" ||
+    session?.state === "seeding";
+  // Selected and never going to be ready: its sandbox is gone, or was never
+  // made. Every pane would ask the runtime about it and draw `sandbox not
+  // found`, which says what is missing and not why, so they are not mounted
+  // and the reason is shown instead.
+  const gone = session?.state === "dead";
+
+  // How wide each sidebar is drawn, and which are folded: what was asked for,
+  // fitted to the window. See `layout.ts`, and why none of it is written back.
+  const room = useRoom();
+  // Which of the dock and the tickets sidebar stays open when only one fits:
+  // the one opened last, so that a click on a rail is never undone by the
+  // layout. The dock until then, since it is about the worktree in the middle.
+  const [keep, setKeep] = useState<Folding>("dock");
+  // Whether a dock is drawn at all: the branches of the workspace below that
+  // end in one.
+  const hasDock = screen === null && session !== null && server !== null && !preparing && !gone;
+  const fitted = fit({
+    room,
+    workspace: screen === null,
+    tree: prefs.treeWidth,
+    dock: hasDock ? { open: prefs.dockOpen, width: prefs.dockWidth } : null,
+    inbox: { open: prefs.inboxOpen, width: prefs.inboxWidth },
+    keep,
+  });
+  // Open as drawn, not as asked for. With no dock on screen, the asking is all
+  // there is.
+  const inboxOpen = fitted.inbox !== null;
+  const dockOpen = hasDock ? fitted.dock !== null : prefs.dockOpen;
+  // Where the ticket and pull request flyouts stand: against the sidebar, or
+  // against its folded rail.
+  const flyoutRight = fitted.inbox ?? RAIL;
+
+  // A fold button, a rail's way back, or a shortcut. Opening one makes it the
+  // one kept when only one fits, so the other folds rather than it. Folding one
+  // also folds for good the other, if that was folded only for room: asking for
+  // more middle must not bring it back to take the room just given.
+  const toggle = useCallback(
+    (which: Folding) => {
+      if (!(which === "dock" ? dockOpen : inboxOpen)) {
+        setKeep(which);
+        setPrefs(which === "dock" ? { dockOpen: true } : { inboxOpen: true });
+        return;
+      }
+      setPrefs({
+        ...(which === "dock" ? { dockOpen: false } : { inboxOpen: false }),
+        ...(fitted.folded === "dock" && { dockOpen: false }),
+        ...(fitted.folded === "inbox" && { inboxOpen: false }),
+      });
+    },
+    [dockOpen, inboxOpen, fitted.folded, setPrefs],
+  );
+
+  // A handle dragged. The other sidebars are written at the widths they are
+  // drawn at, so that the one dragged follows the pointer: left at what was
+  // asked for, they would be narrowed afresh against its new width, and a drag
+  // outwards could draw it narrower.
+  const resize = (change: Partial<Prefs>) =>
+    setPrefs({
+      treeWidth: fitted.tree,
+      ...(fitted.dock !== null && { dockWidth: fitted.dock }),
+      ...(fitted.inbox !== null && { inboxWidth: fitted.inbox }),
+      ...change,
+    });
+  // As far as a handle may take its sidebar: what the middle can spare.
+  const widest = (limit: { min: number; max: number }, drawn: number) =>
+    Math.max(limit.min, Math.min(limit.max, drawn + Math.max(0, fitted.spare)));
+
   // The sidebars' shortcuts. In the capture phase, so it is this window's
   // before a focused terminal takes the key and sends it to the sandbox. Not
   // while a dialog is up: that is asking a question, and the window would
   // change under it.
   const dialogOpen = creatingProject || creatingIn !== null || confirmation !== null;
-  const inboxOpen = prefs.inboxOpen;
-  // Where the ticket and pull request flyouts stand: against the sidebar, or
-  // against its folded rail.
-  const flyoutRight = inboxOpen ? prefs.inboxWidth : 40;
-  const dockOpen = prefs.dockOpen;
   useEffect(() => {
     if (!server || dialogOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -328,19 +407,15 @@ export default function App() {
         setScreen((now) => (now === "search" ? null : "search"));
         return;
       }
-      const change = isShortcut(e, "t")
-        ? { inboxOpen: !inboxOpen }
-        : isShortcut(e, "b")
-          ? { dockOpen: !dockOpen }
-          : null;
-      if (!change) return;
+      const which: Folding | null = isShortcut(e, "t") ? "inbox" : isShortcut(e, "b") ? "dock" : null;
+      if (!which) return;
       e.preventDefault();
       e.stopPropagation();
-      setPrefs(change);
+      toggle(which);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [server, dialogOpen, inboxOpen, dockOpen, setPrefs]);
+  }, [server, dialogOpen, toggle]);
 
   // Keyed on the *names*, joined, rather than on the array: the list is a new
   // array every few seconds and re-subscribing to four sandboxes that often
@@ -610,28 +685,6 @@ export default function App() {
   }, [inbox, inboxOpen]);
 
   const groups = useMemo(() => group(projects, live), [projects, live]);
-
-  // The diff each worktree carries, lifted out of the polls for the tree.
-  //
-  // A projection rather than the whole record: `Poll` also carries the agent's
-  // captured screen, and handing the tree a prop it does not read would make
-  // the tree's own types claim it might. `polls` is a new object on every
-  // status frame, so this recomputes about as often either way -- the point is
-  // the narrower prop, not a saved comparison.
-  const session = sessions.find((s) => s.name === selected) ?? null;
-  // Selected but not ready to be looked at: asked for and not in the list yet,
-  // or in it and still being made. Every pane asks the sandbox about a working
-  // copy, and before the clone there is none -- so they are not mounted until
-  // there is, rather than each drawing its own error for half a minute.
-  const preparing =
-    (selected !== null && session === null) ||
-    session?.state === "creating" ||
-    session?.state === "seeding";
-  // Selected and never going to be ready: its sandbox is gone, or was never
-  // made. Every pane would ask the runtime about it and draw `sandbox not
-  // found`, which says what is missing and not why, so they are not mounted
-  // and the reason is shown instead.
-  const gone = session?.state === "dead";
 
   // The two asks below follow the name and not the record. The list is
   // fetched again every few seconds and each fetch is a new object, so
@@ -962,7 +1015,7 @@ export default function App() {
               handle beside each. A `--tree-width` on the root would be a
               second place for the same fact to live. */}
           <Tree
-            width={prefs.treeWidth}
+            width={fitted.tree}
             groups={groups}
             polls={polls}
             selected={selected}
@@ -989,12 +1042,12 @@ export default function App() {
 
           <Split
             label="Projects sidebar width"
-            value={prefs.treeWidth}
+            value={fitted.tree}
             min={LIMITS.treeWidth.min}
-            max={LIMITS.treeWidth.max}
+            max={widest(LIMITS.treeWidth, fitted.tree)}
             reset={DEFAULTS.treeWidth}
             grows="right"
-            onChange={(treeWidth) => setPrefs({ treeWidth })}
+            onChange={(treeWidth) => resize({ treeWidth })}
           />
 
           {preparing ? (
@@ -1136,22 +1189,22 @@ export default function App() {
               {/* Between the editor and the dock, so a drag on it takes width
                   from the middle and gives it to the right -- which is why
                   this one `grows="left"`. */}
-              {dockOpen && (
+              {fitted.dock !== null && (
                 <Split
                   label="Dock width"
-                  value={prefs.dockWidth}
+                  value={fitted.dock}
                   min={LIMITS.dockWidth.min}
-                  max={LIMITS.dockWidth.max}
+                  max={widest(LIMITS.dockWidth, fitted.dock)}
                   reset={DEFAULTS.dockWidth}
                   grows="left"
-                  onChange={(dockWidth) => setPrefs({ dockWidth })}
+                  onChange={(dockWidth) => resize({ dockWidth })}
                 />
               )}
               <Dock
-                width={prefs.dockWidth}
+                width={fitted.dock ?? prefs.dockWidth}
                 open={dockOpen}
                 keys={DOCK_KEYS}
-                onFold={() => setPrefs({ dockOpen: !dockOpen })}
+                onFold={() => toggle("dock")}
                 server={server}
                 session={session}
                 usage={(selected ? polls[selected]?.usage : undefined) ?? null}
@@ -1236,19 +1289,19 @@ export default function App() {
 
         {/* Beside the workspace and beside every screen, which is the point
             of it being a sidebar rather than a destination. */}
-        {inboxOpen && (
+        {fitted.inbox !== null && (
           <Split
             label="Tickets sidebar width"
-            value={prefs.inboxWidth}
+            value={fitted.inbox}
             min={LIMITS.inboxWidth.min}
-            max={LIMITS.inboxWidth.max}
+            max={widest(LIMITS.inboxWidth, fitted.inbox)}
             reset={DEFAULTS.inboxWidth}
             grows="left"
-            onChange={(inboxWidth) => setPrefs({ inboxWidth })}
+            onChange={(inboxWidth) => resize({ inboxWidth })}
           />
         )}
         <InboxBar
-          width={prefs.inboxWidth}
+          width={fitted.inbox ?? prefs.inboxWidth}
           open={inboxOpen}
           shut={prefs.inboxShut}
           view={prefs.inboxView}
@@ -1263,7 +1316,7 @@ export default function App() {
           showing={showing}
           showingPull={showingPull}
           keys={TICKETS_KEYS}
-          onFold={() => setPrefs({ inboxOpen: !inboxOpen })}
+          onFold={() => toggle("inbox")}
           onShut={(inboxShut) => setPrefs({ inboxShut })}
           onView={(inboxView) => setPrefs({ inboxView })}
           onRefresh={readInbox}

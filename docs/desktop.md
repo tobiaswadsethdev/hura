@@ -162,6 +162,15 @@ one back; the separator is focusable and takes arrow keys, `Home`, `End` and
 change at all. Widths are this window's own and kept on this machine -- see
 [settings](#settings).
 
+**A narrow window keeps the middle.** When the sidebars are wider than the
+window has room for, they narrow toward their minimums so that what is open in
+the middle keeps at least 320 pixels, which is what it has at the default window
+size. When even that does not fit, the dock or the tickets sidebar folds to its
+rail: whichever you opened less recently, so opening one from its rail folds the
+other instead. None of this changes the widths you chose. Widen the window and
+they come back, so a laptop screen does not overwrite a layout set up on a wider
+one. Dragging a handle while the sidebars are narrowed keeps the widths you see.
+
 **Your tickets and pull requests are the sidebar on the far right**, beside the
 workspace and beside every screen. **Ctrl+Shift+T** (⌘⇧T on macOS) folds it to a
 rail of two counts and opens it again, from anywhere. See [Tickets and pull
