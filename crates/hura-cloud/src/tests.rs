@@ -1348,6 +1348,16 @@ async fn deleting_a_subscribed_account_cancels_its_subscription_first() {
     );
 }
 
+#[tokio::test]
+async fn the_privacy_policy_is_a_page() {
+    let Some(t) = service().await else { return };
+    let (status, _, page) = t.get_raw("/privacy").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("<title>hura privacy policy</title>"));
+    assert!(page.contains("<table>"), "tables are rendered");
+    assert!(page.contains("privacy@gethura.app"));
+}
+
 const SECRET: &str = "a-secret-the-desktop-made-for-this-one";
 
 impl Test {

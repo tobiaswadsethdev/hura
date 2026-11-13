@@ -88,6 +88,7 @@ hashes of either.
 | `POST /v1/billing/checkout` | `{url}`: Stripe Checkout, to subscribe. 409 when already subscribed, or with no Stripe configured |
 | `POST /v1/billing/portal` | `{url}`: Stripe's customer portal, to change or cancel the subscription and see invoices |
 | `POST /v1/webhooks/stripe` | Stripe's `customer.subscription.*` events, checked against `STRIPE_WEBHOOK_SECRET`. The account is the subscription's `metadata.account`, set at checkout; active, trialing or past due puts it on `STRIPE_PLAN`, anything else on `free`. An event older than the last applied is ignored. `GET /v1/me` says `can_subscribe` and the `subscription` (`status`, `current_period_end`, `cancel_at_period_end`) |
+| `GET /privacy` | the privacy policy, rendered from `docs/privacy-policy.md` |
 | `GET /v1/me/export` | everything kept about the account, as JSON: the account, its sign-ins, devices, push routes, trackers (filters and connection included) and what was last seen. Tokens are said to be kept and never shown |
 | `DELETE /v1/me` `{confirm: "delete"}` | deletes the account now and for good: the webhooks made on Jira and Fizzy are taken off first, then the account and everything under it, every device signed out. Codes still out for its addresses go too. Backups keep it until they rotate out |
 | `GET /v1/devices` | `[{id, name, platform, created_at, last_seen_at, current}]`, newest first; times in Unix seconds |

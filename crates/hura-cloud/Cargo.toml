@@ -27,6 +27,8 @@ sha2 = "0.11"
 subtle = "2"
 ring = "0.17"
 base64 = "0.22"
+# The privacy policy, from Markdown to the page at /privacy.
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]

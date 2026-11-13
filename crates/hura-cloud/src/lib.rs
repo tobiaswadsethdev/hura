@@ -132,6 +132,7 @@ pub fn app(state: Shared) -> Router {
         .route("/v1/billing/checkout", post(billing::checkout))
         .route("/v1/billing/portal", post(billing::portal))
         .route("/billing/done", get(billing::done))
+        .route("/privacy", get(integrations::privacy))
         .route("/v1/webhooks/stripe", post(billing::webhook))
         .route("/v1/webhooks/github", post(webhooks::github))
         .route("/v1/webhooks/fizzy/{id}", post(webhooks::fizzy))

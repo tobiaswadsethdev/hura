@@ -271,6 +271,23 @@ pub fn layout(title: &str, body: &str) -> String {
     )
 }
 
+/// `GET /privacy`: the privacy policy, from `docs/privacy-policy.md`.
+pub async fn privacy() -> Html<String> {
+    static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let page = PAGE.get_or_init(|| {
+        let text = include_str!("../../../docs/privacy-policy.md");
+        // The title is the page's own; the Markdown's first line is it.
+        let body = text.split_once('\n').map_or(text, |(_, rest)| rest);
+        let mut html = String::new();
+        pulldown_cmark::html::push_html(
+            &mut html,
+            pulldown_cmark::Parser::new_ext(body, pulldown_cmark::Options::ENABLE_TABLES),
+        );
+        layout("hura privacy policy", &html)
+    });
+    Html(page.clone())
+}
+
 pub fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

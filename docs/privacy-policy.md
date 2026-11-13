@@ -1,12 +1,6 @@
 # hura privacy policy
 
-> **Draft, not yet published.** Written from what the service stores as of
-> 2026-11-13 (`crates/hura-cloud`, `relay/`). Before it goes live: fill in the
-> bracketed parts, have it read by someone who knows GDPR, and publish it at a
-> stable address (for the App Store and the sign-in screens). Change it
-> whenever what is stored changes.
-
-*Last updated: [date of publishing]*
+*Last updated: 13 November 2026*
 
 This policy is about **hura cloud**, the service behind an account in the hura
 desktop and iPhone apps, and the **hura relay**, which delivers notifications
@@ -19,8 +13,8 @@ this policy is not about them.
 
 ## Who is responsible
 
-[Tobias Wadseth / company name], Sweden, is the controller of your personal
-data. Write to **[privacy@gethura.app]** about
+Tobias Wadseth, Sweden, is the controller of your personal
+data. Write to **[privacy@gethura.app](mailto:privacy@gethura.app)** about
 anything in this policy.
 
 ## What is kept, and why
@@ -69,7 +63,7 @@ keeps an IP address for one hour when a phone registers, for the same reason.
 
 **Server logs.** Errors and the service's own activity are logged with your
 account's identifier (a random ID), never your email or tokens, and kept for
-[30 days]. *Why:* to find and fix problems (legitimate interest).
+30 days. *Why:* to find and fix problems (legitimate interest).
 
 hura has **no analytics, no advertising and no tracking**, and sells nothing
 about you to anybody.
@@ -99,9 +93,9 @@ or the European Commission's standard contractual clauses.
 
 As long as you have an account. When you delete it, everything above is deleted
 at once, except: database backups, on hura's own server, which roll over
-within [30 days]; records of
+within 30 days; records of
 payments, which Stripe and hura must keep for as long as accounting law
-requires ([7 years] in Sweden); and logs, within [30 days].
+requires (7 years in Sweden); and logs, within 30 days.
 
 ## Your rights
 
@@ -112,7 +106,7 @@ requires ([7 years] in Sweden); and logs, within [30 days].
   the account and everything in it at once, cancels a subscription, and signs
   out every device.
 - **Correct it**, **restrict** or **object to** how it is used: write to
-  [privacy@gethura.app].
+  [privacy@gethura.app](mailto:privacy@gethura.app).
 - **Complain** to the Swedish Authority for Privacy Protection
   (Integritetsskyddsmyndigheten, [imy.se](https://www.imy.se)), or the
   authority where you live.
