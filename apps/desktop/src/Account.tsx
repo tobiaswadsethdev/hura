@@ -210,6 +210,10 @@ function SignedIn({
   const [devices, setDevices] = useState<CloudDevice[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Where the export was saved, once it has been.
+  const [saved, setSaved] = useState<string | null>(null);
+  // Asked once more before the account goes.
+  const [deleting, setDeleting] = useState(false);
   // Read through a ref: a new callback each render is not a reason to ask
   // the service again.
   const signedOut = useRef(onSignedOut);
@@ -289,6 +293,56 @@ function SignedIn({
           </span>
         </div>
       ))}
+
+      <h4>Your Data</h4>
+      <div className="setting-actions">
+        <span className="hint">
+          {saved ? (
+            <>
+              Saved to <strong>{saved}</strong>.
+            </>
+          ) : (
+            "Everything hura cloud keeps about you, as a JSON file. Tokens are never included."
+          )}
+        </span>
+        <button
+          className="quiet"
+          disabled={busy !== null}
+          onClick={() => void act("export", async () => setSaved(await api.cloudExport()))}
+        >
+          {busy === "export" ? "Exporting…" : "Export"}
+        </button>
+      </div>
+      {deleting ? (
+        <div className="setting-actions">
+          <span className="hint">
+            This deletes the account, its trackers and their tokens, and signs out every device, for
+            good. It cannot be undone.
+          </span>
+          <button className="quiet" disabled={busy !== null} onClick={() => setDeleting(false)}>
+            Keep It
+          </button>
+          <button
+            className="quiet danger"
+            disabled={busy !== null}
+            onClick={() =>
+              void act("delete", async () => {
+                await api.cloudDeleteAccount();
+                onSignedOut();
+              })
+            }
+          >
+            {busy === "delete" ? "Deleting…" : "Delete for Good"}
+          </button>
+        </div>
+      ) : (
+        <div className="setting-actions">
+          <span className="hint">Delete the account and everything in it, on every device.</span>
+          <button className="quiet danger" disabled={busy !== null} onClick={() => setDeleting(true)}>
+            Delete Account…
+          </button>
+        </div>
+      )}
 
       <div className="setting-actions">
         <span className="hint">

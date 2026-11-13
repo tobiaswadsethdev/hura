@@ -878,6 +878,34 @@ fn cloud_account() -> Result<CloudAccount, Failed> {
     cloud().account().map_err(cloud_failed)
 }
 
+/// Everything hura cloud keeps about the account, saved as JSON in the
+/// Downloads folder: where it was saved.
+#[tauri::command(async)]
+fn cloud_export(app: tauri::AppHandle) -> Result<String, Failed> {
+    use tauri::Manager as _;
+    let export = cloud().export().map_err(cloud_failed)?;
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| failed(format!("no Downloads folder: {e}")))?;
+    let day = export["exported_at"]
+        .as_str()
+        .and_then(|t| t.get(..10))
+        .unwrap_or("export")
+        .to_string();
+    let path = dir.join(format!("hura-account-{day}.json"));
+    let text = serde_json::to_string_pretty(&export).map_err(|e| failed(e.to_string()))?;
+    std::fs::write(&path, text)
+        .map_err(|e| failed(format!("could not save {}: {e}", path.display())))?;
+    Ok(path.display().to_string())
+}
+
+/// Deletes the account, on every device, and signs this machine out.
+#[tauri::command(async)]
+fn cloud_delete_account() -> Result<(), Failed> {
+    cloud().delete_account().map_err(cloud_failed)
+}
+
 #[tauri::command(async)]
 fn cloud_devices() -> Result<Vec<CloudDevice>, Failed> {
     cloud().devices().map_err(cloud_failed)
@@ -1747,6 +1775,8 @@ fn main() {
             cloud_send_code,
             cloud_verify,
             cloud_sign_in_with_apple,
+            cloud_export,
+            cloud_delete_account,
             cloud_cancel_apple,
             cloud_sign_out,
             cloud_account,

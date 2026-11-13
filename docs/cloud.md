@@ -80,6 +80,8 @@ hashes of either.
 | `POST /v1/sign-in/apple/finish` `{secret, code}` | the same answer as signing in, with `email` (the Apple ID's verified address, or null), once, within ten minutes of the start |
 | `POST /v1/token` `{refresh_token}` | `{access_token, expires_in}` |
 | `GET /v1/me` | `{account, plan, sign_ins: [{provider, email}]}` |
+| `GET /v1/me/export` | everything kept about the account, as JSON: the account, its sign-ins, devices, push routes, trackers (filters and connection included) and what was last seen. Tokens are said to be kept and never shown |
+| `DELETE /v1/me` `{confirm: "delete"}` | deletes the account now and for good: the webhooks made on Jira and Fizzy are taken off first, then the account and everything under it, every device signed out. Codes still out for its addresses go too. Backups keep it until they rotate out |
 | `GET /v1/devices` | `[{id, name, platform, created_at, last_seen_at, current}]`, newest first; times in Unix seconds |
 | `DELETE /v1/devices/{id}` | signs that device out; its tokens stop working at once |
 | `POST /v1/sign-out` | signs out the device asking |

@@ -123,6 +123,9 @@ private struct SignedIn: View {
     @Environment(AccountModel.self) private var account
     @Environment(TrackersModel.self) private var trackers
     @State private var confirmSignOut = false
+    @State private var confirmDelete = false
+    /// The export, once it has been fetched, to share or save.
+    @State private var exported: URL?
 
     var body: some View {
         List {
@@ -147,11 +150,33 @@ private struct SignedIn: View {
             } footer: {
                 Text("This iPhone stops showing your trackers. Your account keeps them for your other devices.")
             }
+            Section {
+                if let exported {
+                    ShareLink(item: exported) { Label("Share Export", systemImage: "square.and.arrow.up") }
+                } else {
+                    Button("Export My Data") { Task { exported = await account.export() } }
+                        .disabled(account.busy)
+                }
+                Button("Delete Account", role: .destructive) { confirmDelete = true }
+                    .disabled(account.busy)
+            } header: {
+                Text("Your Data")
+            } footer: {
+                Text("The export is everything hura cloud keeps about you, as JSON. Tokens are never included.")
+            }
             if let error = account.error {
                 Section { Text(error).foregroundStyle(.red).font(.callout) }
             }
         }
         .refreshable { await account.load() }
+        .alert("Delete your hura cloud account?", isPresented: $confirmDelete) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete for Good", role: .destructive) {
+                Task { await account.deleteAccount(trackers: trackers) }
+            }
+        } message: {
+            Text("This deletes the account, its trackers and their tokens, and signs out every device. It can't be undone.")
+        }
         .alert("Sign out of hura cloud?", isPresented: $confirmSignOut) {
             Button("Cancel", role: .cancel) {}
             Button("Sign Out", role: .destructive) { Task { await account.signOut(trackers: trackers) } }

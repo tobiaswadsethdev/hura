@@ -945,6 +945,103 @@ async fn an_apple_token_that_does_not_check_out_is_refused() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+#[tokio::test]
+async fn an_account_is_exported_without_its_secrets_and_deleted_with_everything() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("gone@example.com", "Mac").await;
+    let phone = t.sign_in("gone@example.com", "iPhone").await;
+    let other = t.sign_in("stays@example.com", "Mac").await;
+    let at = token(&me, "access_token");
+    let gh = json!({ "kind": "git-hub", "name": "gh" });
+    let (status, _) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": gh, "token": "ghp_secret" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, export) = t.call(Method::GET, "/v1/me/export", Some(at), None).await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    assert_eq!(export["account"]["id"], me["account"]);
+    assert_eq!(export["sign_ins"][0]["email"], "gone@example.com");
+    assert_eq!(export["devices"].as_array().unwrap().len(), 2);
+    assert_eq!(export["trackers"][0]["source"]["name"], "gh");
+    assert_eq!(export["trackers"][0]["token"], "kept, not shown");
+    let text = export.to_string();
+    assert!(!text.contains("ghp_secret"));
+    assert!(!text.contains(token(&me, "refresh_token")));
+
+    // Not by mistake.
+    let (status, _) = t
+        .call(
+            Method::DELETE,
+            "/v1/me",
+            Some(at),
+            Some(json!({ "confirm": "yes" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = t
+        .call(
+            Method::DELETE,
+            "/v1/me",
+            Some(at),
+            Some(json!({ "confirm": "delete" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Every device out, nothing left of it, and the other account untouched.
+    for session in [&me, &phone] {
+        let (status, _) = t
+            .call(
+                Method::GET,
+                "/v1/me",
+                Some(token(session, "access_token")),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    for table in [
+        "accounts",
+        "sign_ins",
+        "devices",
+        "trackers",
+        "account_keys",
+    ] {
+        let left: i64 = sqlx::query_scalar(&format!(
+            "select count(*) from {table} where {} = $1",
+            if table == "accounts" {
+                "id"
+            } else {
+                "account_id"
+            }
+        ))
+        .bind(uuid::Uuid::parse_str(me["account"].as_str().unwrap()).unwrap())
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap();
+        assert_eq!(left, 0, "{table}");
+    }
+    let (status, _) = t
+        .call(
+            Method::GET,
+            "/v1/me",
+            Some(token(&other, "access_token")),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The address can sign up again, as a new account.
+    let again = t.sign_in("gone@example.com", "Mac").await;
+    assert_ne!(again["account"], me["account"]);
+}
+
 const SECRET: &str = "a-secret-the-desktop-made-for-this-one";
 
 impl Test {

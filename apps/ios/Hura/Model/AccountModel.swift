@@ -123,6 +123,35 @@ final class AccountModel {
         await trackers.refresh()
     }
 
+    /// The account's data, saved as a file to share or keep: where it is.
+    func export() async -> URL? {
+        var saved: URL?
+        await working {
+            let data = try await cloud.export()
+            let day = Date().formatted(.iso8601.year().month().day())
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("hura-account-\(day).json")
+            try data.write(to: url, options: .atomic)
+            saved = url
+        }
+        return saved
+    }
+
+    /// Deletes the account on every device, for good, which leaves this
+    /// phone signed out with no trackers.
+    func deleteAccount(trackers: TrackersModel) async {
+        await trackers.leaveCloud()
+        var deleted = false
+        await working {
+            try await cloud.deleteAccount()
+            deleted = true
+        }
+        guard deleted else { return }
+        session = nil
+        account = nil
+        devices = []
+        await trackers.refresh()
+    }
+
     /// Signs another device out; its tokens stop working at once.
     func signOut(device: CloudDevice) async {
         await working {

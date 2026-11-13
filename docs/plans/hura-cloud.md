@@ -213,6 +213,15 @@ deleted.
   service.
 - [ ] **6. Ready for others.** The master key in a KMS, monitoring, rate
   limits, export and deletion, plans enforced, billing.
+  - [x] Export and deletion: `GET /v1/me/export` and `DELETE /v1/me`, with
+    buttons in both apps (the App Store asks for deletion in the app). No
+    Apple token is held, so there is none to revoke.
+  - [ ] Rate limits.
+  - [ ] Plans enforced.
+  - [ ] Billing, with Stripe.
+  - [ ] A privacy policy.
+  - The master key stays a Coolify secret for now (decided 2026-11-13), and
+    Uptime Kuma, run beside it in Coolify, watches `/healthz`.
 
 ## Not decided yet
 

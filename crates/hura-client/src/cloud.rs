@@ -396,6 +396,20 @@ impl Cloud {
         parse(&self.authorized("GET", "/v1/me", None)?)
     }
 
+    /// Everything the service keeps about the account, as it sends it:
+    /// tokens said to be kept and never shown.
+    pub fn export(&self) -> Result<Value, Failure> {
+        parse(&self.authorized("GET", "/v1/me/export", None)?)
+    }
+
+    /// Deletes the account and everything under it, on every device, and
+    /// signs this machine out. For good.
+    pub fn delete_account(&self) -> Result<(), Failure> {
+        self.authorized("DELETE", "/v1/me", Some(&json!({ "confirm": "delete" })))?;
+        self.forget();
+        Ok(())
+    }
+
     pub fn devices(&self) -> Result<Vec<Device>, Failure> {
         parse(&self.authorized("GET", "/v1/devices", None)?)
     }
@@ -1063,5 +1077,23 @@ mod tests {
         assert_eq!(finish.body.as_ref().unwrap()["secret"], secret);
         assert_eq!(finish.body.as_ref().unwrap()["code"], "the-code");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn deleting_the_account_signs_this_machine_out() {
+        let (cloud, service, _) = signed_in();
+        service.on("DELETE /v1/me", 204, "");
+        cloud.delete_account().unwrap();
+        assert!(!cloud.signed_in());
+        let sent = &service.sent("DELETE /v1/me")[0];
+        assert_eq!(sent.body.as_ref().unwrap()["confirm"], "delete");
+    }
+
+    #[test]
+    fn an_account_that_could_not_be_deleted_stays_signed_in() {
+        let (cloud, service, _) = signed_in();
+        service.on("DELETE /v1/me", 500, r#"{"error":"down"}"#);
+        assert!(cloud.delete_account().is_err());
+        assert!(cloud.signed_in());
     }
 }

@@ -16,6 +16,7 @@ use axum::Router;
 use axum::routing::{delete, get, post, put};
 use sqlx::PgPool;
 
+mod account;
 pub mod apple;
 mod apple_web;
 mod auth;
@@ -104,7 +105,8 @@ pub fn app(state: Shared) -> Router {
         .route("/v1/oauth/apple/callback", post(apple_web::back))
         .route("/v1/token", post(auth::refresh))
         .route("/v1/sign-out", post(devices::sign_out))
-        .route("/v1/me", get(devices::me))
+        .route("/v1/me", get(devices::me).delete(account::delete))
+        .route("/v1/me/export", get(account::export))
         .route("/v1/devices", get(devices::list))
         .route("/v1/devices/{id}", delete(devices::revoke))
         .route("/v1/trackers", get(trackers::list).post(trackers::add))
