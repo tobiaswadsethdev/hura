@@ -36,7 +36,7 @@ async fn run() -> Result<(), String> {
         keys: config.keys,
         relay: hura_cloud::push::Relay::https(config.relay),
         live: Default::default(),
-        apple: hura_cloud::apple::Apple::new(config.apple_audience),
+        apple: hura_cloud::apple::Apple::new(config.apple_audience, config.apple_services_id),
         web: hura_cloud::web::Web::https(),
         url: config.url,
         setup: hura_cloud::new_setup_token(),

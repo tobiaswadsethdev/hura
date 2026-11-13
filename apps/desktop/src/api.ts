@@ -274,6 +274,10 @@ export const api = {
   cloudSendCode: (email: string) => invoke<void>("cloud_send_code", { email }),
   cloudVerify: (email: string, code: string) =>
     invoke<CloudStatus>("cloud_verify", { email, code }),
+  // Signing in with Apple in the system's browser: answers once the browser
+  // comes back; cancelling stops the wait.
+  cloudSignInWithApple: () => invoke<CloudStatus>("cloud_sign_in_with_apple"),
+  cloudCancelApple: () => invoke<void>("cloud_cancel_apple"),
   cloudSignOut: () => invoke<void>("cloud_sign_out"),
   cloudAccount: () => invoke<CloudAccount>("cloud_account"),
   cloudDevices: () => invoke<CloudDevice[]>("cloud_devices"),

@@ -17,6 +17,7 @@ use axum::routing::{delete, get, post, put};
 use sqlx::PgPool;
 
 pub mod apple;
+mod apple_web;
 mod auth;
 pub mod config;
 pub mod crypto;
@@ -98,6 +99,9 @@ pub fn app(state: Shared) -> Router {
         .route("/v1/sign-in/email", post(sign_in::send_code))
         .route("/v1/sign-in/email/verify", post(sign_in::verify))
         .route("/v1/sign-in/apple", post(apple::sign_in))
+        .route("/v1/sign-in/apple/start", post(apple_web::start))
+        .route("/v1/sign-in/apple/finish", post(apple_web::finish))
+        .route("/v1/oauth/apple/callback", post(apple_web::back))
         .route("/v1/token", post(auth::refresh))
         .route("/v1/sign-out", post(devices::sign_out))
         .route("/v1/me", get(devices::me))

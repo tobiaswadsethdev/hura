@@ -945,6 +945,156 @@ async fn an_apple_token_that_does_not_check_out_is_refused() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+const SECRET: &str = "a-secret-the-desktop-made-for-this-one";
+
+impl Test {
+    /// Starts a browser sign-in with Apple: the state and the nonce's hash in
+    /// the address Apple is sent to.
+    async fn apple_start(&self) -> (String, String) {
+        let body = json!({
+            "secret": SECRET, "port": 50000,
+            "device": { "name": "MacBook", "platform": "macos" },
+        });
+        let (status, v) = self
+            .call(Method::POST, "/v1/sign-in/apple/start", None, Some(body))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        let url = v["url"].as_str().unwrap();
+        assert!(url.starts_with(
+            "https://appleid.apple.com/auth/authorize?client_id=dev.example.app.signin&"
+        ));
+        assert!(url.contains("response_mode=form_post"));
+        let param = |name: &str| {
+            url.split(['?', '&'])
+                .find_map(|p| p.strip_prefix(&format!("{name}=")))
+                .unwrap()
+                .to_string()
+        };
+        (param("state"), param("nonce"))
+    }
+
+    /// Apple posting back to the callback: where the browser is sent next.
+    async fn apple_back(&self, form: String) -> (StatusCode, String) {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/oauth/apple/callback")
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(Body::from(form))
+            .unwrap();
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        let location = response
+            .headers()
+            .get("location")
+            .map(|v| v.to_str().unwrap().to_string())
+            .unwrap_or_default();
+        (response.status(), location)
+    }
+
+    async fn apple_finish(&self, secret: &str, code: &str) -> (StatusCode, Value) {
+        let body = json!({ "secret": secret, "code": code });
+        self.call(Method::POST, "/v1/sign-in/apple/finish", None, Some(body))
+            .await
+    }
+}
+
+/// A token for the Services ID, carrying the nonce hash as Apple was given it.
+fn apple_web_token(sub: &str, email: Option<&str>, hashed_nonce: &str) -> String {
+    let mut claims = apple_claims(sub, email, "unused");
+    claims["aud"] = json!("dev.example.app.signin");
+    claims["nonce"] = json!(hashed_nonce);
+    apple_token(claims)
+}
+
+#[tokio::test]
+async fn signs_in_with_apple_through_a_browser_back_to_the_computer_it_began_on() {
+    let Some(t) = service().await else { return };
+    let phone = t
+        .apple(apple_token(apple_claims("010.apple", None, "n")), "n")
+        .await
+        .1;
+
+    let (made, nonce) = t.apple_start().await;
+    let id_token = apple_web_token("010.apple", None, &nonce);
+    let (status, to) = t
+        .apple_back(format!("state={made}&code=c&id_token={id_token}"))
+        .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let code = to
+        .strip_prefix("http://127.0.0.1:50000/apple?code=")
+        .unwrap_or_else(|| panic!("sent to {to}"));
+
+    // The code alone, or with somebody else's secret, is no use.
+    let (status, _) = t
+        .apple_finish("another-secret-of-the-same-length!!", code)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, desktop) = t.apple_finish(SECRET, code).await;
+    assert_eq!(status, StatusCode::OK, "{desktop}");
+    assert_eq!(
+        desktop["account"], phone["account"],
+        "the same Apple ID, the same account"
+    );
+    assert!(desktop["refresh_token"].is_string());
+
+    // Once.
+    let (status, _) = t.apple_finish(SECRET, code).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, to) = t
+        .apple_back(format!("state={made}&code=c&id_token={id_token}"))
+        .await;
+    assert_eq!(
+        (status, to.as_str()),
+        (StatusCode::OK, ""),
+        "an expired page"
+    );
+
+    let (_, devices) = t
+        .call(
+            Method::GET,
+            "/v1/devices",
+            Some(token(&desktop, "access_token")),
+            None,
+        )
+        .await;
+    let names: Vec<&str> = devices
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), 2, "{devices}");
+    assert!(names.contains(&"MacBook"));
+}
+
+#[tokio::test]
+async fn a_browser_sign_in_that_does_not_check_out_goes_back_with_why() {
+    let Some(t) = service().await else { return };
+    let (made, nonce) = t.apple_start().await;
+    // The iOS app's token, not the Services ID's.
+    let mut claims = apple_claims("011.apple", None, "unused");
+    claims["nonce"] = json!(nonce);
+    let (_, to) = t
+        .apple_back(format!("state={made}&id_token={}", apple_token(claims)))
+        .await;
+    assert!(
+        to.starts_with("http://127.0.0.1:50000/apple?error="),
+        "{to}"
+    );
+
+    let (made, _) = t.apple_start().await;
+    let (_, to) = t
+        .apple_back(format!("state={made}&error=user_cancelled_authorize"))
+        .await;
+    assert_eq!(to, "http://127.0.0.1:50000/apple?error=cancelled");
+
+    // Another nonce than this sign-in's.
+    let (made, _) = t.apple_start().await;
+    let token = apple_web_token("011.apple", None, "0000");
+    let (_, to) = t.apple_back(format!("state={made}&id_token={token}")).await;
+    assert!(to.contains("error="), "{to}");
+}
+
 const MANIFEST_APP: &str = r#"{"id":1,"slug":"hura-cloud","client_id":"Iv1.client","client_secret":"shh","webhook_secret":"hook-secret","pem":"-----","html_url":"https://github.com/apps/hura-cloud"}"#;
 
 impl Test {

@@ -21,6 +21,7 @@ runs anywhere else.
 | `HURA_CLOUD_MASTER_KEY` | required: 32 bytes in base64, from `openssl rand -base64 32`. It wraps each account's key for its trackers' tokens, so **losing it loses every stored token**: keep a copy somewhere safe that is not the database's backups |
 | `HURA_CLOUD_RELAY` | the push relay tracker notifications go through, `https://hura-relay.twadseth.workers.dev` unless set. The service sends only there, whatever a phone says |
 | `HURA_CLOUD_APPLE_AUDIENCE` | the iOS app's bundle ID, which a Sign in with Apple token must be for: `dev.tobiaswadseth.hura.ios` unless set |
+| `HURA_CLOUD_APPLE_SERVICES_ID` | the Services ID the desktop signs in with Apple as, through the browser. Its return URL at Apple is `{HURA_CLOUD_URL}/v1/oauth/apple/callback`, under the iOS app as its primary App ID so an Apple ID is the same account on both. Unset, only the iOS app signs in with Apple |
 | `HURA_CLOUD_URL` | where the service is reached from outside, `https://api.gethura.app` unless set: the address in the callbacks and the webhook it gives GitHub and Atlassian |
 | `HURA_CLOUD_MAIL=log` | prints codes instead of sending them, for a laptop. Without this or a Resend key the service will not start |
 
@@ -74,6 +75,9 @@ hashes of either.
 | `POST /v1/sign-in/email` `{email}` | sends a six-digit code. 204 whether or not the address has an account; 429 if one was sent in the last minute (five an hour at most) |
 | `POST /v1/sign-in/email/verify` `{email, code, device: {name, platform}}` | `{account, device, refresh_token, access_token, expires_in}`. Signs in to the address's account, made if it has none. A code lasts ten minutes, is used once, and is spent after five wrong tries |
 | `POST /v1/sign-in/apple` `{identity_token, nonce, device: {name, platform}}` | the same answer, for Sign in with Apple in the iOS app. The token's signature is checked against Apple's published keys, and it must be for the app (`HURA_CLOUD_APPLE_AUDIENCE`), unexpired, and carry the SHA-256 of `nonce`. It signs in to the account this Apple ID used before, or one whose verified address it shares (never a relayed "hide my email" one), or a new one |
+| `POST /v1/sign-in/apple/start` `{secret, port, device: {name, platform}}` | `{url}`: where to send the browser to sign in with Apple, for the desktop. `secret` is the app's own (kept as its hash); `port` is where on 127.0.0.1 it waits for the browser to come back. 409 without `HURA_CLOUD_APPLE_SERVICES_ID` |
+| `POST /v1/oauth/apple/callback` | Apple posts the identity token here (`form_post`); it is checked as the iOS app's is, but for the Services ID, and the browser sent on to `http://127.0.0.1:{port}/apple?code=…`, or `?error=…`. Back on the computer that started, never another: a sign-in link somebody else started signs nobody in for them |
+| `POST /v1/sign-in/apple/finish` `{secret, code}` | the same answer as signing in, with `email` (the Apple ID's verified address, or null), once, within ten minutes of the start |
 | `POST /v1/token` `{refresh_token}` | `{access_token, expires_in}` |
 | `GET /v1/me` | `{account, plan, sign_ins: [{provider, email}]}` |
 | `GET /v1/devices` | `[{id, name, platform, created_at, last_seen_at, current}]`, newest first; times in Unix seconds |

@@ -1,12 +1,13 @@
-//! Signing in with Apple, from the iOS app.
+//! Signing in with Apple, from the iOS app (here) and from a browser for
+//! the desktop ([`crate::apple_web`]).
 //!
 //! **The app does the signing in**, with AuthenticationServices, and hands
 //! over the identity token Apple gave it: a JWT that Apple signed, saying
 //! which Apple ID (`sub`), for which app (`aud`, the bundle ID), and the
 //! address if the person shared it. This checks the signature against
 //! Apple's published keys and the claims against this service, and signs a
-//! device in. No key of Apple's is needed for that; the Services ID and the
-//! key a browser sign-in needs come with the desktop's.
+//! device in. No key of Apple's is needed for that, nor for a browser's
+//! token, which Apple posts back with the Services ID as its `aud`.
 //!
 //! **A nonce ties the token to this sign-in**: the app makes one, gives
 //! Apple its SHA-256, and sends the nonce itself here, so a token seen
@@ -48,8 +49,11 @@ const KEYS_AT_MOST_EVERY: Duration = Duration::from_secs(60);
 
 /// Apple's published keys, and the app the tokens must be for.
 pub struct Apple {
-    /// The bundle ID: what `aud` must be.
+    /// The bundle ID: what `aud` must be for the iOS app's tokens.
     pub audience: String,
+    /// The Services ID: what it must be for a browser's, and without one a
+    /// browser cannot sign in.
+    pub services_id: Option<String>,
     keys: Keys,
 }
 
@@ -70,13 +74,14 @@ struct Jwk {
 }
 
 impl Apple {
-    pub fn new(audience: String) -> Self {
+    pub fn new(audience: String, services_id: Option<String>) -> Self {
         let agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(10)))
             .build()
             .into();
         Apple {
             audience,
+            services_id,
             keys: Keys::Fetched {
                 agent,
                 cache: Mutex::new(None),
@@ -88,6 +93,7 @@ impl Apple {
     pub(crate) fn fixed(audience: &str, kid: &str, n: &str) -> Self {
         Apple {
             audience: audience.into(),
+            services_id: Some(format!("{audience}.signin")),
             keys: Keys::Fixed(vec![Jwk {
                 kid: kid.into(),
                 n: n.into(),
@@ -141,9 +147,14 @@ impl Apple {
         }
     }
 
-    /// The Apple ID a token is for, and its address when Apple says it is
-    /// verified; or why the token is not one to sign in with.
-    pub(crate) async fn verify(&self, token: &str, nonce: &str) -> Result<Identity> {
+    /// The Apple ID a token for `audience` is for, and its address when Apple
+    /// says it is verified; or why the token is not one to sign in with.
+    pub(crate) async fn verify(
+        &self,
+        token: &str,
+        nonce: &str,
+        audience: &str,
+    ) -> Result<Identity> {
         let mut parts = token.trim().split('.');
         let (Some(head), Some(body), Some(signature), None) =
             (parts.next(), parts.next(), parts.next(), parts.next())
@@ -178,7 +189,7 @@ impl Apple {
             .map(|b| format!("{b:02x}"))
             .collect();
         if claims.iss != ISSUER
-            || claims.aud != self.audience
+            || claims.aud != audience
             || claims.exp < now
             || claims.nonce.as_deref() != Some(expected_nonce.as_str())
             || claims.sub.is_empty()
@@ -217,7 +228,7 @@ pub(crate) struct Identity {
     pub email: Option<String>,
 }
 
-fn refused() -> Error {
+pub(crate) fn refused() -> Error {
     Error::new(
         axum::http::StatusCode::UNAUTHORIZED,
         "Apple's sign-in could not be checked; try again",
@@ -240,7 +251,7 @@ pub async fn sign_in(
     let (name, platform) = sign_in::device_named(&body.device)?;
     let who = state
         .apple
-        .verify(&body.identity_token, &body.nonce)
+        .verify(&body.identity_token, &body.nonce, &state.apple.audience)
         .await?;
     let mut tx = state.db.begin().await?;
     let account = account_for(&mut tx, &who).await?;
@@ -251,7 +262,7 @@ pub async fn sign_in(
 
 /// The account an Apple ID signs in to: the one it signed in to before; one
 /// whose verified address it shares, which it joins; or a new one.
-async fn account_for(db: &mut PgConnection, who: &Identity) -> Result<Uuid> {
+pub(crate) async fn account_for(db: &mut PgConnection, who: &Identity) -> Result<Uuid> {
     let before: Option<Uuid> = sqlx::query_scalar(
         "select account_id from sign_ins where provider = 'apple' and subject = $1",
     )
