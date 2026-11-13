@@ -217,7 +217,8 @@ deleted.
     buttons in both apps (the App Store asks for deletion in the app). No
     Apple token is held, so there is none to revoke.
   - [x] Rate limits: per address, in memory, tightest on signing in.
-  - [ ] Plans enforced.
+  - [x] Plans enforced: a tracker or filter past the plan's limits is
+    refused (402), checked inside the change's transaction.
   - [ ] Billing, with Stripe.
   - [ ] A privacy policy.
   - The master key stays a Coolify secret for now (decided 2026-11-13), and

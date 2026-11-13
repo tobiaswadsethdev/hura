@@ -1089,6 +1089,76 @@ async fn a_client_asking_too_often_is_told_to_wait() {
     assert_ne!(hook.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
+#[tokio::test]
+async fn a_plan_with_limits_refuses_what_would_go_past_them() {
+    let Some(t) = service().await else { return };
+    sqlx::query("insert into plans (id, max_trackers, max_filters, min_read_seconds) values ('small', 1, 1, 60)")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    let me = t.sign_in("small@example.com", "Mac").await;
+    sqlx::query("update accounts set plan = 'small'")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    let at = token(&me, "access_token");
+    let jira = |filters: usize| {
+        let jql: Vec<Value> = (0..filters)
+            .map(|i| json!({ "name": format!("f{i}"), "jql": "project = A" }))
+            .collect();
+        json!({ "kind": "jira", "name": "work", "site": "https://work.atlassian.net",
+                "email": "me@example.com", "jql_filters": jql })
+    };
+    let (status, list) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": jira(1) })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+
+    // A second tracker, or a second filter, is past the plan.
+    let gh = json!({ "kind": "git-hub", "name": "gh" });
+    let (status, said) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": gh })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(said["error"], "your plan has room for 1 tracker");
+    let (status, _) = t
+        .call(
+            Method::PUT,
+            "/v1/trackers/work",
+            Some(at),
+            Some(json!({ "source": jira(2) })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+
+    // Nothing was kept of either, and what is within it still changes.
+    let (_, list) = t.call(Method::GET, "/v1/trackers", Some(at), None).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(
+        list[0]["source"]["jql_filters"].as_array().unwrap().len(),
+        1
+    );
+    let (status, _) = t
+        .call(
+            Method::PUT,
+            "/v1/trackers/work",
+            Some(at),
+            Some(json!({ "source": jira(0) })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
 const SECRET: &str = "a-secret-the-desktop-made-for-this-one";
 
 impl Test {

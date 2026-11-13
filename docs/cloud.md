@@ -82,6 +82,7 @@ hashes of either.
 | `POST /v1/token` `{refresh_token}` | `{access_token, expires_in}` |
 | `GET /v1/me` | `{account, plan, sign_ins: [{provider, email}]}` |
 | (any) | **429** with `Retry-After` when an address asks too often: 20 a minute for signing in and `/v1/token` (bursts of 10), 240 for `/v1/tracker` (120), 600 for the rest (200). Webhooks and `/healthz` are not counted |
+| (adding or changing trackers) | **402** `your plan has room for N trackers` (or filters) when a change would take the account past its plan's `max_trackers` or `max_filters`, counted across all its trackers; connecting through GitHub or Jira says the same on its page. Only growing past a limit is refused: an account already over one can still edit and remove. `free` has no limits |
 | `GET /v1/me/export` | everything kept about the account, as JSON: the account, its sign-ins, devices, push routes, trackers (filters and connection included) and what was last seen. Tokens are said to be kept and never shown |
 | `DELETE /v1/me` `{confirm: "delete"}` | deletes the account now and for good: the webhooks made on Jira and Fizzy are taken off first, then the account and everything under it, every device signed out. Codes still out for its addresses go too. Backups keep it until they rotate out |
 | `GET /v1/devices` | `[{id, name, platform, created_at, last_seen_at, current}]`, newest first; times in Unix seconds |

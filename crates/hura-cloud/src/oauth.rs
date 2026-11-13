@@ -433,6 +433,7 @@ async fn apply_github(
 ) -> Result<Response> {
     let app = integrations::github(state).await?.ok_or_else(not_set_up)?;
     let mut tx = state.db.begin().await?;
+    let before = crate::plans::usage(&mut tx, account).await?;
     let existing: Option<Jsonb<Source>> = sqlx::query_scalar(
         "select source from trackers where account_id = $1
          and (connection->>'provider' = 'github' and lower(connection->>'login') = lower($2)
@@ -461,6 +462,9 @@ async fn apply_github(
     let connection =
         json!({ "provider": "github", "login": login, "expires_at": tokens.expires_at() });
     keep(state, &mut tx, account, &source, &tokens, connection).await?;
+    if let Err(e) = crate::plans::allowed(&before, &crate::plans::usage(&mut tx, account).await?) {
+        return Ok(done(state, return_to, "GitHub", Err(e.message())));
+    }
     tx.commit().await?;
 
     // A user token reads only where the app is installed: with nowhere yet,
@@ -504,6 +508,7 @@ async fn apply_jira(
     // changes at each use: the sites share it as a grant, renewed together.
     let grant = token::mint("")?;
     let mut tx = state.db.begin().await?;
+    let before = crate::plans::usage(&mut tx, account).await?;
     let mut names = Vec::new();
     for (cloud_id, url) in &sites {
         let url = url.as_str();
@@ -554,6 +559,9 @@ async fn apply_jira(
         });
         keep(state, &mut tx, account, &source, &tokens, connection).await?;
         names.push(source.name);
+    }
+    if let Err(e) = crate::plans::allowed(&before, &crate::plans::usage(&mut tx, account).await?) {
+        return Ok(done(state, return_to, "Jira", Err(e.message())));
     }
     tx.commit().await?;
     // A webhook on each site, to read it the moment something of yours

@@ -32,6 +32,7 @@ mod live;
 pub mod mail;
 mod oauth;
 mod outbound;
+mod plans;
 pub mod push;
 pub mod rate;
 mod seen;
