@@ -985,7 +985,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hura-client"
-version = "0.51.0"
+version = "0.52.0"
 dependencies = [
  "hura-core",
  "hura-proto",
@@ -1000,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "hura-cloud"
-version = "0.51.0"
+version = "0.52.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1022,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "hura-core"
-version = "0.51.0"
+version = "0.52.0"
 dependencies = [
  "sbx-client",
  "serde",
@@ -1035,7 +1035,7 @@ dependencies = [
 
 [[package]]
 name = "hura-proto"
-version = "0.51.0"
+version = "0.52.0"
 dependencies = [
  "base64 0.23.1",
  "hura-core",
@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "hurad"
-version = "0.51.0"
+version = "0.52.0"
 dependencies = [
  "axum",
  "axum-server",
@@ -1896,7 +1896,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sbx-client"
-version = "0.51.0"
+version = "0.52.0"
 dependencies = [
  "serde",
  "serde_json",
