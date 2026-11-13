@@ -22,6 +22,7 @@ runs anywhere else.
 | `HURA_CLOUD_RELAY` | the push relay tracker notifications go through, `https://hura-relay.twadseth.workers.dev` unless set. The service sends only there, whatever a phone says |
 | `HURA_CLOUD_APPLE_AUDIENCE` | the iOS app's bundle ID, which a Sign in with Apple token must be for: `dev.tobiaswadseth.hura.ios` unless set |
 | `HURA_CLOUD_APPLE_SERVICES_ID` | the Services ID the desktop signs in with Apple as, through the browser. Its return URL at Apple is `{HURA_CLOUD_URL}/v1/oauth/apple/callback`, under the iOS app as its primary App ID so an Apple ID is the same account on both. Unset, only the iOS app signs in with Apple |
+| `HURA_CLOUD_CLIENT_IP_HEADER` | the header the proxy in front puts the client's address in, which rate limits count by: `CF-Connecting-IP` unless set, for Cloudflare. Set it empty to count by the connection's address, with nothing in front. Only trust it when every request comes through that proxy |
 | `HURA_CLOUD_URL` | where the service is reached from outside, `https://api.gethura.app` unless set: the address in the callbacks and the webhook it gives GitHub and Atlassian |
 | `HURA_CLOUD_MAIL=log` | prints codes instead of sending them, for a laptop. Without this or a Resend key the service will not start |
 
@@ -80,6 +81,7 @@ hashes of either.
 | `POST /v1/sign-in/apple/finish` `{secret, code}` | the same answer as signing in, with `email` (the Apple ID's verified address, or null), once, within ten minutes of the start |
 | `POST /v1/token` `{refresh_token}` | `{access_token, expires_in}` |
 | `GET /v1/me` | `{account, plan, sign_ins: [{provider, email}]}` |
+| (any) | **429** with `Retry-After` when an address asks too often: 20 a minute for signing in and `/v1/token` (bursts of 10), 240 for `/v1/tracker` (120), 600 for the rest (200). Webhooks and `/healthz` are not counted |
 | `GET /v1/me/export` | everything kept about the account, as JSON: the account, its sign-ins, devices, push routes, trackers (filters and connection included) and what was last seen. Tokens are said to be kept and never shown |
 | `DELETE /v1/me` `{confirm: "delete"}` | deletes the account now and for good: the webhooks made on Jira and Fizzy are taken off first, then the account and everything under it, every device signed out. Codes still out for its addresses go too. Backups keep it until they rotate out |
 | `GET /v1/devices` | `[{id, name, platform, created_at, last_seen_at, current}]`, newest first; times in Unix seconds |

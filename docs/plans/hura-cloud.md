@@ -216,7 +216,7 @@ deleted.
   - [x] Export and deletion: `GET /v1/me/export` and `DELETE /v1/me`, with
     buttons in both apps (the App Store asks for deletion in the app). No
     Apple token is held, so there is none to revoke.
-  - [ ] Rate limits.
+  - [x] Rate limits: per address, in memory, tightest on signing in.
   - [ ] Plans enforced.
   - [ ] Billing, with Stripe.
   - [ ] A privacy policy.

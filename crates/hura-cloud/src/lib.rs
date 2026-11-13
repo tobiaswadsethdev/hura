@@ -33,6 +33,7 @@ pub mod mail;
 mod oauth;
 mod outbound;
 pub mod push;
+pub mod rate;
 mod seen;
 mod sign_in;
 mod token;
@@ -54,6 +55,7 @@ pub struct State {
     pub relay: push::Relay,
     pub live: live::Live,
     pub apple: apple::Apple,
+    pub limits: rate::Limits,
     /// Requests to GitHub and Atlassian on the service's own behalf.
     pub web: web::Web,
     /// Where the service is reached, for the addresses it hands out.
@@ -133,6 +135,10 @@ pub fn app(state: Shared) -> Router {
             "/v1/push",
             get(push::status).put(push::configure).delete(push::remove),
         )
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            rate::limit,
+        ))
         .with_state(state)
 }
 

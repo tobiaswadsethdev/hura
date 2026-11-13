@@ -26,6 +26,10 @@ struct Test {
 
 /// A service on a database of its own, or `None` with nothing to run on.
 async fn service() -> Option<Test> {
+    service_with(crate::rate::Limits::off()).await
+}
+
+async fn service_with(limits: crate::rate::Limits) -> Option<Test> {
     let Ok(url) = std::env::var("HURA_CLOUD_TEST_DATABASE_URL") else {
         eprintln!("skipped: HURA_CLOUD_TEST_DATABASE_URL is not set");
         return None;
@@ -61,6 +65,7 @@ async fn service() -> Option<Test> {
             "test-key",
             include_str!("testdata/apple-test-key.n.b64url").trim(),
         ),
+        limits,
         web: crate::web::Web::kept(),
         url: "https://cloud.example".into(),
         setup: "setup-token".into(),
@@ -1040,6 +1045,48 @@ async fn an_account_is_exported_without_its_secrets_and_deleted_with_everything(
     // The address can sign up again, as a new account.
     let again = t.sign_in("gone@example.com", "Mac").await;
     assert_ne!(again["account"], me["account"]);
+}
+
+#[tokio::test]
+async fn a_client_asking_too_often_is_told_to_wait() {
+    let Some(t) = service_with(crate::rate::Limits::new("X-Client".into())).await else {
+        return;
+    };
+    let token = |who: &str| {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/v1/token")
+            .header("X-Client", who)
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"refresh_token":"nope"}"#))
+            .unwrap()
+    };
+    let mut statuses = Vec::new();
+    for _ in 0..11 {
+        let response = t.app.clone().oneshot(token("1.2.3.4")).await.unwrap();
+        statuses.push(response.status());
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            assert!(response.headers().contains_key("retry-after"));
+        }
+    }
+    assert!(
+        statuses[..10]
+            .iter()
+            .all(|s| *s == StatusCode::UNAUTHORIZED),
+        "{statuses:?}"
+    );
+    assert_eq!(statuses[10], StatusCode::TOO_MANY_REQUESTS);
+    // Another address is not held up by it, nor is a webhook.
+    let other = t.app.clone().oneshot(token("5.6.7.8")).await.unwrap();
+    assert_eq!(other.status(), StatusCode::UNAUTHORIZED);
+    let hook = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/webhooks/github")
+        .header("X-Client", "1.2.3.4")
+        .body(Body::empty())
+        .unwrap();
+    let hook = t.app.clone().oneshot(hook).await.unwrap();
+    assert_ne!(hook.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
 const SECRET: &str = "a-secret-the-desktop-made-for-this-one";
