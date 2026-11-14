@@ -12,6 +12,7 @@ struct TrackersView: View {
     @State private var editing: String?
     @State private var failed: String?
     @State private var connecting: String?
+    @AppStorage(ReviewToAgent.automaticKey) private var reviewToAgent = false
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
@@ -89,6 +90,11 @@ struct TrackersView: View {
                 }))
             } footer: {
                 Text("A ticket that changes status, gets a comment from somebody else, becomes yours or turns up in a filter, and a pull request that starts waiting on you or whose checks fail or review comes back. hura cloud reads your trackers every minute or two and tells this iPhone, whether or not hura is open.")
+            }
+            Section {
+                Toggle("Send Review Comments to Agents", isOn: $reviewToAgent)
+            } footer: {
+                Text("What reviewers say on a pull request you opened goes to the worktree on its branch, as one message, while hura is open. Each comment once, whether this iPhone or the desktop sends it.")
             }
         }
         .navigationTitle("Trackers")

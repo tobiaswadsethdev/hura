@@ -31,7 +31,10 @@ struct HuraApp: App {
                         .tag(3)
                 }
                 .onChange(of: tab) { if tab == 1 { trackers.markSeen() } }
-                .onChange(of: trackers.inbox) { if tab == 1 { trackers.markSeen() } }
+                .onChange(of: trackers.inbox) {
+                    if tab == 1 { trackers.markSeen() }
+                    ReviewToAgent.sendAll(trackers.inbox, model: model, trackers: trackers)
+                }
                 // A notification, or a worktree started from a ticket, goes
                 // to the servers.
                 .onChange(of: model.pendingRoute) { _, route in

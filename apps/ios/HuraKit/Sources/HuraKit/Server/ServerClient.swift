@@ -217,6 +217,14 @@ public struct ServerClient: Sendable {
         try await call("send-comments", Named(name: name), as: Told.self).message
     }
 
+    /// Sends what a pull request's reviewers said to the session's agent,
+    /// leaving out what it has been sent before; the server remembers.
+    /// Answers with the message, empty when there was nothing new.
+    public func sendPullComments(_ name: String, key: String, remarks: [PullRemark]) async throws -> String {
+        struct Body: Encodable { var name: String; var key: String; var remarks: [PullRemark] }
+        return try await call("send-pull-comments", Body(name: name, key: key, remarks: remarks), as: Told.self).message
+    }
+
     public func policy(_ name: String) async throws -> PolicyView {
         try await call("policy", Named(name: name), as: PolicyView.self)
     }

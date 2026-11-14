@@ -454,9 +454,19 @@ public struct FieldChange: Encodable, Equatable, Sendable {
 // MARK: A pull request
 
 public struct PullComment: Decodable, Equatable, Sendable {
+    /// The forge's id for it, unique across a pull request's kinds of
+    /// comment. Nil from a hura cloud that predates it.
+    public var id: String?
     public var author: IssuePerson?
     public var body: String
     public var created: String?
+
+    public init(id: String?, author: IssuePerson?, body: String, created: String? = nil) {
+        self.id = id
+        self.author = author
+        self.body = body
+        self.created = created
+    }
 }
 
 public struct PullThread: Decodable, Equatable, Identifiable, Sendable {
@@ -740,6 +750,71 @@ extension TrackerCore {
         _ = try await call("pull_auto_merge", ["tracker": .string(t.source.name), "repo": .string(repo), "id": .string(id),
                                                "how": how.map(JSONValue.string) ?? .null,
                                                "delete_branch": .bool(deleteBranch)])
+    }
+}
+
+// MARK: A pull request's reviewers, to the agent
+
+/// One entry of a pull request's conversation as it goes to the agent of the
+/// session that owns it (`PullRemark` in hura-core's comments module): a
+/// thread on a line, a comment on the pull request, or a review that said
+/// something.
+public struct PullRemark: Encodable, Equatable, Sendable {
+    /// Without the `/` Azure DevOps starts a path with; empty for a remark on
+    /// the pull request as a whole.
+    public var file: String
+    /// Zero for one that is not on a line.
+    public var line: Int
+    public var outdated: Bool
+    /// The thread, oldest first.
+    public var said: [PullSaid]
+}
+
+public struct PullSaid: Encodable, Equatable, Sendable {
+    /// `tracker/repo/pull/comment`: what the server remembers once sent.
+    public var id: String
+    public var who: String
+    public var body: String
+}
+
+/// What a pull request's reviewers have said that is still for its author
+/// (`pull_remarks` in hura-core's comments module, which the desktop uses;
+/// the two must choose alike, or the server's record of what was sent would
+/// not match between them). Every thread not resolved with something in it
+/// from someone other than the author, the author's replies kept under it.
+public func pullRemarks(_ pull: PullDetail) -> [PullRemark] {
+    func trimmed(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
+    func byAuthor(_ p: IssuePerson?) -> Bool {
+        guard let p else { return false }
+        return pull.mine ? p.me : pull.author?.name == p.name
+    }
+    return pull.conversation.filter { !$0.resolved }.compactMap { t in
+        let written = t.comments.filter { !trimmed($0.body).isEmpty }
+        guard written.contains(where: { !byAuthor($0.author) }) else { return nil }
+        let said = written.map { c in
+            let name = c.author?.name ?? "someone"
+            // A cloud from before comments had ids: when, and by whom.
+            let own = c.id.flatMap { $0.isEmpty ? nil : $0 } ?? "\(c.created ?? ""):\(name)"
+            return PullSaid(id: "\(pull.tracker)/\(pull.repo)/\(pull.id)/\(own)",
+                            who: t.verdict.flatMap(reviewDecided).map { "\(name), \($0)" } ?? name,
+                            body: trimmed(c.body))
+        }
+        var file = t.path ?? ""
+        while file.hasPrefix("/") { file.removeFirst() }
+        return PullRemark(file: file, line: t.line ?? 0, outdated: t.outdated, said: said)
+    }
+}
+
+/// What a review decided, as the message to the agent says it; nil for
+/// the ones that decide nothing.
+private func reviewDecided(_ verdict: String) -> String? {
+    switch verdict {
+    case "approved": "approving"
+    case "suggestions": "approving with suggestions"
+    case "changes-requested": "asking for changes"
+    case "waiting": "waiting for the author"
+    case "rejected": "rejecting"
+    default: nil
     }
 }
 

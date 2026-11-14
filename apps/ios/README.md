@@ -44,7 +44,12 @@ through the relay when they change; signed out, the tab asks you to sign in. A
 Jira ticket opens in full, to move its status, edit its fields and comment; a
 pull request opens with its checks, reviewers and conversation, to reply, give
 a review, and read its files. Either starts a worktree, on the branch the
-desktop would give it.
+desktop would give it. A pull request with a worktree on it can send what its
+reviewers said to that worktree's agent, as one message in the format of a diff
+review; a switch on the Trackers screen does that by itself for the pull
+requests you opened while the app is in front. The server remembers what each
+agent has been sent, so it hears each comment once, from the phone or the
+desktop.
 
 A server's menu has its integrations (MCP servers to start, restart or stop,
 the secrets they're given, and the skills new sessions get), its settings

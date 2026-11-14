@@ -192,17 +192,8 @@ struct InboxView: View {
         return nil
     }
 
-    /// A worktree already on this pull request: started from it, or on its
-    /// branch in its repository.
     private func pullSession(_ p: PullRequestSummary) -> (server: String, name: String)? {
-        for server in model.servers {
-            let live = server.sessions.filter { $0.state != "dead" }
-            if let s = live.first(where: { $0.pull?.tracker == p.tracker && $0.pull?.repo == p.repo && $0.pull?.id == p.id })
-                ?? live.first(where: { $0.workBranch == p.branch && bareRepo($0.repo) == bareRepo(p.repoURL) }) {
-                return (server.id, s.name)
-            }
-        }
-        return nil
+        model.pullSession(p).map { ($0.server.id, $0.name) }
     }
 }
 
