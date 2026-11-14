@@ -58,7 +58,6 @@ import {
   StateDot,
   Tracker,
   Unfold,
-  Working,
 } from "./icons";
 import { pullName } from "./inboxNotify";
 import { openExternal } from "./open";
@@ -226,7 +225,9 @@ export function InboxBar({
             </button>
           ))}
         </div>
-        {reading && <Working className="inbox-reading" />}
+        {/* The neutral spinner every pane fetching its own contents shows, not
+            the agent's: the trackers being re-read is not an agent working. */}
+        {reading && <span className="spin inbox-reading" role="status" aria-label="Loading" />}
         <span className="inbox-tools">
           <button
             className="quiet-icon"

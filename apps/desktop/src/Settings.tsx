@@ -256,7 +256,7 @@ export function SettingsScreen({
 
             <fieldset>
               <legend>Credentials</legend>
-              {!options && <p className="hint">Reading the credentials…</p>}
+              {!options && <Waiting size="row" />}
               {options?.providers_error && <p className="error">{options.providers_error}</p>}
               {options && options.providers.length === 0 && !options.providers_error && (
                 <p className="hint">

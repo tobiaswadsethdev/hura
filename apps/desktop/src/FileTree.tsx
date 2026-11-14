@@ -109,10 +109,14 @@ function Level({
   const activate = (dir: boolean, full: string) => (dir ? toggle(full) : onOpen(full));
 
   if (error) return <p className="error">{error}</p>;
-  // Indented to the level being read, so the wait appears where the
-  // directory is about to, rather than at the root of the tree.
+  // The root waits the way every other dock pane does, in the middle, since
+  // the whole pane is what is loading; the git pane beside it centred its
+  // spinner while this one sat in the corner. A folder opened further down
+  // waits on its own row instead, indented to where it is about to appear.
   if (!entries)
-    return (
+    return depth === 0 ? (
+      <Waiting />
+    ) : (
       <div style={{ paddingLeft: depth * 12 + 8 }}>
         <Waiting size="row" />
       </div>

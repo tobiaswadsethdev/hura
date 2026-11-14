@@ -13,10 +13,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type HistoryFound, type HistoryHit, messageOf } from "./api";
-import { Empty } from "./Empty";
+import { Empty, Waiting } from "./Empty";
 import type { ChatEntry } from "./gen/ChatEntry";
 import type { Session } from "./gen/Session";
-import { Back, Chat, Find, Working } from "./icons";
+import { Back, Chat, Find } from "./icons";
 import { Found, Items, relative } from "./chat/Items";
 import { build, group, locate } from "./chat/transcript";
 import { Screen } from "./Screen";
@@ -237,7 +237,7 @@ function Kept({ hit, onBack }: { hit: HistoryHit; onBack: () => void }) {
         </span>
       </div>
       {error && <p className="error">{error}</p>}
-      {!entries && !error && <Empty icon={Working} />}
+      {!entries && !error && <Waiting />}
       {entries && entries.length === 0 && <Empty icon={Chat} note="Nothing was kept of it" />}
       <Found.Provider value={located}>
         <div className="chat-log history-log">
