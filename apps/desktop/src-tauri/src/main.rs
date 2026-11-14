@@ -633,6 +633,36 @@ fn send_comments(server: String, name: String) -> Result<String, Failed> {
     expect_reply!(reply, Reply::Told { message } => message, "a delivered review")
 }
 
+/// Send what a pull request's reviewers said to the agent of the session that
+/// owns it. Read here, with the tracker's token, and handed to the session's
+/// server, which leaves out what that agent has heard already: see
+/// `hura_core::comments`. Answers with the message, empty when there was
+/// nothing new, and with nothing asked of the server when nobody has said
+/// anything still open.
+#[tauri::command(async)]
+fn send_pull_comments(
+    server: String,
+    name: String,
+    tracker: String,
+    repo: String,
+    id: String,
+) -> Result<String, Failed> {
+    let pull: hura_core::tracker::PullDetail =
+        on_tracker("pull", &tracker, json!({ "repo": repo, "id": id }))?;
+    let remarks = hura_core::comments::pull_remarks(&pull);
+    if remarks.is_empty() {
+        return Ok(String::new());
+    }
+    let reply = remote(&server)?
+        .call(Request::SendPullComments {
+            name,
+            key: pull.key,
+            remarks,
+        })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Told { message } => message, "a delivered review")
+}
+
 /// The projects on the server: what the tree is grouped under.
 #[tauri::command(async)]
 fn projects(server: String) -> Result<Vec<Project>, Failed> {
@@ -1784,6 +1814,7 @@ fn main() {
             comment,
             uncomment,
             send_comments,
+            send_pull_comments,
             projects,
             new_project,
             forget_project,

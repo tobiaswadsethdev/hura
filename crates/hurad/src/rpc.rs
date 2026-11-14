@@ -207,6 +207,11 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 .map(|message| Reply::Told { message })
                 .map_err(Failure::failed)
         }),
+        Request::SendPullComments { name, key, remarks } => with_session(&name, |s| {
+            ops::send_pull_comments(backends.for_session(s), s, &key, remarks)
+                .map(|message| Reply::Told { message })
+                .map_err(Failure::failed)
+        }),
         Request::Answer { name, id, decision } => with_session(&name, |s| {
             if s.interface != chat::Interface::Chat {
                 return Err(Failure::failed(format!(
