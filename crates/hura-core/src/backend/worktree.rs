@@ -223,7 +223,7 @@ impl Worktree {
         }
         let mut child = cmd
             .spawn()
-            .map_err(|e| Error::Local(format!("could not run `{bin}`: {e}")))?;
+            .map_err(|e| Error::Local(crate::plain::spawn(bin, &e)))?;
         if let Some(input) = input {
             use std::io::Write as _;
             // Written from a thread, so a command that prints before it has

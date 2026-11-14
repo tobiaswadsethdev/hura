@@ -381,10 +381,23 @@ export function kindOf(e: unknown): FailureKind | null {
 
 /// A command's rejection is a string written for a person, so it is shown
 /// rather than interpreted. Anything that is not one is a bug in the bridge,
-/// and saying so beats rendering "[object Object]".
+/// and the console is where its insides belong -- a JSON dump in the window
+/// is the one thing less useful than "[object Object]".
 export function messageOf(e: unknown): string {
-  if (isFailed(e)) return e.message;
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  return `Unexpected failure: ${JSON.stringify(e)}`;
+  if (isFailed(e)) return sentence(e.message);
+  if (typeof e === "string") return sentence(e);
+  if (e instanceof Error) return sentence(e.message);
+  console.error("an unexpected failure", e);
+  return "Something went wrong that this window did not expect.";
+}
+
+/// The server writes its failures as clauses -- `could not reach the server`,
+/// `no session named x` -- because they are composed into each other before
+/// they get here. Shown on their own they are sentences, and start like one.
+///
+/// Not when the first word is hura's own, which is lowercase everywhere, or a
+/// name in backticks, which is quoted exactly.
+function sentence(message: string): string {
+  if (!/^[a-z]/.test(message) || /^hura/.test(message)) return message;
+  return message[0].toUpperCase() + message.slice(1);
 }

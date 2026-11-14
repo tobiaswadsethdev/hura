@@ -73,11 +73,31 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Connect(e) => write!(f, "could not reach the server: {e}"),
+            Error::Connect(e) => write!(f, "{e}"),
             Error::Tls(e) => write!(f, "{e}"),
-            Error::Io(e) => write!(f, "the connection failed: {e}"),
-            Error::Malformed(e) => write!(f, "the server's answer made no sense: {e}"),
+            Error::Io(e) => write!(f, "the connection to the server broke: {e}"),
+            // What exactly was wrong with it is for a debugger, not for the
+            // person reading this; it is kept in the variant for `{:?}`.
+            Error::Malformed(_) => write!(
+                f,
+                "the server's answer could not be read; is that address a hurad?"
+            ),
         }
+    }
+}
+
+/// An I/O failure in words; see `hura_core::plain`.
+pub(crate) fn reason(e: &std::io::Error) -> String {
+    hura_core::plain::io(e)
+}
+
+/// What an HTTP status from a hurad means, for the one that is not 200.
+pub(crate) fn status_reason(status: u16) -> String {
+    match status {
+        401 | 403 => "the server did not accept this computer's token".into(),
+        404 => "the server does not know that request; it may need updating".into(),
+        500..=599 => format!("the server ran into a problem answering (HTTP {status})"),
+        _ => format!("the server refused the request (HTTP {status})"),
     }
 }
 
@@ -166,7 +186,7 @@ fn tls_or_io(stream: &StreamOwned<ClientConnection, TcpStream>, e: std::io::Erro
                 .to_string(),
         )
     } else {
-        Error::Io(text)
+        Error::Io(reason(&e))
     }
 }
 
@@ -207,11 +227,15 @@ pub(crate) fn connect(host: &str, port: u16) -> Result<TcpStream, Error> {
 
     let addrs: Vec<SocketAddr> = (strip_brackets(host), port)
         .to_socket_addrs()
-        .map_err(|e| Error::Connect(format!("{host}: {e}")))?
+        // The resolver's own wording is "nodename nor servname provided, or
+        // not known", which says the same thing to nobody.
+        .map_err(|_| Error::Connect(format!("could not find a computer called `{host}`")))?
         .collect();
 
     if addrs.is_empty() {
-        return Err(Error::Connect(format!("{host} resolves to no address")));
+        return Err(Error::Connect(format!(
+            "could not find a computer called `{host}`"
+        )));
     }
 
     // Two passes: every address quickly, then every address patiently. One
@@ -229,9 +253,9 @@ pub(crate) fn connect(host: &str, port: u16) -> Result<TcpStream, Error> {
         }
     }
     Err(Error::Connect(format!(
-        "{host}:{port}: {}",
-        last.map(|e| e.to_string())
-            .unwrap_or_else(|| "no address answered".into())
+        "could not reach the server at {host}:{port}: {}",
+        last.map(|e| reason(&e))
+            .unwrap_or_else(|| "nothing answered".into())
     )))
 }
 

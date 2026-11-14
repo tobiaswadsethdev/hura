@@ -1505,7 +1505,7 @@ fn run_curl(
     }
     let mut child = command
         .spawn()
-        .map_err(|e| format!("could not run curl: {e}"))?;
+        .map_err(|e| crate::plain::spawn("curl", &e))?;
     child
         .stdin
         .as_mut()

@@ -123,7 +123,7 @@ impl Http for Ureq {
         let mut response = self
             .agent
             .run(request)
-            .map_err(|e| format!("could not reach hura cloud: {e}"))?;
+            .map_err(|e| format!("could not reach hura cloud: {}", unreachable(e)))?;
         let status = response.status().as_u16();
         // Past ureq's ten megabytes: a ticket's image comes back in base64,
         // a third larger than the most an attachment may be.
@@ -132,7 +132,7 @@ impl Http for Ureq {
             .with_config()
             .limit(64 * 1024 * 1024)
             .read_to_string()
-            .map_err(|e| format!("could not read hura cloud's answer: {e}"))?;
+            .map_err(|e| format!("could not read hura cloud's answer: {}", unreachable(e)))?;
         Ok((status, text))
     }
 
@@ -149,19 +149,48 @@ impl Http for Ureq {
             .header("Authorization", format!("Bearer {bearer}"))
             .header("Accept", "text/event-stream")
             .call()
-            .map_err(|e| format!("could not reach hura cloud: {e}"))?;
+            .map_err(|e| format!("could not reach hura cloud: {}", unreachable(e)))?;
         let status = response.status().as_u16();
         if status != 200 {
             return Ok(status);
         }
         let reader = std::io::BufReader::new(response.body_mut().as_reader());
         for read in reader.lines() {
-            let text = read.map_err(|e| format!("the stream from hura cloud broke: {e}"))?;
+            let text = read.map_err(|e| {
+                format!(
+                    "the stream from hura cloud broke: {}",
+                    hura_core::plain::io(&e)
+                )
+            })?;
             if !line(&text) {
                 break;
             }
         }
         Ok(status)
+    }
+}
+
+/// Why a request did not get to hura cloud or back, as a clause; ureq's own
+/// wording is `io: Connection refused` and `dns failed`.
+fn unreachable(e: ureq::Error) -> String {
+    match e {
+        ureq::Error::Io(e) => hura_core::plain::io(&e),
+        ureq::Error::Timeout(_) => "it did not answer in time".into(),
+        ureq::Error::HostNotFound => "this computer could not look it up; check the network".into(),
+        ureq::Error::ConnectionFailed => {
+            "this computer could not connect; check the network".into()
+        }
+        ureq::Error::BodyExceedsLimit(_) => "the answer was too large".into(),
+        e => e.to_string(),
+    }
+}
+
+/// A status from hura cloud that came with no words of its own.
+fn answered(status: u16) -> String {
+    match status {
+        429 => "hura cloud is busy; try again in a minute".into(),
+        500..=599 => format!("hura cloud ran into a problem (HTTP {status}); try again shortly"),
+        _ => format!("hura cloud refused the request (HTTP {status})"),
     }
 }
 
@@ -561,7 +590,7 @@ impl Cloud {
             }
             other => Err(Failure {
                 status: other,
-                message: format!("hura cloud answered {other}"),
+                message: answered(other),
             }),
         }
     }
@@ -662,7 +691,7 @@ impl Cloud {
             .and_then(|v| v.get("error").and_then(Value::as_str).map(String::from));
         Err(Failure {
             status,
-            message: said.unwrap_or_else(|| format!("hura cloud answered {status}")),
+            message: said.unwrap_or_else(|| answered(status)),
         })
     }
 }
@@ -779,9 +808,12 @@ impl Default for Cloud {
 }
 
 fn parse<T: DeserializeOwned>(text: &str) -> Result<T, Failure> {
-    serde_json::from_str(text).map_err(|e| Failure {
+    // Which field did not fit is for a debugger; the person reading this can
+    // only update, and that is what is worth saying.
+    serde_json::from_str(text).map_err(|_| Failure {
         status: 0,
-        message: format!("hura cloud's answer was not understood: {e}"),
+        message: "hura cloud answered in a form this version cannot read; it may need updating"
+            .into(),
     })
 }
 

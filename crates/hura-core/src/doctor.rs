@@ -733,7 +733,7 @@ fn check_azure(credentials: &[crate::credentials::Credential]) -> Vec<Check> {
                 ),
                 Err(e) => Check::fail(
                     "azure",
-                    format!("`{}`: could not run {az}: {e}", c.name),
+                    format!("`{}`: {}", c.name, crate::plain::spawn(az, &e)),
                     "install the Azure CLI, or set `az = \"/path/to/az\"` in the credential",
                 ),
             }

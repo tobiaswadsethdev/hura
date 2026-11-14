@@ -40,6 +40,7 @@ pub mod mcp;
 pub mod naming;
 pub mod ops;
 pub mod pane;
+pub mod plain;
 pub mod policy;
 pub mod ports;
 pub mod projects;
