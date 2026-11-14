@@ -26,6 +26,10 @@ struct Test {
 
 /// A service on a database of its own, or `None` with nothing to run on.
 async fn service() -> Option<Test> {
+    service_with(crate::rate::Limits::off()).await
+}
+
+async fn service_with(limits: crate::rate::Limits) -> Option<Test> {
     let Ok(url) = std::env::var("HURA_CLOUD_TEST_DATABASE_URL") else {
         eprintln!("skipped: HURA_CLOUD_TEST_DATABASE_URL is not set");
         return None;
@@ -61,6 +65,13 @@ async fn service() -> Option<Test> {
             "test-key",
             include_str!("testdata/apple-test-key.n.b64url").trim(),
         ),
+        limits,
+        stripe: Some(crate::billing::Stripe {
+            secret_key: "sk_test".into(),
+            webhook_secret: "whsec_test".into(),
+            price: "price_pro".into(),
+            plan: "pro".into(),
+        }),
         web: crate::web::Web::kept(),
         url: "https://cloud.example".into(),
         setup: "setup-token".into(),
@@ -943,6 +954,398 @@ async fn an_apple_token_that_does_not_check_out_is_refused() {
         .encode(apple_claims("someone.else", None, "nonce").to_string());
     let (status, _) = t.apple(parts.join("."), "nonce").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_account_is_exported_without_its_secrets_and_deleted_with_everything() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("gone@example.com", "Mac").await;
+    let phone = t.sign_in("gone@example.com", "iPhone").await;
+    let other = t.sign_in("stays@example.com", "Mac").await;
+    let at = token(&me, "access_token");
+    let gh = json!({ "kind": "git-hub", "name": "gh" });
+    let (status, _) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": gh, "token": "ghp_secret" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, export) = t.call(Method::GET, "/v1/me/export", Some(at), None).await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    assert_eq!(export["account"]["id"], me["account"]);
+    assert_eq!(export["sign_ins"][0]["email"], "gone@example.com");
+    assert_eq!(export["devices"].as_array().unwrap().len(), 2);
+    assert_eq!(export["trackers"][0]["source"]["name"], "gh");
+    assert_eq!(export["trackers"][0]["token"], "kept, not shown");
+    let text = export.to_string();
+    assert!(!text.contains("ghp_secret"));
+    assert!(!text.contains(token(&me, "refresh_token")));
+
+    // Not by mistake.
+    let (status, _) = t
+        .call(
+            Method::DELETE,
+            "/v1/me",
+            Some(at),
+            Some(json!({ "confirm": "yes" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = t
+        .call(
+            Method::DELETE,
+            "/v1/me",
+            Some(at),
+            Some(json!({ "confirm": "delete" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Every device out, nothing left of it, and the other account untouched.
+    for session in [&me, &phone] {
+        let (status, _) = t
+            .call(
+                Method::GET,
+                "/v1/me",
+                Some(token(session, "access_token")),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    for table in [
+        "accounts",
+        "sign_ins",
+        "devices",
+        "trackers",
+        "account_keys",
+    ] {
+        let left: i64 = sqlx::query_scalar(&format!(
+            "select count(*) from {table} where {} = $1",
+            if table == "accounts" {
+                "id"
+            } else {
+                "account_id"
+            }
+        ))
+        .bind(uuid::Uuid::parse_str(me["account"].as_str().unwrap()).unwrap())
+        .fetch_one(&t.state.db)
+        .await
+        .unwrap();
+        assert_eq!(left, 0, "{table}");
+    }
+    let (status, _) = t
+        .call(
+            Method::GET,
+            "/v1/me",
+            Some(token(&other, "access_token")),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The address can sign up again, as a new account.
+    let again = t.sign_in("gone@example.com", "Mac").await;
+    assert_ne!(again["account"], me["account"]);
+}
+
+#[tokio::test]
+async fn a_client_asking_too_often_is_told_to_wait() {
+    let Some(t) = service_with(crate::rate::Limits::new("X-Client".into())).await else {
+        return;
+    };
+    let token = |who: &str| {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/v1/token")
+            .header("X-Client", who)
+            .header("Content-Type", "application/json")
+            .body(Body::from(r#"{"refresh_token":"nope"}"#))
+            .unwrap()
+    };
+    let mut statuses = Vec::new();
+    for _ in 0..11 {
+        let response = t.app.clone().oneshot(token("1.2.3.4")).await.unwrap();
+        statuses.push(response.status());
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            assert!(response.headers().contains_key("retry-after"));
+        }
+    }
+    assert!(
+        statuses[..10]
+            .iter()
+            .all(|s| *s == StatusCode::UNAUTHORIZED),
+        "{statuses:?}"
+    );
+    assert_eq!(statuses[10], StatusCode::TOO_MANY_REQUESTS);
+    // Another address is not held up by it, nor is a webhook.
+    let other = t.app.clone().oneshot(token("5.6.7.8")).await.unwrap();
+    assert_eq!(other.status(), StatusCode::UNAUTHORIZED);
+    let hook = Request::builder()
+        .method(Method::POST)
+        .uri("/v1/webhooks/github")
+        .header("X-Client", "1.2.3.4")
+        .body(Body::empty())
+        .unwrap();
+    let hook = t.app.clone().oneshot(hook).await.unwrap();
+    assert_ne!(hook.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn a_plan_with_limits_refuses_what_would_go_past_them() {
+    let Some(t) = service().await else { return };
+    sqlx::query("insert into plans (id, max_trackers, max_filters, min_read_seconds) values ('small', 1, 1, 60)")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    let me = t.sign_in("small@example.com", "Mac").await;
+    sqlx::query("update accounts set plan = 'small'")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    let at = token(&me, "access_token");
+    let jira = |filters: usize| {
+        let jql: Vec<Value> = (0..filters)
+            .map(|i| json!({ "name": format!("f{i}"), "jql": "project = A" }))
+            .collect();
+        json!({ "kind": "jira", "name": "work", "site": "https://work.atlassian.net",
+                "email": "me@example.com", "jql_filters": jql })
+    };
+    let (status, list) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": jira(1) })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+
+    // A second tracker, or a second filter, is past the plan.
+    let gh = json!({ "kind": "git-hub", "name": "gh" });
+    let (status, said) = t
+        .call(
+            Method::POST,
+            "/v1/trackers",
+            Some(at),
+            Some(json!({ "source": gh })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(said["error"], "your plan has room for 1 tracker");
+    let (status, _) = t
+        .call(
+            Method::PUT,
+            "/v1/trackers/work",
+            Some(at),
+            Some(json!({ "source": jira(2) })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED);
+
+    // Nothing was kept of either, and what is within it still changes.
+    let (_, list) = t.call(Method::GET, "/v1/trackers", Some(at), None).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert_eq!(
+        list[0]["source"]["jql_filters"].as_array().unwrap().len(),
+        1
+    );
+    let (status, _) = t
+        .call(
+            Method::PUT,
+            "/v1/trackers/work",
+            Some(at),
+            Some(json!({ "source": jira(0) })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+impl Test {
+    async fn stripe_event(&self, event: Value, secret: &str) -> StatusCode {
+        let body = event.to_string();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/webhooks/stripe")
+            .header("Stripe-Signature", crate::billing::sign(secret, &body, now))
+            .body(Body::from(body))
+            .unwrap();
+        self.app.clone().oneshot(request).await.unwrap().status()
+    }
+}
+
+fn subscription_event(kind: &str, account: &Value, status: &str, created: i64) -> Value {
+    json!({
+        "type": kind, "created": created,
+        "data": { "object": {
+            "id": "sub_1", "customer": "cus_1", "status": status,
+            "cancel_at_period_end": false,
+            "items": { "data": [{ "current_period_end": 1_900_000_000 }] },
+            "metadata": { "account": account },
+        } },
+    })
+}
+
+#[tokio::test]
+async fn a_subscription_moves_the_account_to_the_paid_plan_and_back() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("payer@example.com", "Mac").await;
+    let at = token(&me, "access_token");
+    let crate::web::Web::Kept { .. } = &t.state.web else {
+        unreachable!()
+    };
+    t.state.web.on(
+        "POST https://api.stripe.com/v1/checkout/sessions",
+        200,
+        r#"{"url":"https://checkout.stripe.com/c/pay/cs_1"}"#,
+    );
+    let (status, v) = t
+        .call(Method::POST, "/v1/billing/checkout", Some(at), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["url"], "https://checkout.stripe.com/c/pay/cs_1");
+    let form = t
+        .state
+        .web
+        .sent("POST https://api.stripe.com/v1/checkout/sessions")[0]
+        .clone()
+        .unwrap();
+    let account = me["account"].as_str().unwrap();
+    assert!(
+        form.contains(&format!(
+            "subscription_data%5Bmetadata%5D%5Baccount%5D={account}"
+        )),
+        "{form}"
+    );
+    assert!(
+        form.contains("customer_email=payer%40example.com"),
+        "{form}"
+    );
+
+    // Not signed by Stripe: nothing changes.
+    let created = subscription_event(
+        "customer.subscription.created",
+        &me["account"],
+        "active",
+        100,
+    );
+    assert_eq!(
+        t.stripe_event(created.clone(), "whsec_other").await,
+        StatusCode::UNAUTHORIZED
+    );
+    let (_, mine) = t.call(Method::GET, "/v1/me", Some(at), None).await;
+    assert_eq!(mine["plan"], "free");
+    assert_eq!(mine["can_subscribe"], true);
+
+    assert_eq!(t.stripe_event(created, "whsec_test").await, StatusCode::OK);
+    let (_, mine) = t.call(Method::GET, "/v1/me", Some(at), None).await;
+    assert_eq!(mine["plan"], "pro");
+    assert_eq!(mine["subscription"]["status"], "active");
+    assert_eq!(mine["subscription"]["current_period_end"], 1_900_000_000);
+
+    // Subscribed: checkout again is refused, the portal is where to go.
+    let (status, _) = t
+        .call(Method::POST, "/v1/billing/checkout", Some(at), None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    t.state.web.on(
+        "POST https://api.stripe.com/v1/billing_portal/sessions",
+        200,
+        r#"{"url":"https://billing.stripe.com/p/session/x"}"#,
+    );
+    let (status, v) = t
+        .call(Method::POST, "/v1/billing/portal", Some(at), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let form = t
+        .state
+        .web
+        .sent("POST https://api.stripe.com/v1/billing_portal/sessions")[0]
+        .clone()
+        .unwrap();
+    assert!(form.contains("customer=cus_1"), "{form}");
+
+    // Ended; and an older event arriving after it does not bring it back.
+    let deleted = subscription_event(
+        "customer.subscription.deleted",
+        &me["account"],
+        "active",
+        300,
+    );
+    assert_eq!(t.stripe_event(deleted, "whsec_test").await, StatusCode::OK);
+    let late = subscription_event(
+        "customer.subscription.updated",
+        &me["account"],
+        "active",
+        200,
+    );
+    assert_eq!(t.stripe_event(late, "whsec_test").await, StatusCode::OK);
+    let (_, mine) = t.call(Method::GET, "/v1/me", Some(at), None).await;
+    assert_eq!(mine["plan"], "free");
+    assert_eq!(mine["subscription"]["status"], "canceled");
+}
+
+#[tokio::test]
+async fn deleting_a_subscribed_account_cancels_its_subscription_first() {
+    let Some(t) = service().await else { return };
+    let me = t.sign_in("leaving@example.com", "Mac").await;
+    let at = token(&me, "access_token");
+    let created = subscription_event(
+        "customer.subscription.created",
+        &me["account"],
+        "active",
+        100,
+    );
+    assert_eq!(t.stripe_event(created, "whsec_test").await, StatusCode::OK);
+
+    // Stripe away the first time: the account stays, rather than go on
+    // being charged. Then it answers.
+    t.state.web.on(
+        "DELETE https://api.stripe.com/v1/subscriptions/sub_1",
+        500,
+        "{}",
+    );
+    t.state.web.on(
+        "DELETE https://api.stripe.com/v1/subscriptions/sub_1",
+        200,
+        r#"{"id":"sub_1","status":"canceled"}"#,
+    );
+    let (status, _) = t
+        .call(
+            Method::DELETE,
+            "/v1/me",
+            Some(at),
+            Some(json!({ "confirm": "delete" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    let (status, _) = t.call(Method::GET, "/v1/me", Some(at), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = t
+        .call(
+            Method::DELETE,
+            "/v1/me",
+            Some(at),
+            Some(json!({ "confirm": "delete" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        t.state
+            .web
+            .sent("DELETE https://api.stripe.com/v1/subscriptions/sub_1")
+            .len(),
+        2
+    );
 }
 
 const SECRET: &str = "a-secret-the-desktop-made-for-this-one";

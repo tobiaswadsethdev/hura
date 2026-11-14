@@ -4,7 +4,8 @@
 //! Asking for a code always answers the same, whether or not the address has
 //! an account, so the endpoint does not say who has one. A code lasts ten
 //! minutes, is used once, and is spent after five wrong tries; an address is
-//! sent one a minute and five an hour at most.
+//! sent one a minute and five an hour at most. Codes, used or not, are
+//! deleted after a day.
 
 use axum::Json;
 use axum::extract::State;
@@ -34,6 +35,10 @@ pub async fn send_code(State(state): State<Shared>, Json(body): Json<Ask>) -> Re
     let email = address(&body.email)?;
     // One request for an address at a time, so two at once cannot both find
     // the limit unreached: held until the code is written.
+    // Codes are kept a day, for the limits above to count, and no longer.
+    sqlx::query("delete from email_codes where created_at < now() - interval '1 day'")
+        .execute(&state.db)
+        .await?;
     let mut tx = state.db.begin().await?;
     sqlx::query("select pg_advisory_xact_lock(hashtext($1))")
         .bind(&email)

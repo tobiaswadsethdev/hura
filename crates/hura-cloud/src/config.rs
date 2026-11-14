@@ -22,6 +22,10 @@
 //!   Apple as, for the desktop; its return URL at Apple is
 //!   `{HURA_CLOUD_URL}/v1/oauth/apple/callback`. Without it, only the iOS
 //!   app signs in with Apple.
+//! - `HURA_CLOUD_CLIENT_IP_HEADER`: the header the proxy in front puts the
+//!   client's address in, which rate limits are counted by:
+//!   `CF-Connecting-IP` unless set, for Cloudflare. Set it empty to count by
+//!   the connection's address instead, with nothing in front.
 //! - `HURA_CLOUD_URL`: where the service is reached from outside,
 //!   `https://api.gethura.app` unless set: the address in the callbacks and
 //!   the webhook it gives GitHub and Atlassian.
@@ -42,6 +46,7 @@ pub struct Config {
     pub relay: String,
     pub apple_audience: String,
     pub apple_services_id: Option<String>,
+    pub client_ip_header: String,
     pub url: String,
 }
 
@@ -74,6 +79,11 @@ impl Config {
         let apple_audience =
             var("HURA_CLOUD_APPLE_AUDIENCE").unwrap_or_else(|| "dev.tobiaswadseth.hura.ios".into());
         let apple_services_id = var("HURA_CLOUD_APPLE_SERVICES_ID");
+        // Read as it is, so that set empty means none.
+        let client_ip_header = std::env::var("HURA_CLOUD_CLIENT_IP_HEADER")
+            .unwrap_or_else(|_| "CF-Connecting-IP".into())
+            .trim()
+            .to_string();
         let url = var("HURA_CLOUD_URL")
             .unwrap_or_else(|| "https://api.gethura.app".into())
             .trim_end_matches('/')
@@ -86,6 +96,7 @@ impl Config {
             relay,
             apple_audience,
             apple_services_id,
+            client_ip_header,
             url,
         })
     }

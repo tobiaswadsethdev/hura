@@ -93,6 +93,20 @@ struct CloudTests {
         #expect(cloud.stored == nil)
     }
 
+    @Test func deletingTheAccountSignsThisPhoneOut() async throws {
+        let service = Service()
+        let (cloud, store) = try await signedInCloud(service)
+        service.on("DELETE /v1/me", 500, #"{"error":"down"}"#)
+        await #expect(throws: CloudError.self) { try await cloud.deleteAccount() }
+        #expect(try store.load() != nil, "still signed in when it was not deleted")
+
+        service.on("DELETE /v1/me", 204, "")
+        try await cloud.deleteAccount()
+        #expect(try store.load() == nil)
+        let sent = try #require(service.requests("DELETE /v1/me").last)
+        #expect(service.body(sent)?["confirm"]?.string == "delete")
+    }
+
     @Test func aRefusedAccessTokenIsRenewedOnce() async throws {
         let service = Service()
         let (cloud, _) = try await signedInCloud(service)

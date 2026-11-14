@@ -16,9 +16,11 @@ use axum::Router;
 use axum::routing::{delete, get, post, put};
 use sqlx::PgPool;
 
+mod account;
 pub mod apple;
 mod apple_web;
 mod auth;
+pub mod billing;
 pub mod config;
 pub mod crypto;
 mod devices;
@@ -31,7 +33,9 @@ mod live;
 pub mod mail;
 mod oauth;
 mod outbound;
+mod plans;
 pub mod push;
+pub mod rate;
 mod seen;
 mod sign_in;
 mod token;
@@ -53,6 +57,9 @@ pub struct State {
     pub relay: push::Relay,
     pub live: live::Live,
     pub apple: apple::Apple,
+    pub limits: rate::Limits,
+    /// Taking payments, when it is configured.
+    pub stripe: Option<billing::Stripe>,
     /// Requests to GitHub and Atlassian on the service's own behalf.
     pub web: web::Web,
     /// Where the service is reached, for the addresses it hands out.
@@ -104,7 +111,8 @@ pub fn app(state: Shared) -> Router {
         .route("/v1/oauth/apple/callback", post(apple_web::back))
         .route("/v1/token", post(auth::refresh))
         .route("/v1/sign-out", post(devices::sign_out))
-        .route("/v1/me", get(devices::me))
+        .route("/v1/me", get(devices::me).delete(account::delete))
+        .route("/v1/me/export", get(account::export))
         .route("/v1/devices", get(devices::list))
         .route("/v1/devices/{id}", delete(devices::revoke))
         .route("/v1/trackers", get(trackers::list).post(trackers::add))
@@ -121,6 +129,10 @@ pub fn app(state: Shared) -> Router {
         .route("/v1/oauth/github/callback", get(oauth::github_callback))
         .route("/v1/oauth/jira/callback", get(oauth::jira_callback))
         .route("/v1/oauth/confirm", post(oauth::confirm))
+        .route("/v1/billing/checkout", post(billing::checkout))
+        .route("/v1/billing/portal", post(billing::portal))
+        .route("/billing/done", get(billing::done))
+        .route("/v1/webhooks/stripe", post(billing::webhook))
         .route("/v1/webhooks/github", post(webhooks::github))
         .route("/v1/webhooks/fizzy/{id}", post(webhooks::fizzy))
         .route("/v1/webhooks/jira", post(webhooks::jira))
@@ -131,6 +143,10 @@ pub fn app(state: Shared) -> Router {
             "/v1/push",
             get(push::status).put(push::configure).delete(push::remove),
         )
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            rate::limit,
+        ))
         .with_state(state)
 }
 

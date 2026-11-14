@@ -213,6 +213,22 @@ deleted.
   service.
 - [ ] **6. Ready for others.** The master key in a KMS, monitoring, rate
   limits, export and deletion, plans enforced, billing.
+  - [x] Export and deletion: `GET /v1/me/export` and `DELETE /v1/me`, with
+    buttons in both apps (the App Store asks for deletion in the app). No
+    Apple token is held, so there is none to revoke.
+  - [x] Rate limits: per address, in memory, tightest on signing in.
+  - [x] Plans enforced: a tracker or filter past the plan's limits is
+    refused (402), checked inside the change's transaction.
+  - [x] Billing, with Stripe: Checkout to subscribe and the customer portal
+    to manage, from the desktop; the plan set by Stripe's signed webhook;
+    a subscription cancelled before its account is deleted. The iPhone only
+    shows the plan, with nothing to buy there (Apple's in-app purchase rules).
+    The price and what `free` and `pro` have room for are still to decide.
+  - [x] A privacy policy, on the landing page at
+    [gethura.app/privacy](https://gethura.app/privacy.html)
+    ([site/privacy.html](../../site/privacy.html)).
+  - The master key stays a Coolify secret for now (decided 2026-11-13), and
+    Uptime Kuma, run beside it in Coolify, watches `/healthz`.
 
 ## Not decided yet
 

@@ -30,6 +30,11 @@ impl Error {
         Error::new(StatusCode::UNAUTHORIZED, "not signed in")
     }
 
+    /// The words the client is shown.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     pub fn is_status(&self, status: StatusCode) -> bool {
         self.status == status
     }

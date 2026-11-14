@@ -243,6 +243,19 @@ public actor Cloud {
         _ = try await authorized("DELETE", "/v1/devices/\(id)")
     }
 
+    /// Everything the service keeps about the account, as the JSON it sends:
+    /// tokens said to be kept and never shown.
+    public func export() async throws -> Data {
+        try await authorized("GET", "/v1/me/export")
+    }
+
+    /// Deletes the account and everything under it, on every device, and
+    /// signs this phone out. For good.
+    public func deleteAccount() async throws {
+        _ = try await authorized("DELETE", "/v1/me", body: ["confirm": .string("delete")])
+        forget()
+    }
+
     // MARK: Notifications
 
     /// Where the service tells this phone that something changed: a link on

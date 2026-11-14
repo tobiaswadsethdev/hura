@@ -396,6 +396,35 @@ impl Cloud {
         parse(&self.authorized("GET", "/v1/me", None)?)
     }
 
+    /// Where to send the browser to subscribe to the paid plan, or, `manage`,
+    /// to change or cancel the subscription and see its invoices.
+    pub fn billing_url(&self, manage: bool) -> Result<String, Failure> {
+        let path = if manage {
+            "/v1/billing/portal"
+        } else {
+            "/v1/billing/checkout"
+        };
+        let v: Value = parse(&self.authorized("POST", path, None)?)?;
+        v["url"].as_str().map(String::from).ok_or_else(|| Failure {
+            status: 0,
+            message: "hura cloud gave no address to pay at".into(),
+        })
+    }
+
+    /// Everything the service keeps about the account, as it sends it:
+    /// tokens said to be kept and never shown.
+    pub fn export(&self) -> Result<Value, Failure> {
+        parse(&self.authorized("GET", "/v1/me/export", None)?)
+    }
+
+    /// Deletes the account and everything under it, on every device, and
+    /// signs this machine out. For good.
+    pub fn delete_account(&self) -> Result<(), Failure> {
+        self.authorized("DELETE", "/v1/me", Some(&json!({ "confirm": "delete" })))?;
+        self.forget();
+        Ok(())
+    }
+
     pub fn devices(&self) -> Result<Vec<Device>, Failure> {
         parse(&self.authorized("GET", "/v1/devices", None)?)
     }
@@ -1063,5 +1092,23 @@ mod tests {
         assert_eq!(finish.body.as_ref().unwrap()["secret"], secret);
         assert_eq!(finish.body.as_ref().unwrap()["code"], "the-code");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn deleting_the_account_signs_this_machine_out() {
+        let (cloud, service, _) = signed_in();
+        service.on("DELETE /v1/me", 204, "");
+        cloud.delete_account().unwrap();
+        assert!(!cloud.signed_in());
+        let sent = &service.sent("DELETE /v1/me")[0];
+        assert_eq!(sent.body.as_ref().unwrap()["confirm"], "delete");
+    }
+
+    #[test]
+    fn an_account_that_could_not_be_deleted_stays_signed_in() {
+        let (cloud, service, _) = signed_in();
+        service.on("DELETE /v1/me", 500, r#"{"error":"down"}"#);
+        assert!(cloud.delete_account().is_err());
+        assert!(cloud.signed_in());
     }
 }

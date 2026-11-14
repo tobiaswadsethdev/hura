@@ -19,6 +19,11 @@ pub struct Me {
     /// How the account's trackers are being read for its devices, once
     /// something has asked them to be.
     watch: Option<Watch>,
+    /// Whether this service takes payments, so there is a plan to buy.
+    can_subscribe: bool,
+    /// The account's subscription as Stripe last said, once it has had one:
+    /// `{id, status, current_period_end, cancel_at_period_end}`.
+    subscription: Option<serde_json::Value>,
 }
 
 /// Reading the account's trackers on a timer: what to look at when a
@@ -43,10 +48,11 @@ pub struct SignIn {
 
 /// `GET /v1/me`: the account and its ways in.
 pub async fn me(State(state): State<Shared>, signed: Signed) -> Result<Json<Me>> {
-    let plan: String = sqlx::query_scalar("select plan from accounts where id = $1")
-        .bind(signed.account)
-        .fetch_one(&state.db)
-        .await?;
+    let (plan, subscription): (String, Option<serde_json::Value>) =
+        sqlx::query_as("select plan, subscription from accounts where id = $1")
+            .bind(signed.account)
+            .fetch_one(&state.db)
+            .await?;
     let sign_ins = sqlx::query_as(
         "select provider, email from sign_ins where account_id = $1 order by created_at",
     )
@@ -69,6 +75,8 @@ pub async fn me(State(state): State<Shared>, signed: Signed) -> Result<Json<Me>>
         plan,
         sign_ins,
         watch,
+        can_subscribe: state.stripe.is_some(),
+        subscription,
     }))
 }
 

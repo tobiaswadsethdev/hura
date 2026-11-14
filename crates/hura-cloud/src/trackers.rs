@@ -21,6 +21,7 @@ use uuid::Uuid;
 use crate::Shared;
 use crate::auth::Signed;
 use crate::error::{Error, Result};
+use crate::plans;
 
 #[derive(Deserialize)]
 pub struct Add {
@@ -67,6 +68,8 @@ pub async fn add(
         ),
         None => None,
     };
+    let mut tx = state.db.begin().await?;
+    let before = plans::usage(&mut tx, signed.account).await?;
     let added = sqlx::query(
         "insert into trackers (account_id, name, source, token) values ($1, $2, $3, $4)
          on conflict (account_id, name) do nothing",
@@ -75,7 +78,7 @@ pub async fn add(
     .bind(&source.name)
     .bind(Jsonb(&source))
     .bind(sealed)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
     if added.rows_affected() == 0 {
         return Err(Error::new(
@@ -83,6 +86,8 @@ pub async fn add(
             format!("there is already a tracker called `{}`", source.name),
         ));
     }
+    plans::allowed(&before, &plans::usage(&mut tx, signed.account).await?)?;
+    tx.commit().await?;
     hooks(&state, signed.account, &source.name).await;
     views(&state, signed.account).await
 }
@@ -114,15 +119,19 @@ pub async fn edit(
             "a tracker cannot be renamed; `{name}` is still `{name}`"
         )));
     }
+    let mut tx = state.db.begin().await?;
+    let before = plans::usage(&mut tx, signed.account).await?;
     let changed = sqlx::query(
         "update trackers set source = $3, updated_at = now() where account_id = $1 and name = $2",
     )
     .bind(signed.account)
     .bind(&name)
     .bind(Jsonb(&source))
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
     found(changed.rows_affected(), &name)?;
+    plans::allowed(&before, &plans::usage(&mut tx, signed.account).await?)?;
+    tx.commit().await?;
     hooks(&state, signed.account, &name).await;
     views(&state, signed.account).await
 }

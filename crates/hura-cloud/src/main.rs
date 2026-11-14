@@ -37,6 +37,8 @@ async fn run() -> Result<(), String> {
         relay: hura_cloud::push::Relay::https(config.relay),
         live: Default::default(),
         apple: hura_cloud::apple::Apple::new(config.apple_audience, config.apple_services_id),
+        limits: hura_cloud::rate::Limits::new(config.client_ip_header),
+        stripe: hura_cloud::billing::Stripe::from_env(),
         web: hura_cloud::web::Web::https(),
         url: config.url,
         setup: hura_cloud::new_setup_token(),
@@ -53,10 +55,13 @@ async fn run() -> Result<(), String> {
         .await
         .map_err(|e| format!("could not listen on {}: {e}", config.listen))?;
     eprintln!("hura-cloud: listening on {}", config.listen);
-    axum::serve(listener, hura_cloud::app(state))
-        .with_graceful_shutdown(stopped())
-        .await
-        .map_err(|e| e.to_string())
+    axum::serve(
+        listener,
+        hura_cloud::app(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(stopped())
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Ctrl-C, or the SIGTERM a container is stopped with.
