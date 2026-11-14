@@ -145,12 +145,30 @@ struct CodeText: View {
                     CodeLine(number: String(i + 1).leftPad(width), text: line, wrap: wrap)
                 }
             }
+            // As wide as the widest line, said rather than left to the stack:
+            // a lazy one measures only the rows it has made, and settles on
+            // the screen's width, with nothing past it to scroll to.
+            .frame(minWidth: wrap ? nil : Self.width(of: lines, numbers: width), alignment: .leading)
             .font(.system(size: 12, design: .monospaced))
             .textSelection(.enabled)
             .padding(10)
         }
         // A scroll view that scrolls both ways centres what's smaller than it.
         .defaultScrollAnchor(.topLeading)
+    }
+
+    /// The font the lines are drawn in, to measure them with.
+    private static let font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+
+    /// How wide a row is for the widest of `lines`, numbered with `numbers`
+    /// digits. Measured rather than counted, for tabs and wide characters,
+    /// but only the longest few, which are the only ones it can be.
+    static func width(of lines: [String], numbers: Int) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+        let longest = lines.indices.sorted { lines[$0].utf16.count > lines[$1].utf16.count }.prefix(20)
+        let text = longest.map { (lines[$0] as NSString).size(withAttributes: attributes).width }.max() ?? 0
+        let number = (String(repeating: "0", count: numbers) as NSString).size(withAttributes: attributes).width
+        return ceil(number + 10 + text) + 2
     }
 }
 
