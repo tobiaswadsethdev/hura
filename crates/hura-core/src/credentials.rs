@@ -624,7 +624,9 @@ mod tests {
         }
         assert_eq!(
             base64(b"hura:0123456789abcdef01234567"),
-            sh("printf %s hura:0123456789abcdef01234567 | base64 -w0")
+            // Not `base64 -w0`: macOS's has no `-w`, and both end with a
+            // newline either way. Forty characters is under every wrap width.
+            sh("printf %s hura:0123456789abcdef01234567 | base64 | tr -d '\\n'")
         );
     }
 
