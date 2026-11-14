@@ -64,7 +64,7 @@ public enum PairingError: Error, LocalizedError, Equatable {
         case .notHurad: "Something answered at that address, but it isn't hurad."
         case .pinMismatch: "The server's certificate doesn't match the pairing string. Nothing was sent."
         case .tokenRefused: "The server doesn't accept this token. Run `hurad pair` again for a new one."
-        case let .unreachable(why): "Couldn't reach the server: \(why)."
+        case let .unreachable(why): why
         }
     }
 }
@@ -92,9 +92,9 @@ public enum Pairing {
             // The server answered and took the token; a failure inside it
             // (no sandbox runtime yet, say) is not a reason not to pair.
             if case .failed = e { return record }
-            throw PairingError.unreachable(e.localizedDescription)
+            throw PairingError.unreachable(e.userMessage)
         } catch {
-            throw PairingError.unreachable(error.localizedDescription)
+            throw PairingError.unreachable(error.userMessage)
         }
         return record
     }

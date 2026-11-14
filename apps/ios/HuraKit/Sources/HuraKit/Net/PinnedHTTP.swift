@@ -13,7 +13,7 @@ enum PinnedHTTP {
                         headers: [(String, String)] = [], body: Data? = nil,
                         timeout: Duration = .seconds(10)) async throws -> Response {
         let check = PinCheck()
-        guard let nwPort = NWEndpoint.Port(port) else { throw TransportError.failed("bad port \(port)") }
+        guard let nwPort = NWEndpoint.Port(port) else { throw TransportError.failed("\(port) isn't a port number.") }
         let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort,
                                       using: PinnedTLS.parameters(pin: pin, check: check))
         var head = "\(method) \(path) HTTP/1.1\r\nHost: \(host.urlHost):\(port)\r\nConnection: close\r\n"
@@ -32,13 +32,13 @@ enum PinnedHTTP {
     static func parse(_ data: Data) throws -> Response {
         let bytes = [UInt8](data)
         guard let split = bytes.firstRange(of: [13, 10, 13, 10]) else {
-            throw TransportError.failed("incomplete HTTP response")
+            throw TransportError.failed("The server's answer was cut short.")
         }
         let head = String(decoding: bytes[..<split.lowerBound], as: UTF8.self)
         var lines = head.components(separatedBy: "\r\n")
         let statusLine = lines.removeFirst().split(separator: " ")
         guard statusLine.count >= 2, statusLine[0].hasPrefix("HTTP/1."), let status = Int(statusLine[1]) else {
-            throw TransportError.failed("malformed HTTP status line")
+            throw TransportError.failed("The server's answer couldn't be read. Is that address a hurad?")
         }
         var fields: [String: String] = [:]
         for line in lines {
@@ -49,7 +49,7 @@ enum PinnedHTTP {
         if fields["transfer-encoding"]?.lowercased() == "chunked" {
             body = try dechunk(body)
         } else if let length = fields["content-length"].flatMap(Int.init) {
-            guard body.count >= length else { throw TransportError.failed("truncated HTTP body") }
+            guard body.count >= length else { throw TransportError.failed("The server's answer was cut short.") }
             body = Array(body.prefix(length))
         }
         return Response(status: status, body: Data(body))
@@ -62,10 +62,10 @@ enum PinnedHTTP {
             guard let eol = b[pos...].firstRange(of: [13, 10]),
                   let size = Int(String(decoding: b[pos..<eol.lowerBound], as: UTF8.self)
                       .split(separator: ";").first ?? "", radix: 16)
-            else { throw TransportError.failed("malformed chunked body") }
+            else { throw TransportError.failed("The server's answer couldn't be read. Is that address a hurad?") }
             if size == 0 { return out }
             let start = eol.upperBound
-            guard start + size <= b.count else { throw TransportError.failed("truncated chunked body") }
+            guard start + size <= b.count else { throw TransportError.failed("The server's answer was cut short.") }
             out += b[start..<start + size]
             pos = start + size + 2
         }
@@ -115,7 +115,7 @@ enum PinnedHTTP {
             connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [self] data, _, isComplete, error in
                 if let data { buffer.append(data) }
                 if buffer.count > 1 << 20 {
-                    finish(.failure(TransportError.failed("HTTP response too large")))
+                    finish(.failure(TransportError.failed("The server's answer was too large.")))
                 } else if isComplete {
                     finish(Result { try PinnedHTTP.parse(buffer) })
                 } else if let error {
@@ -128,7 +128,7 @@ enum PinnedHTTP {
 
         private func translate(_ error: NWError?) -> Error {
             if check.outcome == .mismatched { return TransportError.pinMismatch }
-            return TransportError.failed(error?.localizedDescription ?? "connection cancelled")
+            return TransportError.failed(Plain.network(error))
         }
 
         private func finish(_ result: Result<Response, Error>) {

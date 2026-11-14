@@ -13,9 +13,10 @@ public enum ServerError: Error, LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .unauthorized: "This server no longer accepts this phone. Pair it again with `hurad pair`."
-        case let .failed(_, message): message
-        case let .http(status): "The server answered with HTTP \(status)."
-        case let .malformed(why): "The server's answer couldn't be read: \(why)"
+        case let .failed(_, message): Plain.sentence(message)
+        case let .http(status): Plain.status(status)
+        // The detail is a decoder's, kept in the case for a debugger.
+        case .malformed: "The server's answer couldn't be read. The app and the server may be different versions."
         }
     }
 }

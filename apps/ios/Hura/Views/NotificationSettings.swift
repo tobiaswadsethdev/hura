@@ -80,7 +80,7 @@ struct NotificationSettings: View {
         message = nil
         Task {
             defer { working = false }
-            do { try await body() } catch { message = error.localizedDescription }
+            do { try await body() } catch { message = error.userMessage }
             await loadStatus()
         }
     }

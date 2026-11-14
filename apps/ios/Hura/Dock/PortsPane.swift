@@ -184,7 +184,7 @@ struct PortsPane: View {
                 let p = try await server.previews.open(session: name, port: port, host: host)
                 browsing = p.url
             } catch {
-                failed = error.localizedDescription
+                failed = error.userMessage
             }
         }
     }
@@ -198,7 +198,7 @@ struct PortsPane: View {
         busy = key
         Task {
             defer { busy = nil }
-            do { view = try await work() } catch { failed = error.localizedDescription }
+            do { view = try await work() } catch { failed = error.userMessage }
         }
     }
 
@@ -208,7 +208,7 @@ struct PortsPane: View {
             view = try await server.api.ports(name)
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
         if let p = await poll { listening = p.ports ?? [] }
     }

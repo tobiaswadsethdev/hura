@@ -636,7 +636,7 @@ public final class Chat {
             phase = .offline(e == .unauthorized ? ServerError.unauthorized.localizedDescription
                                                 : "Can't reach the server.")
         } catch {
-            phase = .offline(error.localizedDescription)
+            phase = .offline(error.userMessage)
         }
         self.socket = nil
         return opened

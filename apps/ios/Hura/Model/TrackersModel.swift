@@ -64,7 +64,7 @@ final class TrackersModel {
         do {
             trackers = try await cloud.trackers()
         } catch {
-            lastError = error.localizedDescription
+            lastError = error.userMessage
             // Signed out from another device.
             if !(await cloud.isSignedIn) {
                 signedIn = false
@@ -147,7 +147,7 @@ final class TrackersModel {
             inbox = try await TrackerCore.inbox(prefix: "hura")
             lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            lastError = error.userMessage
         }
     }
 
@@ -188,7 +188,7 @@ final class TrackersModel {
                 try await push.enableCloud(cloud)
             }
         } catch {
-            lastError = error.localizedDescription
+            lastError = error.userMessage
         }
     }
 

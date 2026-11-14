@@ -75,7 +75,7 @@ public struct CloudError: Error, Equatable, LocalizedError {
     public var status: Int
     public var message: String
 
-    public var errorDescription: String? { message }
+    public var errorDescription: String? { Plain.sentence(message) }
     /// The device was signed out, here or from another of the account's.
     public var isSignedOut: Bool { status == 401 }
 }
@@ -421,7 +421,7 @@ public actor Cloud {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let said = (try? JSONDecoder().decode(JSONValue.self, from: data))?["error"]?.string
-            throw CloudError(status: status, message: said ?? "hura cloud answered \(status).")
+            throw CloudError(status: status, message: said ?? (status >= 500 ? "hura cloud ran into a problem (HTTP \(status)). Try again shortly." : "hura cloud refused the request (HTTP \(status))."))
         }
         return data
     }

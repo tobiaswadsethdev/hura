@@ -94,7 +94,7 @@ private struct SignInForm: View {
                 }
             }
             if account.busy {
-                Section { ProgressView().frame(maxWidth: .infinity) }
+                Section { WaitingRow() }
             }
             if let error = account.error {
                 Section { Text(error).foregroundStyle(.red).font(.callout) }

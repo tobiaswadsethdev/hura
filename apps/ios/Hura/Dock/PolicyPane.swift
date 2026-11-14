@@ -199,7 +199,7 @@ struct PolicyPane: View {
         busy = key
         Task {
             defer { busy = nil }
-            do { view = try await work() } catch { failed = error.localizedDescription }
+            do { view = try await work() } catch { failed = error.userMessage }
         }
     }
 
@@ -208,7 +208,7 @@ struct PolicyPane: View {
             view = try await server.api.policy(name)
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 }

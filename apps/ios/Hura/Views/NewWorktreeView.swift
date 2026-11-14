@@ -44,7 +44,7 @@ struct NewWorktreeView: View {
                 if let options {
                     form(options)
                 } else if error == nil {
-                    ProgressView().frame(maxWidth: .infinity)
+                    WaitingRow()
                 }
             }
             .navigationTitle("New Worktree")
@@ -241,7 +241,7 @@ struct NewWorktreeView: View {
             }
             if !picked.providers.isEmpty { providers = Set(picked.providers) }
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 
@@ -287,7 +287,7 @@ struct NewWorktreeView: View {
                 dismiss()
                 onCreated(created)
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.userMessage
             }
         }
     }

@@ -60,7 +60,7 @@ final class AppModel {
             servers = try store.loadAll().map { Server(record: $0) }
             for s in servers { s.history = history }
         } catch {
-            loadError = error.localizedDescription
+            loadError = error.userMessage
         }
         history.warm()
     }
@@ -155,13 +155,13 @@ final class AppModel {
             }
             pushError = nil
         } catch {
-            pushError = error.localizedDescription
+            pushError = error.userMessage
         }
         resumeTokenWaiters()
     }
 
     func deviceTokenFailed(_ error: Error) {
-        pushError = error.localizedDescription
+        pushError = error.userMessage
         resumeTokenWaiters()
     }
 
@@ -212,7 +212,7 @@ final class AppModel {
                 try save(server, pushLinkID: linkID)
             }
         } catch {
-            pushError = error.localizedDescription
+            pushError = error.userMessage
         }
     }
 
@@ -237,7 +237,7 @@ final class AppModel {
         } catch let ServerError.failed(_, message) {
             await notifyNotSent(target, title: failed, why: message)
         } catch let e as ServerError {
-            await notifyNotSent(target, title: failed, why: e.localizedDescription)
+            await notifyNotSent(target, title: failed, why: e.userMessage)
         } catch {
             await notifyNotSent(target, title: failed, why: "Couldn't reach \(server.record.name).")
         }

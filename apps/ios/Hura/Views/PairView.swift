@@ -106,7 +106,7 @@ struct PairView: View {
             parsed = try PairingString(raw)
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 
@@ -117,7 +117,7 @@ struct PairView: View {
             let record = try await Pairing.pair(p, name: name.trimmingCharacters(in: .whitespaces))
             onPaired(try model.add(record))
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 }

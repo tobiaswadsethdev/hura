@@ -4,7 +4,12 @@ import Security
 public struct KeychainError: Error, LocalizedError {
     public var status: OSStatus
     public var errorDescription: String? {
-        "Keychain error \(status): \(SecCopyErrorMessageString(status, nil) as String? ?? "unknown")"
+        switch status {
+        case errSecInteractionNotAllowed: "The iPhone is locked. Unlock it and try again."
+        // The code is kept: a keychain failure past that one is rare enough
+        // that it is only ever reported, and the number is what to report.
+        default: "The iPhone's keychain couldn't be used (\(status))."
+        }
     }
 }
 

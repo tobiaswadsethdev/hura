@@ -190,7 +190,7 @@ struct EventsPane: View {
     private func change(_ work: @escaping (ServerClient) async throws -> PolicyView) {
         Task {
             do { policy = try await work(server.api) } catch {
-                failed = error.localizedDescription
+                failed = error.userMessage
             }
         }
     }
@@ -245,7 +245,7 @@ struct EventsPane: View {
             if let p = try? await p { policy = p }
             error = nil
         } catch {
-            if feed == nil { self.error = error.localizedDescription }
+            if feed == nil { self.error = error.userMessage }
         }
     }
 }
@@ -455,7 +455,7 @@ struct PolicyChangeSheet: View {
                 }
                 onDone(try await run(everywhere, wanted))
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.userMessage
             }
         }
     }

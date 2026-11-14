@@ -132,7 +132,7 @@ public final class Server: Identifiable {
                 state = .online
                 problem = message
             } else {
-                state = .offline(e.localizedDescription)
+                state = .offline(e.userMessage)
             }
         } catch TransportError.pinMismatch {
             state = .offline("The server's certificate has changed. Pair it again.")
@@ -193,7 +193,7 @@ public final class Server: Identifiable {
                 history?.removed(serverID: serverID, session: name)
             } catch {
                 deleting.remove(name)
-                deleteFailure = "\(name) wasn't deleted: \(error.localizedDescription)"
+                deleteFailure = "\(name) wasn't deleted: \(error.userMessage)"
             }
         }
     }

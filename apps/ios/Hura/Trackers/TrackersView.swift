@@ -62,7 +62,7 @@ struct TrackersView: View {
                     .swipeActions {
                         Button("Forget", role: .destructive) {
                             Task {
-                                do { try await model.forget(t.source.name) } catch { failed = error.localizedDescription }
+                                do { try await model.forget(t.source.name) } catch { failed = error.userMessage }
                             }
                         }
                     }
@@ -84,7 +84,7 @@ struct TrackersView: View {
             Section {
                 Toggle("Notify When They Change", isOn: Binding(get: { model.notify }, set: { on in
                     Task {
-                        do { try await model.setNotify(on) } catch { failed = error.localizedDescription }
+                        do { try await model.setNotify(on) } catch { failed = error.userMessage }
                     }
                 }))
             } footer: {
@@ -123,7 +123,7 @@ struct TrackersView: View {
             } catch let e as ASWebAuthenticationSessionError where e.code == .canceledLogin {
                 // Closed: nothing to say.
             } catch {
-                failed = error.localizedDescription
+                failed = error.userMessage
             }
         }
     }
@@ -240,7 +240,7 @@ struct AddTrackerView: View {
                 try await model.add(source, token: token)
                 dismiss()
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.userMessage
             }
         }
     }
@@ -344,7 +344,7 @@ private struct TrackerSheet: View {
                 if !trimmedToken.isEmpty { try await model.setToken(name, trimmedToken) }
                 dismiss()
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.userMessage
             }
         }
     }

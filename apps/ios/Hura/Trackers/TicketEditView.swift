@@ -41,7 +41,7 @@ struct TicketEditView: View {
             }
             .interactiveDismissDisabled(!changed.isEmpty)
             .task {
-                do { form = try await TrackerCore.editForm(tracker, key: key) } catch { self.error = error.localizedDescription }
+                do { form = try await TrackerCore.editForm(tracker, key: key) } catch { self.error = error.userMessage }
             }
         }
     }
@@ -117,7 +117,7 @@ struct TicketEditView: View {
                 try await TrackerCore.save(tracker, key: key, changes: changes)
                 dismiss()
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.userMessage
             }
         }
     }

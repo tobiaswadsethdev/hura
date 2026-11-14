@@ -198,7 +198,7 @@ struct GitPane: View {
             comments = (try? await c) ?? comments
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 
@@ -210,7 +210,7 @@ struct GitPane: View {
                 for op in ops { answer = try await server.api.git(name, op) }
                 if ops.contains(where: { if case .commit = $0 { true } else { false } }) { message = "" }
             } catch {
-                failed = error.localizedDescription
+                failed = error.userMessage
                 await load()
             }
         }
@@ -218,7 +218,7 @@ struct GitPane: View {
 
     private func act(_ work: @escaping () async throws -> Void) {
         Task {
-            do { try await work() } catch { failed = error.localizedDescription }
+            do { try await work() } catch { failed = error.userMessage }
         }
     }
 }
@@ -385,7 +385,7 @@ struct FileDiffView: View {
                     .frame(maxWidth: wrap ? .infinity : 240, alignment: .leading)
                 Button {
                     Task {
-                        do { comments = try await server.api.uncomment(name, id: c.id) } catch { failed = error.localizedDescription }
+                        do { comments = try await server.api.uncomment(name, id: c.id) } catch { failed = error.userMessage }
                     }
                 } label: {
                     Image(systemName: "xmark.circle").foregroundStyle(.secondary)
@@ -411,7 +411,7 @@ struct FileDiffView: View {
             comments = (try? await c) ?? comments
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 
@@ -423,7 +423,7 @@ struct FileDiffView: View {
                                                                          excerpt: line.text, body: body))
                 writing = nil
             } catch {
-                failed = error.localizedDescription
+                failed = error.userMessage
             }
         }
     }

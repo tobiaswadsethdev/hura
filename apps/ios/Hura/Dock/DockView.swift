@@ -96,3 +96,12 @@ struct Loaded<T, Content: View>: View {
         }
     }
 }
+
+/// Still asking, as a row of a form or a list: centred across it, the way
+/// `Loaded` centres in a whole pane. A bare `ProgressView` in a row sits at
+/// the leading edge, and some sections did that while others centred.
+struct WaitingRow: View {
+    var body: some View {
+        ProgressView().frame(maxWidth: .infinity)
+    }
+}

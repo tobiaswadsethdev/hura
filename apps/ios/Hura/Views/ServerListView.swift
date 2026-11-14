@@ -77,7 +77,7 @@ struct ServerListView: View {
                         do {
                             try await model.remove(s)
                         } catch {
-                            self.error = error.localizedDescription
+                            self.error = error.userMessage
                         }
                     }
                 }
