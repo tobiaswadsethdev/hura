@@ -27,7 +27,7 @@ pub use pairing::Pairing;
 pub use push::{PushRoute, PushView};
 
 use hura_core::chat::ChatDecision;
-use hura_core::comments::{Comment, NewComment};
+use hura_core::comments::{Comment, NewComment, PullRemark};
 use hura_core::endpoints::Route;
 use hura_core::events::Event;
 use hura_core::files::{Dir, FileText};
@@ -263,6 +263,22 @@ pub enum Request {
     /// Send the review to the agent and forget it. One message, once: see
     /// `hura_core::comments`.
     SendComments { name: String },
+    /// Send what a pull request's reviewers said to the agent of the session
+    /// that owns it, in the format of [`Request::SendComments`], leaving out
+    /// what that agent has been sent before. Answers [`Reply::Told`], with an
+    /// empty message when there was nothing new.
+    ///
+    /// The client reads the pull request and the server does the rest: the
+    /// trackers are the hura cloud account's, which the server cannot reach,
+    /// and what has been sent is the session's, which the client must not be
+    /// trusted to remember -- two windows would each tell it once. See
+    /// `hura_core::comments::pull_remarks`.
+    SendPullComments {
+        name: String,
+        /// The pull request's own name, `#58` or `!26056`, for the message.
+        key: String,
+        remarks: Vec<PullRemark>,
+    },
     /// Answer one of a chat session's permission requests by its id, from
     /// outside the conversation: what a notification on a phone sends. The
     /// id is the one the notification carried, so the answer goes to that
@@ -437,6 +453,7 @@ impl Request {
             | Request::Comment { name, .. }
             | Request::Uncomment { name, .. }
             | Request::SendComments { name }
+            | Request::SendPullComments { name, .. }
             | Request::Answer { name, .. } => Some(name),
             Request::Create(new) | Request::CreateFromPull(new) => new.name.as_deref(),
             Request::Destroy { name } | Request::Retitle { name, .. } => Some(name),
@@ -782,6 +799,14 @@ mod tests {
                 "upload-skills",
             ),
             (Request::CreateFromPull(Box::default()), "create-from-pull"),
+            (
+                Request::SendPullComments {
+                    name: "s".into(),
+                    key: "#1".into(),
+                    remarks: Vec::new(),
+                },
+                "send-pull-comments",
+            ),
         ] {
             let v: serde_json::Value = serde_json::to_value(&req).unwrap();
             assert_eq!(v["op"], op, "{req:?}");

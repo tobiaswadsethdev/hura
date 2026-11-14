@@ -15,6 +15,7 @@ struct PullView: View {
     let pull: PullRequestSummary
     @Binding var starting: WorkOrigin?
     @Environment(TrackersModel.self) private var trackers
+    @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @State private var detail: PullDetail?
     @State private var error: String?
@@ -26,6 +27,8 @@ struct PullView: View {
     @State private var voting = false
     @State private var merging: MergeSheet.Mode?
     @State private var cancelling = false
+    /// What became of sending its reviewers' comments to the agent.
+    @State private var told: String?
 
     private var stored: StoredTracker? { trackers.tracker(named: pull.tracker) }
 
@@ -80,6 +83,10 @@ struct PullView: View {
                     if !pull.fork, detail?.state ?? "open" == "open" {
                         Button("Work on It", glyph: .workOn) { starting = .pull(pull, review: false) }
                         Button("Review It", glyph: .review) { starting = .pull(pull, review: true) }
+                    }
+                    if let on = model.pullSession(pull) {
+                        Button("Send Comments to the Agent", glyph: .sendReview) { tell(on) }
+                            .disabled(busy != nil)
                     }
                     if let d = detail, !d.offers.isEmpty {
                         Button("Give a Review…", glyph: .approve) { voting = true }
@@ -140,6 +147,25 @@ struct PullView: View {
             }
         }
         .failure($failed)
+        .alert(told ?? "", isPresented: Binding(get: { told != nil }, set: { if !$0 { told = nil } })) {
+            Button("OK") {}
+        }
+    }
+
+    /// Its open review comments, in one message, to the agent of the worktree
+    /// on it, leaving out the ones that agent has been sent before.
+    private func tell(_ on: (server: Server, name: String)) {
+        guard let stored else { return }
+        busy = "tell"
+        Task {
+            defer { busy = nil }
+            do {
+                let message = try await ReviewToAgent.send(stored, pull: pull, to: on.server, session: on.name)
+                told = message.isEmpty ? "Nothing new: it has been told everything still open." : "Sent to \(on.name)."
+            } catch {
+                failed = error.userMessage
+            }
+        }
     }
 
     @ViewBuilder

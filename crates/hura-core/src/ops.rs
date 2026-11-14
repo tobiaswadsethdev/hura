@@ -1219,6 +1219,29 @@ pub fn send_comments(backend: &dyn Backend, session: &Session) -> Result<String,
     Ok(message)
 }
 
+/// Send what a pull request's reviewers said to the agent of the session
+/// that owns it, leaving out what it has been sent already. Answers with the
+/// message, or with nothing when there was nothing new to say, which is not
+/// a failure: a timer asks this every few minutes and is usually told so.
+///
+/// Remembered as sent only once the paste has landed, for the reason
+/// [`send_comments`] clears only then.
+pub fn send_pull_comments(
+    backend: &dyn Backend,
+    session: &Session,
+    key: &str,
+    remarks: Vec<crate::comments::PullRemark>,
+) -> Result<String, String> {
+    let fresh = crate::comments::unsent(remarks, &crate::comments::sent(&session.name));
+    if fresh.is_empty() {
+        return Ok(String::new());
+    }
+    let message = crate::comments::pull_message(key, &fresh);
+    tell(backend, session, &message)?;
+    crate::comments::mark_sent(&session.name, &fresh)?;
+    Ok(message)
+}
+
 /// The rules on a session's sandbox, as the policy pane shows them, with the
 /// global lists said against them.
 pub fn policy(backend: &dyn Backend, session: &Session) -> Result<policy::View, String> {

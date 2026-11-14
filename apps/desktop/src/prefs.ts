@@ -46,6 +46,14 @@ export type Prefs = {
   /// On by default. Off silences the notifications and not the reading: the
   /// sidebar is read on its timer either way, because it is on screen.
   notifyTickets: boolean;
+  /// Whether what reviewers say on one of your pull requests goes to the
+  /// agent of the worktree that owns it without asking, each time the
+  /// sidebar is read. The pull request's own panel has a button for it
+  /// either way.
+  ///
+  /// Off by default: it types into an agent that may be in the middle of
+  /// something else, which is for somebody to choose.
+  pullCommentsToAgent: boolean;
   /// Whether the sidebar is open, or folded to its rail of counts.
   inboxOpen: boolean;
   /// Whether the dock -- files, git and the rest -- is open, or folded to its
@@ -105,6 +113,7 @@ export const DEFAULTS: Prefs = {
   pullWidth: 860,
   notify: true,
   notifyTickets: true,
+  pullCommentsToAgent: false,
   inboxOpen: true,
   dockOpen: true,
   inboxShut: [],
@@ -137,6 +146,10 @@ export function sanitize(stored: unknown): Prefs {
     notify: typeof raw.notify === "boolean" ? raw.notify : DEFAULTS.notify,
     notifyTickets:
       typeof raw.notifyTickets === "boolean" ? raw.notifyTickets : DEFAULTS.notifyTickets,
+    pullCommentsToAgent:
+      typeof raw.pullCommentsToAgent === "boolean"
+        ? raw.pullCommentsToAgent
+        : DEFAULTS.pullCommentsToAgent,
     inboxOpen: typeof raw.inboxOpen === "boolean" ? raw.inboxOpen : DEFAULTS.inboxOpen,
     dockOpen: typeof raw.dockOpen === "boolean" ? raw.dockOpen : DEFAULTS.dockOpen,
     inboxShut: Array.isArray(raw.inboxShut)

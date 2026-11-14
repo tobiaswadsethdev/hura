@@ -367,6 +367,18 @@ export function SettingsScreen({
               A status moved, somebody else's comment, a ticket newly yours, a review asked of you,
               and your pull requests' checks and reviews. Checked every few minutes.
             </p>
+            <label className="tick">
+              <input
+                type="checkbox"
+                checked={prefs.pullCommentsToAgent}
+                onChange={(e) => onPrefs({ pullCommentsToAgent: e.target.checked })}
+              />
+              <span>Send review comments on my pull requests to their agents</span>
+            </label>
+            <p className="hint indent">
+              What reviewers say on a pull request you opened goes to the worktree on its branch, as
+              one message, while this window is open. Each comment once. Checked every few minutes.
+            </p>
           </>
         )}
       </section>

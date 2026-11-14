@@ -660,6 +660,38 @@ export default function App() {
     };
   }, [readInbox]);
 
+  // What reviewers said on your pull requests, to the agents of the worktrees
+  // that own them, each time the sidebar is read, when that is switched on.
+  // Each pull request is read again in full, because the sidebar's row counts
+  // comments only on GitHub and only some of them; the server leaves out what
+  // each agent has been sent, so asking every few minutes says each thing
+  // once. Yours only: on somebody else's pull request the reviewer is you, or
+  // the worktree is reviewing it. Silent when it fails, as a timer has nobody
+  // to tell; the panel's button says why.
+  const sessionsNow = useRef(live);
+  sessionsNow.current = live;
+  const telling = useRef(false);
+  useEffect(() => {
+    if (!prefs.pullCommentsToAgent || !server || !inbox || telling.current) return;
+    const owned = inbox.pulls
+      .filter((p) => p.relation === "created")
+      .flatMap((p) => {
+        const s = pullSession(p, sessionsNow.current);
+        return s ? [{ pull: p, session: s }] : [];
+      });
+    if (owned.length === 0) return;
+    telling.current = true;
+    void (async () => {
+      for (const { pull, session } of owned) {
+        await api
+          .sendPullComments(server, session.name, pull.tracker, pull.repo, pull.id)
+          .catch(() => undefined);
+      }
+    })().finally(() => {
+      telling.current = false;
+    });
+  }, [inbox, server, prefs.pullCommentsToAgent]);
+
   // Looking at the inbox here is looking at it everywhere: with the window in
   // front and the sidebar open, what is waiting on you (the phone's badge
   // counts the same) is seen, and signed in, the phones clear their badge and
@@ -1399,6 +1431,7 @@ export default function App() {
             />
             <PullPanel
               key={`${showingPull.tracker}:${showingPull.repo}:${showingPull.id}`}
+              server={server}
               pull={showingPull}
               projects={pullProjects(showingPull, projects)}
               session={pullSession(showingPull, live)}

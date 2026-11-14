@@ -90,7 +90,7 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `projects.rs` | the repositories someone has said they are working on, which is what worktrees are grouped under. A decision, not a discovery: stored rather than derived from the sessions that exist |
 | `git.rs` | the working copy inside a sandbox as git describes it, and the operations on it. The status parser is pure, because git's output is the part that is easy to get subtly wrong and impossible to notice |
 | `files.rs` | reading a worktree's files from outside it, one directory at a time. Read-only: the agent owns the working copy |
-| `comments.rs` | review comments on a diff, kept per session until they go to the agent as one message |
+| `comments.rs` | review comments on a diff, kept per session until they go to the agent as one message; a pull request's reviewers' comments sent the same way, each once |
 | `config.rs` | `~/.config/hura/config.toml`, and which default wins |
 | `doctor.rs` | the preflight checks, each carrying its fix |
 | `update.rs` | fetching, verifying and replacing the `hurad` binary itself |

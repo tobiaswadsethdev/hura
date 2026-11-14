@@ -768,6 +768,18 @@ threads stay on the forge, one click away in its header.
 and checks sit on the branch line, and a click on them opens the pull request
 rather than selecting the worktree.
 
+**What its reviewers said goes back to that worktree's agent** as one message,
+in the format of a review written in the dock: by file and line, with what was
+said about the pull request as a whole first. Every thread that is still open
+and has a word in it from someone other than the pull request's author, with
+the author's replies under it; a thread with a new reply goes again, whole. The
+server remembers which comments each session has been sent, so the agent hears
+each one once however many times it is asked. **Send Comments to the Agent**
+in the pull request's footer does it now. A switch on the settings screen does
+it for every pull request you opened each time the sidebar is read, while the
+window is open. It is off by default, because it types into an agent that may
+be busy with something else.
+
 What is worth interrupting for is something *changing*: a ticket's status,
 somebody else's comment, a ticket newly yours, a review asked of you, your
 pull request's checks failing or its review coming back. hura cloud, which

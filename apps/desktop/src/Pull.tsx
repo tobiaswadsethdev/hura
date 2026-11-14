@@ -42,6 +42,7 @@ import {
   PullRequest,
   Refresh,
   Review,
+  Send,
   Start,
   StateDot,
 } from "./icons";
@@ -60,6 +61,7 @@ export type PullStart = "work" | "review";
 type Tab = "overview" | "conversation" | "files";
 
 export function PullPanel({
+  server,
   pull,
   projects,
   session,
@@ -68,6 +70,9 @@ export function PullPanel({
   onClose,
   onChanged,
 }: {
+  /// The server `session` is on, which is what its reviewers' comments are
+  /// sent through.
+  server: string | null;
   /// The sidebar's row, which is what is shown until the full read answers.
   pull: Pull;
   /// The projects that are clones of this pull request's repository, which
@@ -88,6 +93,8 @@ export function PullPanel({
   // went wrong with the last one.
   const [working, setWorking] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  /// What became of the last sending of its comments to the agent.
+  const [told, setTold] = useState<string | null>(null);
   const [where, setWhere] = useState(projects[0]?.name ?? "");
   const project = projects.find((p) => p.name === where) ?? projects[0];
   const panel = useRef<HTMLElement>(null);
@@ -137,6 +144,24 @@ export function PullPanel({
   const comment = (body: string, thread: string | null) =>
     change(thread ?? "comment", () => api.pullComment(pull.tracker, pull.repo, pull.id, body, thread));
   const { ask, dialog } = useConfirm();
+
+  /// What its reviewers said, to the agent of the worktree that owns it.
+  /// Only what that agent has not been sent: the server remembers, so this
+  /// and the automatic sending (`App.tsx`) never say a thing twice.
+  const tell = async (to: Session) => {
+    if (!server) return;
+    setWorking("tell");
+    setFailed(null);
+    setTold(null);
+    try {
+      const message = await api.sendPullComments(server, to.name, pull.tracker, pull.repo, pull.id);
+      setTold(message ? `Sent to ${to.title ?? to.name}.` : "Nothing new: it has been told everything still open.");
+    } catch (e) {
+      setFailed(messageOf(e));
+    } finally {
+      setWorking(null);
+    }
+  };
 
   return (
     <aside
@@ -199,6 +224,7 @@ export function PullPanel({
       )}
       {error && <p className="error">{error}</p>}
       {failed && <p className="error">{failed}</p>}
+      {told && <p className="hint">{told}</p>}
       {d?.warnings.map((w) => (
         <p key={w} className="warn">
           {w}
@@ -270,14 +296,24 @@ export function PullPanel({
 
       <footer className="ticket-panel-foot">
         {session ? (
-          <button
-            className="inbox-worktree pull-go"
-            title={`Go to ${session.title ?? session.name}`}
-            onClick={() => onSelect(session.name)}
-          >
-            <StateDot state={session.state} />
-            <span>{session.title ?? session.name}</span>
-          </button>
+          <>
+            <button
+              className="inbox-worktree pull-go"
+              title={`Go to ${session.title ?? session.name}`}
+              onClick={() => onSelect(session.name)}
+            >
+              <StateDot state={session.state} />
+              <span>{session.title ?? session.name}</span>
+            </button>
+            <button
+              className="quiet"
+              disabled={working !== null || !server}
+              title="Its open review comments, in one message, leaving out the ones the agent has been sent"
+              onClick={() => void tell(session)}
+            >
+              <Send /> {working === "tell" ? "Sending…" : "Send Comments to the Agent"}
+            </button>
+          </>
         ) : fork ? (
           <span className="hint">
             Opened from a fork, so its branch is not in this repository to start a worktree on.

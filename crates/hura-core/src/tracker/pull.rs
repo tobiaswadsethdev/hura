@@ -174,6 +174,15 @@ pub struct PullThread {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullComment {
+    /// The forge's own id for it, made unique across the kinds of comment a
+    /// pull request has: `c` and `r` and `t` before GitHub's numbers for a
+    /// comment, a review and a comment on a line, which are counted apart;
+    /// `thread/comment` on Azure DevOps, which counts comments per thread.
+    /// What lets one already sent to an agent be told from one that is not;
+    /// see [`crate::comments::pull_remarks`]. Empty from a hura cloud that
+    /// predates it.
+    #[serde(default)]
+    pub id: String,
     pub author: Option<Person>,
     /// Markdown.
     pub body: String,
@@ -851,7 +860,7 @@ const GITHUB_PULL: &str = r#"query($owner: String!, $name: String!, $number: Int
         ... on StatusContext { context state targetUrl description isRequired(pullRequestNumber: $number) }
       } } } } } }
       comments(last: 100) { totalCount nodes { databaseId author { login ... on User { name } } body bodyHTML createdAt } }
-      reviews(last: 100) { totalCount nodes { state body bodyHTML submittedAt author { login ... on User { name } } } }
+      reviews(last: 100) { totalCount nodes { databaseId state body bodyHTML submittedAt author { login ... on User { name } } } }
       reviewThreads(last: 100) { totalCount nodes { isResolved isOutdated path line originalLine viewerCanReply
         comments(first: 50) { nodes { databaseId author { login ... on User { name } } body bodyHTML createdAt } } } }
     }
@@ -1102,14 +1111,21 @@ fn parse_github(data: &Value, source: &Source) -> Result<PullDetail, String> {
         });
     }
 
-    let comment = |c: &Value| PullComment {
+    let github_id = |prefix: &str, c: &Value| {
+        c.get("databaseId")
+            .and_then(Value::as_u64)
+            .map(|id| format!("{prefix}{id}"))
+            .unwrap_or_default()
+    };
+    let comment = |prefix: &str, c: &Value| PullComment {
+        id: github_id(prefix, c),
         author: c.get("author").and_then(|a| github_person(a, &viewer)),
         body: github_body(c),
         created: text_of(c, "createdAt"),
     };
     let mut conversation: Vec<PullThread> = Vec::new();
     for c in nodes(p, "comments") {
-        let c = comment(c);
+        let c = comment("c", c);
         conversation.push(PullThread {
             id: String::new(),
             path: None,
@@ -1146,6 +1162,7 @@ fn parse_github(data: &Value, source: &Source) -> Result<PullDetail, String> {
                 Vec::new()
             } else {
                 vec![PullComment {
+                    id: github_id("r", r),
                     author,
                     body,
                     created: at,
@@ -1164,7 +1181,7 @@ fn parse_github(data: &Value, source: &Source) -> Result<PullDetail, String> {
             .and_then(Value::as_u64)
             .map(|id| id.to_string())
             .unwrap_or_default();
-        let comments: Vec<PullComment> = comments.into_iter().map(comment).collect();
+        let comments: Vec<PullComment> = comments.into_iter().map(|c| comment("t", c)).collect();
         conversation.push(PullThread {
             can_reply: !first_id.is_empty()
                 && t.get("viewerCanReply")
@@ -1795,10 +1812,16 @@ fn azure_thread(t: &Value, me: &AzureMe) -> Option<PullThread> {
             can_reply: false,
         });
     }
+    let id = t.get("id").and_then(Value::as_u64)?.to_string();
     let comments: Vec<PullComment> = comments
         .into_iter()
         .filter(|c| !system(c))
         .map(|c| PullComment {
+            id: c
+                .get("id")
+                .and_then(Value::as_u64)
+                .map(|n| format!("{id}/{n}"))
+                .unwrap_or_default(),
             author: c.get("author").and_then(|a| azure_person(a, me)),
             body: pictures::html_images(&string(c, "content")),
             created: text_of(c, "publishedDate"),
@@ -1825,7 +1848,6 @@ fn azure_thread(t: &Value, me: &AzureMe) -> Option<PullThread> {
         (_, Some(n)) => (2..=5).contains(&n),
         _ => false,
     };
-    let id = t.get("id").and_then(Value::as_u64)?.to_string();
     Some(PullThread {
         id,
         path,
@@ -2070,7 +2092,7 @@ mod tests {
         ] },
         "reviews": { "totalCount": 3, "nodes": [
           { "state": "COMMENTED", "body": "", "submittedAt": "2026-10-01T12:00:00Z", "author": { "login": "ada", "name": "Ada Lovelace" } },
-          { "state": "CHANGES_REQUESTED", "body": "One thing first.", "submittedAt": "2026-10-02T12:00:00Z", "author": { "login": "ada", "name": "Ada Lovelace" } }
+          { "databaseId": 77, "state": "CHANGES_REQUESTED", "body": "One thing first.", "submittedAt": "2026-10-02T12:00:00Z", "author": { "login": "ada", "name": "Ada Lovelace" } }
         ] },
         "reviewThreads": { "totalCount": 1, "nodes": [
           { "isResolved": false, "isOutdated": true, "path": "src/upload.rs", "line": null, "originalLine": 42, "viewerCanReply": true,
@@ -2199,6 +2221,14 @@ mod tests {
         );
         assert!(thread.outdated && thread.can_reply && !thread.resolved);
         assert!(d.conversation[1].comments[0].author.as_ref().unwrap().me);
+        // GitHub counts comments, reviews and comments on lines apart, so a
+        // comment's id says which it is.
+        let ids: Vec<&str> = d
+            .conversation
+            .iter()
+            .flat_map(|t| t.comments.iter().map(|c| c.id.as_str()))
+            .collect();
+        assert_eq!(ids, ["t1974078574", "t1974078575", "c900", "r77"]);
     }
 
     #[test]
@@ -2510,6 +2540,11 @@ mod tests {
         assert!(thread.resolved, "fixed is done with");
         assert_eq!(thread.comments.len(), 2, "a deleted comment is gone");
         assert!(thread.comments[1].author.as_ref().unwrap().me);
+        assert_eq!(
+            [&thread.comments[0].id, &thread.comments[1].id],
+            ["111990/1", "111990/2"],
+            "Azure DevOps counts comments per thread"
+        );
         let vote = &d.conversation[1];
         assert_eq!(vote.verdict, Some(PullVerdict::Approved));
         assert_eq!(

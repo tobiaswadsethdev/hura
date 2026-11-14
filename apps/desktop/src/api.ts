@@ -222,6 +222,11 @@ export const api = {
     invoke<Comment[]>("uncomment", { server, name, id }),
   sendComments: (server: string, name: string) =>
     invoke<string>("send_comments", { server, name }),
+  // What a pull request's reviewers said, to the agent of the session that
+  // owns it: the comments it has not been sent before, in the review's format.
+  // Answers with the message, empty when there was nothing new to say.
+  sendPullComments: (server: string, name: string, tracker: string, repo: string, id: string) =>
+    invoke<string>("send_pull_comments", { server, name, tracker, repo, id }),
 
   // Projects: the repositories someone has decided to work on, which is what
   // the tree groups worktrees under.
