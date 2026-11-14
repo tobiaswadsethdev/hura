@@ -41,7 +41,7 @@ struct NewProjectView: View {
                         .disabled(repo.origin == nil || busy)
                     }
                 } else if error == nil {
-                    ProgressView().frame(maxWidth: .infinity)
+                    WaitingRow()
                 }
             }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter repositories")
@@ -53,7 +53,7 @@ struct NewProjectView: View {
                 }
             }
             .task {
-                do { listing = try await server.api.repos() } catch { self.error = error.localizedDescription }
+                do { listing = try await server.api.repos() } catch { self.error = error.userMessage }
             }
         }
     }
@@ -67,7 +67,7 @@ struct NewProjectView: View {
                 try await server.newProject(from: repo)
                 dismiss()
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.userMessage
             }
         }
     }

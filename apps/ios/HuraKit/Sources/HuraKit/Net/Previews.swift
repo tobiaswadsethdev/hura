@@ -63,7 +63,7 @@ public final class PreviewHub {
                         done.resume(returning: Int(listener.port?.rawValue ?? 0))
                     case let .failed(e):
                         answered = true
-                        done.resume(throwing: TransportError.failed(e.localizedDescription))
+                        done.resume(throwing: TransportError.failed(Plain.network(e)))
                     default:
                         break
                     }

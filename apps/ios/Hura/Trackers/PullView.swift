@@ -303,7 +303,7 @@ struct PullView: View {
             detail = try await TrackerCore.pull(stored, repo: pull.repo, id: pull.id)
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 
@@ -316,7 +316,7 @@ struct PullView: View {
                 try await work(stored)
                 await load()
             } catch {
-                failed = error.localizedDescription
+                failed = error.userMessage
             }
         }
     }
@@ -496,12 +496,12 @@ private struct PullFilesSection: View {
             } else if let error {
                 Text(error).foregroundStyle(.red).font(.callout)
             } else {
-                ProgressView()
+                WaitingRow()
             }
         }
         .task {
             do { files = try await TrackerCore.pullFiles(tracker, repo: pull.repo, id: pull.id) } catch {
-                self.error = error.localizedDescription
+                self.error = error.userMessage
             }
         }
     }
@@ -559,7 +559,7 @@ private struct PullFileDiffView: View {
                 model = DiffModel(original: d.original, modified: d.modified)
                 diff = d
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.userMessage
             }
         }
     }

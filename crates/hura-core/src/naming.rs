@@ -263,7 +263,7 @@ fn run(command: &mut Command, input: &str, what: &str) -> Result<String, String>
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| format!("could not run {what}: {e}"))?;
+        .map_err(|e| crate::plain::spawn(what, &e))?;
     // Dropped once written, so the command sees the end of its input.
     if let Some(mut stdin) = child.stdin.take() {
         stdin

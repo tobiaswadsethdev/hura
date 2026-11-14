@@ -99,7 +99,7 @@ final class AccountModel {
                 codeSentTo = nil
             }
         case let .failure(e):
-            if (e as? ASAuthorizationError)?.code != .canceled { error = e.localizedDescription }
+            if (e as? ASAuthorizationError)?.code != .canceled { error = e.userMessage }
             return
         }
         await load()
@@ -168,6 +168,6 @@ final class AccountModel {
     }
 
     private func fail(_ error: Error) {
-        self.error = error.localizedDescription
+        self.error = error.userMessage
     }
 }

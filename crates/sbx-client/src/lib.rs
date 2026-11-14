@@ -46,26 +46,32 @@ use serde::Deserialize;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// What went wrong running the CLI.
+///
+/// Displayed to people, all the way out to the desktop and the phone, so the
+/// words are about Docker Sandboxes rather than about the command line that
+/// was run: `` `sbx exec -it hura-x -- git status` failed (exit 125) `` is a
+/// debugging aid, and it is still here, in the fields, for `{:?}` and the log.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("could not run `{bin}`: {source}")]
+    #[error("{}", spawn_reason(bin, source))]
     Spawn {
         bin: String,
         #[source]
         source: std::io::Error,
     },
 
-    #[error("sandbox `{0}` not found")]
+    #[error("the sandbox `{0}` no longer exists")]
     NotFound(String),
 
-    #[error("`sbx {args}` failed (exit {code}): {stderr}")]
+    #[error("{}", cli_reason(*code, stderr))]
     Cli {
         args: String,
         code: i32,
         stderr: String,
     },
 
-    #[error("could not parse `sbx {args}` output as JSON: {source}")]
+    #[error("Docker Sandboxes answered in a form this version of hura cannot read")]
     Parse {
         args: String,
         #[source]
@@ -74,8 +80,30 @@ pub enum Error {
 
     /// The CLI succeeded and said something this build cannot read, such as a
     /// rule id missing from the line that should carry one.
-    #[error("`sbx {args}` answered in a shape this build does not know: {said}")]
+    #[error("Docker Sandboxes answered in a form this version of hura cannot read")]
     Unexpected { args: String, said: String },
+}
+
+fn spawn_reason(bin: &str, source: &std::io::Error) -> String {
+    match source.kind() {
+        std::io::ErrorKind::NotFound => {
+            format!("Docker Sandboxes is not installed on the server (no `{bin}` to run)")
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            format!("the server is not allowed to run Docker Sandboxes (`{bin}`)")
+        }
+        _ => format!("could not start Docker Sandboxes: {source}"),
+    }
+}
+
+/// The CLI's own refusal, which is already a sentence -- `refusal` has taken
+/// the `error:` off it -- or, when it said nothing, that much.
+fn cli_reason(code: i32, stderr: &str) -> String {
+    if stderr.is_empty() {
+        format!("Docker Sandboxes failed without saying why (exit {code})")
+    } else {
+        stderr.to_string()
+    }
 }
 
 /// Where a sandbox is in its life, as `sbx ls` reports it.

@@ -70,7 +70,7 @@ impl Remote {
             // each, which on Windows is twenty seconds of nothing happening
             // before `localhost` falls back from `::1` to `127.0.0.1`.
             super::http::connect(&self.host, self.port)
-                .map_err(|e| Error::Server(format!("could not reach the server: {e}")))?,
+                .map_err(|e| Error::Server(e.to_string()))?,
             None,
             Some(tungstenite::Connector::Rustls(Arc::new(config))),
         )
@@ -221,7 +221,18 @@ where
 /// layer noticed. The certificate one is the one worth recognising: it is a
 /// server that was rebuilt, or one that is not the server that was paired with.
 fn describe(e: tungstenite::Error) -> String {
-    tidy(&e.to_string())
+    match e {
+        tungstenite::Error::Io(e) => {
+            format!(
+                "the connection to the server broke: {}",
+                super::http::reason(&e)
+            )
+        }
+        tungstenite::Error::Http(response) => {
+            super::http::status_reason(response.status().as_u16())
+        }
+        e => tidy(&e.to_string()),
+    }
 }
 
 /// The wording, separated from where it came from.

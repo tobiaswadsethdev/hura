@@ -116,9 +116,9 @@ public final class TerminalChannel {
                 }
             }
         } catch let e as TransportError {
-            phase = e.isPermanent ? .closed(e.localizedDescription) : .offline("Can't reach the server.")
+            phase = e.isPermanent ? .closed(e.userMessage) : .offline("Can't reach the server.")
         } catch {
-            phase = .offline(error.localizedDescription)
+            phase = .offline(error.userMessage)
         }
         self.socket = nil
         return opened

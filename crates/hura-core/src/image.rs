@@ -163,7 +163,7 @@ pub fn load(tag: &str) -> Result<(), String> {
         .arg(&archive)
         .arg(tag)
         .status()
-        .map_err(|e| format!("could not run docker: {e}"));
+        .map_err(|e| crate::plain::spawn("docker", &e));
     let result = match saved {
         Ok(status) if status.success() => sbx_client::CliClient::new()
             .load_template(&archive)
@@ -288,7 +288,7 @@ fn run_build(dir: &Path, claude: Option<&str>) -> Result<(), String> {
     let status = Command::new("docker")
         .args(build_argv(dir, claude))
         .status()
-        .map_err(|e| format!("could not run docker: {e}"))?;
+        .map_err(|e| crate::plain::spawn("docker", &e))?;
     if !status.success() {
         return Err(format!("docker build exited with {status}"));
     }
@@ -349,7 +349,7 @@ fn run_variant_build(dir: &Path, tag: &str) -> Result<(), String> {
     let status = Command::new("docker")
         .args(variant_build_argv(dir, tag))
         .status()
-        .map_err(|e| format!("could not run docker: {e}"))?;
+        .map_err(|e| crate::plain::spawn("docker", &e))?;
     if !status.success() {
         return Err(format!("docker build exited with {status}"));
     }
@@ -709,7 +709,7 @@ fn pull_image(tag: &str, registry: &str) -> Result<(), String> {
         Command::new("docker")
             .args(args)
             .status()
-            .map_err(|e| format!("could not run docker: {e}"))
+            .map_err(|e| crate::plain::spawn("docker", &e))
     };
     let pulled = docker(&["pull", &remote])?;
     if !pulled.success() {

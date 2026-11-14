@@ -240,7 +240,7 @@ struct ServerView: View {
 
     private func act(_ work: @escaping () async throws -> Void) {
         Task {
-            do { try await work() } catch { self.error = error.localizedDescription }
+            do { try await work() } catch { self.error = error.userMessage }
         }
     }
 }

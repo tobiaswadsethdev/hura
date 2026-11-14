@@ -13,7 +13,7 @@ public struct TrackerError: Error, LocalizedError, Equatable {
         self.message = message
     }
 
-    public var errorDescription: String? { message }
+    public var errorDescription: String? { Plain.sentence(message) }
 }
 
 /// hura-core's tracker functions, one JSON request at a time, run by hura

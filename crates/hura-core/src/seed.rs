@@ -185,7 +185,7 @@ pub enum SeedError {
     /// Whatever the session's backend said, such as an unreachable runtime.
     #[error(transparent)]
     Backend(#[from] crate::backend::Error),
-    #[error("seeding failed (exit {code}): {stderr}")]
+    #[error("setting up the sandbox failed: {stderr}")]
     Script { code: i32, stderr: String },
     #[error("sandbox metadata at {META_PATH} is not valid JSON: {0}")]
     BadMeta(#[from] serde_json::Error),

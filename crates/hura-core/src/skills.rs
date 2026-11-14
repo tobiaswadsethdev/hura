@@ -563,7 +563,7 @@ fn unpack(into: &Path, tar_b64: &str) -> Result<(), String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("could not run tar: {e}"))?;
+        .map_err(|e| crate::plain::spawn("tar", &e))?;
     child
         .stdin
         .as_mut()

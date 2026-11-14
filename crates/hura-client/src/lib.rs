@@ -73,10 +73,7 @@ impl Remote {
             None,
         )?;
         if response.status != 200 {
-            return Err(Error::Server(format!(
-                "asked for the version and got HTTP {}",
-                response.status
-            )));
+            return Err(Error::Server(http::status_reason(response.status)));
         }
         serde_json::from_str(&response.body).map_err(|_| {
             // The fingerprint matched, so this really is the paired server --
@@ -117,11 +114,16 @@ impl Remote {
                         .into(),
                 ));
             }
-            other => return Err(Error::Server(format!("HTTP {other}"))),
+            other => return Err(Error::Server(http::status_reason(other))),
         }
 
-        let outcome: Outcome = serde_json::from_str(&response.body)
-            .map_err(|e| Error::Server(format!("could not read the reply: {e}")))?;
+        let outcome: Outcome = serde_json::from_str(&response.body).map_err(|_| {
+            Error::Server(
+                "the server's reply could not be read, which means these two \
+                     builds disagree about the protocol"
+                    .into(),
+            )
+        })?;
         outcome.into_result().map_err(Error::Failed)
     }
 }

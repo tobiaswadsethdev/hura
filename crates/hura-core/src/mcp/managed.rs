@@ -514,8 +514,7 @@ fn docker(argv: &[&str], env: &[(String, String)]) -> Result<std::process::Outpu
     for (k, v) in env {
         cmd.env(k, v);
     }
-    cmd.output()
-        .map_err(|e| format!("could not run docker: {e}"))
+    cmd.output().map_err(|e| crate::plain::spawn("docker", &e))
 }
 
 #[cfg(test)]

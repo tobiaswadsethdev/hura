@@ -53,7 +53,7 @@ struct DirView: View {
             dir = try await server.api.files(name, path: path)
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 }
@@ -120,7 +120,7 @@ struct FileView: View {
             }
         }
         .task {
-            do { file = try await server.api.file(name, path: path) } catch { self.error = error.localizedDescription }
+            do { file = try await server.api.file(name, path: path) } catch { self.error = error.userMessage }
         }
     }
 }

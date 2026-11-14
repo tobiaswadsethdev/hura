@@ -1,4 +1,5 @@
 import Foundation
+import HuraKit
 import LocalAuthentication
 import Observation
 
@@ -36,7 +37,7 @@ final class AppLock {
                 // here would only be theatre. (The simulator lands here too.)
                 isLocked = false
             } else {
-                lastError = error?.localizedDescription
+                lastError = error?.userMessage
             }
             return
         }
@@ -47,7 +48,7 @@ final class AppLock {
         } catch let e as LAError where e.code == .userCancel || e.code == .appCancel || e.code == .systemCancel {
             lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            lastError = error.userMessage
         }
     }
 }

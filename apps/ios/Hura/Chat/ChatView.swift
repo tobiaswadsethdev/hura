@@ -425,7 +425,7 @@ struct ChatView: View {
             do {
                 attached += try result.get().map(Attachments.file)
             } catch {
-                chat.error = error.localizedDescription
+                chat.error = error.userMessage
             }
         }
     }
@@ -453,7 +453,7 @@ struct ChatView: View {
                 justSent = nil
                 if draft.isEmpty { draft = text }
                 if attached.isEmpty { attached = files }
-                chat.error = error.localizedDescription
+                chat.error = error.userMessage
             }
         }
     }
@@ -474,7 +474,7 @@ struct ChatView: View {
             } catch {
                 justSent = nil
                 if draft.isEmpty { draft = text }
-                chat.error = error.localizedDescription
+                chat.error = error.userMessage
             }
         }
     }
@@ -483,7 +483,7 @@ struct ChatView: View {
         answering = ask.id
         Task {
             defer { answering = nil }
-            do { try await chat.answer(ask.id, decision: decision) } catch { chat.error = error.localizedDescription }
+            do { try await chat.answer(ask.id, decision: decision) } catch { chat.error = error.userMessage }
         }
     }
 }
@@ -599,7 +599,7 @@ private struct ModelMenu: View {
                 if !chat.models.isEmpty {
                     Section("Model") {
                         Picker("Model", selection: Binding(get: { chat.model ?? chat.models[0].value }, set: { m in
-                            Task { do { try await chat.setModel(m) } catch { chat.error = error.localizedDescription } }
+                            Task { do { try await chat.setModel(m) } catch { chat.error = error.userMessage } }
                         })) {
                             ForEach(chat.models) { m in
                                 Text(m.displayName).tag(m.value)
@@ -611,7 +611,7 @@ private struct ModelMenu: View {
                 if !chat.efforts.isEmpty {
                     Section("Effort") {
                         Picker("Effort", selection: Binding(get: { chat.effort ?? "" }, set: { e in
-                            Task { do { try await chat.setEffort(e.isEmpty ? nil : e) } catch { chat.error = error.localizedDescription } }
+                            Task { do { try await chat.setEffort(e.isEmpty ? nil : e) } catch { chat.error = error.userMessage } }
                         })) {
                             Text("Model's Default").tag("")
                             ForEach(chat.efforts, id: \.self) { e in
@@ -655,7 +655,7 @@ private struct ModeMenu: View {
         let mode = ChatView.modes.first { $0.value == (chat.mode ?? "auto") }
         return Menu {
             Picker("Permission mode", selection: Binding(get: { chat.mode ?? "auto" }, set: { m in
-                Task { do { try await chat.setMode(m) } catch { chat.error = error.localizedDescription } }
+                Task { do { try await chat.setMode(m) } catch { chat.error = error.userMessage } }
             })) {
                 ForEach(ChatView.modes, id: \.value) { m in
                     Text("\(m.label) — \(m.hint)").tag(m.value)

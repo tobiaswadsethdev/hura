@@ -20,7 +20,7 @@ public enum TransportError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unauthorized: "The server no longer accepts this phone. Pair it again with `hurad pair`."
-        case let .closed(code): "Connection closed (\(code))."
+        case .closed: "The connection to the server closed."
         case .pinMismatch: "The server's certificate changed. Pair it again to trust the new one."
         case .timeout: "The server didn't answer in time."
         case let .failed(why): why
@@ -210,7 +210,7 @@ public final class NetworkTransport: WebSocketTransport {
         let status = try? await PinnedHTTP.request(
             host: host, port: port, pin: pin, method: "GET", path: path,
             headers: [("Authorization", "Bearer \(token)")]).status
-        settle(status == 401 ? .unauthorized : .failed(error?.localizedDescription ?? "WebSocket upgrade failed"))
+        settle(status == 401 ? .unauthorized : .failed(error.map(Plain.network) ?? "The server wouldn't open a live connection."))
     }
 
     private func settle(_ error: TransportError) {
@@ -234,7 +234,7 @@ public final class NetworkTransport: WebSocketTransport {
         if let code = closedByPeer { return .closed(code) }
         if check.outcome == .mismatched { return .pinMismatch }
         if case .posix(.ETIMEDOUT) = error { return .timeout }
-        return .failed(error?.localizedDescription ?? "connection closed")
+        return .failed(Plain.network(error))
     }
 
     private nonisolated static func rawCode(_ code: NWProtocolWebSocket.CloseCode) -> Int {

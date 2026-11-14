@@ -162,7 +162,7 @@ struct IntegrationsView: View {
         busy = key
         Task {
             defer { busy = nil }
-            do { view = try await work() } catch { failed = error.localizedDescription }
+            do { view = try await work() } catch { failed = error.userMessage }
         }
     }
 
@@ -171,7 +171,7 @@ struct IntegrationsView: View {
             view = try await server.api.integrations()
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 }
@@ -265,7 +265,7 @@ struct ServerSettingsView: View {
             } else if let error {
                 Section("Server") { Text(error).foregroundStyle(.secondary).font(.callout) }
             } else {
-                Section("Server") { ProgressView().frame(maxWidth: .infinity) }
+                Section("Server") { WaitingRow() }
             }
         }
         .navigationTitle("Settings")
@@ -385,7 +385,7 @@ struct ServerSettingsView: View {
             draft = v.settings
             options = try? await o
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 
@@ -398,7 +398,7 @@ struct ServerSettingsView: View {
                 view = v
                 draft = v.settings
             } catch {
-                failed = error.localizedDescription
+                failed = error.userMessage
             }
         }
     }
@@ -440,7 +440,7 @@ private struct NamingKeyRow: View {
                 value = ""
                 changed(try await server.api.settings().namingKey)
             } catch {
-                failed = error.localizedDescription
+                failed = error.userMessage
             }
         }
     }
@@ -473,7 +473,7 @@ struct AboutView: View {
                     } else if let error {
                         Text(error).foregroundStyle(.red)
                     } else {
-                        ProgressView()
+                        WaitingRow()
                     }
                     LabeledContent("Address") { Text("\(server.record.host):\(server.record.port)").font(.footnote.monospaced()) }
                     LabeledContent("Certificate") {
@@ -489,7 +489,7 @@ struct AboutView: View {
         .navigationTitle("About")
         .task {
             guard let server else { return }
-            do { hello = try await server.api.hello() } catch { self.error = error.localizedDescription }
+            do { hello = try await server.api.hello() } catch { self.error = error.userMessage }
         }
     }
 }
@@ -523,6 +523,6 @@ struct ServerNameField: View {
             name = server.record.name
             return
         }
-        do { try model.rename(server, to: trimmed) } catch { failed = error.localizedDescription }
+        do { try model.rename(server, to: trimmed) } catch { failed = error.userMessage }
     }
 }

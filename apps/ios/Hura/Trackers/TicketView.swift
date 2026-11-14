@@ -188,7 +188,7 @@ struct TicketView: View {
             transitions = await t ?? []
             error = nil
         } catch {
-            self.error = error.localizedDescription
+            self.error = error.userMessage
         }
     }
 
@@ -204,7 +204,7 @@ struct TicketView: View {
                 await load()
                 await trackers.refresh()
             } catch {
-                failed = error.localizedDescription
+                failed = error.userMessage
             }
         }
     }

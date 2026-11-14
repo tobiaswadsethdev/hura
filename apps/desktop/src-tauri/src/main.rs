@@ -96,6 +96,22 @@ fn failed(message: impl std::fmt::Display) -> Failed {
     }
 }
 
+/// The list of paired servers would not read or write: the file's own
+/// problem, said without the errno.
+fn remotes_failed(e: std::io::Error) -> Failed {
+    failed(format!(
+        "could not read the list of paired servers: {}",
+        hura_core::plain::io(&e)
+    ))
+}
+
+/// An answer from hura cloud in a shape this build does not know, which is a
+/// version gap: serde's `invalid type: null, expected a string at line 1` is
+/// the detail, and updating is the remedy.
+fn unreadable(_: serde_json::Error) -> Failed {
+    failed("hura cloud answered in a form this version cannot read; it may need updating")
+}
+
 /// A paired server, as the picker shows it. No token: it is a credential, and
 /// the webview has no use for one it can never present.
 #[derive(Debug, Clone, Serialize)]
@@ -106,7 +122,7 @@ struct ServerSummary {
 
 #[tauri::command(async)]
 fn servers() -> Result<Vec<ServerSummary>, Failed> {
-    let remotes = Remotes::load().map_err(failed)?;
+    let remotes = Remotes::load().map_err(remotes_failed)?;
     Ok(remotes
         .list()
         .iter()
@@ -158,11 +174,11 @@ fn connect(pairing: String, name: Option<String>) -> Result<Paired, Failed> {
 /// matters if the token has been somewhere it should not.
 #[tauri::command(async)]
 fn forget(name: String) -> Result<Vec<ServerSummary>, Failed> {
-    let mut remotes = Remotes::load().map_err(failed)?;
+    let mut remotes = Remotes::load().map_err(remotes_failed)?;
     if !remotes.remove(&name) {
         return Err(failed(format!("no server named `{name}`")));
     }
-    remotes.save().map_err(failed)?;
+    remotes.save().map_err(remotes_failed)?;
     servers()
 }
 
@@ -199,7 +215,7 @@ fn about(server: Option<String>) -> About {
 }
 
 fn remote(name: &str) -> Result<Remote, Failed> {
-    let remotes = Remotes::load().map_err(failed)?;
+    let remotes = Remotes::load().map_err(remotes_failed)?;
     remotes.select(Some(name)).cloned().map_err(failed)
 }
 
@@ -887,7 +903,7 @@ fn cloud_export(app: tauri::AppHandle) -> Result<String, Failed> {
     let dir = app
         .path()
         .download_dir()
-        .map_err(|e| failed(format!("no Downloads folder: {e}")))?;
+        .map_err(|_| failed("this computer has no Downloads folder to save it in"))?;
     let day = export["exported_at"]
         .as_str()
         .and_then(|t| t.get(..10))
@@ -895,8 +911,13 @@ fn cloud_export(app: tauri::AppHandle) -> Result<String, Failed> {
         .to_string();
     let path = dir.join(format!("hura-account-{day}.json"));
     let text = serde_json::to_string_pretty(&export).map_err(|e| failed(e.to_string()))?;
-    std::fs::write(&path, text)
-        .map_err(|e| failed(format!("could not save {}: {e}", path.display())))?;
+    std::fs::write(&path, text).map_err(|e| {
+        failed(format!(
+            "could not save {}: {}",
+            path.display(),
+            hura_core::plain::io(&e)
+        ))
+    })?;
     Ok(path.display().to_string())
 }
 
@@ -1087,7 +1108,7 @@ fn tickets(server: Option<String>) -> Result<Inbox, Failed> {
     let answer = cloud()
         .tracker(&serde_json::json!({ "op": "inbox", "prefix": prefix }))
         .map_err(cloud_failed)?;
-    let mut inbox: Inbox = serde_json::from_value(answer).map_err(failed)?;
+    let mut inbox: Inbox = serde_json::from_value(answer).map_err(unreadable)?;
     inbox.warnings.extend(warning);
     Ok(inbox)
 }
@@ -1123,7 +1144,7 @@ fn on_tracker<T: serde::de::DeserializeOwned>(
     args["op"] = json!(op);
     args["tracker"] = json!(tracker);
     let answer = signed_in()?.tracker(&args).map_err(cloud_failed)?;
-    serde_json::from_value(answer).map_err(failed)
+    serde_json::from_value(answer).map_err(unreadable)
 }
 
 // Changing a ticket. Each is one button somebody pressed: nothing here runs

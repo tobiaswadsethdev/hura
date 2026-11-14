@@ -62,7 +62,12 @@ pub fn view(cfg: &crate::config::Config) -> View {
 /// from an entry that has gone or a typo in one that has not, and both are worth
 /// seeing.
 fn named_secrets(entries: &[mcp::Entry]) -> Vec<secrets::Named> {
-    let stored = secrets::names();
+    named_from(entries, &secrets::names())
+}
+
+/// [`named_secrets`] against a store given rather than read, so a test sees
+/// the store it set up and not whatever this machine happens to keep.
+fn named_from(entries: &[mcp::Entry], stored: &[String]) -> Vec<secrets::Named> {
     let mut out: Vec<secrets::Named> = Vec::new();
 
     let mut note = |name: &str, used_by: Option<&str>| {
@@ -91,7 +96,7 @@ fn named_secrets(entries: &[mcp::Entry]) -> Vec<secrets::Named> {
     if stored.iter().any(|s| s == crate::naming::KEY) {
         note(crate::naming::KEY, Some("session naming"));
     }
-    for name in &stored {
+    for name in stored {
         note(name, None);
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -127,18 +132,28 @@ mod tests {
             entry("jira", &["ATLASSIAN_TOKEN"]),
             entry("wiki", &["ATLASSIAN_TOKEN"]),
         ];
-        let named = named_secrets(&entries);
-        // The store is the real one, so on a machine with secrets of its own
-        // they are listed too, used by nothing here. Only the catalog's rows
-        // are this test's to count.
-        let asked: Vec<_> = named.iter().filter(|n| !n.used_by.is_empty()).collect();
+        let stored = ["LEFTOVER".to_string()];
+        let named = named_from(&entries, &stored);
 
-        assert_eq!(asked.len(), 1, "{named:?}");
-        assert_eq!(asked[0].name, "ATLASSIAN_TOKEN");
-        assert_eq!(asked[0].used_by, ["jira", "wiki"]);
-        // Usually nothing is stored under it, so it is asked for and missing,
-        // which is the state that explains a container exiting.
-        assert!(!asked[0].set || secrets::names().contains(&asked[0].name));
+        assert_eq!(named.len(), 2, "{named:?}");
+        assert_eq!(named[0].name, "ATLASSIAN_TOKEN");
+        assert_eq!(named[0].used_by, ["jira", "wiki"]);
+        // Asked for and missing, which is the state that explains a container
+        // exiting.
+        assert!(!named[0].set);
+        assert_eq!(named[1].name, "LEFTOVER");
+        assert!(named[1].set && named[1].used_by.is_empty());
+    }
+
+    /// The naming key is used by something even with no integration asking
+    /// for it, and is only listed when it is stored.
+    #[test]
+    fn a_stored_naming_key_is_used_by_session_naming() {
+        let stored = [crate::naming::KEY.to_string()];
+        let named = named_from(&[], &stored);
+        assert_eq!(named.len(), 1, "{named:?}");
+        assert_eq!(named[0].used_by, ["session naming"]);
+        assert!(named_from(&[], &[]).is_empty());
     }
 
     /// An external entry has no secrets of its own here: whoever runs it gave it
@@ -149,7 +164,7 @@ mod tests {
             mcp::Server::parse("theirs", "http://mcp-theirs:9000/mcp", mcp::Transport::Http)
                 .unwrap(),
         );
-        let named = named_secrets(std::slice::from_ref(&external));
+        let named = named_from(std::slice::from_ref(&external), &[]);
         assert!(named.iter().all(|n| n.used_by.is_empty()), "{named:?}");
     }
 }
