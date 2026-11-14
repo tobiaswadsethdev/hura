@@ -142,13 +142,7 @@ struct CodeText: View {
         ScrollView(wrap ? .vertical : [.vertical, .horizontal]) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(String(i + 1).leftPad(width))
-                            .foregroundStyle(.tertiary)
-                        Text(line.isEmpty ? " " : line)
-                            .fixedSize(horizontal: !wrap, vertical: true)
-                            .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading)
-                    }
+                    CodeLine(number: String(i + 1).leftPad(width), text: line, wrap: wrap)
                 }
             }
             .font(.system(size: 12, design: .monospaced))
@@ -157,6 +151,30 @@ struct CodeText: View {
         }
         // A scroll view that scrolls both ways centres what's smaller than it.
         .defaultScrollAnchor(.topLeading)
+    }
+}
+
+/// One line: its number, and its text.
+///
+/// A line wider than the screen is the one to look after. Its number keeps
+/// its own width, or the stack squeezes it to make room and it breaks onto a
+/// line of its own; and unwrapped, the whole row keeps its full width, or
+/// what overflows is centred and the text starts left of every other line.
+struct CodeLine: View {
+    let number: String
+    let text: String
+    let wrap: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(number)
+                .foregroundStyle(.tertiary)
+                .fixedSize()
+            Text(text.isEmpty ? " " : text)
+                .fixedSize(horizontal: !wrap, vertical: true)
+                .frame(maxWidth: wrap ? .infinity : nil, alignment: .leading)
+        }
+        .fixedSize(horizontal: !wrap, vertical: false)
     }
 }
 
