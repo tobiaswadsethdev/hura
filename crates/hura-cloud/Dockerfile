@@ -15,8 +15,6 @@ COPY crates crates
 # hura-core compiles in the sandbox image's files and the built-in policies.
 COPY images images
 COPY policies policies
-# Served at /privacy.
-COPY docs/privacy-policy.md docs/privacy-policy.md
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p hura-cloud \

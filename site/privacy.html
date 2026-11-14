@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy policy · hura</title>
+  <meta name="description" content="What hura cloud and the hura relay keep about you, why, who else handles it, and how to take it away.">
+  <meta name="theme-color" content="#0b2318">
+  <link rel="icon" href="images/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="images/icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- The privacy policy for hura cloud and the relay: the one copy of it,
+       linked from the apps and from App Store Connect. Written from what
+       crates/hura-cloud and relay/ store; change it whenever that does, and
+       move the date. -->
+  <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+  <header class="nav">
+    <a class="brand" href="./"><img src="images/icon.svg" alt="" width="28" height="28">hura</a>
+    <nav>
+      <a href="https://github.com/tobiaswadsethdev/hura">GitHub</a>
+      <a class="nav-cta" href="./#download">Download</a>
+    </nav>
+  </header>
+
+  <main class="legal">
+    <h1>Privacy policy</h1>
+    <p class="updated">Last updated 13 November 2026</p>
+
+    <p>
+      This policy is about <strong>hura cloud</strong>, the service behind an
+      account in the hura desktop and iPhone apps, and the <strong>hura
+      relay</strong>, which delivers notifications to iPhones. It says what is
+      kept about you, why, who else handles it, and how to take it away.
+    </p>
+    <p>
+      Using hura without an account (servers you run yourself, their sessions
+      and sandboxes) sends nothing to hura cloud: those stay on your own
+      machines, and this policy is not about them.
+    </p>
+
+    <h2>Who is responsible</h2>
+    <p>
+      Tobias Wadseth, Sweden, is the controller of your personal data. Write to
+      <a href="mailto:privacy@gethura.app">privacy@gethura.app</a> about
+      anything in this policy.
+    </p>
+
+    <h2>What is kept, and why</h2>
+    <p>
+      <strong>Your account.</strong> The email address you sign in with, or,
+      with Sign in with Apple, the identifier Apple gives hura for your Apple ID
+      and the address Apple shares (which may be an address of Apple's that
+      forwards to yours). When the account was made, and which plan it is on.
+      <em>Why:</em> to sign you in and to keep your trackers yours (the contract
+      between us, GDPR article 6(1)(b)).
+    </p>
+    <p>
+      <strong>Sign-in codes.</strong> A code emailed to you is stored only as a
+      hash, used once, and deleted after a day.
+    </p>
+    <p>
+      <strong>Your devices.</strong> Each phone or computer signed in: the name
+      it gives itself (often your name, as in "Anna's MacBook"), whether it is a
+      Mac, a PC or an iPhone, and when it was signed in and last used. Its
+      sign-in tokens are stored only as hashes. <em>Why:</em> so you can see and
+      sign out your devices.
+    </p>
+    <p>
+      <strong>Your trackers.</strong> What you set up in hura: which GitHub,
+      Jira, Azure DevOps or Fizzy sites and projects to read, your filters, and
+      the access token or connection that reads them. Tokens are
+      <strong>encrypted</strong> with a key of your account's own and are never
+      shown back, to you or anyone. For a GitHub connection, your GitHub
+      username is kept; for Jira, the site's address. <em>Why:</em> to read your
+      tickets and pull requests for you (contract).
+    </p>
+    <p>
+      <strong>What was last seen on them.</strong> To tell you what changed,
+      hura keeps, per ticket and pull request that is yours: its key (as in
+      <code>PROJ-7</code>), its status, how many comments it has, and its review
+      and check state. Not titles, descriptions or comments. <em>Why:</em> to
+      notify you once about each change (contract).
+    </p>
+    <p>
+      <strong>Notifications.</strong> For an iPhone that has turned them on: the
+      address of its link on the hura relay and the keys to it. The text of a
+      notification is encrypted on hura cloud and can be read only by your
+      phone. <em>Why:</em> to notify you (contract).
+    </p>
+    <p>
+      <strong>Payments.</strong> If you subscribe: your customer and
+      subscription identifiers at Stripe, the subscription's status and when it
+      renews. Card details go to Stripe only and never reach hura. <em>Why:</em>
+      to provide the plan you pay for (contract), and to keep records the law
+      requires (legal obligation, 6(1)(c)).
+    </p>
+    <p>
+      <strong>Your address on the network.</strong> Each request's IP address is
+      used, in memory only, to slow down anyone asking too often; it is not
+      written down. The relay keeps an IP address for one hour when a phone
+      registers, for the same reason. <em>Why:</em> to keep the service safe and
+      working (legitimate interest, 6(1)(f)).
+    </p>
+    <p>
+      <strong>Server logs.</strong> Errors and the service's own activity are
+      logged with your account's identifier (a random ID), never your email or
+      tokens, and kept for 30 days. <em>Why:</em> to find and fix problems
+      (legitimate interest).
+    </p>
+    <p>
+      hura has <strong>no analytics, no advertising and no tracking</strong>, and
+      sells nothing about you to anybody.
+    </p>
+
+    <h2>Who else handles it</h2>
+    <p>
+      hura cloud, its database and its backups run on hura's own server, in the
+      EU, and are not handed to a hosting company. Beyond that, only to provide
+      the service, under their own data processing terms:
+    </p>
+    <div class="table">
+      <table>
+        <thead>
+          <tr><th>Who</th><th>For</th><th>Where</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Cloudflare</td><td>the network in front of hura cloud, and running the relay</td><td>worldwide, EU–US Data Privacy Framework</td></tr>
+          <tr><td>Resend</td><td>sending sign-in codes by email</td><td>USA, EU–US Data Privacy Framework / standard contractual clauses</td></tr>
+          <tr><td>Apple</td><td>Sign in with Apple, and delivering notifications to iPhones</td><td>worldwide</td></tr>
+          <tr><td>Stripe</td><td>payments, if you subscribe</td><td>EU and USA, EU–US Data Privacy Framework</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      hura also talks to <strong>GitHub, Atlassian (Jira), Microsoft (Azure
+      DevOps) and Fizzy</strong> on your behalf, with the access you gave it, to
+      read and change your tickets and pull requests as you ask. What they do
+      with that is up to their own policies and your agreement with them.
+    </p>
+    <p>
+      Where data leaves the EU/EEA, it does so under the EU–US Data Privacy
+      Framework or the European Commission's standard contractual clauses.
+    </p>
+
+    <h2>How long it is kept</h2>
+    <p>
+      As long as you have an account. When you delete it, everything above is
+      deleted at once, except: database backups, on hura's own server, which
+      roll over within 30 days; records of payments, which Stripe and hura must
+      keep for as long as accounting law requires (7 years in Sweden); and logs,
+      within 30 days.
+    </p>
+
+    <h2>Your rights</h2>
+    <ul>
+      <li>
+        <strong>See and take it with you.</strong> <em>Export</em> in the
+        account screen of either app downloads everything hura cloud keeps about
+        you, as JSON (tokens are said to be there, never shown).
+      </li>
+      <li>
+        <strong>Delete it.</strong> <em>Delete Account</em> in the account
+        screen of either app deletes the account and everything in it at once,
+        cancels a subscription, and signs out every device.
+      </li>
+      <li>
+        <strong>Correct it</strong>, <strong>restrict</strong> or <strong>object
+        to</strong> how it is used: write to
+        <a href="mailto:privacy@gethura.app">privacy@gethura.app</a>.
+      </li>
+      <li>
+        <strong>Complain</strong> to the Swedish Authority for Privacy
+        Protection (Integritetsskyddsmyndigheten,
+        <a href="https://www.imy.se">imy.se</a>), or the authority where you
+        live.
+      </li>
+    </ul>
+
+    <h2>Children</h2>
+    <p>
+      hura is not meant for anyone under 16, and does not knowingly keep
+      anything about them.
+    </p>
+
+    <h2>Changes</h2>
+    <p>
+      A change to this policy is published here with a new date. A change that
+      matters, such as a new kind of data or a new party it goes to, is also
+      told in the apps or by email before it takes effect.
+    </p>
+  </main>
+
+  <footer>
+    <span>hura · Apache-2.0</span>
+    <a href="https://github.com/tobiaswadsethdev/hura">GitHub</a>
+    <a href="https://github.com/tobiaswadsethdev/hura/blob/main/docs/install.md">Install guide</a>
+    <a href="https://github.com/tobiaswadsethdev/hura/tree/main/docs">Docs</a>
+    <a href="privacy.html">Privacy</a>
+  </footer>
+</body>
+</html>
