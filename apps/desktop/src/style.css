@@ -711,22 +711,48 @@ html.mac .sidebar { border-right-color: rgb(0 0 0 / 0.35); }
 @keyframes state-spin { to { transform: rotate(1turn); } }
 
 /* A pane fetching its own contents, which is not an agent doing anything.
-   Same ring and same mechanical tick as the state above; `--dimmer` rather
-   than one of the four hues, because the rule at the top of this file is that
-   nothing borrows those. Used by `Waiting` in `Empty.tsx` and by the two
-   buttons on the integrations screen that start a container. */
+   Grey rather than one of the four hues, because the rule at the top of this
+   file is that nothing borrows those. Used by `Waiting` in `Empty.tsx`, and
+   inline wherever a button or a row is waiting on its own request.
+
+   An arc that fades into its own tail, turning smoothly. It used to be a ring
+   with a quarter missing, ticked round in twelve steps, and at 13 pixels the
+   steps read as a stutter rather than as a clock. The arc is a conic gradient
+   cut to a ring by a mask, so it is one element with nothing to draw, and
+   `currentColor` so a button can make it its own text colour. The head is at
+   `--dim`, a rank above the empty glyphs beside it, because the tail fades to
+   nothing and a ring all in `--dimmer` would be mostly invisible. */
 .spin {
+  --spin-weight: 1.5px;
   display: inline-block;
   width: 13px;
   height: 13px;
   flex: none;
-  border: 1.5px solid var(--dimmer);
-  border-top-color: transparent;
+  position: relative;
   border-radius: 50%;
-  animation: state-spin 1s steps(12, end) infinite;
+  color: var(--dim);
+  background: conic-gradient(transparent 0.15turn, currentColor);
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--spin-weight)), #000 calc(100% - var(--spin-weight) + 0.5px));
+  animation: state-spin 0.8s linear infinite;
 }
+/* A round cap on the head of the arc, at the top where the gradient ends.
+   Only its leading half: the colour is translucent, and the half lying over
+   the arc would show as a brighter spot where the two overlap. */
+.spin::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 0 0 50%);
+  background: radial-gradient(
+    circle at 50% calc(var(--spin-weight) / 2),
+    currentColor calc(var(--spin-weight) / 2),
+    transparent calc(var(--spin-weight) / 2 + 0.5px)
+  );
+}
+/* Still, a full faint ring: something is under way, without the motion. */
 @media (prefers-reduced-motion: reduce) {
-  .spin { animation: none; border-top-color: var(--dimmer); opacity: 0.7; }
+  .spin { animation: none; background: currentColor; opacity: 0.5; }
+  .spin::after { content: none; }
 }
 
 .state-dot.running { color: var(--working); }
@@ -1042,7 +1068,7 @@ main { position: relative; }
 }
 .inbox-views-count { font-variant-numeric: tabular-nums; color: var(--dimmer); }
 .inbox-views button.on .inbox-views-count { color: var(--dim); }
-.inbox-reading { color: var(--dimmer); font-size: 12px; }
+.inbox-reading { margin-left: 4px; }
 .inbox-tools { margin-left: auto; display: inline-flex; gap: 2px; }
 .inbox-tools .quiet-icon { width: 24px; height: 24px; }
 .inbox-tools .quiet-icon:disabled { color: var(--dimmer); cursor: default; background: none; }
@@ -1929,7 +1955,7 @@ main { position: relative; }
 }
 .change-actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 2px; }
 .change-actions .go { padding: 4px 12px; }
-.change-actions .go .spin { width: 11px; height: 11px; border-color: currentColor; border-top-color: transparent; }
+.change-actions .go .spin { width: 11px; height: 11px; color: currentColor; }
 .change-panel .quiet {
   background: none;
   border: none;
@@ -2989,7 +3015,7 @@ main { position: relative; }
 /* Wider than the centred measure: a left-aligned fragment that wraps has a
    dangling clause under it, and these are short enough to sit on one line. */
 .panel > .empty.pane .empty-note { text-align: left; max-width: 60ch; }
-.empty.pane .spin { width: 18px; height: 18px; }
+.empty.pane .spin { width: 20px; height: 20px; --spin-weight: 2px; }
 
 /* The whole middle of the window: a first run, or nothing selected. `margin:
    auto` is what centres it, in a flex parent either way -- `.app` when there
