@@ -24,7 +24,7 @@
 # base = "develop"
 
 # Policy applied to a new session: a template name, or a path to a template file
-# of your own (TOML, in the shape of policies/feature-work.toml).
+# of your own (TOML, in the shape of hurad/policies/feature-work.toml).
 # `hura policies` lists the templates.
 # policy = "feature-work"
 

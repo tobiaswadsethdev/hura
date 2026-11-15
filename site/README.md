@@ -10,7 +10,7 @@ and serve the directory as it is from anywhere that serves static files.
 
 - **The privacy policy** is `privacy.html`, the one copy of it, for hura
   cloud and the relay: the apps and App Store Connect link to it. Change it
-  whenever what `crates/hura-cloud` or `relay/` stores changes, and move its
+  whenever what `services/cloud` or `services/relay/` stores changes, and move its
   date.
 - **The download button** is `download.js`. It guesses the visitor's platform
   from the user agent, then asks GitHub's API for the newest release and points

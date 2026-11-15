@@ -5,5 +5,5 @@
 .env
 
 # the push relay
-/relay/node_modules/
-/relay/.wrangler/
+/services/relay/node_modules/
+/services/relay/.wrangler/

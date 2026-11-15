@@ -21,7 +21,7 @@
 //!   secret per resource (`https://vault.azure.net`, ...), each sent only to
 //!   the hosts listed for it. The sandbox has no Azure CLI and no login, only
 //!   the image's stand-in `az`, which answers `az account get-access-token`
-//!   with the resource's placeholder (see `images/hura-base/az`). Azure.Identity's
+//!   with the resource's placeholder (see `hurad/images/hura-base/az`). Azure.Identity's
 //!   `AzureCliCredential` asks exactly that, so code written for a developer's
 //!   laptop runs unchanged.
 //! * **`nuget-feed`** is a private NuGet feed's password. NuGet builds its own
@@ -830,7 +830,7 @@ mod tests {
     /// both ways Azure.Identity asks (`--resource` and `--scope`).
     #[test]
     fn the_image_az_answers_with_the_resource_placeholder() {
-        let stub = include_str!("../../../images/hura-base/az");
+        let stub = include_str!("../../../hurad/images/hura-base/az");
         let dir = std::env::temp_dir().join(format!("hura-az-test-{}", random_hex()));
         std::fs::create_dir_all(&dir).unwrap();
         let az = dir.join("az");

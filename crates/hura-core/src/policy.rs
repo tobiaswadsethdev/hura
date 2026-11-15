@@ -8,7 +8,7 @@
 //! binary and parsed here, which each become one rule on the session's sandbox.
 //!
 //! Your own templates sit beside the config file, one `NAME.toml` each in
-//! `policies/`, and are chosen by name like the shipped ones: a policy for
+//! `hurad/policies/`, and are chosen by name like the shipped ones: a policy for
 //! one repository's work is somebody's own business, and a path typed into a
 //! phone's create form is not a way to pick one. A shipped name always means
 //! the shipped template, so a file cannot quietly redefine `feature-work`.
@@ -34,17 +34,17 @@ pub const TEMPLATES: [Template; 3] = [
     Template {
         name: "readonly-explore",
         summary: "clone and read; no push, no model API",
-        toml: include_str!("../../../policies/readonly-explore.toml"),
+        toml: include_str!("../../../hurad/policies/readonly-explore.toml"),
     },
     Template {
         name: "feature-work",
         summary: "clone, agent, push (github + azure devops)",
-        toml: include_str!("../../../policies/feature-work.toml"),
+        toml: include_str!("../../../hurad/policies/feature-work.toml"),
     },
     Template {
         name: "net-open",
         summary: "feature-work plus npm and PyPI",
-        toml: include_str!("../../../policies/net-open.toml"),
+        toml: include_str!("../../../hurad/policies/net-open.toml"),
     },
 ];
 
@@ -164,7 +164,7 @@ pub enum Error {
     Invalid { name: String, message: String },
     #[error(
         "{path} is an OpenShell policy, which nothing enforces any more; write its \
-         network rules as a hura template instead (see policies/feature-work.toml)"
+         network rules as a hura template instead (see hurad/policies/feature-work.toml)"
     )]
     OpenShell { path: String },
 }
@@ -1019,7 +1019,7 @@ mod tests {
     /// rather than a bare `policies/...`.
     #[test]
     fn resolves_a_path_to_a_template_file() {
-        let spec = concat!(env!("CARGO_MANIFEST_DIR"), "/../../policies/net-open.toml");
+        let spec = concat!(env!("CARGO_MANIFEST_DIR"), "/../../hurad/policies/net-open.toml");
         let r = resolve(spec).unwrap();
         assert_eq!(r.label, spec);
         assert!(!r.rules.is_empty());
@@ -1056,7 +1056,7 @@ mod tests {
     }
 
     /// A spec that looks like a path is never matched against a template, so
-    /// the checked-in `policies/*.toml` stay directly usable, and a template
+    /// the checked-in `hurad/policies/*.toml` stay directly usable, and a template
     /// name still wins over a same-named file in the working directory, so
     /// `--policy net-open` cannot be hijacked by a local file.
     #[test]

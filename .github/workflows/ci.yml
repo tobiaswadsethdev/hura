@@ -68,7 +68,7 @@ jobs:
         run: ./scripts/check-tauri-versions.sh
 
       - name: The chat host
-        run: node --test images/hura-base/hura-agent.test.mjs
+        run: node --test hurad/images/hura-base/hura-agent.test.mjs
       - name: Desktop types
         working-directory: apps/desktop
         run: |
@@ -148,7 +148,7 @@ jobs:
 
       # The image builds, so a merge does not first find out in cloud.yml.
       - name: Image
-        run: docker build -f crates/hura-cloud/Dockerfile -t hura-cloud .
+        run: docker build -f services/cloud/Dockerfile -t hura-cloud .
 
   # The push relay: its routes, validation and APNs payloads, in the Workers
   # runtime, and its types against wrangler's.
@@ -157,21 +157,21 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: relay
+        working-directory: services/relay
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: relay/package-lock.json
+          cache-dependency-path: services/relay/package-lock.json
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
 
   # The iOS app's package, on the Mac: pairing, pinning, the chat translation,
   # the hura cloud client, and the push encryption against hurad's own test vector
-  # (crates/hurad/src/push/push-crypto.json), which keeps the two ends in step.
+  # (hurad/daemon/src/push/push-crypto.json), which keeps the two ends in step.
   hurakit:
     name: HuraKit
     runs-on: macos-latest

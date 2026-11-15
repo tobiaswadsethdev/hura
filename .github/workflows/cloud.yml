@@ -10,7 +10,7 @@ on:
   push:
     branches: [main]
     paths:
-      - crates/hura-cloud/**
+      - services/cloud/**
       - Cargo.lock
       - .github/workflows/cloud.yml
 
@@ -37,7 +37,7 @@ jobs:
       - name: Build and push
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/hura-cloud"
-          docker build -f crates/hura-cloud/Dockerfile \
+          docker build -f services/cloud/Dockerfile \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             -t "$image:latest" -t "$image:$GITHUB_SHA" .
           docker push "$image:$GITHUB_SHA"

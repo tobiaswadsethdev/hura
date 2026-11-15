@@ -6,7 +6,7 @@ time. Why it exists, and what comes next, is in
 [plans/hura-cloud.md](plans/hura-cloud.md). Trackers live only here: signed
 out, an app has none, and everything else in hura works as before.
 
-It is `crates/hura-cloud`, one binary on Postgres, configured by its
+It is `services/cloud`, one binary on Postgres, configured by its
 environment. The hosted one is at `https://api.gethura.app`; the same image
 runs anywhere else.
 

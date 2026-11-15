@@ -18,7 +18,7 @@ hura adds tmux, Claude Code at a pinned version, `hura-status` and `hura-usage`,
 it, with the clone at `/sandbox/repo`. The whole image is 718 MB, where the one
 it replaces was 5.2 GB. It is called `hura-sandbox` rather than the old
 `hura-base` so that an image built for OpenShell cannot be taken for it, though
-its recipe is still in `images/hura-base/`.
+its recipe is still in `hurad/images/hura-base/`.
 
 It has to stay a `FROM`. The template's labels carry over to the image, and two
 of them, `com.docker.sandboxes.flavor=shell-docker` and
@@ -141,7 +141,7 @@ The Dockerfile's `CLAUDE_VERSION` build arg pins a specific one, building from a
 checkout:
 
 ```sh
-docker build --build-arg CLAUDE_VERSION=2.1.293 -t hura-sandbox:latest images/hura-base
+docker build --build-arg CLAUDE_VERSION=2.1.293 -t hura-sandbox:latest hurad/images/hura-base
 ```
 
 The next create sees that the runtime does not hold that image and loads it.

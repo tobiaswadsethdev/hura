@@ -38,7 +38,7 @@ let every session reach more than its rules say.
 
 ## Templates
 
-A session starts from a template: a list of rules in TOML, in `policies/`.
+A session starts from a template: a list of rules in TOML, in `hurad/policies/`.
 
 | | |
 | --- | --- |

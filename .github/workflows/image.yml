@@ -21,7 +21,7 @@ on:
   push:
     branches: [main]
     paths:
-      - images/hura-base/**
+      - hurad/images/hura-base/**
       - crates/hura-core/src/toolchain.rs
       - crates/hura-core/src/image.rs
       - .github/workflows/image.yml

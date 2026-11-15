@@ -1,7 +1,7 @@
 # The hura relay, version 1
 
 The relay is how `hurad` reaches a phone. It is a Cloudflare Worker in
-[`relay/`](../relay) that holds the APNs key, and the only thing that talks to
+[`services/relay/`](../services/relay) that holds the APNs key, and the only thing that talks to
 Apple. The hura iOS app registers the phone with the relay and links each
 server it has paired to the phone. Each `hurad` then sends events to the relay
 with a push token that can do nothing else.

@@ -17,7 +17,7 @@ pub const REPO_PATH: &str = "/sandbox/repo";
 /// any nested quoting.
 pub const TASK_PATH: &str = "/sandbox/.hura/task.txt";
 /// Where the agent's hooks record what it is doing. Written by `hura-status`,
-/// which the image bakes in; see `images/hura-base/hura-status`.
+/// which the image bakes in; see `hurad/images/hura-base/hura-status`.
 pub const STATUS_PATH: &str = "/sandbox/.hura/status.json";
 /// Where the seeder reports how far it has got. Written inside the sandbox by a
 /// process that outlives the command that started it, which is what lets a clone

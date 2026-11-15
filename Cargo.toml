@@ -1,6 +1,16 @@
 [workspace]
 resolver = "3"
-members = ["crates/sbx-client", "crates/hura-core", "crates/hura-proto", "crates/hura-client", "crates/hurad", "crates/hura-cloud"]
+members = [
+    # Shared by the server, hura cloud and apps/desktop.
+    "crates/sbx-client",
+    "crates/hura-core",
+    "crates/hura-proto",
+    "crates/hura-client",
+    # The server.
+    "hurad/daemon",
+    # hura cloud.
+    "services/cloud",
+]
 
 [workspace.package]
 version = "0.54.0"

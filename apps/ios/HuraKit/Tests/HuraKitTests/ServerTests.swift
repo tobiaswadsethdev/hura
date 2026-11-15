@@ -86,7 +86,7 @@ struct WireTests {
     }
 }
 
-/// `crates/hurad/src/push/push-crypto.json`: sealed by hurad, and opened here.
+/// `hurad/daemon/src/push/push-crypto.json`: sealed by hurad, and opened here.
 /// The file is the contract between the two ends.
 struct PushCryptoTests {
     static func vectors() -> [[String: Any]] {
@@ -97,7 +97,7 @@ struct PushCryptoTests {
             .deletingLastPathComponent() // ios
             .deletingLastPathComponent() // apps
             .deletingLastPathComponent() // repository root
-            .appendingPathComponent("crates/hurad/src/push/push-crypto.json")
+            .appendingPathComponent("hurad/daemon/src/push/push-crypto.json")
         let data = try! Data(contentsOf: url)
         return try! JSONSerialization.jsonObject(with: data) as! [[String: Any]]
     }

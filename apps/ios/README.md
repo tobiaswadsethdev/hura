@@ -56,7 +56,7 @@ the secrets they're given, and the skills new sessions get), its settings
 (what new sessions start from, and whether it updates itself), and what
 versions are running. It talks to `hurad` over the same paired, pinned TLS connection the
 desktop application uses, and receives notifications through the
-[relay](../../relay). [docs/notifications.md](../../docs/notifications.md)
+[relay](../../services/relay). [docs/notifications.md](../../docs/notifications.md)
 covers the `hurad` side.
 
 | Part | What it is |
@@ -141,7 +141,7 @@ off.
 
 ## Notifications
 
-Notifications go through the relay in [`relay/`](../../relay). Deploy it
+Notifications go through the relay in [`services/relay/`](../../services/relay). Deploy it
 first (its README covers that), then set its host in `Config/Hura.xcconfig`:
 
 ```

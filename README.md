@@ -135,7 +135,7 @@ puts the binary in `~/.local/bin` -- then runs `hurad doctor` to say what is sti
 missing. It falls back to building with `cargo` when no release matches your
 machine, and `--bin-dir`, `--version` and `--from-source` are there when you
 want to decide those yourself. From a checkout, `cargo install --path
-crates/hurad` does the same job.
+hurad/daemon` does the same job.
 
 `hurad update` fetches, verifies and replaces the binary the same way, on
 demand. It also keeps itself current without being asked: `hurad serve`

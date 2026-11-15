@@ -3,18 +3,19 @@
 # hura-cloud, as Coolify runs it. Built from the repository's root, since the
 # crate is a workspace member and builds against its lockfile:
 #
-#   docker build -f crates/hura-cloud/Dockerfile -t hura-cloud .
+#   docker build -f services/cloud/Dockerfile -t hura-cloud .
 #
-# Configured by its environment; see crates/hura-cloud/src/config.rs and
+# Configured by its environment; see services/cloud/src/config.rs and
 # docs/cloud.md.
 
 FROM rust:1-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates crates
-# hura-core compiles in the sandbox image's files and the built-in policies.
-COPY images images
-COPY policies policies
+# The server is a workspace member too, and hura-core compiles in its sandbox
+# image files and built-in policies.
+COPY hurad hurad
+COPY services/cloud services/cloud
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p hura-cloud \

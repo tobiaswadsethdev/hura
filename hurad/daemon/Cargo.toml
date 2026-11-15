@@ -12,10 +12,10 @@ name = "hurad"
 path = "src/main.rs"
 
 [dependencies]
-hura-core = { path = "../hura-core" }
-hura-client = { path = "../hura-client" }
-hura-proto = { path = "../hura-proto" }
-sbx-client = { path = "../sbx-client" }
+hura-core = { path = "../../crates/hura-core" }
+hura-client = { path = "../../crates/hura-client" }
+hura-proto = { path = "../../crates/hura-proto" }
+sbx-client = { path = "../../crates/sbx-client" }
 clap = { version = "4", features = ["derive"] }
 # Raw mode for `attach`, and nothing else. It arrived through `ratatui` until
 # the terminal interface went; this is the same crate, named directly.

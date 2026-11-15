@@ -17,7 +17,7 @@
 # Everything hura itself puts in a session stays under /sandbox, which is made
 # here and given to `agent`.
 #
-# Build:  hurad image build   (or: docker build -t hura-base:latest images/hura-base,
+# Build:  hurad image build   (or: docker build -t hura-base:latest hurad/images/hura-base,
 #         then load it into the sandbox runtime with `sbx template load`)
 FROM docker/sandbox-templates:shell-docker
 

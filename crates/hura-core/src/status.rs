@@ -121,7 +121,7 @@ pub struct Report {
 
 /// The record `hura-status` writes inside the sandbox.
 ///
-/// Field names are a contract with `images/hura-base/hura-status`; `image.rs` has
+/// Field names are a contract with `hurad/images/hura-base/hura-status`; `image.rs` has
 /// a test asserting the script still writes them.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HookStatus {

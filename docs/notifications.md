@@ -3,7 +3,7 @@
 The desktop application tells you when a session starts waiting on you, but
 only while it is open. To tell you on a phone, `hurad` watches the sessions
 itself and sends notifications to the **hura iOS app** through the **hura
-relay**. The relay is a small Cloudflare Worker in [`relay/`](../relay) that
+relay**. The relay is a small Cloudflare Worker in [`services/relay/`](../services/relay) that
 holds the APNs key. Its API is in [relay-api.md](relay-api.md).
 
 ```
@@ -130,7 +130,7 @@ the kind, the session and the request, so the relay can't move one
 notification's text onto another's. For a permission request, that means it
 can't point an Allow at a different request from the one the phone showed.
 [relay-api.md](relay-api.md#encrypted-text) has the exact scheme, and
-`crates/hurad/src/push/push-crypto.json` is a test vector that both `hurad`
+`hurad/daemon/src/push/push-crypto.json` is a test vector that both `hurad`
 and the app are checked against.
 
 ## Delivery

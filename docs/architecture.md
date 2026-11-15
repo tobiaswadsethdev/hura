@@ -50,9 +50,9 @@ Five crates, and an application:
 | `crates/sbx-client` | everything the rest of the tool knows about Docker Sandboxes, behind one trait, so a change in the CLI's surface lands in one file. Measured rather than read off its documentation; the module comment says what was measured. Sessions ran on OpenShell before this, through a crate of the same shape |
 | `crates/hura-core` | everything `hura` *does*: sessions, policy, events, seeding. No renderer may appear in it, which is what lets something other than a terminal sit on top |
 | `crates/hura-proto` | one definition of every message on the wire, so a server and a client cannot drift. Built on `hura-core`, because the types it carries are the core's own rather than a second set kept in step by hand |
-| `crates/hurad` | the whole Linux side: the clap CLI, and the server behind TLS, one token check and `/rpc`. Async only where it has to be -- everything it calls is blocking and goes to `spawn_blocking`. `crates/hura` carried the CLI and a ratatui TUI beside it until v0.4.0, when two front ends onto one set of sessions stopped earning their keep |
+| `hurad/daemon` | the whole Linux side: the clap CLI, and the server behind TLS, one token check and `/rpc`. Async only where it has to be -- everything it calls is blocking and goes to `spawn_blocking`. `crates/hura` carried the CLI and a ratatui TUI beside it until v0.4.0, when two front ends onto one set of sessions stopped earning their keep |
 | `crates/hura-client` | the client half: paired servers, and one certificate-pinned connection to each. Its own crate because the CLI and the desktop application both need it, and a webview cannot pin a certificate for itself |
-| `crates/hura-cloud` | the hura cloud service: accounts, devices and the trackers they keep, which the apps read through it, on Postgres. See [cloud.md](cloud.md) |
+| `services/cloud` | the hura cloud service: accounts, devices and the trackers they keep, which the apps read through it, on Postgres. See [cloud.md](cloud.md) |
 | `apps/desktop` | Tauri v2 and React. Deliberately *not* a workspace member: `cargo build --workspace` would otherwise need a GUI toolkit installed to check that a session store reconciles |
 
 ## Where things live
@@ -114,7 +114,7 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `panes/` | *(desktop)* the terminal, a conversation, a file in Monaco, and a file's diff with the review on it |
 | `chat/` | *(desktop)* a transcript folded into things to draw, tool calls as cards, and what the agent is waiting on you for |
 | `Search.tsx` | *(desktop)* searching the kept conversations, and reading one that exists nowhere else |
-| `hura-agent.mjs` | *(the image)* the process that runs the Agent SDK inside a chat session's sandbox: conversations, their transcripts, permission requests, and the status and usage files. `images/hura-base/` |
+| `hura-agent.mjs` | *(the image)* the process that runs the Agent SDK inside a chat session's sandbox: conversations, their transcripts, permission requests, and the status and usage files. `hurad/images/hura-base/` |
 
 ## Three rules worth knowing before you change anything
 
