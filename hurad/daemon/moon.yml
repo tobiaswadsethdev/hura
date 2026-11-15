@@ -1,0 +1,14 @@
+$schema: '../../.moon/cache/schemas/project.json'
+
+language: 'rust'
+layer: 'application'
+
+dependsOn: ['sbx-client', 'hura-core', 'hura-proto', 'hura-client']
+
+tasks:
+  build:
+    command: 'cargo build -p $project --release'
+    inputs:
+      - '@group(sources)'
+      - '@group(workspace)'
+      - '@group(shared)'

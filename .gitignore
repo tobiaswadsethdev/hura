@@ -7,3 +7,7 @@
 # the push relay
 /services/relay/node_modules/
 /services/relay/.wrangler/
+
+# moon: its cache, including the generated config schemas
+/.moon/cache/
+/.moon/docker/

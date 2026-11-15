@@ -1,5 +1,16 @@
 name: CI
 
+# Every check in the repository is a moon task (docs/moon.md), and each job here
+# is one operating system running the ones a change can affect: `moon ci`
+# compares what changed against MOON_BASE and runs the tasks whose inputs it
+# touches. A change to the site runs nothing; one to hura-core runs every crate
+# above it, the desktop app's checks, and the Windows job.
+#
+# Tasks name the OS they need (`options.os`), and on any other OS moon runs
+# them as no-ops, so the Linux job can ask for everything. The Windows and
+# macOS runners are slower and dearer, so `plan` asks moon first whether any of
+# their tasks are affected, and they are skipped -- which counts as passing for
+# a required check -- when none are.
 on:
   push:
     branches: [main]
@@ -9,13 +20,68 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # What changed: a pull request against its base, a push against what `main`
+  # was before it. A dispatch compares against git's empty tree, which makes
+  # every file changed and runs everything -- the way to check the whole
+  # repository on demand.
+  MOON_BASE: >-
+    ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha
+        || github.event_name == 'push' && github.event.before
+        || '4b825dc642cb6eb9a060e54bf8d69288fbee4904' }}
+  MOON_HEAD: ${{ github.sha }}
 
 jobs:
-  check:
-    name: fmt, clippy, test
+  plan:
+    name: what changed
     runs-on: ubuntu-latest
+    outputs:
+      windows: ${{ steps.affected.outputs.windows }}
+      macos: ${{ steps.affected.outputs.macos }}
+    steps:
+      # The whole history, because affected detection diffs two commits and a
+      # shallow clone has only one of them.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      # moon, at the version in .prototools.
+      - uses: moonrepo/setup-toolchain@v0
+
+      - name: Ask moon
+        id: affected
+        run: |
+          set -eu
+          moon query tasks --affected > affected.json
+          jq -r '.tasks | to_entries[] | "\(.key): \(.value | keys | join(", "))"' affected.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "windows=$(jq '[.tasks[][] | select(.id == "check-windows")] | length > 0' affected.json)" >> "$GITHUB_OUTPUT"
+          echo "macos=$(jq '.tasks.hurakit.test != null or .tasks.ios.test != null' affected.json)" >> "$GITHUB_OUTPUT"
+
+  # Everything that runs on Linux: the cargo workspace's fmt, clippy and tests,
+  # hurad's release build, hura cloud against a real Postgres and its image, the
+  # relay, the sandbox image's chat host, and the desktop app's TypeScript,
+  # generated bindings and Tauri versions.
+  linux:
+    name: linux
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: hura
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 20
+    env:
+      # hura cloud's tests skip themselves without it; here they run.
+      HURA_CLOUD_TEST_DATABASE_URL: postgres://postgres:hura@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Install Rust
         run: |
@@ -29,74 +95,30 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+            services/relay/package-lock.json
 
-      - name: Formatting
-        run: cargo fmt --all --check
+      - uses: moonrepo/setup-toolchain@v0
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: moon ci
 
-      # The suite is hermetic: no sandbox runtime, no Docker, no network. The
-      # tests that need a live one are #[ignore]d and are not run here.
-      - name: Tests
-        run: cargo test --workspace
-
-      # The desktop application's types are generated from the Rust ones. A
-      # checked-in binding that no longer matches its type is a shape mismatch
-      # discovered at runtime in a webview, so it is a build failure here.
-      - name: TypeScript bindings are current
-        run: |
-          ./scripts/gen-bindings.sh
-          git diff --exit-code -- apps/desktop/src/gen \
-            || { echo "::error::bindings are stale; run ./scripts/gen-bindings.sh"; exit 1; }
-
-      # The desktop application is not a workspace member -- building it needs a
-      # GUI toolkit -- so what CI checks is the half that does not: the types it
-      # is generated from, and that its own TypeScript agrees with them.
-      #
-      # `working-directory` and not `--prefix`: npm's prefix says where the
-      # package is, not where the command runs, so `tsc` started at the
-      # repository root, found no `tsconfig.json` there, and printed its own
-      # help -- which is a failure that looks nothing like a type error. This is
-      # now the same two commands run by hand in `apps/desktop`.
-      # `tauri build` refuses an npm package and its crate on different
-      # major.minor releases, but only the release build runs it -- so a
-      # mismatch passed here and failed v0.13.1 after it was tagged. The same
-      # check, from the lockfiles.
-      - name: Tauri versions agree
-        run: ./scripts/check-tauri-versions.sh
-
-      - name: The chat host
-        run: node --test hurad/images/hura-base/hura-agent.test.mjs
-      - name: Desktop types
-        working-directory: apps/desktop
-        run: |
-          npm ci
-          npm exec -- tsc --noEmit
-
-      - name: Build
-        run: cargo build --workspace --release
-
-  # The client half has to compile for Windows, because the desktop application
-  # runs there and `hura-core` is underneath it. Only the client half: there is no
-  # sandbox runtime, no Docker daemon and no tmux on that side, so `hurad`
-  # remains a Linux program and is not built here.
-  #
-  # A check rather than a build, and only these three crates, because what it is
-  # guarding against is one `use std::os::unix::fs` -- which costs seconds to
-  # catch here and a tagged release to catch anywhere else.
-  #
-  # The desktop crate is checked too, and for a reason that cost somebody an
-  # afternoon: `tauri-build` generates a Windows *resource file* and needs
-  # `icons/icon.ico` to do it, which nothing on Linux ever asks for. The icon
-  # was missing for two increments and neither a Linux build, a release that was
-  # never tagged, nor the three crates below could notice.
+  # The client half has to compile for Windows, because the desktop app runs
+  # there and hura-core is underneath it -- one `use std::os::unix::fs` costs
+  # seconds to catch here and a tagged release anywhere else. And the desktop
+  # crate itself, because `tauri-build` there needs things nothing on Linux
+  # asks for: `icons/icon.ico` was missing for two increments and only this
+  # could notice.
   windows:
-    name: the client half compiles on Windows
+    name: windows
+    needs: plan
+    if: needs.plan.outputs.windows == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Install Rust
         run: |
@@ -105,103 +127,31 @@ jobs:
           rustc --version
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Check
-        run: cargo check -p hura-client -p hura-proto -p hura-core --all-targets
-
-      # Its own workspace, so it needs its own invocation. `check` and not
-      # `build`: what this is for is the build script and the Windows-only
-      # dependencies resolving, not a binary nobody here will run.
-      - name: Check the desktop application
-        working-directory: apps/desktop/src-tauri
-        run: cargo check
-
-  # hura cloud against a real Postgres. Its tests skip themselves without
-  # HURA_CLOUD_TEST_DATABASE_URL, which keeps the suite above needing nothing
-  # running; this is where they run.
-  cloud:
-    name: hura cloud
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_PASSWORD: hura
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 20
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Tests
-        env:
-          HURA_CLOUD_TEST_DATABASE_URL: postgres://postgres:hura@localhost:5432/postgres
-        run: cargo test -p hura-cloud
-
-      # The image builds, so a merge does not first find out in cloud.yml.
-      - name: Image
-        run: docker build -f services/cloud/Dockerfile -t hura-cloud .
-
-  # The push relay: its routes, validation and APNs payloads, in the Workers
-  # runtime, and its types against wrangler's.
-  relay:
-    name: relay
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: services/relay
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: services/relay/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+          workspaces: |
+            . -> target
+            apps/desktop/src-tauri -> target
 
-  # The iOS app's package, on the Mac: pairing, pinning, the chat translation,
-  # the hura cloud client, and the push encryption against hurad's own test vector
-  # (hurad/daemon/src/push/push-crypto.json), which keeps the two ends in step.
-  hurakit:
-    name: HuraKit
+      - uses: moonrepo/setup-toolchain@v0
+
+      - run: moon ci :check-windows
+
+  # The iPhone app: HuraKit's tests, including the push encryption against
+  # hurad's own vector, and the app built and tested on a simulator.
+  macos:
+    name: macos
+    needs: plan
+    if: needs.plan.outputs.macos == 'true'
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: apps/ios/HuraKit
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
       - run: xcodebuild -version && swift --version
-      - run: swift test
-
-  ios:
-    name: iOS app
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: apps/ios
-    steps:
-      - uses: actions/checkout@v7
       - run: brew install xcodegen
-      - run: xcodegen
-      - name: Build and test on a simulator
-        run: |
-          udid=$(xcrun simctl list devices available -j \
-            | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
-          echo "simulator $udid"
-          # CI has no Apple account, so build without the team in Hura.xcconfig.
-          xcodebuild -project Hura.xcodeproj -scheme Hura \
-            -destination "platform=iOS Simulator,id=$udid" \
-            -skipPackagePluginValidation -skipMacroValidation \
-            HURA_TEAM_ID= \
-            test
 
+      - uses: moonrepo/setup-toolchain@v0
+
+      - run: moon ci hurakit:test ios:test

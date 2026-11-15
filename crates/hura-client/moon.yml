@@ -1,0 +1,17 @@
+$schema: '../../.moon/cache/schemas/project.json'
+
+language: 'rust'
+layer: 'library'
+
+dependsOn: ['hura-core', 'hura-proto']
+
+tasks:
+  # Compiles for Windows, for the desktop app; see hura-core's.
+  check-windows:
+    command: 'cargo check -p $project --all-targets'
+    inputs:
+      - '@group(sources)'
+      - '@group(workspace)'
+      - '@group(shared)'
+    options:
+      os: 'windows'

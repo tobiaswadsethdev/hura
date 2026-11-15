@@ -31,7 +31,12 @@ cargo run -p hurad -- doctor                               # the CLI, from the t
 cargo run -p hurad -- serve                                # the server, from the tree
 ```
 
-CI runs exactly those last three checks on the **newest stable**, so
+Every check CI runs, for every part of the repository, is also a
+[moon](docs/moon.md) task: `moon run :fmt :clippy :test` is the Rust loop above,
+`moon run relay:test` or `moon run desktop:types` one of the others, and
+`moon ci` is what CI will run for your branch's changes.
+
+CI runs the Rust checks on the **newest stable**, so
 `rustup update stable` before pushing is what makes a green local run a green
 pull request: clippy gains lints with each release, and one of them can turn CI
 red on code nobody touched. The sandbox runtime's contract lives in ignored tests
