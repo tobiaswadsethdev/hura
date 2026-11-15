@@ -66,7 +66,9 @@ tasks:
   # The crate, on Windows, where it ships. `tauri-build` there needs things
   # nothing on Linux asks for, like icons/icon.ico.
   check-windows:
-    command: 'cargo check'
+    # From the crate's own manifest: run bare from apps/desktop, cargo finds
+    # the root workspace instead, and that has hurad in it.
+    command: 'cargo check --manifest-path src-tauri/Cargo.toml'
     inputs:
       - '@group(tauri)'
       - '/crates/*/src/**/*'
