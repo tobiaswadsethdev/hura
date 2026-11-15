@@ -65,17 +65,27 @@ struct ChatRows: View {
     @Environment(\.foundRow) private var found
 
     var body: some View {
+        let current = currentTurn
         ForEach(items) { item in
+            let working = working && current.contains(item.id)
             if found?.id == item.id {
-                row(item).modifier(FoundMark(nonce: found?.nonce ?? 0)).id(item.id)
+                row(item, working: working).modifier(FoundMark(nonce: found?.nonce ?? 0)).id(item.id)
             } else {
-                row(item).id(item.id)
+                row(item, working: working).id(item.id)
             }
         }
     }
 
+    /// The rows from your last message on: the only ones that `working`
+    /// changes. Given to every row, it drew the whole history again, and
+    /// measured it again, each time a turn started or ended.
+    private var currentTurn: Set<String> {
+        let start = items.lastIndex { if case .prompt = $0 { true } else { false } } ?? items.startIndex
+        return Set(items[start...].map(\.id))
+    }
+
     @ViewBuilder
-    private func row(_ item: ChatItem) -> some View {
+    private func row(_ item: ChatItem, working: Bool) -> some View {
         switch item {
         case let .prompt(_, prompt):
             HStack {
