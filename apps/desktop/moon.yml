@@ -1,0 +1,90 @@
+$schema: '../../.moon/cache/schemas/project.json'
+
+# The desktop app: React in src/, and a Tauri crate in src-tauri/ that is its
+# own cargo workspace, not a member of the root one -- building it needs a GUI
+# toolkit.
+language: 'typescript'
+layer: 'application'
+
+dependsOn: ['hura-core', 'hura-proto', 'hura-client']
+
+fileGroups:
+  web:
+    - 'src/**/*'
+    - 'index.html'
+    - 'package.json'
+    - 'tsconfig.json'
+    - 'vite.config.ts'
+  tauri:
+    - 'src-tauri/**/*'
+    - '!src-tauri/target/**/*'
+
+tasks:
+  install:
+    command: 'npm ci --no-audit --no-fund'
+    inputs:
+      - 'package.json'
+      - 'package-lock.json'
+    options:
+      cache: false
+
+  # Its TypeScript against itself and against the types generated from Rust.
+  # After `bindings`, which rewrites src/gen and would otherwise pull the files
+  # out from under the compiler.
+  types:
+    command: 'npm exec -- tsc --noEmit'
+    deps: ['~:install', '~:bindings']
+    inputs:
+      - '@group(web)'
+
+  # The types in src/gen are generated from hura-core's and hura-proto's. A
+  # checked-in binding that no longer matches its type is a shape mismatch
+  # found at runtime in a webview, so a stale one fails here.
+  bindings:
+    script: './scripts/gen-bindings.sh && git diff --exit-code -- apps/desktop/src/gen'
+    inputs:
+      - '/crates/hura-core/src/**/*'
+      - '/crates/hura-proto/src/**/*'
+      - '/scripts/gen-bindings.sh'
+      - 'src/gen/**/*'
+    options:
+      runFromWorkspaceRoot: true
+      cache: false
+
+  # `tauri build` refuses an npm package and its crate on different
+  # major.minor releases, and only a release runs it. The same check, from
+  # the lockfiles.
+  tauri-versions:
+    command: './scripts/check-tauri-versions.sh'
+    inputs:
+      - '/scripts/check-tauri-versions.sh'
+      - 'package-lock.json'
+      - 'src-tauri/Cargo.lock'
+    options:
+      runFromWorkspaceRoot: true
+
+  # The crate, on Windows, where it ships. `tauri-build` there needs things
+  # nothing on Linux asks for, like icons/icon.ico.
+  check-windows:
+    # From the crate's own manifest: run bare from apps/desktop, cargo finds
+    # the root workspace instead, and that has hurad in it.
+    command: 'cargo check --manifest-path src-tauri/Cargo.toml'
+    inputs:
+      - '@group(tauri)'
+      - '/crates/*/src/**/*'
+      - '/crates/*/Cargo.toml'
+      - '/hurad/images/hura-base/**/*'
+      - '/hurad/policies/**/*'
+    options:
+      os: 'windows'
+
+  # Local only: the window against a real server, and an installer.
+  dev:
+    command: 'npm run tauri -- dev'
+    deps: ['~:install']
+    preset: 'server'
+  build:
+    command: 'npm run tauri -- build'
+    deps: ['~:install']
+    options:
+      runInCI: false

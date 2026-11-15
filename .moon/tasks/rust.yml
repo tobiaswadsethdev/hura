@@ -1,0 +1,54 @@
+$schema: '../cache/schemas/tasks.json'
+
+# The checks every crate in the cargo workspace gets. They run from the
+# workspace root against one package each (`-p $project`, which is why the
+# projects are named for their packages), so they share one `target/`.
+inheritedBy:
+  language: 'rust'
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+    - 'tests/**/*'
+    - 'build.rs'
+    - 'Cargo.toml'
+  workspace:
+    - '/Cargo.toml'
+    - '/Cargo.lock'
+    - '/rust-toolchain.toml'
+  # Everything a crate here can be compiled against: the shared crates, and
+  # the sandbox image's files and policies that hura-core compiles in. Listed
+  # as inputs of every build, rather than left to each project's `dependsOn`,
+  # because moon follows dependencies between projects only through task
+  # deps -- without these, a change to hura-core would leave hurad's tests
+  # cached and unaffected. A little wider than each crate needs, which costs
+  # the odd extra run and never a missed one.
+  shared:
+    - '/crates/*/src/**/*'
+    - '/crates/*/build.rs'
+    - '/crates/*/Cargo.toml'
+    - '/hurad/images/hura-base/**/*'
+    - '/hurad/policies/**/*'
+
+taskOptions:
+  runFromWorkspaceRoot: true
+
+tasks:
+  fmt:
+    command: 'cargo fmt -p $project --check'
+    inputs:
+      - '@group(sources)'
+
+  clippy:
+    command: 'cargo clippy -p $project --all-targets -- -D warnings'
+    inputs:
+      - '@group(sources)'
+      - '@group(workspace)'
+      - '@group(shared)'
+
+  test:
+    command: 'cargo test -p $project'
+    inputs:
+      - '@group(sources)'
+      - '@group(workspace)'
+      - '@group(shared)'

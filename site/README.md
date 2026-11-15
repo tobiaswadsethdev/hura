@@ -10,13 +10,19 @@ and serve the directory as it is from anywhere that serves static files.
 
 - **The privacy policy** is `privacy.html`, the one copy of it, for hura
   cloud and the relay: the apps and App Store Connect link to it. Change it
-  whenever what `crates/hura-cloud` or `relay/` stores changes, and move its
+  whenever what `services/cloud` or `services/relay/` stores changes, and move its
   date.
 - **The download button** is `download.js`. It guesses the visitor's platform
-  from the user agent, then asks GitHub's API for the newest release and points
-  the button and the download grid at its files, matched by the names
-  `.github/workflows/release.yml` gives them. A renamed asset needs its pattern
-  in `ASSETS` changed too. Without the script, or without an answer from
+  from the user agent, then asks GitHub's API for the newest hurad release
+  (`hurad-v...`) and the newest desktop release (`desktop-v...`) and points
+  the button and the download grid at their files, matched by the names
+  `.github/workflows/release-hurad.yml` and `release-desktop.yml` give them. A
+  renamed asset needs its pattern in `ASSETS` changed too.
+- **The desktop updater** reads `desktop/latest.json` from here. Do not edit
+  it: `release-desktop.yml` commits it to `main` once a release is published,
+  and every installed Windows app takes its next update from what it says.
+  This only works if whatever serves gethura.app redeploys on a push to
+  `main`; the app falls back to the same file on raw.githubusercontent.com. Without the script, or without an answer from
   GitHub, every link goes to the releases page.
 - **The motion** is `motion.js` and CSS. Anything marked `data-reveal` fades
   up the first time it scrolls into view. The inline script in `index.html` adds

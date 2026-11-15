@@ -207,7 +207,7 @@ The dotnet layer installs no packages of its own: the base already has what the
 SDK needs, and the layer checks that some `libicu` is there, by any version
 (Ubuntu 26.04 has 78), rather than naming one that a newer base would not have.
 
-Its install is a script, `images/hura-base/toolchains/dotnet-sdk`, copied into
+Its install is a script, `hurad/images/hura-base/toolchains/dotnet-sdk`, copied into
 the image rather than inlined in the layer, because the layer that adds a
 checkout's pinned SDKs runs it too. It installs the newest SDK first and never
 overwrites a file already there, so the `dotnet` host is always the newest one's
@@ -218,7 +218,7 @@ it finds the newer SDK's workload manifests; the build itself is unaffected.
 ## Adding one
 
 `crates/hura-core/src/toolchain.rs` is one table, and a toolchain is an entry in it
-plus a Dockerfile fragment under `images/hura-base/toolchains/`. The entry names
+plus a Dockerfile fragment under `hurad/images/hura-base/toolchains/`. The entry names
 the registries it reads and the markers that make the create form tick it. The
 tests in that module check the halves against each other: every layer records
 itself in the manifest `doctor` reads, and no toolchain ships without a registry

@@ -58,7 +58,7 @@ trackers at all.
      └── desktop notification     relay ──► APNs ──► phone
 ```
 
-**`crates/hura-cloud`, in this repository**, a Rust service that runs
+**`services/cloud`, in this repository**, a Rust service that runs
 `hura-core`'s tracker code as it is. Rust rather than a Worker beside the relay
 because that code is synchronous over a blocking transport
 (`tracker::use_transport`), and a Worker would mean rewriting it async in
@@ -152,7 +152,7 @@ deleted.
   the phone through hura-mobile's `changes` op; each keeps what was seen where
   it kept its snapshot before, in the same shape, so nothing is announced
   twice or missed across the update. The service will keep it per account.
-- [x] **2. The service, bare.** `crates/hura-cloud` ([cloud.md](../cloud.md)):
+- [x] **2. The service, bare.** `services/cloud` ([cloud.md](../cloud.md)):
   - [x] The Postgres schema for accounts, sign-ins, devices and plans;
     emailed codes through Resend; refresh and access tokens; the device
     list; the image, its workflow and CI against a real Postgres.

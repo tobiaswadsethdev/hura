@@ -1,0 +1,25 @@
+$schema: '../../.moon/cache/schemas/project.json'
+
+language: 'rust'
+layer: 'library'
+
+dependsOn: ['sbx-client', 'sandbox-image']
+
+tasks:
+  # The update tests read install.sh and the hurad release workflow, which
+  # have to agree with update.rs about what a release is called.
+  test:
+    inputs:
+      - '/install.sh'
+      - '/.github/workflows/release-hurad.yml'
+
+  # The client half has to compile for Windows, because the desktop app runs
+  # there and this crate is underneath it.
+  check-windows:
+    command: 'cargo check -p $project --all-targets'
+    inputs:
+      - '@group(sources)'
+      - '@group(workspace)'
+      - '@group(shared)'
+    options:
+      os: 'windows'

@@ -1,6 +1,6 @@
 //! A chat session: the agent driven through the Agent SDK instead of a terminal.
 //!
-//! **The SDK runs inside the sandbox.** `images/hura-base/hura-agent.mjs` is a
+//! **The SDK runs inside the sandbox.** `hurad/images/hura-base/hura-agent.mjs` is a
 //! host process the image carries, and it is what owns the agent: one or more
 //! conversations, each a `query()` running the image's own `claude`. Putting the
 //! SDK on the server instead would have meant a Claude Code outside the policy,
@@ -605,7 +605,7 @@ mod tests {
     use super::*;
     use crate::backend::testing::sandboxed;
 
-    const HOST: &str = include_str!("../../../images/hura-base/hura-agent.mjs");
+    const HOST: &str = include_str!("../../../hurad/images/hura-base/hura-agent.mjs");
 
     /// The port and the agent's name are said twice, once on each side of the
     /// forward. A mismatch is a window that waits for ever on a host listening

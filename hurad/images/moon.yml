@@ -1,0 +1,13 @@
+$schema: '../../.moon/cache/schemas/project.json'
+
+# The sandbox image hurad builds. Its files are compiled into hura-core, which
+# depends on this project so that a change here re-checks everything above it.
+language: 'javascript'
+layer: 'configuration'
+
+tasks:
+  # The chat host, which runs the Agent SDK inside a sandbox.
+  test:
+    command: 'node --test hura-base/hura-agent.test.mjs'
+    inputs:
+      - 'hura-base/**/*'

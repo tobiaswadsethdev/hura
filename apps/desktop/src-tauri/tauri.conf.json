@@ -40,7 +40,8 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/tobiaswadsethdev/hura/releases/latest/download/latest.json"
+        "https://gethura.app/desktop/latest.json",
+        "https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/site/desktop/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVFNEI5REJFRTAwRjBDRTgKUldUb0RBL2d2cDFMWHFreHdWZVBsL3RxUElKVWJCRFYvM09wNmxhZTRvcGNyd3dSZ1FMekZ3S28K"
     }

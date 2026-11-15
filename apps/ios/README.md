@@ -56,7 +56,7 @@ the secrets they're given, and the skills new sessions get), its settings
 (what new sessions start from, and whether it updates itself), and what
 versions are running. It talks to `hurad` over the same paired, pinned TLS connection the
 desktop application uses, and receives notifications through the
-[relay](../../relay). [docs/notifications.md](../../docs/notifications.md)
+[relay](../../services/relay). [docs/notifications.md](../../docs/notifications.md)
 covers the `hurad` side.
 
 | Part | What it is |
@@ -109,11 +109,20 @@ branch other than `main` or a checkout with uncommitted changes
 - **Signing** is automatic, with the team in `Config/Hura.xcconfig`. Xcode has
   to be signed in to an account on that team (Xcode > Settings > Accounts);
   the archive and the upload both use it.
-- **The build number** is App Store Connect's to give
-  (`manageAppVersionAndBuildNumber`), so `CURRENT_PROJECT_VERSION` in
-  `project.yml` stays as it is. The version testers see is
-  `MARKETING_VERSION`, bumped by hand when it should change. It is the app's
-  own, separate from the server's release numbers.
+- **The version** testers see is `MARKETING_VERSION` in
+  `Config/Version.xcconfig`. It is the app's own, separate from hurad's and the
+  desktop app's: the three agree on the protocol, not on a number. Move it with
+  the **Tag a release** workflow (component `ios`), which commits the new
+  version and tags `ios-vX.Y.Z`; the next upload from `main` carries it.
+- **The build number** is the commit count of what was archived (`git
+  rev-list --count HEAD`), set by the script, so it rises with every merge and
+  names a commit. App Store Connect is told to keep it
+  (`manageAppVersionAndBuildNumber` is off). Each upload from `main` is tagged
+  `ios-vX.Y.Z+N` and the tag pushed, and the About screen shows `X.Y.Z (N)`,
+  so a tester's report leads straight to the commit. A number can only be
+  uploaded once, so the script refuses a commit that already was; a build from
+  another branch is not tagged, and its number may collide with a later one
+  from `main`.
 - **After the upload** App Store Connect takes a few minutes to process the
   build and mails when it is done; internal testers get it then, with nothing
   more to do. A build that never appears was usually rejected in processing,
@@ -141,7 +150,7 @@ off.
 
 ## Notifications
 
-Notifications go through the relay in [`relay/`](../../relay). Deploy it
+Notifications go through the relay in [`services/relay/`](../../services/relay). Deploy it
 first (its README covers that), then set its host in `Config/Hura.xcconfig`:
 
 ```

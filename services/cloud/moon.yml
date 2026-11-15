@@ -1,0 +1,33 @@
+$schema: '../../.moon/cache/schemas/project.json'
+
+language: 'rust'
+layer: 'application'
+
+dependsOn: ['hura-core']
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+    - 'tests/**/*'
+    - 'migrations/**/*'
+    - 'Cargo.toml'
+
+tasks:
+  # Its tests skip themselves without a database. CI has a Postgres and sets
+  # HURA_CLOUD_TEST_DATABASE_URL; set it locally to run them for real.
+  test:
+    inputs:
+      - '$HURA_CLOUD_TEST_DATABASE_URL'
+
+  # The image Coolify runs, built so a merge does not first find out in
+  # cloud.yml.
+  image:
+    command: 'docker build -f services/cloud/Dockerfile -t hura-cloud .'
+    inputs:
+      - '@group(sources)'
+      - '@group(workspace)'
+      - '@group(shared)'
+      - 'Dockerfile'
+      - 'Dockerfile.dockerignore'
+    options:
+      cache: false

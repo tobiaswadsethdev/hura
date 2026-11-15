@@ -1,0 +1,28 @@
+$schema: './cache/schemas/workspace.json'
+
+# moon runs every check in the repository from one place and, in CI, only the
+# ones a change can affect. It does not build anything itself: cargo, npm,
+# swift and xcodebuild still do, through the tasks each project's moon.yml
+# declares. See docs/moon.md.
+projects:
+  # Shared by the server, hura cloud and the desktop app. Named for their
+  # cargo packages, which is what the inherited Rust tasks pass to `-p`.
+  sbx-client: 'crates/sbx-client'
+  hura-core: 'crates/hura-core'
+  hura-proto: 'crates/hura-proto'
+  hura-client: 'crates/hura-client'
+  # The server, and the sandbox image it builds.
+  hurad: 'hurad/daemon'
+  sandbox-image: 'hurad/images'
+  # hura cloud and the push relay.
+  hura-cloud: 'services/cloud'
+  relay: 'services/relay'
+  # The apps.
+  desktop: 'apps/desktop'
+  hurakit: 'apps/ios/HuraKit'
+  ios: 'apps/ios'
+
+vcs:
+  client: 'git'
+  provider: 'github'
+  defaultBranch: 'main'

@@ -13,7 +13,7 @@ name = "hura-cloud"
 path = "src/main.rs"
 
 [dependencies]
-hura-core = { path = "../hura-core", features = ["ureq"] }
+hura-core = { path = "../../crates/hura-core", features = ["ureq"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }

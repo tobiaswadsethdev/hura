@@ -55,9 +55,9 @@ use crate::session::{Kind, Session, State};
 use crate::store;
 
 /// The files the sandbox image carries for an agent, built into this binary.
-const HURA_AGENT: &str = include_str!("../../../../images/hura-base/hura-agent.mjs");
-const HURA_STATUS: &str = include_str!("../../../../images/hura-base/hura-status");
-const HURA_USAGE: &str = include_str!("../../../../images/hura-base/hura-usage");
+const HURA_AGENT: &str = include_str!("../../../../hurad/images/hura-base/hura-agent.mjs");
+const HURA_STATUS: &str = include_str!("../../../../hurad/images/hura-base/hura-status");
+const HURA_USAGE: &str = include_str!("../../../../hurad/images/hura-base/hura-usage");
 
 /// The ports a worktree session's chat host may be given. Clear of
 /// [`crate::chat::PORT`] and of the relay ports, and kept per record so two

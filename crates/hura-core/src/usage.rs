@@ -6,7 +6,7 @@
 //! payload on stdin -- and that payload carries the session's cost and, since
 //! the release that added it, the account's rate-limit windows. So the image
 //! bakes in a status line command whose real job is to keep a copy of the
-//! payload where a poll can read it: `images/hura-base/hura-usage`, writing
+//! payload where a poll can read it: `hurad/images/hura-base/hura-usage`, writing
 //! `/sandbox/.hura/usage.json`, exactly as `hura-status` does for the hooks.
 //!
 //! **The whole payload is kept and this parses what it recognises.** The shape

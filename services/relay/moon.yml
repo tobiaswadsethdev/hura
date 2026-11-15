@@ -1,0 +1,44 @@
+$schema: '../../.moon/cache/schemas/project.json'
+
+# The push relay, a Cloudflare Worker. Deployed by hand with `npm run deploy`;
+# see README.md.
+language: 'typescript'
+layer: 'application'
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+    - 'test/**/*'
+    - 'migrations/**/*'
+    - 'package.json'
+    - 'tsconfig.json'
+    - 'vitest.config.ts'
+    - 'worker-configuration.d.ts'
+    - 'wrangler.jsonc'
+
+tasks:
+  install:
+    command: 'npm ci --no-audit --no-fund'
+    inputs:
+      - 'package.json'
+      - 'package-lock.json'
+    options:
+      # node_modules is not worth keeping in moon's cache; npm's own is.
+      cache: false
+
+  typecheck:
+    command: 'npm run typecheck'
+    deps: ['~:install']
+    inputs:
+      - '@group(sources)'
+
+  test:
+    command: 'npm test'
+    deps: ['~:install']
+    inputs:
+      - '@group(sources)'
+
+  dev:
+    command: 'npm run dev'
+    deps: ['~:install']
+    preset: 'server'

@@ -59,8 +59,10 @@ export function AboutScreen({
     };
   }, [server]);
 
+  // The window and the server release on their own, so their versions are not
+  // expected to match. The protocol is what has to.
   const differs =
-    about?.server_version != null && about.server_version !== about.desktop;
+    about?.server_protocol != null && about.server_protocol !== about.protocol;
 
   return (
     <Screen icon={AboutGlyph} title="About" narrow onClose={onClose}>
@@ -83,8 +85,11 @@ export function AboutScreen({
                   unreachable
                 </span>
               ) : differs ? (
-                <span className="about-warn" title="The window and the server are on different releases">
-                  <Heads /> differs
+                <span
+                  className="about-warn"
+                  title={`The server speaks protocol ${about?.server_protocol} and this window speaks ${about?.protocol}. Update whichever is older.`}
+                >
+                  <Heads /> incompatible
                 </span>
               ) : null
             }
@@ -221,7 +226,7 @@ function Updates({ supported }: { supported: boolean | null }) {
         {p.version && (
           <a
             className="quiet"
-            href={`${REPO}/releases/tag/v${p.version}`}
+            href={`${REPO}/releases/tag/desktop-v${p.version}`}
             target="_blank"
             rel="noreferrer"
           >

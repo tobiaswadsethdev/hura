@@ -1,0 +1,11 @@
+# Read by BuildKit for services/cloud/Dockerfile only. The build needs the
+# workspace's manifests and every member crate (cargo resolves the whole
+# workspace even to build one), including what hura-core includes from
+# hurad/images/ and hurad/policies/; everything else is weight.
+*
+!Cargo.toml
+!Cargo.lock
+!crates/
+!hurad/
+!services/cloud/
+**/target

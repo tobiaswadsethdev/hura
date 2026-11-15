@@ -1,5 +1,5 @@
 // The parts of hura-agent that decide something, tested without an SDK or a
-// sandbox: `node --test images/hura-base/hura-agent.test.mjs`.
+// sandbox: `node --test hurad/images/hura-base/hura-agent.test.mjs`.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";

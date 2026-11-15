@@ -1,0 +1,51 @@
+$schema: '../../.moon/cache/schemas/project.json'
+
+language: 'swift'
+layer: 'application'
+
+dependsOn: ['hurakit']
+
+fileGroups:
+  app:
+    - 'project.yml'
+    - 'Config/**/*'
+    - 'Hura/**/*'
+    - 'HuraNotificationService/**/*'
+    - 'HuraTests/**/*'
+
+tasks:
+  project:
+    command: 'xcodegen --quiet'
+    inputs:
+      - 'project.yml'
+    options:
+      cache: false
+      os: 'macos'
+
+  # Builds and tests on the first available iPhone simulator. CI has no Apple
+  # account, so this builds without the team in Config/Hura.xcconfig.
+  test:
+    script: |
+      udid=$(xcrun simctl list devices available -j \
+        | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
+      echo "simulator $udid"
+      xcodebuild -project Hura.xcodeproj -scheme Hura \
+        -destination "platform=iOS Simulator,id=$udid" \
+        -skipPackagePluginValidation -skipMacroValidation \
+        HURA_TEAM_ID= \
+        test
+    deps: ['~:project']
+    inputs:
+      - '@group(app)'
+      - '/apps/ios/HuraKit/Sources/**/*'
+      - '/apps/ios/HuraKit/Package.swift'
+    options:
+      os: 'macos'
+
+  # A TestFlight upload; see README.md. Never from CI.
+  testflight:
+    command: './Tools/testflight.sh'
+    options:
+      runInCI: false
+      cache: false
+      interactive: true

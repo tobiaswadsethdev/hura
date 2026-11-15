@@ -68,7 +68,7 @@ pub const TOOLCHAINS: [Toolchain; 4] = [
     Toolchain {
         name: "dotnet",
         summary: "the newest .NET SDK, any SDK the checkout's global.json pins, and nuget",
-        layer: include_str!("../../../images/hura-base/toolchains/dotnet.dockerfile"),
+        layer: include_str!("../../../hurad/images/hura-base/toolchains/dotnet.dockerfile"),
         files: &[(DOTNET_SDK_SCRIPT, DOTNET_SDK)],
         registries: &[Registry {
             host: "api.nuget.org",
@@ -89,7 +89,7 @@ pub const TOOLCHAINS: [Toolchain; 4] = [
     Toolchain {
         name: "node",
         summary: "the newest node LTS and npm, and the npm registry",
-        layer: include_str!("../../../images/hura-base/toolchains/node.dockerfile"),
+        layer: include_str!("../../../hurad/images/hura-base/toolchains/node.dockerfile"),
         files: &[],
         registries: &[Registry {
             host: "registry.npmjs.org",
@@ -101,7 +101,7 @@ pub const TOOLCHAINS: [Toolchain; 4] = [
     Toolchain {
         name: "playwright",
         summary: "the system libraries Playwright's Chromium needs, and its browser downloads",
-        layer: include_str!("../../../images/hura-base/toolchains/playwright.dockerfile"),
+        layer: include_str!("../../../hurad/images/hura-base/toolchains/playwright.dockerfile"),
         files: &[],
         // Where `npx playwright install` fetches a browser from, measured
         // with Playwright 1.64: its CDN, which sends Chromium on to the
@@ -135,7 +135,7 @@ pub const TOOLCHAINS: [Toolchain; 4] = [
     Toolchain {
         name: "rust",
         summary: "rustc, cargo, fmt and clippy, and crates.io",
-        layer: include_str!("../../../images/hura-base/toolchains/rust.dockerfile"),
+        layer: include_str!("../../../hurad/images/hura-base/toolchains/rust.dockerfile"),
         files: &[],
         registries: &[
             // The sparse index and the crate downloads are two hosts, and cargo
@@ -164,7 +164,8 @@ const ANY_PATH: &str = "/**";
 /// copies it into the image, and so does the layer that adds a checkout's
 /// pinned SDKs; see [`crate::dotnet`].
 pub const DOTNET_SDK_SCRIPT: &str = "dotnet-sdk";
-pub(crate) const DOTNET_SDK: &str = include_str!("../../../images/hura-base/toolchains/dotnet-sdk");
+pub(crate) const DOTNET_SDK: &str =
+    include_str!("../../../hurad/images/hura-base/toolchains/dotnet-sdk");
 
 /// Where a built image records what it carries, one `name version` per line.
 ///

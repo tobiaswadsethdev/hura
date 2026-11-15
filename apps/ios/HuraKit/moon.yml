@@ -1,0 +1,19 @@
+$schema: '../../../.moon/cache/schemas/project.json'
+
+# The iPhone app's package: networking, pairing, the chat translation, the
+# hura cloud client and the push encryption.
+language: 'swift'
+layer: 'library'
+
+tasks:
+  test:
+    command: 'swift test'
+    inputs:
+      - 'Package.swift'
+      - 'Package.resolved'
+      - 'Sources/**/*'
+      - 'Tests/**/*'
+      # The push encryption is tested against hurad's own vector.
+      - '/hurad/daemon/src/push/push-crypto.json'
+    options:
+      os: 'macos'

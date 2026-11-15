@@ -47,20 +47,20 @@ use sbx_client::Sbx as _;
 use crate::session::{IMAGE, IMAGE_REPO};
 use crate::toolchain::{self, Toolchain};
 
-const DOCKERFILE: &str = include_str!("../../../images/hura-base/Dockerfile");
+const DOCKERFILE: &str = include_str!("../../../hurad/images/hura-base/Dockerfile");
 /// Writes `/sandbox/.hura/status.json` from Claude Code's hooks.
-const HURA_STATUS: &str = include_str!("../../../images/hura-base/hura-status");
+const HURA_STATUS: &str = include_str!("../../../hurad/images/hura-base/hura-status");
 /// Writes `/sandbox/.hura/usage.json` from Claude Code's status line, which is
 /// the only place it hands out what it knows about cost and rate limits.
-const HURA_USAGE: &str = include_str!("../../../images/hura-base/hura-usage");
+const HURA_USAGE: &str = include_str!("../../../hurad/images/hura-base/hura-usage");
 /// Hook wiring, baked in so a session needs no per-session setup.
-const CLAUDE_SETTINGS: &str = include_str!("../../../images/hura-base/claude-settings.json");
+const CLAUDE_SETTINGS: &str = include_str!("../../../hurad/images/hura-base/claude-settings.json");
 /// The chat agent's host: the Agent SDK, run from inside the sandbox. See
 /// [`crate::chat`].
-const HURA_AGENT: &str = include_str!("../../../images/hura-base/hura-agent.mjs");
+const HURA_AGENT: &str = include_str!("../../../hurad/images/hura-base/hura-agent.mjs");
 /// The stand-in Azure CLI, which answers token requests with a session's
 /// placeholders. See [`crate::credentials`].
-const AZ: &str = include_str!("../../../images/hura-base/az");
+const AZ: &str = include_str!("../../../hurad/images/hura-base/az");
 
 /// Files making up the build context, as (name in the context, content).
 const CONTEXT: [(&str, &str); 6] = [
@@ -94,7 +94,7 @@ const CHAT_HOST: u32 = 1;
 /// What revision [`CHAT_HOST`] brought, in words that finish "predates ...".
 pub const CHAT_HOST_BROUGHT: &str = "files, read receipts and subagents in chats";
 /// The label an image carrying the stand-in `az` carries, which a session
-/// with an `azure-cli` credential needs; see `images/hura-base/az`.
+/// with an `azure-cli` credential needs; see `hurad/images/hura-base/az`.
 const AZURE_LABEL: &str = "hura.azure";
 
 pub fn exists() -> bool {

@@ -146,14 +146,14 @@ Three things it takes, as flags or environment variables:
 | | |
 | --- | --- |
 | `--bin-dir DIR` / `HURA_BIN_DIR` | where to install; default `~/.local/bin`, and it says so when that is not on your `PATH` |
-| `--version vX.Y.Z` / `HURA_VERSION` | a specific release rather than the newest |
+| `--version X.Y.Z` / `HURA_VERSION` | a specific release rather than the newest (`v0.53.0` and `hurad-v0.55.0` work too) |
 | `--from-source` / `HURA_FROM_SOURCE=1` | build with `cargo` instead of downloading |
 
 Building it yourself is the other way, and the one to use from a checkout. It
 is also the automatic fallback when no release is built for your architecture:
 
 ```sh
-cargo install --path crates/hurad                                  # from a checkout
+cargo install --path hurad/daemon                                  # from a checkout
 cargo install --git https://github.com/tobiaswadsethdev/hura hurad --locked   # without one
 ```
 
@@ -369,7 +369,7 @@ not worth the stat.
 
 A binary installed with `cargo install` can still be updated this way, since it
 is replaced where it stands. Going the other way -- back to a build from the
-tree -- is `cargo install --path crates/hurad` again.
+tree -- is `cargo install --path hurad/daemon` again.
 
 ---
 

@@ -18,6 +18,7 @@
 | [cloud.md](cloud.md) | hura cloud: running the service, deploying it on Coolify, and its API |
 | [sandbox-image.md](sandbox-image.md) | what the image bakes in, and why the agent runs in auto mode |
 | [architecture.md](architecture.md) | the crates, the modules, and three rules worth knowing before changing them |
+| [moon.md](moon.md) | running any check in the repository, and how CI runs only the affected ones |
 | [sbx-daemon.service](sbx-daemon.service) | the systemd user unit for the sandbox runtime's daemon |
 
 Contributing is covered in [CONTRIBUTING.md](../CONTRIBUTING.md); the entry

@@ -5,5 +5,9 @@
 .env
 
 # the push relay
-/relay/node_modules/
-/relay/.wrangler/
+/services/relay/node_modules/
+/services/relay/.wrangler/
+
+# moon: its cache, including the generated config schemas
+/.moon/cache/
+/.moon/docker/

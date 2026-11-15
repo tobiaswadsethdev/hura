@@ -1,6 +1,6 @@
 //! Notifications on a phone, through the hura relay.
 //!
-//! The relay (`relay/` at the repository root, `docs/relay-api.md`) holds the
+//! The relay (`services/relay/`, `docs/relay-api.md`) holds the
 //! APNs key. What this server holds is a push token per paired client, which
 //! can make that client's phone show a notification and nothing more. A client
 //! configures its route with [`hura_proto::Request::PushConfigure`];

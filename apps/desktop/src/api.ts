@@ -99,7 +99,9 @@ export type GitAnswer = { said: string; status: GitStatus };
 export type About = {
   desktop: string;
   updater: boolean;
+  protocol: number;
   server_version: string | null;
+  server_protocol: number | null;
   server_error: string | null;
 };
 

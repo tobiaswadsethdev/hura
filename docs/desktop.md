@@ -703,11 +703,14 @@ reports the same percentages.
 ## Keeping it current
 
 The wordmark in the top-left corner carries the window's version, and opens
-the **about** screen: this window's version, the paired `hurad`'s (flagged when
-the two differ, which is the usual reason a new button does nothing), the
-agent's, and links to the releases, the docs and the issue tracker.
+the **about** screen: this window's version, the paired `hurad`'s, the agent's,
+and links to the releases, the docs and the issue tracker. The window and the
+server release separately and their versions need not match; what is flagged
+is the two speaking different protocols, and then the older one needs an
+update.
 
-The window asks github whether there is a newer release at launch, again when
+The window asks gethura.app (`site/desktop/latest.json`, which every desktop
+release rewrites) whether there is a newer release at launch, again when
 it comes back into focus after six hours, and whenever *check* is pressed on the
 about screen -- so learning about a release never needs a restart. When there
 is one, a badge with the new version appears beside the wordmark; it opens the

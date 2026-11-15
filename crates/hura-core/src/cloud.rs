@@ -1,5 +1,5 @@
 //! hura cloud's answers, as a client shows them: the account, and the devices
-//! signed in to it. The service itself is `crates/hura-cloud`; the client
+//! signed in to it. The service itself is `services/cloud`; the client
 //! that asks it is `hura_client::cloud`. Here so the desktop's TypeScript is
 //! generated from them like everything else on its bridge.
 
