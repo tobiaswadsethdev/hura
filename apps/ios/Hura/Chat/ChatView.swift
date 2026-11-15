@@ -38,6 +38,7 @@ struct ChatView: View {
     @State private var justSent: (text: String, at: Date)?
     @State private var answering: String?
     @State private var atBottom = true
+    @State private var end = ListEnd()
     @State private var items: [ChatItem] = []
     /// Sent and not yet read: drawn after the turn in progress.
     @State private var queued: [ChatItem] = []
@@ -84,8 +85,13 @@ struct ChatView: View {
             }
             ScrollViewReader { proxy in
                 ZStack(alignment: .bottomTrailing) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 12) {
+                    // A list, not a lazy stack in a scroll view. The stack
+                    // guessed the height of rows it had not drawn, and when
+                    // a turn ended and its steps folded shut under the screen
+                    // it lost its place: it drew nothing, wherever it was
+                    // scrolled, until the next message came.
+                    List {
+                        Group {
                             if items.isEmpty && queued.isEmpty { emptyState }
                             ChatRows(items: ChatItem.group(items, working: working), cwd: Self.cwd, working: working,
                                      receipts: chat.receipts)
@@ -107,16 +113,18 @@ struct ChatView: View {
                                     if items.isEmpty == empty { atBottom = false }
                                 }
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                         .environment(\.foundRow, found)
                     }
-                    // Made again once the history is in, so it opens at the
-                    // bottom by its default anchor. Scrolling a lazy stack
-                    // there instead lands by guessed row heights, short of
-                    // or past the rows it has drawn, and it shows nothing
-                    // until it is scrolled by hand.
-                    .id(items.isEmpty)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .environment(\.defaultMinListRowHeight, 0)
+                    .contentMargins(.vertical, 6, for: .scrollContent)
+                    // A button in a row with no style of its own is the
+                    // whole row's, in a list.
+                    .buttonStyle(.borderless)
                     .onChange(of: chat.entries.count, initial: true) { fold(proxy) }
                     .onChange(of: chat.loaded) { fold(proxy) }
                     .onChange(of: jump, initial: true) {
@@ -127,14 +135,14 @@ struct ChatView: View {
                     .onChange(of: target) { fold(proxy) }
                     .background {
                         FollowsReply(chat: chat) {
-                            if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+                            if atBottom { end.scroll() }
                         }
                     }
                     .scrollDismissesKeyboard(.interactively)
-                    .defaultScrollAnchor(.bottom)
+                    .background { ListEnd.Finder(end: end) }
                     if !atBottom {
                         Button {
-                            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                            end.scroll(animated: true)
                         } label: {
                             Image(systemName: "arrow.down")
                                 .font(.headline)
@@ -167,7 +175,7 @@ struct ChatView: View {
     /// several frames, oldest first; drawing each as it came scrolled the
     /// whole history past on the way to the newest. Until the chat says it
     /// is loaded there is a spinner, and then the rows arrive at once and
-    /// the stack opens at the bottom. After that a new entry follows the
+    /// the list opens at the bottom. After that a new entry follows the
     /// bottom only for someone already there.
     private func fold(_ proxy: ScrollViewProxy) {
         guard chat.loaded else { return }
@@ -179,8 +187,8 @@ struct ChatView: View {
             found = FoundRow(id: at.id, nonce: target.nonce)
             atBottom = false
             ChatView.reveal(at.id, in: proxy)
-        } else if had, atBottom {
-            withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+        } else if !had || atBottom {
+            end.scroll()
         }
     }
 
@@ -699,3 +707,70 @@ private struct TightLabel: LabelStyle {
 private struct Following: Identifiable {
     var id: String
 }
+
+/// Scrolls the transcript's list to its end by its offset, not to a row. A
+/// list scrolled to a row takes the row's index when asked, and a row going
+/// in the same update -- the line saying Claude is working, as a turn ends
+/// -- left it scrolling past its last row, which it throws for.
+@MainActor
+final class ListEnd {
+    fileprivate weak var view: UIScrollView?
+    private var pending = false
+
+    /// After this update, once the list has its rows. Rows it has not drawn
+    /// are measured as it reaches them, which moves the end, so it goes
+    /// again until the end stays put.
+    func scroll(animated: Bool = false) {
+        guard !pending else { return }
+        pending = true
+        DispatchQueue.main.async { [self] in
+            pending = false
+            guard let view else { return }
+            for _ in 0..<4 {
+                view.layoutIfNeeded()
+                let y = max(-view.adjustedContentInset.top,
+                            view.contentSize.height + view.adjustedContentInset.bottom - view.bounds.height)
+                if abs(view.contentOffset.y - y) < 1 { break }
+                view.setContentOffset(CGPoint(x: view.contentOffset.x, y: y), animated: animated)
+                if animated { break }
+            }
+        }
+    }
+
+    /// Beside the list, to find the scroll view under it.
+    struct Finder: UIViewRepresentable {
+        let end: ListEnd
+
+        func makeUIView(context: Context) -> UIView { Probe(end: end) }
+        func updateUIView(_ view: UIView, context: Context) {}
+
+        private final class Probe: UIView {
+            let end: ListEnd
+            init(end: ListEnd) {
+                self.end = end
+                super.init(frame: .zero)
+                isUserInteractionEnabled = false
+            }
+            required init?(coder: NSCoder) { nil }
+
+            override func didMoveToWindow() {
+                super.didMoveToWindow()
+                guard window != nil else { return }
+                DispatchQueue.main.async { [self] in
+                    var at = superview
+                    while let ancestor = at, end.view == nil {
+                        end.view = Self.list(in: ancestor)
+                        at = ancestor.superview
+                    }
+                }
+            }
+
+            private static func list(in view: UIView) -> UICollectionView? {
+                if let list = view as? UICollectionView { return list }
+                for sub in view.subviews { if let list = list(in: sub) { return list } }
+                return nil
+            }
+        }
+    }
+}
+
