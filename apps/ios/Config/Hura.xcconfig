@@ -12,4 +12,5 @@ HURA_TEAM_ID = 5CLNYT78JN
 // comment, so no https://. Empty builds an app without notifications.
 HURA_RELAY_HOST = hura-relay.twadseth.workers.dev
 
+#include "Version.xcconfig"
 #include? "Signing.local.xcconfig"

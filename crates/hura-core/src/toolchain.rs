@@ -164,7 +164,8 @@ const ANY_PATH: &str = "/**";
 /// copies it into the image, and so does the layer that adds a checkout's
 /// pinned SDKs; see [`crate::dotnet`].
 pub const DOTNET_SDK_SCRIPT: &str = "dotnet-sdk";
-pub(crate) const DOTNET_SDK: &str = include_str!("../../../hurad/images/hura-base/toolchains/dotnet-sdk");
+pub(crate) const DOTNET_SDK: &str =
+    include_str!("../../../hurad/images/hura-base/toolchains/dotnet-sdk");
 
 /// Where a built image records what it carries, one `name version` per line.
 ///

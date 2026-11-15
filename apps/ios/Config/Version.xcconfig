@@ -1,0 +1,14 @@
+// The iPhone app's version, apart from hurad's and the desktop app's: what the
+// three have to agree on is the protocol, not a release number.
+//
+// MARKETING_VERSION is the version testers see (CFBundleShortVersionString).
+// Move it with the "Tag a release" workflow (component: ios), which rewrites
+// this line, commits it and tags `ios-vX.Y.Z` -- not by hand.
+//
+// CURRENT_PROJECT_VERSION, the build number, is 1 for a build from Xcode.
+// Tools/testflight.sh sets it to the commit count of what it archives, so every
+// upload's number is unique, only ever goes up on main, and names a commit;
+// it tags each one `ios-vX.Y.Z+N`.
+
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1

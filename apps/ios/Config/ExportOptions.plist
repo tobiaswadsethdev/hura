@@ -2,8 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- How Tools/testflight.sh exports an archive: straight to App Store Connect,
      for the internal TestFlight group, signed with the team the archive was
-     built for (Config/Hura.xcconfig). App Store Connect numbers the build, so
-     CURRENT_PROJECT_VERSION never needs bumping by hand. -->
+     built for (Config/Hura.xcconfig). The build number is the one
+     testflight.sh archived with, the commit count, and App Store Connect is
+     told to keep it rather than give its own: a number that names a commit is
+     worth more than one that only counts uploads. -->
 <plist version="1.0">
 <dict>
     <key>method</key>
@@ -15,7 +17,7 @@
     <key>testFlightInternalTestingOnly</key>
     <true/>
     <key>manageAppVersionAndBuildNumber</key>
-    <true/>
+    <false/>
     <key>uploadSymbols</key>
     <true/>
 </dict>

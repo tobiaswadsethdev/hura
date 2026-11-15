@@ -146,7 +146,7 @@ Three things it takes, as flags or environment variables:
 | | |
 | --- | --- |
 | `--bin-dir DIR` / `HURA_BIN_DIR` | where to install; default `~/.local/bin`, and it says so when that is not on your `PATH` |
-| `--version vX.Y.Z` / `HURA_VERSION` | a specific release rather than the newest |
+| `--version X.Y.Z` / `HURA_VERSION` | a specific release rather than the newest (`v0.53.0` and `hurad-v0.55.0` work too) |
 | `--from-source` / `HURA_FROM_SOURCE=1` | build with `cargo` instead of downloading |
 
 Building it yourself is the other way, and the one to use from a checkout. It

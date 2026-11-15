@@ -18,7 +18,7 @@
 #
 # Options, as flags or as environment variables:
 #
-#   --version v0.4.0   HURA_VERSION    a specific release; default the newest
+#   --version 0.55.0   HURA_VERSION    a specific release; default the newest
 #   --bin-dir DIR      HURA_BIN_DIR    where to install; default ~/.local/bin
 #   --from-source      HURA_FROM_SOURCE=1
 #                                     build with cargo instead of downloading
@@ -50,7 +50,7 @@ install.sh -- install hurad without a checkout or a Rust toolchain
 
 Options, as flags or as environment variables:
 
-  --version v0.4.0   HURA_VERSION       a specific release; default the newest
+  --version 0.55.0   HURA_VERSION       a specific release; default the newest
   --bin-dir DIR      HURA_BIN_DIR       where to install; default ~/.local/bin
   --from-source      HURA_FROM_SOURCE=1 build with cargo instead of downloading
 
@@ -117,14 +117,37 @@ detect_target() {
 
 # ------------------------------------------------------------------- releases
 
-# The newest release's tag, read out of the API response without jq: one field,
-# and a dependency for it would be a worse trade than this sed.
+# hurad's releases are tagged `hurad-v<version>`, and were `v<version>` up to
+# v0.54.0. The desktop and iPhone apps release from the same repository under
+# their own prefixes, so GitHub's single "latest release" may well be one of
+# theirs.
+HURAD_TAG='^\(hurad-\)\{0,1\}v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$'
+
+# The newest hurad release's tag: the first in the release list, which GitHub
+# sorts newest first, that is one. Read out of the API response without jq: one
+# field, and a dependency for it would be a worse trade than this sed.
 latest_tag() {
     curl -fsSL --connect-timeout 5 --max-time 20 \
         -H 'Accept: application/vnd.github+json' \
-        "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null |
+        "https://api.github.com/repos/${REPO}/releases?per_page=50" 2>/dev/null |
         sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+        grep "$HURAD_TAG" |
         head -n 1
+}
+
+# The tag for a version asked for by hand, which may be written `0.55.0`,
+# `v0.55.0` or `hurad-v0.55.0`, and was released under one of two prefixes.
+tag_for() {
+    v="${1#hurad-}"
+    v="${v#v}"
+    for t in "hurad-v${v}" "v${v}"; do
+        if curl -fsIL --connect-timeout 5 --max-time 20 -o /dev/null \
+            "https://github.com/${REPO}/releases/download/${t}/SHA256SUMS" 2>/dev/null; then
+            printf '%s\n' "$t"
+            return
+        fi
+    done
+    printf 'hurad-v%s\n' "$v"
 }
 
 # ---------------------------------------------------------------------- steps
@@ -132,7 +155,8 @@ latest_tag() {
 install_release() {
     target="$(detect_target)"
 
-    tag="$VERSION"
+    tag=""
+    [ -n "$VERSION" ] && tag="$(tag_for "$VERSION")"
     if [ -z "$tag" ]; then
         say "==> looking for the newest release"
         tag="$(latest_tag || true)"
@@ -144,7 +168,10 @@ install_release() {
         return
     fi
 
-    asset="hurad-${tag}-${target}.tar.gz"
+    # The same name under either prefix: `hurad-v0.55.0-<target>.tar.gz`.
+    version="${tag#hurad-}"
+    version="${version#v}"
+    asset="hurad-v${version}-${target}.tar.gz"
     base="https://github.com/${REPO}/releases/download/${tag}"
 
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/hura-install.XXXXXX")"

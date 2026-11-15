@@ -19,7 +19,7 @@
 //! that would want a TLS stack.
 //!
 //! The three files that have to agree about what a release is called, and
-//! about what is inside it -- `install.sh`, `.github/workflows/release.yml`
+//! about what is inside it -- `install.sh`, `.github/workflows/release-hurad.yml`
 //! and this one -- are kept in step by tests at the bottom rather than by
 //! anyone remembering.
 //!
@@ -36,6 +36,15 @@
 //! cannot fetch its own successor. v0.3.1 is worth having for a narrower
 //! reason -- it is the last release `hura update` can reach, so nobody is
 //! stranded on the v0.3.0 that no installed copy could update to.
+//!
+//! **The tag gained a prefix after v0.54.0**, from `v<version>` to
+//! `hurad-v<version>`, when the desktop and iPhone apps started releasing on
+//! their own (`desktop-v...`, `ios-v...`) from the same repository. The asset
+//! names did not change -- `hurad-v<version>-<target>.tar.gz` either way -- and
+//! this reads both tags, so `hurad update v0.53.0` still goes back. What cannot
+//! follow is a v0.54.0 or older: it takes everything after a `v` as the
+//! version, finds `hurad-v...` is not one, and stays where it is. One
+//! `install.sh` moves it across.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -44,6 +53,14 @@ use crate::image::is_older;
 
 /// Where releases are published.
 pub const REPO: &str = "tobiaswadsethdev/hura";
+
+/// What a `hurad` release's tag starts with, before its version. The desktop
+/// and iPhone apps release from the same repository under their own prefixes,
+/// so a tag without this one is not a `hurad` release.
+pub const TAG_PREFIX: &str = "hurad-v";
+
+/// How `hurad` releases were tagged up to v0.54.0.
+const LEGACY_TAG_PREFIX: &str = "v";
 
 /// The version of the running binary.
 pub fn current() -> &'static str {
@@ -70,8 +87,11 @@ fn target() -> Option<&'static str> {
 }
 
 /// What a release asset is called. `install.sh` builds the same name.
-fn asset_name(tag: &str, target: &str) -> String {
-    format!("{BIN}-{tag}-{target}.tar.gz")
+///
+/// From the version and not the tag, because it is the same name under a
+/// `hurad-v0.55.0` tag as it was under a `v0.54.0` one.
+fn asset_name(version: &str, target: &str) -> String {
+    format!("{BIN}-v{version}-{target}.tar.gz")
 }
 
 /// The checksum file covering every asset in a release.
@@ -83,9 +103,9 @@ const BIN: &str = "hurad";
 /// A published release, as much of one as this needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
-    /// The git tag, `v0.1.0`.
+    /// The git tag, `hurad-v0.55.0` (or `v0.54.0` and older).
     pub tag: String,
-    /// The tag without its `v`, comparable with [`current`].
+    /// The tag without its prefix, comparable with [`current`].
     pub version: String,
     assets: Vec<Asset>,
 }
@@ -107,6 +127,10 @@ impl Release {
 struct ApiRelease {
     tag_name: String,
     #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
     assets: Vec<ApiAsset>,
 }
 
@@ -117,13 +141,36 @@ struct ApiAsset {
 }
 
 fn parse_release(json: &str) -> Option<Release> {
-    let api: ApiRelease = serde_json::from_str(json).ok()?;
-    let version = api.tag_name.strip_prefix('v').unwrap_or(&api.tag_name);
+    release_from(serde_json::from_str(json).ok()?)
+}
+
+/// The newest `hurad` release in a page of the release list, which GitHub
+/// sorts newest first.
+///
+/// Not GitHub's own "latest release": that is one per repository, and this
+/// repository also publishes the desktop app. Whichever was marked latest last,
+/// a desktop release is never a `hurad` one.
+fn parse_newest(json: &str) -> Option<Release> {
+    let list: Vec<ApiRelease> = serde_json::from_str(json).ok()?;
+    list.into_iter()
+        .filter(|r| !r.draft && !r.prerelease)
+        .find_map(release_from)
+}
+
+/// The version a `hurad` tag names, or `None` for any other tag.
+fn version_of_tag(tag: &str) -> Option<&str> {
+    let version = tag
+        .strip_prefix(TAG_PREFIX)
+        .or_else(|| tag.strip_prefix(LEGACY_TAG_PREFIX))?;
     // A tag that is not a version is not something this can compare against, so
-    // it is better ignored than reported as an update.
-    if !version.contains('.') {
-        return None;
-    }
+    // it is better ignored than reported as an update. `desktop-v1.0.0` never
+    // gets this far; `vnext` would.
+    let parts: Vec<&str> = version.split('.').collect();
+    (parts.len() == 3 && parts.iter().all(|p| p.parse::<u32>().is_ok())).then_some(version)
+}
+
+fn release_from(api: ApiRelease) -> Option<Release> {
+    let version = version_of_tag(&api.tag_name)?;
     Some(Release {
         version: version.to_string(),
         tag: api.tag_name.clone(),
@@ -159,21 +206,32 @@ fn fetch(url: &str) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-/// The newest published release.
+/// The newest published `hurad` release.
 ///
 /// `None` means "could not ask" -- no releases yet, no network, a rate limit --
 /// and no caller may read it as "up to date".
+///
+/// One page of fifty: the desktop app releasing that many times between two
+/// `hurad` releases would be a different project.
 pub fn latest() -> Option<Release> {
-    parse_release(&fetch(&format!(
-        "https://api.github.com/repos/{REPO}/releases/latest"
+    parse_newest(&fetch(&format!(
+        "https://api.github.com/repos/{REPO}/releases?per_page=50"
     ))?)
 }
 
 /// One named release, for going back to a version that worked.
+///
+/// Takes `0.53.0`, `v0.53.0` or `hurad-v0.55.0` alike, and tries the tag
+/// releases are cut under now before the one they were cut under before.
 fn tagged(tag: &str) -> Option<Release> {
-    parse_release(&fetch(&format!(
-        "https://api.github.com/repos/{REPO}/releases/tags/{tag}"
-    ))?)
+    let version = version_of_tag(tag).unwrap_or(tag);
+    [TAG_PREFIX, LEGACY_TAG_PREFIX]
+        .into_iter()
+        .find_map(|prefix| {
+            parse_release(&fetch(&format!(
+                "https://api.github.com/repos/{REPO}/releases/tags/{prefix}{version}"
+            ))?)
+        })
 }
 
 /// What an update would do, without doing any of it.
@@ -441,7 +499,7 @@ fn fetch_verified(dir: &Path, release: &Release) -> Result<PathBuf, String> {
         )
     })?;
 
-    let name = asset_name(&release.tag, target);
+    let name = asset_name(&release.version, target);
     let asset = release
         .asset(&name)
         .ok_or_else(|| format!("release {} has no {name}", release.tag))?;
@@ -618,10 +676,42 @@ mod tests {
         assert_eq!(r.version, "0.2.0", "the `v` is not part of the version");
         assert!(r.asset(SUMS).is_some());
         assert!(
-            r.asset(&asset_name(&r.tag, "x86_64-unknown-linux-musl"))
+            r.asset(&asset_name(&r.version, "x86_64-unknown-linux-musl"))
                 .is_some(),
             "the name this builds must be the name the release publishes"
         );
+    }
+
+    #[test]
+    fn a_hurad_tag_is_read_with_either_prefix_and_no_other_tag_is() {
+        assert_eq!(version_of_tag("hurad-v0.55.0"), Some("0.55.0"));
+        assert_eq!(version_of_tag("v0.54.0"), Some("0.54.0"));
+        assert_eq!(version_of_tag("desktop-v0.55.0"), None);
+        assert_eq!(version_of_tag("ios-v1.0.0"), None);
+        assert_eq!(version_of_tag("ios-v1.0.0+480"), None);
+        assert_eq!(version_of_tag("vnext"), None);
+        assert_eq!(version_of_tag("hurad-v0.55"), None);
+    }
+
+    /// The release list holds the desktop app's releases too, newest first, and
+    /// one of them is as likely as not to be on top.
+    #[test]
+    fn the_newest_hurad_release_is_found_past_the_desktop_ones() {
+        let list = r#"[
+          {"tag_name": "desktop-v0.56.0", "assets": []},
+          {"tag_name": "hurad-v0.56.0-rc1", "prerelease": true, "assets": []},
+          {"tag_name": "hurad-v0.57.0", "draft": true, "assets": []},
+          {"tag_name": "hurad-v0.55.0", "assets": []},
+          {"tag_name": "v0.54.0", "assets": []}
+        ]"#;
+        let r = parse_newest(list).expect("finds one");
+        assert_eq!(r.tag, "hurad-v0.55.0");
+        assert_eq!(r.version, "0.55.0");
+
+        let legacy_only = r#"[{"tag_name": "desktop-v0.55.0"}, {"tag_name": "v0.54.0"}]"#;
+        assert_eq!(parse_newest(legacy_only).unwrap().tag, "v0.54.0");
+        assert!(parse_newest(r#"[{"tag_name": "desktop-v0.55.0"}]"#).is_none());
+        assert!(parse_newest(r#"{"message":"Not Found"}"#).is_none());
     }
 
     /// GitHub answers "no releases yet" with a 404 body rather than an empty
@@ -681,7 +771,7 @@ bbbb *hurad-v0.2.0-aarch64-unknown-linux-musl.tar.gz
     }
 
     const INSTALL_SH: &str = include_str!("../../../install.sh");
-    const RELEASE_WORKFLOW: &str = include_str!("../../../.github/workflows/release.yml");
+    const RELEASE_WORKFLOW: &str = include_str!("../../../.github/workflows/release-hurad.yml");
 
     /// Three files have to agree about what a release asset is called: the
     /// workflow that publishes it, the script that installs it, and this. They
@@ -703,19 +793,24 @@ bbbb *hurad-v0.2.0-aarch64-unknown-linux-musl.tar.gz
                 "install.sh cannot install {target}"
             );
         }
-        // `hura-$tag-$target.tar.gz`, built by `asset_name` here and by string
-        // interpolation there.
+        // `hurad-v$version-$target.tar.gz`, built by `asset_name` here and by
+        // string interpolation there.
         assert!(
-            INSTALL_SH.contains("hurad-${tag}-${target}.tar.gz"),
+            INSTALL_SH.contains("hurad-v${version}-${target}.tar.gz"),
             "install.sh names assets differently from asset_name"
         );
         assert!(
-            RELEASE_WORKFLOW.contains("hurad-${TAG}-${{ matrix.target }}.tar.gz"),
+            RELEASE_WORKFLOW.contains("hurad-v${VERSION}-${{ matrix.target }}.tar.gz"),
             "the release workflow names assets differently from asset_name"
         );
         assert_eq!(
-            asset_name("v0.2.0", "x86_64-unknown-linux-musl"),
+            asset_name("0.2.0", "x86_64-unknown-linux-musl"),
             "hurad-v0.2.0-x86_64-unknown-linux-musl.tar.gz"
+        );
+        // And the tags they are published under.
+        assert!(
+            INSTALL_SH.contains(TAG_PREFIX) && RELEASE_WORKFLOW.contains(TAG_PREFIX),
+            "both must agree that hurad's tags start {TAG_PREFIX}"
         );
         assert!(
             INSTALL_SH.contains(SUMS) && RELEASE_WORKFLOW.contains(SUMS),

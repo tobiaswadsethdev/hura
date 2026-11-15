@@ -1019,7 +1019,10 @@ mod tests {
     /// rather than a bare `policies/...`.
     #[test]
     fn resolves_a_path_to_a_template_file() {
-        let spec = concat!(env!("CARGO_MANIFEST_DIR"), "/../../hurad/policies/net-open.toml");
+        let spec = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../hurad/policies/net-open.toml"
+        );
         let r = resolve(spec).unwrap();
         assert_eq!(r.label, spec);
         assert!(!r.rules.is_empty());

@@ -95,69 +95,93 @@ rather than a list of files touched.
 
 ## Releasing
 
-Releases are what `install.sh` and `hurad update` install, and both find them by
-name. Cutting one is a dispatch of **Tag a release**
-(`.github/workflows/tag.yml`) from the Actions tab, with `patch`, `minor` or
-`major` -- or an exact version if the increment is not the point. It works out
-the next version, rewrites the seven files that carry it, commits that as
-`Release vX.Y.Z`, tags it, pushes both, and hands the tag to `release.yml`.
-`dry_run` does everything except the pushing and prints the diff, which is the
-cheap way to check a bump before it is permanent.
+Three things release from this repository, each with its own version and its
+own tags. Up to v0.54.0 they shared one version, tagged `v...`; what they have
+to agree on is the protocol (`hura_proto::VERSION`), which a client checks when
+it connects, and a protocol change is the one thing that means releasing more
+than one of them.
 
-Seven files, because the version is written down in four formats across two
-cargo workspaces:
+| component | tag | version in | released by |
+| --- | --- | --- | --- |
+| hurad | `hurad-vX.Y.Z` | `Cargo.toml`, `Cargo.lock` (and the desktop app's lockfile, for the shared crates) | `release-hurad.yml` |
+| desktop app | `desktop-vX.Y.Z` | `apps/desktop/package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json` | `release-desktop.yml` |
+| iPhone app | `ios-vX.Y.Z` | `apps/ios/Config/Version.xcconfig` | `apps/ios/Tools/testflight.sh`, from a Mac |
 
-| | |
-| --- | --- |
-| `Cargo.toml`, `Cargo.lock` | the workspace version every crate inherits |
-| `apps/desktop/package.json`, `package-lock.json` | the front end |
-| `apps/desktop/src-tauri/Cargo.toml`, `Cargo.lock` | the desktop crate, its own workspace |
-| `apps/desktop/src-tauri/tauri.conf.json` | what Windows shows in Add or Remove Programs |
+Cutting any of them is a dispatch of **Tag a release**
+(`.github/workflows/tag.yml`) from the Actions tab: pick the component and
+`patch`, `minor` or `major` -- or an exact version if the increment is not the
+point. It works out the next version from that component's own files, rewrites
+them, commits that as `Release <tag>`, tags it and pushes both; the tag starts
+the release workflow. `dry_run` does everything except the pushing and prints
+the diff, which is the cheap way to check a bump before it is permanent. For
+the iPhone app the tag only moves the version; the next
+`apps/ios/Tools/testflight.sh` from `main` uploads a build of it (see
+[apps/ios](apps/ios/README.md#testflight)).
 
-Bumping them by hand is the reason this is a workflow. `v0.3.0` was tagged with
-all seven still reading `0.2.0`, and `hurad update` refuses a release whose binary
-reports a different version than the tag claims -- so the current `latest` is
-one no installed copy can update to. The workflow writes all seven from one
+Bumping by hand is the reason this is a workflow. `v0.3.0` was tagged with
+every file still reading `0.2.0`, and `hurad update` refuses a release whose
+binary reports a different version than the tag claims -- so that release was
+one no installed copy could update to. The workflow writes every file from one
 number and refuses to tag if the diff touches anything else.
 
 Doing it by hand still works, and is still the fallback if Actions is down:
 
 ```sh
-# bump the seven files above, commit them, then:
-git tag v0.2.0 && git push origin v0.2.0
+# bump the component's files above, commit them, then:
+git tag hurad-v0.55.0 && git push origin hurad-v0.55.0
 ```
 
-A tag pushed from a laptop starts `release.yml` directly. One pushed by
-`tag.yml` does not -- GitHub does not run workflows on events raised with the
-built-in `GITHUB_TOKEN` -- which is why that workflow dispatches this one
-explicitly rather than relying on the push. It needs no personal access token
-to do it.
+The tag push from `tag.yml` starts the release workflow because it is made
+with the release deploy key: GitHub does not run workflows on events raised
+with the built-in `GITHUB_TOKEN`, and the key is also what lets the commit
+bypass `main`'s required checks.
 
-`.github/workflows/release.yml` builds a static musl binary for
-`x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, packs each as
-`hurad-<tag>-<target>.tar.gz` with `hurad` flat at the root, and publishes them
-with one `SHA256SUMS` covering both. Three files have to agree about that name
-and about what is inside the archive -- the workflow, `install.sh` and
-`crates/hura-core/src/update.rs` -- and a test in `update.rs` fails if they ever
-stop agreeing, so a rename in one of them is caught locally rather than by
-someone's broken install.
+Release notes are generated from the component's previous tag (or the last
+combined `v...` release, for the first of each), so they cover the merges in
+between -- all of them, since GitHub does not filter them by path.
+
+### hurad
+
+`release-hurad.yml` builds a static musl binary for
+`x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, and one for
+`aarch64-apple-darwin`, packs each as `hurad-v<version>-<target>.tar.gz` with
+`hurad` flat at the root, and publishes them with one `SHA256SUMS` covering all
+of them. Three files have to agree about that name, the tag and what is inside
+the archive -- the workflow, `install.sh` and `crates/hura-core/src/update.rs`
+-- and a test in `update.rs` fails if they ever stop agreeing, so a rename in
+one of them is caught locally rather than by someone's broken install.
+
+hurad's releases are the ones GitHub marks "latest". Nothing depends on that:
+`install.sh` and `hurad update` both take the newest `hurad-v` (or older `v`)
+tag from the release list, so a desktop release on top does not confuse them.
+
+**Nothing at v0.54.0 or older can follow the tag's new prefix.** Those read
+everything after a `v` as the version, find `hurad-v0.55.0` is not one, and
+stay where they are, quietly. One `install.sh` moves a server across, and from
+then on `hurad update` reads both prefixes, so going back to `v0.53.0` still
+works.
 
 The asset was `hura-<tag>-<target>.tar.gz` until v0.4.0, and carried `hura`.
-Nothing installed before then can update across that rename: `hura update`
-replaces the binary it is running, and there is no longer an `hura` to replace
-it with. It fails saying the release has no asset by the name it wants, which
-is true.
+Nothing installed before then can update across that rename either: `hura
+update` replaces the binary it is running, and there is no longer an `hura` to
+replace it with. v0.3.1 is the last release `hura update` can reach at all, so
+nobody is left sitting on the v0.3.0 that no installed copy could update to.
 
-**The way across is one `install.sh`, from any release before v0.4.0.** There
-is no update path that crosses it. The `hurad` that v0.3.1 installs is the
-server alone -- `update` did not move into it until v0.4.0 -- so it cannot
-fetch its own successor either. What v0.3.1 is for is narrower and still worth
-having: it is the last release `hura update` can reach at all, so nobody is left
-sitting on the v0.3.0 that no installed copy could update to.
+### The desktop app
 
-Until the first tag exists there is nothing to download, and both installers
-say so and fall back to building from source. That is the intended behaviour,
-not a gap to work around.
+`release-desktop.yml` builds the Windows installers (`.exe` and `.msi`) and the
+Mac disk image, named `hura-desktop-v<version>-<target>`, and publishes them
+*without* marking the release latest. When there is an updater key it also
+writes `latest.json`, and once the release is up commits it to
+`site/desktop/latest.json` on `main`: the installed app reads it from
+`https://gethura.app/desktop/latest.json`, falling back to the same file on
+raw.githubusercontent.com. That needs the site to redeploy on a push to `main`.
+
+Windows installs from v0.54.0 and before read
+`/releases/latest/download/latest.json` instead, which is now a hurad release.
+So the desktop workflow also uploads its `latest.json` onto the newest hurad
+release, and the hurad workflow carries `site/desktop/latest.json` into each
+new one. The first update such an install takes moves it onto the new address.
 
 ### The signing keys
 
@@ -177,7 +201,7 @@ whatever is published. Changing it has the same effect on every copy already
 out there. Back it up somewhere that is not this repository.
 
 `createUpdaterArtifacts` makes `tauri build` *fail* without the key rather than
-skip the signing, so `release.yml` turns that option back off when the secrets
+skip the signing, so `release-desktop.yml` turns that option back off when the secrets
 are absent. That is what lets a fork cut a release at all.
 
 Both halves of each pair have to be set. The key is password-protected, so a

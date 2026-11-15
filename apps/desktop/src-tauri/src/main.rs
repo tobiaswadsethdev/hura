@@ -184,6 +184,10 @@ fn forget(name: String) -> Result<Vec<ServerSummary>, Failed> {
 
 /// What the about screen says: this window's version, and the server's.
 ///
+/// The two release on their own and their numbers are not expected to match;
+/// what has to match is the protocol each speaks, so that is what the screen
+/// warns about.
+///
 /// The server half is asked fresh rather than remembered from pairing, because
 /// `hurad` updates itself and the version it paired at is a fact about last
 /// month. Unauthenticated -- it is `GET /version` -- so a revoked token still
@@ -194,22 +198,27 @@ struct About {
     /// Whether this build can replace itself. The plugin is compiled in on
     /// Windows only; see `Update.tsx`.
     updater: bool,
+    /// The protocol this window speaks, `hura_proto::VERSION`.
+    protocol: u32,
     server_version: Option<String>,
+    server_protocol: Option<u32>,
     server_error: Option<String>,
 }
 
 #[tauri::command(async)]
 fn about(server: Option<String>) -> About {
     let hello = server.map(|name| remote(&name).and_then(|r| r.hello().map_err(to_message)));
-    let (server_version, server_error) = match hello {
-        Some(Ok(h)) => (Some(h.version), None),
-        Some(Err(e)) => (None, Some(e.message)),
-        None => (None, None),
+    let (server_version, server_protocol, server_error) = match hello {
+        Some(Ok(h)) => (Some(h.version), Some(h.protocol), None),
+        Some(Err(e)) => (None, None, Some(e.message)),
+        None => (None, None, None),
     };
     About {
         desktop: env!("CARGO_PKG_VERSION").into(),
         updater: cfg!(windows),
+        protocol: hura_proto::VERSION,
         server_version,
+        server_protocol,
         server_error,
     }
 }

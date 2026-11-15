@@ -1,0 +1,231 @@
+name: Release hurad
+
+# Tag `hurad-vX.Y.Z` and this publishes the binary `install.sh` and
+# `hurad update` download.
+#
+# The tag is normally not made by hand: `tag.yml`, with `component: hurad`,
+# bumps the workspace version, tags the commit that holds it, and pushes the
+# tag, which starts this. Doing it the short way still works --
+#
+#     git tag hurad-v0.55.0 && git push origin hurad-v0.55.0
+#
+# -- but then remember the bump, because nothing here checks that the tag and
+# the tree agree, and once they did not.
+#
+# Up to v0.54.0 this repository had one version and one release, tagged
+# `v...`, carrying the server and the desktop app together. They release on
+# their own now: the desktop app is `release-desktop.yml` and the iPhone app
+# goes to TestFlight from a Mac (apps/ios/README.md). What they share with this
+# is the protocol (`hura_proto::VERSION`), not the release number.
+#
+# hurad's releases are the ones marked "latest" on GitHub, because that is what
+# the release page and anyone browsing it lead with. Nothing reads that mark
+# any more: install.sh and `hurad update` both look for the newest `hurad-v`
+# tag in the release list.
+#
+# The asset names are part of the contract with both installers, and a test in
+# `crates/hura-core/src/update.rs` fails if the three ever disagree.
+on:
+  push:
+    tags: ["hurad-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish, e.g. hurad-v0.55.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # One resolved tag for both triggers. `github.ref_name` is the tag on a tag
+  # push and the *branch* on a workflow_dispatch, which would name every asset
+  # after `main` and produce a release nothing can find.
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    # An architecture whose runner is unavailable must not take the other one
+    # down with it: a release with one binary in it beats a release with none.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          # A Mac runs sessions too: worktree sessions, for the work a Linux
+          # VM cannot do, beside sandboxes that Docker Sandboxes runs there.
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+    steps:
+      # The tag, explicitly, and not whatever ref the run was started from. On
+      # a tag push those are the same thing; on a `workflow_dispatch` they are
+      # not -- the dispatch carries a branch, so this used to build `main` and
+      # label the result with a tag it had never been at. Naming the tag also
+      # means a dispatch for a tag that does not exist fails here, loudly,
+      # instead of publishing whatever `main` happened to be.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      # A dispatch takes the tag as free text, and a junk one would be baked
+      # into an asset name and a git tag that outlives the mistake.
+      - name: Check the tag looks like a version
+        run: |
+          case "$TAG" in
+            hurad-v[0-9]*.[0-9]*.[0-9]*) echo "building $TAG" ;;
+            *) echo "TAG=$TAG is not a hurad-vX.Y.Z tag"; exit 1 ;;
+          esac
+          echo "VERSION=${TAG#hurad-v}" >> "$GITHUB_ENV"
+
+      # musl, so one binary runs on every distribution rather than on the ones
+      # whose glibc is new enough. Rust brings musl's own C runtime with the
+      # target, so nothing comes from apt: the Ubuntu mirrors are one more
+      # thing that has to be up for a release, and for v0.47.0 to v0.47.2 the
+      # runners could not reach them. The one C compiled in is ring's, which
+      # needs no libc headers musl does not share, so the runner's own gcc
+      # builds it; cc-rs would otherwise look for `<arch>-linux-musl-gcc`.
+      - name: Install Rust
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            echo "CC_$(echo '${{ matrix.target }}' | tr - _)=gcc" >> "$GITHUB_ENV"
+          fi
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # The whole Linux side, in one binary. `hura` was a second one until
+      # v0.4.0, when it folded into this: two front ends onto one set of
+      # sessions cost more than the terminal one was worth.
+      - name: Build
+        run: cargo build --release --locked --bin hurad --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          set -eu
+          bin="target/${{ matrix.target }}/release"
+          # Ask it what it is. A binary built from the wrong commit answers the
+          # wrong version, and that is cheaper to find out here than in
+          # `hurad update`, which refuses the swap over exactly this.
+          "$bin/hurad" --version
+          # Flat, one file at the root of the archive: install.sh and
+          # `hurad update` both expect to find `hurad` and nothing else.
+          #
+          # The asset is named after what it holds, so it changed name in
+          # v0.4.0 along with the binary. Nothing older can follow that -- an
+          # `hura update` replaces the binary it is running and there is no
+          # longer an `hura` to replace it with -- so it fails saying this
+          # release has no `hura-...tar.gz`, which is true. v0.3.1 is the last
+          # release `hura update` can reach at all, which is what keeps anyone
+          # from being stranded on v0.3.0 -- but it is not a bridge across this
+          # rename, because the `hurad` it installs is the server alone and has
+          # no `update` of its own. One `install.sh`, and never again.
+          #
+          # Named for the version and not the tag, so the name did not change
+          # when the tag gained its `hurad-` prefix after v0.54.0.
+          tar -czf "hurad-v${VERSION}-${{ matrix.target }}.tar.gz" -C "$bin" hurad
+          # `shasum`, which both runners have; its output is `sha256sum`'s.
+          shasum -a 256 "hurad-v${VERSION}-${{ matrix.target }}.tar.gz" > "${{ matrix.target }}.sha256"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hurad-${{ matrix.target }}
+          path: |
+            hurad-v${{ env.VERSION }}-${{ matrix.target }}.tar.gz
+            ${{ matrix.target }}.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+
+      - name: Read the version
+        run: echo "VERSION=${TAG#hurad-v}" >> "$GITHUB_ENV"
+
+      # The release notes cover what changed since this component's previous
+      # release, not since whatever was tagged last: with three components
+      # releasing from one repository that is as likely as not someone else's.
+      # Before the first `hurad-v` release that is the last combined one, `v...`.
+      - name: Find the previous release
+        id: prev
+        run: |
+          set -eu
+          git fetch --force --tags --quiet origin
+          # Every candidate and this tag, in version order; the one before
+          # this tag is the previous release.
+          prev=$( { git tag --list 'hurad-v[0-9]*' 'v[0-9]*'; echo "$TAG"; } \
+            | sort -u \
+            | awk '{ v = $0; sub(/^[a-z-]*v/, "", v); print v "\t" $0 }' \
+            | sort -t. -k1,1n -k2,2n -k3,3n \
+            | cut -f2 \
+            | grep -B1 -xF "$TAG" | grep -vxF "$TAG" || true)
+          echo "tag=$prev" >> "$GITHUB_OUTPUT"
+          echo "previous release: ${prev:-none}"
+
+      # `merge-multiple`, because the build jobs upload an artifact each
+      # and what the steps below want is one directory with everything in it.
+      #
+      # On v8 a digest mismatch between what the server holds and what arrives
+      # is an *error* rather than a logged warning, which is the default worth
+      # having here and worth writing down: the files that come out of this are
+      # the ones `SHA256SUMS` is computed over, so a corrupted download would
+      # otherwise be published with a checksum that matches the corruption.
+      # Pinning back to v7 would quietly give that up.
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      # One SHA256SUMS covering every architecture, which is what install.sh
+      # verifies against with --ignore-missing and what `hurad update` reads the
+      # single line it needs out of.
+      - name: Collect checksums
+        run: |
+          set -eu
+          cd dist
+          cat ./*.sha256 > SHA256SUMS
+          rm -f ./*.sha256
+          cat SHA256SUMS
+
+      # Desktop windows installed before the split (v0.54.0 and older) check
+      # `/releases/latest/download/latest.json`, and "latest" is this release
+      # now. The desktop app's newest manifest rides along so that URL keeps
+      # answering; `release-desktop.yml` also refreshes it here whenever the
+      # desktop app releases between two of these.
+      - name: Carry the desktop app's update manifest
+        run: |
+          set -eu
+          if [ -f site/desktop/latest.json ]; then
+            cp site/desktop/latest.json dist/latest.json
+            jq 'del(.platforms[].signature)' dist/latest.json
+          else
+            echo "no desktop manifest in the tree yet"
+          fi
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV: ${{ steps.prev.outputs.tag }}
+        run: |
+          set -eu
+          set -- dist/*.tar.gz dist/SHA256SUMS
+          [ -f dist/latest.json ] && set -- "$@" dist/latest.json
+          notes_from=""
+          [ -n "$PREV" ] && notes_from="--notes-start-tag=$PREV"
+          gh release create "$TAG" --verify-tag --latest \
+            --title "hurad $VERSION" --generate-notes $notes_from "$@"

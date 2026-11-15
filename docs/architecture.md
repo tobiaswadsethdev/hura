@@ -43,7 +43,25 @@ A tour of the code, for anyone about to change some of it: this is the map.
    +Docker Engine     +Docker Engine      +Docker Engine
 ```
 
-Five crates, and an application:
+The repository is grouped by what ships, and each of the three things that
+ship has its own version and its own releases:
+
+| | ships as | version in | tagged |
+| --- | --- | --- | --- |
+| `hurad/` | the server: `install.sh`, `hurad update` | `Cargo.toml` (`[workspace.package]`) | `hurad-vX.Y.Z` |
+| `apps/desktop/` | the desktop app: Windows installers, a Mac disk image | `apps/desktop/src-tauri/tauri.conf.json` and four more | `desktop-vX.Y.Z` |
+| `apps/ios/` | the iPhone app, through TestFlight | `apps/ios/Config/Version.xcconfig` | `ios-vX.Y.Z`, and `ios-vX.Y.Z+N` per upload |
+| `services/` | hura cloud and the push relay, deployed from `main` | -- | -- |
+| `crates/` | the libraries the server, hura cloud and the desktop app share | hurad's | -- |
+
+Up to v0.54.0 there was one version for all of it, tagged `v...`. What a client
+and a server have to agree on is the protocol, `hura_proto::VERSION`, which
+each checks on connecting; the release numbers are free to drift. The shared
+crates carry hurad's number because `hura-core` and `hura-proto` report it, in
+`hurad update` and in the hello a client reads. CONTRIBUTING.md says how each
+is released.
+
+Inside that, the crates and an application:
 
 | | |
 | --- | --- |
@@ -52,7 +70,9 @@ Five crates, and an application:
 | `crates/hura-proto` | one definition of every message on the wire, so a server and a client cannot drift. Built on `hura-core`, because the types it carries are the core's own rather than a second set kept in step by hand |
 | `hurad/daemon` | the whole Linux side: the clap CLI, and the server behind TLS, one token check and `/rpc`. Async only where it has to be -- everything it calls is blocking and goes to `spawn_blocking`. `crates/hura` carried the CLI and a ratatui TUI beside it until v0.4.0, when two front ends onto one set of sessions stopped earning their keep |
 | `crates/hura-client` | the client half: paired servers, and one certificate-pinned connection to each. Its own crate because the CLI and the desktop application both need it, and a webview cannot pin a certificate for itself |
+| `hurad/images`, `hurad/policies` | the sandbox image the server builds and the policy templates it ships, compiled into `hura-core` |
 | `services/cloud` | the hura cloud service: accounts, devices and the trackers they keep, which the apps read through it, on Postgres. See [cloud.md](cloud.md) |
+| `services/relay` | the push relay, a Cloudflare Worker that holds the APNs key. See [relay-api.md](relay-api.md) |
 | `apps/desktop` | Tauri v2 and React. Deliberately *not* a workspace member: `cargo build --workspace` would otherwise need a GUI toolkit installed to check that a session store reconciles |
 
 ## Where things live
