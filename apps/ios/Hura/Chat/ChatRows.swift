@@ -338,13 +338,18 @@ struct ThinkingView: View {
     @State private var open = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(.snappy) { open.toggle() }
             } label: {
+                // The whole width of the row and some height around the words
+                // take the tap: the caption alone was hard to hit.
                 Label("Thinking", systemImage: open ? "chevron.down" : "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             if open {

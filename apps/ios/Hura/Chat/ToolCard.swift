@@ -257,32 +257,86 @@ struct ShellCard: View {
 
 struct DiffView: View {
     let lines: [LineDiff.Line]
+    @State private var width: CGFloat = 0
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                    row(line)
+                ForEach(Array(Self.hunks(lines).enumerated()), id: \.offset) { _, hunk in
+                    block(hunk)
                 }
             }
+            // As wide as the box at least, so a block's colour runs to its
+            // edge and not only to the end of the longest line.
+            .frame(minWidth: width, alignment: .leading)
             .padding(.vertical, 6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            GeometryReader { g in
+                Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w }
+            }
+        }
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
         .textSelection(.enabled)
     }
 
-    private func row(_ line: LineDiff.Line) -> some View {
-        let (mark, text, color): (String, String, Color) = switch line {
-        case let .same(t): (" ", t, .clear)
-        case let .removed(t): ("−", t, .red)
-        case let .added(t): ("+", t, .green)
+    /// Changed lines that follow each other, removed and added alike, drawn
+    /// as one block with its corners rounded; a shape on each line rounded
+    /// every line by itself. Within a block, its lines of each kind.
+    private static func hunks(_ lines: [LineDiff.Line]) -> [[[LineDiff.Line]]] {
+        var out: [[[LineDiff.Line]]] = []
+        for line in lines {
+            if let last = out.last?.last?.last, (kind(last) == 0) == (kind(line) == 0) {
+                if kind(last) == kind(line) {
+                    out[out.count - 1][out[out.count - 1].count - 1].append(line)
+                } else {
+                    out[out.count - 1].append([line])
+                }
+            } else {
+                out.append([[line]])
+            }
         }
-        return Text("\(mark) \(text)")
+        return out
+    }
+
+    private static func kind(_ line: LineDiff.Line) -> Int {
+        switch line {
+        case .same: 0
+        case .removed: 1
+        case .added: 2
+        }
+    }
+
+    private func block(_ hunk: [[LineDiff.Line]]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(hunk.enumerated()), id: \.offset) { _, run in
+                self.run(run)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
+    private func run(_ run: [LineDiff.Line]) -> some View {
+        let color: Color = switch run[0] {
+        case .same: .clear
+        case .removed: .red
+        case .added: .green
+        }
+        let text = run.map { line in
+            switch line {
+            case let .same(t): "  \(t)"
+            case let .removed(t): "− \(t)"
+            case let .added(t): "+ \(t)"
+            }
+        }.joined(separator: "\n")
+        return Text(text)
             .font(.system(.caption, design: .monospaced))
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(color.opacity(0.15))
+            // Square: the block it is in rounds the corners, and a background
+            // with no shape given comes out rounded on its own.
+            .background(color.opacity(0.15), in: Rectangle())
     }
 }
 

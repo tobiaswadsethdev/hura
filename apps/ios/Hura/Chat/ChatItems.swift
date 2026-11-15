@@ -351,9 +351,17 @@ enum LineDiff {
     }
 
     static func diff(_ old: String, _ new: String) -> [Line] {
-        // \r\n as \n: a stray \r draws as a second line break.
-        let a = old.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
-        let b = new.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        // \r\n as \n: a stray \r draws as a second line break. A text ending
+        // in a newline is that many lines, not one more empty one, as on the
+        // desktop (`diffLines` in `Items.tsx`).
+        func lines(_ text: String) -> [String] {
+            var text = text.replacingOccurrences(of: "\r\n", with: "\n")
+            if text.isEmpty { return [] }
+            if text.hasSuffix("\n") { text.removeLast() }
+            return text.components(separatedBy: "\n")
+        }
+        let a = lines(old)
+        let b = lines(new)
         // Large edits: show them as a replacement rather than spend time on LCS.
         guard a.count * b.count <= 250_000 else { return a.map(Line.removed) + b.map(Line.added) }
         var lcs = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
