@@ -72,6 +72,7 @@ final class AppModel {
     /// Starts asking every server; called when the app becomes active.
     func resumeAll() {
         active = true
+        syncActivityKeys()
         for s in servers {
             s.resume()
             Task { await repairPush(s) }
@@ -113,6 +114,7 @@ final class AppModel {
         server.suspend()
         try store.delete(serverID: server.id)
         servers.removeAll { $0 === server }
+        syncActivityKeys()
     }
 
     /// What this phone calls a server. Its own name for it, kept with the
@@ -124,7 +126,10 @@ final class AppModel {
         r.name = name
         try store.save(r)
         server.update(record: r)
-        Task { try? await push.renamed(server) }
+        Task {
+            try? await push.renamed(server)
+            syncActivityKeys()
+        }
     }
 
     private func save(_ server: Server, pushLinkID: String?) throws {
@@ -132,6 +137,20 @@ final class AppModel {
         r.pushLinkID = pushLinkID
         try store.save(r)
         server.update(record: r)
+        syncActivityKeys()
+    }
+
+    /// Copies each server's push key and name to where the Live Activity
+    /// widget can read them, which is not the Keychain (`ActivityKeyFile`).
+    /// Best effort: an activity that can't open its text says so.
+    func syncActivityKeys() {
+        var ids = servers.map(\.id)
+        #if DEBUG
+        // `-HuraActivity`'s made-up server, whose key the demo keeps.
+        ids.append(LiveActivities.demoServerID)
+        #endif
+        try? ActivityKeyFile.shared?.sync(from: KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup),
+                                          serverIDs: ids)
     }
 
     // MARK: Notifications
