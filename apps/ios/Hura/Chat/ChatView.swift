@@ -223,7 +223,7 @@ struct ChatView: View {
     /// within which the card scrolls, from its question down.
     private var askHeight: CGFloat {
         guard room > 0 else { return 420 }
-        return min(420, max(120, room * 0.45))
+        return min(420, max(120, room * 0.6))
     }
 
     /// What floats over the end of the transcript: what is waiting on you,
