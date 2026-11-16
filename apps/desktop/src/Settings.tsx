@@ -307,6 +307,30 @@ export function SettingsScreen({
           </section>
 
           <section className="setting-group">
+            <h3>Queue</h3>
+            <p className="hint">
+              A session added to the queue starts once fewer than this many are creating or running. One
+              scheduled for a time starts then, whatever this says.
+            </p>
+            <label>
+              <span>Run at once</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                // Blank is the server's default, which is what the key
+                // missing from the file means.
+                placeholder="2"
+                value={draft.queue_limit ?? ""}
+                onChange={(e) => {
+                  const n = Number.parseInt(e.target.value, 10);
+                  edit({ queue_limit: Number.isFinite(n) && n > 0 ? n : null });
+                }}
+              />
+            </label>
+          </section>
+
+          <section className="setting-group">
             <h3>This server</h3>
             <label className="tick">
               <input

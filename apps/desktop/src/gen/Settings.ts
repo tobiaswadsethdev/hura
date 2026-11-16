@@ -45,4 +45,8 @@ interface: Interface | null,
 /**
  * How a session given no name is named: by a model, or by the rules.
  */
-names: NamingMode | null, };
+names: NamingMode | null, 
+/**
+ * How many sessions the queue lets run at once.
+ */
+queue_limit: number | null, };

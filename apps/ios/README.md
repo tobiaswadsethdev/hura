@@ -26,6 +26,12 @@ processes; and what it has spent. A port can be previewed: it is opened on
 the phone's own loopback, at the same number when that's free, tunnelled to
 the sandbox over the paired connection, and shown in Safari's in-app browser.
 
+A worktree can start later instead of now: when the server's queue has room,
+or at a time, both kept and started by the server. What is waiting shows under
+its project, to start now or take off; and the clock beside a chat's send
+button keeps a message to be said at a time, or when the turn running then
+ends. See [docs/server.md](../../docs/server.md#queued-and-scheduled-sessions).
+
 The Search tab searches every conversation the phone has seen, including
 ended ones and deleted sessions: words in what was said, `file:` for the files
 a tool call touched and `tool:` for the tool, as on the desktop. A result opens

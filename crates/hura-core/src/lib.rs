@@ -44,6 +44,7 @@ pub mod plain;
 pub mod policy;
 pub mod ports;
 pub mod projects;
+pub mod queue;
 pub mod removed;
 pub mod repos;
 pub mod secrets;

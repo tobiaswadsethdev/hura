@@ -8,7 +8,7 @@ struct AdminTests {
         let v = try JSONDecoder().decode(JSONValue.self, from: data)
         #expect(v == .object([
             "op": .string("set-settings"), "branch_prefix": .string("tobias"), "base": .null, "policy": .null,
-            "providers": .array([]), "auto_update": .null, "interface": .null, "names": .null,
+            "providers": .array([]), "auto_update": .null, "interface": .null, "names": .null, "queue_limit": .null,
         ]))
     }
 

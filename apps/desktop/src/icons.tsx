@@ -45,6 +45,7 @@ import {
   Box,
   Bot,
   Bug,
+  CalendarClock,
   ChevronDown,
   ChevronRight,
   Check,
@@ -74,6 +75,7 @@ import {
   GitPullRequest,
   GitPullRequestDraft,
   Eye,
+  Hourglass,
   Info,
   LoaderCircle,
   Monitor,
@@ -211,6 +213,11 @@ export const UnstageAll = ListMinus;
 // The integrations screen: containers to run, credentials to hold, trackers to
 // read, skills to push.
 export const Start = Play;
+/// A session or a message waiting for a time.
+export const Scheduled = CalendarClock;
+/// A session waiting for room in the queue, or a message for its agent's turn
+/// to end.
+export const Queued = Hourglass;
 export const Stop = Square;
 export const Restart = RotateCw;
 /// Storing a secret. A save and not a tick: the value is written somewhere the

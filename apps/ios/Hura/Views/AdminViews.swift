@@ -355,6 +355,16 @@ struct ServerSettingsView: View {
                     Text(namingFooter(view.namingKey))
                 }
                 Section {
+                    Stepper(value: Binding(get: { draft.queueLimit ?? 2 }, set: { draft.queueLimit = $0 }),
+                            in: 1...20) {
+                        LabeledContent("Run at once", value: "\(draft.queueLimit ?? 2)")
+                    }
+                } header: {
+                    Text("Queue")
+                } footer: {
+                    Text("A queued session starts once fewer than this many are running. A scheduled one starts at its time regardless.")
+                }
+                Section {
                     Toggle("Update itself", isOn: Binding(get: { draft.autoUpdate ?? true }, set: { draft.autoUpdate = $0 }))
                 } header: {
                     Text("This server")

@@ -28,8 +28,11 @@ import type { ChatFrame } from "../gen/ChatFrame";
 import type { ChatState } from "../gen/ChatState";
 import type { SlashCommand } from "../gen/SlashCommand";
 import type { Usage } from "../gen/Usage";
-import { Attach, Chat as ChatGlyph, Close, Plus, Send, Shell, Skill, Stop, Working } from "../icons";
-import { api } from "../api";
+import { Attach, Chat as ChatGlyph, Close, Plus, Queued, Scheduled, Send, Shell, Skill, Stop, Working } from "../icons";
+import { api, messageOf } from "../api";
+import { epochOf, localInput } from "../NewWorktree";
+import { startsAt } from "../Tree";
+import type { QueuedMessage } from "../gen/QueuedMessage";
 import { keyFor, Remembered } from "../cache";
 import { Markdown, Pictures, type ReadPicture } from "../Markdown";
 import type { PartialMessage } from "../sdk";
@@ -370,6 +373,7 @@ function Composer({
   onAttach,
   onRemove,
   onSent,
+  onSchedule,
 }: {
   state: ChatState | null;
   usage: Usage | null;
@@ -378,8 +382,14 @@ function Composer({
   onAttach: (files: File[]) => void;
   onRemove: (key: string) => void;
   onSent: () => void;
+  /// Keep a message on the server to say at a time: what the clock button
+  /// does instead of sending. Throws to leave the text where it is.
+  onSchedule: (text: string, at: number) => Promise<void>;
 }) {
   const [text, setText] = useState("");
+  // Open while a message is being written for later: the time it is for, as
+  // a `datetime-local` input holds it. Enter then schedules rather than sends.
+  const [later, setLater] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const shade = useRef<HTMLDivElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -457,6 +467,19 @@ function Composer({
     setText("");
   };
   const send = () => {
+    if (later !== null) {
+      const t = text.trim();
+      const at = epochOf(later);
+      if (!t || at === null) return;
+      void onSchedule(t, at).then(
+        () => {
+          say(t);
+          setLater(null);
+        },
+        () => {},
+      );
+      return;
+    }
     if (what.kind === "shell") {
       // Files wait for the next message: a command does not take them.
       const command = what.command.trim();
@@ -475,7 +498,12 @@ function Composer({
     say(t);
     onSent();
   };
-  const sendable = what.kind === "shell" ? Boolean(what.command.trim()) : Boolean(text.trim() || files.length);
+  const sendable =
+    later !== null
+      ? Boolean(text.trim()) && epochOf(later) !== null
+      : what.kind === "shell"
+        ? Boolean(what.command.trim())
+        : Boolean(text.trim() || files.length);
 
   const models = state?.models ?? [];
   const model = state?.model ?? null;
@@ -498,6 +526,22 @@ function Composer({
         onClick={(e) => e.target === e.currentTarget && box.current?.focus()}
       >
         <AttachedFiles files={files} onRemove={onRemove} />
+        {later !== null && (
+          <div className="chat-later">
+            <Scheduled />
+            <span>Say this at</span>
+            <input
+              type="datetime-local"
+              value={later}
+              aria-label="When to say it"
+              onChange={(e) => setLater(e.target.value)}
+            />
+            <span className="hint">or when the turn running then ends · kept by the server</span>
+            <button className="quiet-icon" title="Send Now Instead" aria-label="Cancel" onClick={() => setLater(null)}>
+              <Close />
+            </button>
+          </div>
+        )}
         <div className="chat-field">
           <Shade what={what} shade={shade} />
           <textarea
@@ -633,6 +677,20 @@ function Composer({
             />
           )}
           <span className="chat-facts">{state?.status === "compacting" && <span>compacting</span>}</span>
+          {/* Text only: a file is not something the server keeps for later. */}
+          {later === null && what.kind !== "shell" && !files.length && (
+            <button
+              className="chat-round chat-attach"
+              title="Send Later, at a Time"
+              aria-label="Send Later"
+              onClick={() => {
+                setLater(localInput(Date.now() + 60 * 60 * 1000));
+                box.current?.focus();
+              }}
+            >
+              <Scheduled size={15} />
+            </button>
+          )}
           {(state?.started || usage) && (
             <ContextRing
               percentage={state?.context_percentage ?? null}
@@ -643,7 +701,7 @@ function Composer({
           {/* One round button at the end, as on the phone: Stop while a turn
               runs and nothing is written, Send otherwise -- a message
               written during a turn is queued, so it is still sent. */}
-          {working && !text.trim() && !files.length ? (
+          {working && later === null && !text.trim() && !files.length ? (
             <button
               className="chat-round chat-stop"
               title="Stop This Turn (Esc)"
@@ -655,17 +713,100 @@ function Composer({
           ) : (
             <button
               className="chat-round chat-send"
-              title={what.kind === "shell" ? "Run It in the Sandbox (Enter)" : "Send (Enter)"}
-              aria-label={what.kind === "shell" ? "Run" : "Send"}
+              title={
+                later !== null
+                  ? "Schedule (Enter)"
+                  : what.kind === "shell"
+                    ? "Run It in the Sandbox (Enter)"
+                    : "Send (Enter)"
+              }
+              aria-label={later !== null ? "Schedule" : what.kind === "shell" ? "Run" : "Send"}
               disabled={!sendable}
               onClick={send}
             >
-              {what.kind === "shell" ? <Shell size={15} /> : <Send size={16} strokeWidth={2.25} />}
+              {later !== null ? (
+                <Scheduled size={15} />
+              ) : what.kind === "shell" ? (
+                <Shell size={15} />
+              ) : (
+                <Send size={16} strokeWidth={2.25} />
+              )}
             </button>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+/// How often the messages waiting on the server for this session are read
+/// again. They change when one is said, which is a turn's end at the soonest.
+const WAITING_MS = 5_000;
+
+/// The messages waiting on the server to be said to this session's agent, and
+/// adding and removing them. From a server without a queue, there are none.
+function useWaiting(server: string, name: string, onError: (message: string | null) => void) {
+  const [waiting, setWaiting] = useState<QueuedMessage[]>([]);
+  const take = useCallback(
+    (all: { messages: QueuedMessage[] }) => setWaiting(all.messages.filter((m) => m.session === name)),
+    [name],
+  );
+  useEffect(() => {
+    let live = true;
+    const read = () =>
+      api
+        .queue(server)
+        .then((q) => live && take(q))
+        .catch(() => {});
+    void read();
+    const timer = setInterval(read, WAITING_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [server, take]);
+  const schedule = useCallback(
+    async (text: string, at: number) => {
+      try {
+        take(await api.queueMessage(server, name, text, at));
+        onError(null);
+      } catch (e) {
+        onError(messageOf(e));
+        throw e;
+      }
+    },
+    [server, name, take, onError],
+  );
+  const unqueue = useCallback(
+    (m: QueuedMessage) =>
+      void api
+        .unqueue(server, m.id)
+        .then(take)
+        .catch((e) => onError(messageOf(e))),
+    [server, take, onError],
+  );
+  return { waiting, schedule, unqueue };
+}
+
+/// The messages waiting to be said, above the box they were written in: each
+/// with when, and a way to take it back.
+function Waiting({ messages, onRemove }: { messages: QueuedMessage[]; onRemove: (m: QueuedMessage) => void }) {
+  if (!messages.length) return null;
+  return (
+    <ul className="chat-waiting" aria-label="Waiting to be said">
+      {messages.map((m) => (
+        <li key={m.id}>
+          {m.at !== null ? <Scheduled /> : <Queued />}
+          <span className="when">{m.at !== null ? startsAt(m.at) : "after this turn"}</span>
+          <span className="text" title={m.text}>
+            {m.text}
+          </span>
+          <button className="quiet-icon" title="Don't Say It" aria-label="Remove" onClick={() => onRemove(m)}>
+            <Close />
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -763,6 +904,7 @@ export function ChatPane({
 
   const [files, setFiles] = useState<Attached[]>([]);
   const [refused, setRefused] = useState<string | null>(null);
+  const { waiting, schedule, unqueue } = useWaiting(server, name, setRefused);
   const [dropping, setDropping] = useState(false);
   const takesFiles = view.state?.files ?? false;
   const attach = (picked: File[]) => {
@@ -919,6 +1061,7 @@ export function ChatPane({
             {(view.down || view.error || refused) && (
               <p className="error chat-banner">{view.down ?? refused ?? view.error}</p>
             )}
+            <Waiting messages={waiting} onRemove={unqueue} />
             <Composer
               state={view.state}
               usage={usage}
@@ -930,6 +1073,7 @@ export function ChatPane({
                 setFiles([]);
                 setRefused(null);
               }}
+              onSchedule={schedule}
             />
           </div>
         </Unpin.Provider>

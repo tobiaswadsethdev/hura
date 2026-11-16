@@ -128,6 +128,12 @@
 # meaning. The task text is sent to Anthropic either way the model is reached.
 # names = "ai"
 
+# How many sessions the queue lets run at once. A session added to the queue
+# (`hurad new --queue`, or "When one is free" in an app) starts once fewer than
+# this many are creating, seeding or running; one scheduled for a time
+# (`hurad new --at 02:00`) starts at that time whatever this says.
+# queue_limit = 2
+
 # Whether `hurad serve` may fetch a newer release in the background. It never
 # replaces a running binary: it downloads and verifies ahead of time and leaves
 # the result beside the current one, and the swap happens at the next process

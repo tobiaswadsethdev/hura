@@ -18,9 +18,11 @@ mod push;
 mod qr;
 mod relay;
 mod rpc;
+mod schedule;
 mod serve;
 mod stream;
 mod tls;
+mod when;
 
 use std::io::IsTerminal as _;
 use std::net::SocketAddr;
@@ -31,8 +33,8 @@ use clap::{Parser, Subcommand};
 use hura_client as remote;
 use hura_core::backend::Backends;
 use hura_core::{
-    chat, config, doctor, endpoints, events, image, mcp, naming, ops, pane, policy, repos, session,
-    store, toolchain, update,
+    chat, config, doctor, endpoints, events, image, mcp, naming, ops, pane, policy, queue, repos,
+    session, store, toolchain, update,
 };
 use hura_proto::{DEFAULT_PORT, Pairing};
 
@@ -135,6 +137,16 @@ enum Command {
 
     /// Start a session: create a sandbox, clone the repo, cut a work branch.
     New(NewArgs),
+
+    /// What is waiting to start, and what is waiting to be said.
+    ///
+    /// Sessions are added with `hurad new --at` or `--queue`, and started by
+    /// `hurad serve`, which keeps going through a restart. Without an action,
+    /// lists what is waiting.
+    Queue {
+        #[command(subcommand)]
+        action: Option<QueueAction>,
+    },
 
     /// List sessions, reconciled against the sandbox runtime.
     #[command(alias = "list")]
@@ -350,10 +362,45 @@ struct NewArgs {
     /// file, and `--repo` to be a checkout on this machine.
     #[arg(long)]
     worktree: bool,
+
+    /// Start it later rather than now: `02:00` (the next time it is two
+    /// o'clock here), `2026-11-20 14:30`, or `+90m`, `+2h`, `+1d`.
+    ///
+    /// Kept by `hurad serve`, which starts it at that time whether or not
+    /// anything is connected, and after a restart of the server or of this
+    /// machine.
+    #[arg(long, conflicts_with = "queue")]
+    at: Option<String>,
+
+    /// Add it to the queue instead, to start once fewer than `queue_limit`
+    /// sessions are running. Started by `hurad serve`.
+    #[arg(long)]
+    queue: bool,
 }
 
 fn parse_interface(text: &str) -> Result<chat::Interface, String> {
     chat::Interface::parse(text).ok_or_else(|| format!("`{text}` is not `chat` or `terminal`"))
+}
+
+#[derive(Subcommand)]
+enum QueueAction {
+    /// Take a waiting session or message off the queue.
+    Rm { id: u64 },
+    /// Start a waiting session now, whatever the limit says.
+    Start { id: u64 },
+    /// Say something to a session's agent once it has finished what it is
+    /// doing, after anything already waiting for it.
+    Say {
+        /// Session name.
+        name: String,
+        /// Not before then: the forms `hurad new --at` takes. Said at that
+        /// time, or when the agent's turn ends if it is busy then.
+        #[arg(long)]
+        at: Option<String>,
+        /// What to say. Words are joined with spaces.
+        #[arg(required = true, num_args = 1..)]
+        text: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -487,7 +534,9 @@ fn main() -> ExitCode {
             };
         }
         Some(Command::Config { init, path }) => cmd_config(&cfg, init, path),
+        Some(Command::New(args)) if args.at.is_some() || args.queue => cmd_enqueue(args, &cfg),
         Some(Command::New(args)) => cmd_new(&backends, args, &cfg),
+        Some(Command::Queue { action }) => cmd_queue(action, &cfg),
         Some(Command::Ls) => match server(chosen.as_deref()) {
             Ok(Some(r)) => remote_ls(&r),
             Ok(None) => cmd_ls(&backends),
@@ -903,6 +952,151 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     println!("branch   {}", s.work_branch);
     println!("workdir  {}", backend.paths(&s).repo);
     Ok(())
+}
+
+/// `hurad new --at` and `--queue`: the same request a window sends, kept for
+/// `hurad serve` to start.
+fn cmd_enqueue(args: NewArgs, cfg: &Config) -> Fallible {
+    let at = match &args.at {
+        Some(text) => Some(when::parse(text, chrono::Local::now())?),
+        None => None,
+    };
+    let repo = args.repo.or_else(|| cfg.repo.clone()).ok_or_else(|| {
+        format!(
+            "no repository: pass --repo, or set `repo` in {}",
+            cfg.path.display()
+        )
+    })?;
+    // Resolved now so an unknown name fails while someone is reading, as it
+    // does for a session started straight away.
+    toolchain::resolve(&args.toolchains)?;
+    let new = ops::NewSession {
+        project: None,
+        name: args.name,
+        title: None,
+        repo,
+        task: args.task,
+        base: args.base.or_else(|| cfg.base.clone()),
+        branch: None,
+        policy: args.policy.unwrap_or_else(|| cfg.policy().to_string()),
+        providers: if args.providers.is_empty() {
+            cfg.providers().to_vec()
+        } else {
+            args.providers
+        },
+        toolchains: args.toolchains,
+        start: !args.no_start,
+        ticket: None,
+        pull: None,
+        interface: Some(args.interface.unwrap_or_else(|| cfg.interface())),
+        worktree: args.worktree,
+    };
+    let id = queue::add(new, at, cfg)?;
+    let q = queue::view(cfg)?;
+    let Some(s) = q.sessions.iter().find(|s| s.id == id) else {
+        return Ok(());
+    };
+    match at {
+        Some(at) => println!("`{}` starts {} (#{id})", s.name(), local_time(at)),
+        None => {
+            let ahead = q
+                .sessions
+                .iter()
+                .filter(|s| s.at.is_none() && s.id != id)
+                .count();
+            println!(
+                "`{}` is queued (#{id}), behind {ahead}; it starts once fewer than {} sessions are running",
+                s.name(),
+                q.limit
+            );
+        }
+    }
+    println!("`hurad serve` starts it; `hurad queue` lists what is waiting");
+    Ok(())
+}
+
+/// `hurad queue`: list what is waiting, or change it.
+fn cmd_queue(action: Option<QueueAction>, cfg: &Config) -> Fallible {
+    let missing = |id: u64| format!("nothing waiting is #{id}, or it has already started");
+    match action {
+        Some(QueueAction::Rm { id }) => {
+            if !queue::update(|q| q.remove(id))? {
+                return Err(missing(id).into());
+            }
+        }
+        Some(QueueAction::Start { id }) => {
+            if !queue::update(|q| q.start_now(id, queue::now()))? {
+                return Err(missing(id).into());
+            }
+            println!("#{id} starts within a few seconds, if `hurad serve` is running");
+            return Ok(());
+        }
+        Some(QueueAction::Say { name, at, text }) => {
+            let at = match &at {
+                Some(text) => Some(when::parse(text, chrono::Local::now())?),
+                None => None,
+            };
+            let id = queue::say(&name, &text.join(" "), at)?;
+            match at {
+                Some(at) => println!(
+                    "queued for `{name}` (#{id}); said {}, or when its agent's turn ends after that",
+                    local_time(at)
+                ),
+                None => println!("queued for `{name}` (#{id}); said once its agent has finished"),
+            }
+            return Ok(());
+        }
+        None => {}
+    }
+
+    let q = queue::view(cfg)?;
+    if q.sessions.is_empty() && q.messages.is_empty() {
+        println!("nothing is waiting");
+        return Ok(());
+    }
+    if !q.sessions.is_empty() {
+        println!("{:<5} {:<32} WHEN", "ID", "SESSION");
+        for s in &q.sessions {
+            let when = if s.started {
+                "starting".to_string()
+            } else if let Some(why) = &s.failed {
+                format!("could not start: {why}")
+            } else {
+                match s.at {
+                    Some(at) if at <= queue::now() => "now".to_string(),
+                    Some(at) => local_time(at),
+                    None => format!("when fewer than {} are running", q.limit),
+                }
+            };
+            println!("{:<5} {:<32} {when}", s.id, s.name());
+        }
+    }
+    if !q.messages.is_empty() {
+        if !q.sessions.is_empty() {
+            println!();
+        }
+        println!("{:<5} {:<32} MESSAGE", "ID", "TO");
+        for m in &q.messages {
+            let first = m.text.lines().next().unwrap_or_default();
+            let short: String = first.chars().take(60).collect();
+            let more = if short.len() < m.text.len() {
+                "..."
+            } else {
+                ""
+            };
+            println!("{:<5} {:<32} {short}{more}", m.id, m.session);
+        }
+    }
+    Ok(())
+}
+
+/// An instant as this machine's clock reads it.
+fn local_time(at: u64) -> String {
+    use chrono::TimeZone;
+    match chrono::Local.timestamp_opt(at as i64, 0).single() {
+        Some(t) => t.format("at %Y-%m-%d %H:%M").to_string(),
+        None => format!("at {at}"),
+    }
 }
 
 /// Show, or create, the config file.
@@ -1553,6 +1747,10 @@ fn serve(opts: Serve) -> Fallible {
         }
         tokio::spawn(keep_feeds());
         tokio::spawn(push::watch::run(server.clone(), pusher));
+        // Sessions queued or scheduled to start, and messages waiting to be
+        // said. On disk, so what was waiting when the server stopped carries
+        // on from here.
+        tokio::spawn(schedule::run());
 
         let config = axum_server::tls_rustls::RustlsConfig::from_pem(
             identity.cert_pem.into_bytes(),

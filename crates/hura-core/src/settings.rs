@@ -65,6 +65,9 @@ pub struct Settings {
     /// How a session given no name is named: by a model, or by the rules.
     #[serde(default)]
     pub names: Option<crate::naming::Mode>,
+    /// How many sessions the queue lets run at once.
+    #[serde(default)]
+    pub queue_limit: Option<u32>,
 }
 
 /// What a settings screen is drawn from.
@@ -102,6 +105,7 @@ impl From<&Config> for Settings {
             auto_update: cfg.auto_update,
             interface: cfg.interface,
             names: cfg.names,
+            queue_limit: cfg.queue_limit,
         }
     }
 }
@@ -143,6 +147,8 @@ impl Settings {
             auto_update: self.auto_update,
             interface: self.interface,
             names: self.names,
+            // Zero is a cleared field rather than a queue that never moves.
+            queue_limit: self.queue_limit.filter(|n| *n > 0),
         }
     }
 }
@@ -264,6 +270,11 @@ fn edit(text: &str, settings: &Settings) -> String {
         &mut lines,
         "names",
         settings.names.map(|m| quote(m.as_str())),
+    );
+    set(
+        &mut lines,
+        "queue_limit",
+        settings.queue_limit.map(|n| n.to_string()),
     );
 
     let mut out = lines.join(newline);
@@ -610,6 +621,7 @@ mod tests {
             auto_update: Some(false),
             interface: Some(crate::chat::Interface::Terminal),
             names: Some(crate::naming::Mode::Rules),
+            queue_limit: Some(3),
         };
         let text = edit(config::EXAMPLE, &settings);
         let cfg = Config::parse(Path::new("x.toml"), &text).unwrap();

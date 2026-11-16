@@ -81,10 +81,15 @@ public struct ServerSettings: Codable, Equatable, Sendable {
     public var interface: String?
     /// How a session given no name is named: `ai` or `rules`.
     public var names: String?
+    /// How many sessions the server's queue lets run at once; nil for its
+    /// default. Sent back as it came, so saving from a build that shows it
+    /// does not take it out of the file.
+    public var queueLimit: Int?
 
     public init(branchPrefix: String? = nil, base: String? = nil, policy: String? = nil, providers: [String]? = nil,
-                autoUpdate: Bool? = nil, interface: String? = nil, names: String? = nil) {
+                autoUpdate: Bool? = nil, interface: String? = nil, names: String? = nil, queueLimit: Int? = nil) {
         self.names = names
+        self.queueLimit = queueLimit
         self.branchPrefix = branchPrefix
         self.base = base
         self.policy = policy
@@ -97,6 +102,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         case base, policy, providers, interface, names
         case branchPrefix = "branch_prefix"
         case autoUpdate = "auto_update"
+        case queueLimit = "queue_limit"
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -108,6 +114,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         try c.encode(autoUpdate, forKey: .autoUpdate)
         try c.encode(interface, forKey: .interface)
         try c.encode(names, forKey: .names)
+        try c.encode(queueLimit, forKey: .queueLimit)
     }
 }
 

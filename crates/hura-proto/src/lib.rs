@@ -36,6 +36,7 @@ use hura_core::integrations::View as IntegrationsView;
 use hura_core::ops::{NewOptions, NewSession, Picked, Poll, Refreshed};
 use hura_core::policy::View as PolicyView;
 use hura_core::projects::{NewProject, Project};
+use hura_core::queue::Queue;
 use hura_core::repos::Listing;
 use hura_core::session::Session;
 use hura_core::settings::{Settings, SettingsView};
@@ -311,6 +312,43 @@ pub enum Request {
     /// replace the pull request's branch with. Sent as this, an older server
     /// answers `unsupported`, which says what to do about it.
     CreateFromPull(Box<NewSession>),
+    /// What is waiting: sessions queued or scheduled to start, and messages
+    /// waiting to be said to a session. See `hura_core::queue`.
+    Queue,
+    /// Start a session later rather than now: at `at`, in seconds since the
+    /// epoch, or with `at` empty once the queue has room. Named here, so the
+    /// queue can say what it will be called. Answers with [`Reply::Queue`].
+    ///
+    /// Kept on the server's disk and started by it, so it happens whether or
+    /// not anything is connected, and after the server or its machine has
+    /// restarted.
+    Enqueue {
+        new: Box<NewSession>,
+        #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+        at: Option<u64>,
+    },
+    /// Take a waiting session or message off the queue, by id. Answers with
+    /// [`Reply::Queue`].
+    Unqueue {
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        id: u64,
+    },
+    /// Start a waiting session at the next look, whatever the limit says.
+    /// Answers with [`Reply::Queue`].
+    StartQueued {
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        id: u64,
+    },
+    /// Say something to a session's agent once it has finished what it is
+    /// doing, after anything already waiting for it -- and with `at`, not
+    /// before then, in seconds since the epoch. Answers with [`Reply::Queue`].
+    QueueMessage {
+        name: String,
+        text: String,
+        #[serde(default)]
+        #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+        at: Option<u64>,
+    },
 
     /// Destroy one: its sandbox, and then its record.
     ///
@@ -422,7 +460,10 @@ impl Request {
             | Request::PushConfigure(_)
             | Request::PushStatus
             | Request::PushRemove
-            | Request::PushTest => None,
+            | Request::PushTest
+            | Request::Queue
+            | Request::Unqueue { .. }
+            | Request::StartQueued { .. } => None,
             Request::Poll { name }
             | Request::Diff { name }
             | Request::Policy { name }
@@ -456,6 +497,8 @@ impl Request {
             | Request::SendPullComments { name, .. }
             | Request::Answer { name, .. } => Some(name),
             Request::Create(new) | Request::CreateFromPull(new) => new.name.as_deref(),
+            Request::Enqueue { new, .. } => new.name.as_deref(),
+            Request::QueueMessage { name, .. } => Some(name),
             Request::Destroy { name } | Request::Retitle { name, .. } => Some(name),
         }
     }
@@ -580,6 +623,8 @@ pub enum Reply {
     /// This connection's push route, which is what every push request answers
     /// with.
     Push(PushView),
+    /// Everything waiting, which is what every queue request answers with.
+    Queue(Queue),
 }
 
 impl From<Refreshed> for Reply {

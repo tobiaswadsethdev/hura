@@ -630,6 +630,11 @@ html.mac .sidebar { border-right-color: rgb(0 0 0 / 0.35); }
   .worktree.on:hover { background: var(--selected); }
 }
 .worktree.on { background: var(--selected); }
+/* A session on the server's queue: a row where it will appear, dimmed, since
+   there is nothing there yet to open. Its menu is what acts on it. */
+.worktree-row.waiting .worktree { cursor: default; opacity: 0.62; }
+.worktree-row.waiting .wt-state { color: var(--dim); }
+.worktree-row.waiting .wt-branch.failed { color: var(--bad); }
 /* A row being renamed: the field sits where the name was, in the name's own
    type, so the row changes as little as it can while it is being typed in. */
 .wt-rename { cursor: default; }
@@ -4279,3 +4284,45 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   0%, 40% { background: color-mix(in srgb, var(--accent) 18%, transparent); }
   100% { background: transparent; }
 }
+
+/* A message being written for later: the time it is for, at the top of the
+   box it is written in. */
+.chat-later {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 6px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.chat-later input {
+  font: inherit;
+  color: var(--text);
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 1px 6px;
+}
+.chat-later .hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dimmer); }
+
+/* Messages waiting on the server to be said, above the composer. */
+.chat-waiting {
+  list-style: none;
+  margin: 0 12px 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chat-waiting li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--dim);
+  font-size: 12px;
+}
+.chat-waiting .when { flex: none; color: var(--text); }
+.chat-waiting .text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
