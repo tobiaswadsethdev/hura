@@ -3410,6 +3410,10 @@ img.zoomable { cursor: zoom-in; }
 /* One form, centred: the 568 pixels a field row measures, plus the padding. */
 .screen-inner.narrow { max-width: 612px; }
 .wt-ports.on { color: var(--ok); }
+/* Something waiting to be said to the session: its glyph, and how many when
+   it is more than one. */
+.wt-waiting { display: inline-flex; align-items: center; gap: 2px; color: var(--dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+.wt-waiting .lucide { width: 11px; height: 11px; }
 
 /* Two lines once a port is forwarded: what it is, then where it goes. */
 .ports li { display: flex; flex-direction: column; padding: 4px 4px 4px 6px; gap: 2px; border-radius: var(--r-sm); font-size: 12px; }

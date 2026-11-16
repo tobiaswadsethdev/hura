@@ -195,7 +195,8 @@ struct ServerView: View {
     private func row(_ s: Session) -> some View {
         let pull = sessionPull(s, in: trackers.inbox?.pulls ?? [])
         return NavigationLink(value: Route.session(serverID: server.id, name: s.name)) {
-            SessionRow(session: s, report: server.reports[s.name], pull: pull)
+            SessionRow(session: s, report: server.reports[s.name], pull: pull,
+                       waiting: server.queue.messages(for: s.name))
         }
         .swipeActions {
             // Red by tint rather than `role: .destructive`: a destructive
@@ -295,6 +296,8 @@ struct SessionRow: View {
     let report: AgentReport?
     /// The open pull request it is on, if the inbox knows it.
     var pull: PullRequestSummary?
+    /// Messages waiting on the server to be said to it, oldest first.
+    var waiting: [QueuedMessage] = []
 
     var body: some View {
         // The desktop sidebar's row, as a message in Mail is laid out: the
@@ -307,7 +310,7 @@ struct SessionRow: View {
             StateMark(state: liveState(session, report))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(session.label).font(.body.weight(.medium)).lineLimit(1)
+                    Text(session.label).font(.body.weight(.medium)).lineLimit(1).layoutPriority(1)
                     if session.isWorktree {
                         Image(glyph: .unsandboxed)
                             .font(.caption)
@@ -315,6 +318,7 @@ struct SessionRow: View {
                             .accessibilityLabel("Worktree on the server, not isolated")
                     }
                     if let pull { PullChip(pull: pull) }
+                    if !waiting.isEmpty { WaitingMark(messages: waiting) }
                 }
                 if let failure = session.failure, ["failed", "dead"].contains(session.state) {
                     Text(failure)
@@ -338,6 +342,34 @@ struct SessionRow: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.tertiary)
         }
+    }
+}
+
+/// That something is waiting to be said to a session, and when the first of
+/// it will be: after the turn when any is waiting only for that, or else at
+/// the soonest time. A glyph and a count, as the desktop's sidebar has it;
+/// the time is in the chat, and read out to VoiceOver.
+private struct WaitingMark: View {
+    let messages: [QueuedMessage]
+
+    var body: some View {
+        let times = messages.map(\.at)
+        let soonest = times.contains(nil) ? nil : times.compactMap { $0 }.min()
+        HStack(spacing: 3) {
+            Image(systemName: soonest == nil ? "hourglass" : "calendar.badge.clock")
+            if messages.count > 1 { Text("\(messages.count)") }
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label(soonest))
+    }
+
+    private func label(_ soonest: Date?) -> String {
+        let what = messages.count == 1 ? "A message waiting" : "\(messages.count) messages waiting"
+        let when = soonest.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "after this turn"
+        return messages.count == 1 ? "\(what), \(when)" : "\(what), the first \(when)"
     }
 }
 

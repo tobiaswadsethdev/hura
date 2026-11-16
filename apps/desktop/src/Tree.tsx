@@ -29,6 +29,7 @@ import type { Poll } from "./gen/Poll";
 import type { Usage } from "./gen/Usage";
 import type { Project } from "./gen/Project";
 import type { PullRequest as Pull } from "./gen/PullRequest";
+import type { QueuedMessage } from "./gen/QueuedMessage";
 import type { QueuedSession } from "./gen/QueuedSession";
 import type { Session } from "./gen/Session";
 import { copy, useContextMenu } from "./ContextMenu";
@@ -120,6 +121,7 @@ export function Tree({
   onDestroy,
   onRename,
   queueLimit,
+  messages,
   onUnqueue,
   onStartQueued,
 }: {
@@ -148,6 +150,9 @@ export function Tree({
   onRename: (session: Session, title: string) => void;
   /// How many sessions the server's queue lets run at once.
   queueLimit: number;
+  /// Every message waiting on the server to be said to a session: a row with
+  /// some says so, since nothing else would until the chat is opened.
+  messages: QueuedMessage[];
   /// Take a waiting session off the queue, or start it now.
   onUnqueue: (waiting: QueuedSession) => void;
   onStartQueued: (waiting: QueuedSession) => void;
@@ -274,6 +279,7 @@ export function Tree({
                         branch={polls[s.name]?.branch ?? s.work_branch}
                         usage={polls[s.name]?.usage ?? null}
                         listening={polls[s.name]?.ports.map((l) => l.port) ?? []}
+                        waiting={messages.filter((m) => m.session === s.name)}
                         on={s.name === selected}
                         pull={sessionPull(s, pulls)}
                         onSelect={onSelect}
@@ -339,6 +345,7 @@ function Worktree({
   branch,
   usage,
   listening,
+  waiting,
   on,
   pull,
   onSelect,
@@ -353,6 +360,8 @@ function Worktree({
   branch: string;
   usage: Usage | null;
   listening: number[];
+  /// Messages waiting to be said to it, oldest first.
+  waiting: QueuedMessage[];
   on: boolean;
   /// The open pull request on this worktree's branch, if the sidebar knows it.
   pull: Pull | null;
@@ -438,6 +447,7 @@ function Worktree({
                 <Ports />
               </span>
             )}
+            <WaitingMessages messages={waiting} />
             {usage && <Context usage={usage} />}
           </span>
           <span className="wt-age" title="How long this worktree has existed">
@@ -472,6 +482,23 @@ function Worktree({
     </button>
     )}
     </div>
+  );
+}
+
+/// That something is waiting to be said to a session, and when the first of
+/// it will be: after the turn when any is waiting only for that, or else at
+/// the soonest time. Nothing at all when nothing is waiting.
+function WaitingMessages({ messages }: { messages: QueuedMessage[] }) {
+  if (!messages.length) return null;
+  const times = messages.map((m) => m.at);
+  const soonest = times.includes(null) ? null : Math.min(...(times as number[]));
+  const what = messages.length === 1 ? "A message waiting" : `${messages.length} messages waiting`;
+  const when = soonest === null ? "after this turn" : startsAt(soonest);
+  return (
+    <span className="wt-waiting" title={`${what}, ${messages.length === 1 ? "" : "the first "}${when}`}>
+      {soonest === null ? <Queued /> : <Scheduled />}
+      {messages.length > 1 && messages.length}
+    </span>
   );
 }
 
