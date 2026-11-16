@@ -5,6 +5,8 @@
 /Hura/Hura.entitlements
 /HuraNotificationService/Info.plist
 /HuraNotificationService/HuraNotificationService.entitlements
+/HuraWidgets/Info.plist
+/HuraWidgets/HuraWidgets.entitlements
 /Config/Signing.local.xcconfig
 /build/
 /HuraKit/.build/

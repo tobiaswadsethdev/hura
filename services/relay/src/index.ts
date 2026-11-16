@@ -1,7 +1,19 @@
 // The hura relay: how hurad reaches a phone. See docs/relay-api.md.
 
-import { DEAD_TOKEN_REASONS, sendApns, type Environment } from "./apns";
-import { apnsPayload, BACKGROUND, KINDS, type Kind, type Notification } from "./notify";
+import { DEAD_ACTIVITY_TOKEN_REASONS, DEAD_TOKEN_REASONS, sendApns, type Environment } from "./apns";
+import {
+  activityPayload,
+  apnsPayload,
+  BACKGROUND,
+  KINDS,
+  PHASES,
+  STARTING,
+  type ActivityEvent,
+  type Kind,
+  type Notification,
+  type Phase,
+  type SessionActivity,
+} from "./notify";
 import {
   badRequest,
   bearer,
@@ -25,12 +37,27 @@ const REGISTRATIONS_PER_HOUR = 10;
 const EVENTS_PER_MINUTE = 30;
 const LINKS_PER_DEVICE = 50;
 const DAY_MS = 24 * 3600 * 1000;
+// An activity lasts at most eight hours, and an ended one shows for four more.
+const ACTIVITY_MS = 12 * 3600 * 1000;
+// A Live Activity push that arrives an hour late says something long since
+// replaced.
+const ACTIVITY_EXPIRY_SECONDS = 3600;
+const SESSION_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// What an activity's token is while it is being started, until the phone
+// gives the real one. Never valid hex, so never mistaken for a token.
+const STARTING_TOKEN = "";
+// How long a started activity waits for its token before the next event
+// starts another instead: the phone is woken in the background to give it,
+// which takes a second or two.
+const START_GRACE_MS = 60 * 1000;
 
 interface DeviceRow {
   id: string;
   apns_token: string;
   environment: Environment;
   disabled_at: number | null;
+  /** The push-to-start token for Live Activities, when the app gave one. */
+  activity_token: string | null;
 }
 
 interface LinkRow {
@@ -50,10 +77,14 @@ const routes: Array<[string, RegExp, Handler]> = [
   ["PUT", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})$/, updateDevice],
   ["DELETE", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})$/, deleteDevice],
   ["POST", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})\/test$/, testDevice],
+  ["PUT", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})\/activity-token$/, setStartToken],
+  ["DELETE", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})\/activity-token$/, deleteStartToken],
   ["POST", /^\/v1\/servers$/, createLink],
   ["GET", /^\/v1\/servers$/, listLinks],
   ["PATCH", /^\/v1\/servers\/(?<link>l_[a-z2-7]{16})$/, renameLink],
   ["DELETE", /^\/v1\/servers\/(?<link>l_[a-z2-7]{16})$/, deleteLink],
+  ["PUT", /^\/v1\/servers\/(?<link>l_[a-z2-7]{16})\/activities\/(?<session>[^/]+)$/, setActivityToken],
+  ["DELETE", /^\/v1\/servers\/(?<link>l_[a-z2-7]{16})\/activities\/(?<session>[^/]+)$/, deleteActivityToken],
   ["GET", /^\/v1\/link$/, checkLink],
   ["POST", /^\/v1\/events$/, postEvent],
 ];
@@ -79,6 +110,7 @@ export default {
     await env.DB.batch([
       env.DB.prepare("DELETE FROM events WHERE created_at < ?").bind(now - DAY_MS),
       env.DB.prepare("DELETE FROM registrations WHERE at < ?").bind(now - 3600 * 1000),
+      env.DB.prepare("DELETE FROM activities WHERE updated_at < ?").bind(now - ACTIVITY_MS),
     ]);
   },
 } satisfies ExportedHandler<RelayEnv>;
@@ -88,7 +120,9 @@ export default {
 async function authDevice(req: Request, env: RelayEnv, pathId?: string): Promise<DeviceRow> {
   const secret = bearer(req);
   if (!secret?.startsWith("hud_")) throw unauthorized();
-  const row = await env.DB.prepare("SELECT id, apns_token, environment, disabled_at FROM devices WHERE secret_hash = ?")
+  const row = await env.DB.prepare(
+    "SELECT id, apns_token, environment, disabled_at, activity_token FROM devices WHERE secret_hash = ?",
+  )
     .bind(await sha256hex(secret))
     .first<DeviceRow>();
   // A valid secret for another device is as good as no secret here.
@@ -101,7 +135,7 @@ async function authLink(req: Request, env: RelayEnv): Promise<LinkRow & { device
   if (!token?.startsWith("hup_")) throw unauthorized();
   const row = await env.DB.prepare(
     `SELECT l.id, l.device_id, l.server_id, l.label, l.created_at, l.last_event_at,
-            d.apns_token, d.environment, d.disabled_at
+            d.apns_token, d.environment, d.disabled_at, d.activity_token
        FROM links l JOIN devices d ON d.id = l.device_id
       WHERE l.token_hash = ?`,
   )
@@ -110,7 +144,13 @@ async function authLink(req: Request, env: RelayEnv): Promise<LinkRow & { device
   if (!row) throw unauthorized();
   return {
     ...row,
-    device: { id: row.device_id, apns_token: row.apns_token, environment: row.environment, disabled_at: row.disabled_at },
+    device: {
+      id: row.device_id,
+      apns_token: row.apns_token,
+      environment: row.environment,
+      disabled_at: row.disabled_at,
+      activity_token: row.activity_token,
+    },
   };
 }
 
@@ -132,6 +172,11 @@ function deviceFields(body: Record<string, unknown>) {
   const token = str(body, "apns_token", { max: 200, re: /^[0-9a-fA-F]{64,200}$/ })!.toLowerCase();
   const environment = str(body, "environment", { max: 20, re: /^(sandbox|production)$/ }) as Environment;
   return { token, environment };
+}
+
+/** A Live Activity token: hex, as ActivityKit hands it out. */
+function activityToken(body: Record<string, unknown>) {
+  return str(body, "token", { max: 200, re: /^[0-9a-fA-F]{64,200}$/ })!.toLowerCase();
 }
 
 // --- device routes ------------------------------------------------------
@@ -187,6 +232,20 @@ async function testDevice(req: Request, env: RelayEnv, p: Record<string, string>
   }
   log("device test", { device: dev.id, apns_status: r.status, apns_reason: r.reason });
   return json(200, { sent: r.status === 200, apns_status: r.status, apns_id: r.apnsId ?? null, apns_reason: r.reason ?? null });
+}
+
+/** The device's push-to-start token, which starts a Live Activity. */
+async function setStartToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
+  const dev = await authDevice(req, env, p.device);
+  const token = activityToken(await readJSON(req));
+  await env.DB.prepare("UPDATE devices SET activity_token = ? WHERE id = ?").bind(token, dev.id).run();
+  return json(204, null);
+}
+
+async function deleteStartToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
+  const dev = await authDevice(req, env, p.device);
+  await env.DB.prepare("UPDATE devices SET activity_token = NULL WHERE id = ?").bind(dev.id).run();
+  return json(204, null);
 }
 
 // --- link routes --------------------------------------------------------
@@ -245,6 +304,34 @@ async function deleteLink(req: Request, env: RelayEnv, p: Record<string, string>
   return json(204, null);
 }
 
+/** The link, when it is the device's own, and the session from the path. */
+async function activityTarget(req: Request, env: RelayEnv, p: Record<string, string>) {
+  const dev = await authDevice(req, env);
+  if (!SESSION_RE.test(p.session)) throw badRequest("session is malformed");
+  const owned = await env.DB.prepare("SELECT id FROM links WHERE id = ? AND device_id = ?").bind(p.link, dev.id).first();
+  if (!owned) throw notFound();
+  return { link: p.link, session: p.session };
+}
+
+/** The update token of the activity showing one session. */
+async function setActivityToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
+  const { link, session } = await activityTarget(req, env, p);
+  const token = activityToken(await readJSON(req));
+  await env.DB.prepare(
+    `INSERT INTO activities (link_id, session, token, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (link_id, session) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at`,
+  )
+    .bind(link, session, token, Date.now())
+    .run();
+  return json(204, null);
+}
+
+async function deleteActivityToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
+  const { link, session } = await activityTarget(req, env, p);
+  await env.DB.prepare("DELETE FROM activities WHERE link_id = ? AND session = ?").bind(link, session).run();
+  return json(204, null);
+}
+
 // --- server routes -------------------------------------------------------
 
 async function checkLink(req: Request, env: RelayEnv): Promise<Response> {
@@ -273,15 +360,32 @@ async function postEvent(req: Request, env: RelayEnv): Promise<Response> {
   const subtitle = encrypted === undefined ? str(body, "subtitle", { max: 1000, optional: true }) : undefined;
   const text = encrypted === undefined ? str(body, "body", { max: 4000 })! : "";
   // A hura session name, which the app opens when the notification is tapped.
-  const session = str(body, "session", { max: 64, re: /^[a-z0-9][a-z0-9-]{0,63}$/, optional: true });
+  const activity = kind === "session_activity";
+  const session = str(body, "session", { max: 64, re: SESSION_RE, optional: !activity });
+  const phase = activity ? (str(body, "phase", { max: 20 }) as Phase) : undefined;
+  if (phase !== undefined && !PHASES.includes(phase)) throw badRequest(`unknown phase ${JSON.stringify(phase)}`);
+  if (!activity && body.phase !== undefined) throw badRequest("phase is only for session_activity");
   // The request a permission notification answers. Required for that kind,
   // whose Allow and Deny would otherwise answer nothing, and refused on any
   // other, so an id never rides along where nothing will use it.
   const askId = str(body, "ask_id", { max: 100, re: /^[A-Za-z0-9_-]{1,100}$/, optional: true });
-  if (kind === "claude_permission" && askId === undefined) throw badRequest("ask_id is required for claude_permission");
-  if (kind !== "claude_permission" && askId !== undefined) throw badRequest("ask_id is only for claude_permission");
+  // A Live Activity waiting on a permission request carries one too, for its
+  // Allow and Deny.
+  const asks = kind === "claude_permission" || phase === "permission";
+  if (asks && askId === undefined) throw badRequest(`ask_id is required for ${phase ?? kind}`);
+  if (!asks && askId !== undefined) throw badRequest("ask_id is only for a permission request");
 
   const now = Date.now();
+  let at = Math.floor(now / 1000);
+  if (activity && body.at !== undefined && body.at !== null) {
+    if (typeof body.at !== "number" || !Number.isInteger(body.at) || body.at < 0) {
+      throw badRequest("at must be a whole number of seconds");
+    }
+    // A clock ahead of the relay's would hold off every later update.
+    at = Math.min(body.at, at);
+  } else if (!activity && body.at !== undefined) {
+    throw badRequest("at is only for session_activity");
+  }
   const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE link_id = ? AND created_at > ?")
     .bind(link.id, now - 60 * 1000)
     .first<{ n: number }>();
@@ -293,6 +397,14 @@ async function postEvent(req: Request, env: RelayEnv): Promise<Response> {
     .run();
   if (!ins.meta.changes) return json(200, { sent: false, reason: "duplicate" });
   if (link.device.disabled_at !== null) return json(200, { sent: false, reason: "device_unregistered" });
+
+  if (activity) {
+    const a: SessionActivity =
+      encrypted !== undefined
+        ? { session: session!, phase: phase!, at, askId, encrypted }
+        : { session: session!, phase: phase!, at, askId, title, subtitle, body: text };
+    return sendActivity(env, link, a, eventId, now);
+  }
 
   const n: Notification =
     encrypted !== undefined
@@ -319,6 +431,93 @@ async function postEvent(req: Request, env: RelayEnv): Promise<Response> {
   // Not delivered: forget the event ID so hurad's retry goes through.
   await env.DB.prepare("DELETE FROM events WHERE link_id = ? AND event_id = ?").bind(link.id, eventId).run();
   throw new HttpError(502, "apns_error", `APNs answered ${r.status || "nothing"}${r.reason ? ` (${r.reason})` : ""}`);
+}
+
+/**
+ * A session's Live Activity: updated or ended when the phone gave the relay
+ * its token, started when it gave a push-to-start token instead, and nothing
+ * otherwise (docs/relay-api.md, "Live Activities").
+ */
+async function sendActivity(
+  env: RelayEnv,
+  link: LinkRow & { device: DeviceRow },
+  a: SessionActivity,
+  eventId: string,
+  now: number,
+): Promise<Response> {
+  const linkInfo = { id: link.id, serverId: link.server_id, label: link.label };
+  const send = (token: string, event: ActivityEvent) =>
+    sendApns(
+      env,
+      { token, environment: link.device.environment },
+      activityPayload(a, event, linkInfo, now),
+      ACTIVITY_EXPIRY_SECONDS,
+      "liveactivity",
+    );
+  const forget = () =>
+    env.DB.prepare("DELETE FROM activities WHERE link_id = ? AND session = ?").bind(link.id, a.session).run();
+  const failed = async (r: { status: number; reason?: string }) => {
+    // Not delivered: forget the event ID so hurad's retry goes through.
+    await env.DB.prepare("DELETE FROM events WHERE link_id = ? AND event_id = ?").bind(link.id, eventId).run();
+    throw new HttpError(502, "apns_error", `APNs answered ${r.status || "nothing"}${r.reason ? ` (${r.reason})` : ""}`);
+  };
+  const delivered = async (event: ActivityEvent) => {
+    log("activity", { link: link.id, phase: a.phase, event });
+    await env.DB.prepare("UPDATE links SET last_event_at = ? WHERE id = ?").bind(now, link.id).run();
+    return json(200, { sent: true, activity: event });
+  };
+
+  let row = await env.DB.prepare("SELECT token, updated_at FROM activities WHERE link_id = ? AND session = ?")
+    .bind(link.id, a.session)
+    .first<{ token: string; updated_at: number }>();
+  if (row?.token === STARTING_TOKEN) {
+    // Started a moment ago, and the phone hasn't yet said where its updates
+    // go. Starting another would put the session on the Lock Screen twice,
+    // so hurad is asked to try again shortly, by when it usually has.
+    if (now - row.updated_at < START_GRACE_MS) {
+      await env.DB.prepare("DELETE FROM events WHERE link_id = ? AND event_id = ?").bind(link.id, eventId).run();
+      throw new HttpError(429, "rate_limited", "the activity is still starting", { "retry-after": "5" });
+    }
+    // It never did: the start was lost, or the phone said no.
+    await forget();
+    row = null;
+  }
+  if (row) {
+    const event: ActivityEvent = STARTING.has(a.phase) ? "update" : "end";
+    const r = await send(row.token, event);
+    if (r.status === 200) {
+      if (event === "end") await forget();
+      else {
+        await env.DB.prepare("UPDATE activities SET updated_at = ? WHERE link_id = ? AND session = ?")
+          .bind(now, link.id, a.session)
+          .run();
+      }
+      return delivered(event);
+    }
+    if (!r.reason || !DEAD_ACTIVITY_TOKEN_REASONS.has(r.reason)) return failed(r);
+    // The activity is gone, ended or dismissed on the phone: start another
+    // below if this phase would.
+    await forget();
+    log("activity token gone", { link: link.id, apns_reason: r.reason });
+  }
+
+  if (!STARTING.has(a.phase) || !link.device.activity_token) return json(200, { sent: false, reason: "no_activity" });
+  const r = await send(link.device.activity_token, "start");
+  if (r.status === 200) {
+    await env.DB.prepare(
+      `INSERT INTO activities (link_id, session, token, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (link_id, session) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at`,
+    )
+      .bind(link.id, a.session, STARTING_TOKEN, now)
+      .run();
+    return delivered("start");
+  }
+  if (r.reason && DEAD_ACTIVITY_TOKEN_REASONS.has(r.reason)) {
+    await env.DB.prepare("UPDATE devices SET activity_token = NULL WHERE id = ?").bind(link.device.id).run();
+    log("activity start token gone", { device: link.device.id, apns_reason: r.reason });
+    return json(200, { sent: false, reason: "no_activity" });
+  }
+  return failed(r);
 }
 
 function log(msg: string, fields: Record<string, unknown>) {

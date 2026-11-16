@@ -10,6 +10,12 @@ struct NotificationTarget: Equatable, Sendable {
     /// The permission request a `claude_permission` notification answers.
     var askID: String?
 
+    init(serverID: String, session: String?, askID: String? = nil) {
+        self.serverID = serverID
+        self.session = session
+        self.askID = askID
+    }
+
     init?(userInfo: [AnyHashable: Any]) {
         guard let h = userInfo["hura"] as? [String: Any], let serverID = h["server_id"] as? String else { return nil }
         self.serverID = serverID
@@ -55,6 +61,11 @@ enum NotificationCategories {
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     let model: AppModel
     let trackers: TrackersModel
+    let liveActivities: LiveActivities
+
+    /// The one there is, for an Allow or Deny on a Live Activity: iOS runs
+    /// those in the app, but hands them nothing but themselves.
+    @MainActor static private(set) weak var current: AppDelegate?
 
     override init() {
         let model = AppModel()
@@ -62,13 +73,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // Hands hura cloud's link to the relay to the trackers, which turn it
         // on and off with their notifications.
         trackers = TrackersModel(push: model.push)
+        liveActivities = LiveActivities(push: model.push)
         super.init()
+        Self.current = self
     }
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         NotificationCategories.register()
+        liveActivities.start()
         Task { await model.registerForPushIfAllowed() }
         return true
     }

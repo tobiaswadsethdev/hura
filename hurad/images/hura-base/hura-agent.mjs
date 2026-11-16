@@ -375,16 +375,28 @@ export class Inbox {
 /// One line saying what a request asks, for a notification that can answer
 /// it: Allow on a lock screen is only an answer if the screen says what is
 /// being allowed. Claude Code's own sentence when it has one, otherwise the
-/// tool and the thing it would act on.
+/// tool and the thing it would act on. The two tools that ask rather than act
+/// are said as what they ask: a question in its own words, a plan as one.
 export function describeAsk(request) {
   const input = request.input ?? {};
   const target = [input.command, input.file_path, input.url, input.path, input.pattern].find(
     (v) => typeof v === "string" && v.trim(),
   );
-  const line = request.title?.trim() || (target ? `${request.tool}: ${target.trim()}` : request.tool);
+  const line = askLine(request.tool, input) ?? (request.title?.trim() || (target ? `${request.tool}: ${target.trim()}` : request.tool));
   // Short enough for a notification body, and one line of it.
   const flat = line.replace(/\s+/g, " ");
   return flat.length > 300 ? flat.slice(0, 299) + "…" : flat;
+}
+
+/// What a question or a plan asks, or null for a tool that acts.
+function askLine(tool, input) {
+  if (tool === "ExitPlanMode") return "Claude has a plan for you to review";
+  if (tool !== "AskUserQuestion") return null;
+  const questions = Array.isArray(input.questions) ? input.questions : [];
+  const first = questions[0]?.question;
+  if (typeof first !== "string" || !first.trim()) return "Claude has a question for you";
+  const more = questions.length - 1;
+  return more > 0 ? `${first.trim()} (+${more} more)` : first.trim();
 }
 
 /// The conversation holding the request `id`, among them all.

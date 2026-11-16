@@ -78,6 +78,9 @@ public final class PushManager {
         let d = try await relay.registerDevice(apnsToken: hex, environment: environment)
         try store.save(d)
         device = d
+        if let activityStartToken {
+            try? await relay.setActivityStartToken(SessionActivity.hex(activityStartToken), device: d)
+        }
         return true
     }
 
@@ -195,6 +198,33 @@ public final class PushManager {
         let keyed = cloudServerID.flatMap { try? keys.key(serverID: $0) } != nil
         if route.configured, route.broken == nil, keyed { return }
         try await enableCloud(cloud)
+    }
+
+    // MARK: Live Activities
+
+    /// The last push-to-start token ActivityKit handed out, kept to give a
+    /// device registered anew, which the relay knows nothing about.
+    @ObservationIgnored private var activityStartToken: Data?
+
+    /// ActivityKit handed out a push-to-start token. Best effort, and sent
+    /// again on the next launch, which hands it out again.
+    public func activityStartTokenChanged(_ token: Data) async {
+        activityStartToken = token
+        guard let relay, let device else { return }
+        try? await relay.setActivityStartToken(SessionActivity.hex(token), device: device)
+    }
+
+    /// The activity showing `session` has a token the relay can update it with.
+    public func activityTokenChanged(_ token: Data, linkID: String, session: String) async {
+        guard let relay, let device else { return }
+        try? await relay.setActivityToken(SessionActivity.hex(token), linkID: linkID, session: session, device: device)
+    }
+
+    /// The activity showing `session` has ended or been dismissed, so its token
+    /// is no use to the relay.
+    public func activityEnded(linkID: String, session: String) async {
+        guard let relay, let device else { return }
+        try? await relay.deleteActivityToken(linkID: linkID, session: session, device: device)
     }
 
     /// Asks the relay to send this phone a test notification.

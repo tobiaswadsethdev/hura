@@ -70,6 +70,7 @@ covers the `hurad` side.
 | `Hura/` | the SwiftUI app |
 | `HuraKit/` | a Swift package with no UI: pairing, certificate pinning, the Keychain, `/rpc`, the chat and terminal channels on the websocket, and the push relay's client and encryption |
 | `HuraNotificationService/` | a notification service extension that decrypts end-to-end encrypted notification text on the phone |
+| `HuraWidgets/` | a widget extension that draws a session's Live Activity on the Lock Screen and in the Dynamic Island |
 
 ## Build
 
@@ -177,6 +178,20 @@ A permission request from a chat session arrives with **Allow** and **Deny**.
 Allow needs the phone unlocked, because it runs something on the server;
 Deny doesn't. Either answers that one request: if it has already been
 answered elsewhere, the app posts a notification saying so instead.
+
+### Live Activities
+
+On iOS 17.2 and later, a session's turn also shows on the Lock Screen and in
+the Dynamic Island: working, waiting on a permission (with **Allow** and
+**Deny**, under the same rules as the notification's), waiting on input, done.
+The relay starts each one with ActivityKit's push-to-start and updates and
+ends it with pushes of its own ([docs/relay-api.md](../../docs/relay-api.md#live-activities));
+the app only hands the relay the tokens ActivityKit gives out, and isn't
+running for any of it. `HuraWidgets/` draws them, and opens their text, which
+is sealed like a notification's, with the push keys in the Keychain group it
+shares with the app. Allow and Deny are `LiveActivityIntent`s
+(`Hura/LiveActivity/AnswerIntents.swift`, compiled into both), which iOS runs
+in the app. Each server's Notifications section can switch them off.
 
 Builds run from Xcode register as `sandbox` with APNs, and TestFlight builds
 as `production`. The relay needs to know which, and the app tells it.

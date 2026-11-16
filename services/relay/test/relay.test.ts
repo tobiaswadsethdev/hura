@@ -507,6 +507,236 @@ describe("events", () => {
   });
 });
 
+describe("live activities", () => {
+  const START = "5".repeat(64);
+  const UPDATE = "6".repeat(64);
+
+  function activity(extra: Record<string, unknown> = {}) {
+    return {
+      event_id: `h_testboot01-${++eventCounter}`,
+      kind: "session_activity",
+      session: "fix-tests",
+      phase: "working",
+      at: Math.floor(Date.now() / 1000) - 10,
+      title: "Fix the tests",
+      subtitle: "studio",
+      body: "Claude is working",
+      ...extra,
+    };
+  }
+
+  async function setup(opts: { start?: boolean; update?: boolean } = {}) {
+    const d = await device();
+    const l = await link(d.device_secret);
+    if (opts.start) {
+      const r = await call("PUT", `/v1/devices/${d.device_id}/activity-token`, { auth: d.device_secret, body: { token: START } });
+      expect(r.status).toBe(204);
+    }
+    if (opts.update) {
+      const r = await call("PUT", `/v1/servers/${l.link_id}/activities/fix-tests`, {
+        auth: d.device_secret,
+        body: { token: UPDATE.toUpperCase() },
+      });
+      expect(r.status).toBe(204);
+    }
+    return { d, l };
+  }
+
+  const rows = (linkId: string) =>
+    env.DB.prepare("SELECT token FROM activities WHERE link_id = ?").bind(linkId).all<{ token: string }>().then((r) => r.results);
+  const startToken = (deviceId: string) =>
+    env.DB.prepare("SELECT activity_token FROM devices WHERE id = ?").bind(deviceId).first<string | null>("activity_token");
+
+  it("keeps and forgets the tokens for their own device and links only", async () => {
+    const { d, l } = await setup({ start: true, update: true });
+    expect(await startToken(d.device_id)).toBe(START);
+    expect(await rows(l.link_id)).toEqual([{ token: UPDATE }]);
+
+    const other = await device();
+    const body = { token: START };
+    expect((await call("PUT", `/v1/devices/${d.device_id}/activity-token`, { auth: other.device_secret, body })).status).toBe(401);
+    expect((await call("PUT", `/v1/devices/${d.device_id}/activity-token`, { body })).status).toBe(401);
+    expect((await call("PUT", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: other.device_secret, body })).status).toBe(404);
+    expect((await call("DELETE", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: other.device_secret })).status).toBe(404);
+    expect((await call("PUT", `/v1/servers/${l.link_id}/activities/fix-tests`, { body })).status).toBe(401);
+
+    for (const bad of [{ token: "zz" }, { token: "a".repeat(10) }, {}]) {
+      expect((await call("PUT", `/v1/devices/${d.device_id}/activity-token`, { auth: d.device_secret, body: bad })).status).toBe(400);
+      expect((await call("PUT", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: d.device_secret, body: bad })).status).toBe(400);
+    }
+    expect((await call("PUT", `/v1/servers/${l.link_id}/activities/Fix_Tests`, { auth: d.device_secret, body })).status).toBe(400);
+
+    expect((await call("DELETE", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: d.device_secret })).status).toBe(204);
+    expect((await call("DELETE", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: d.device_secret })).status).toBe(204);
+    expect(await rows(l.link_id)).toEqual([]);
+    expect((await call("DELETE", `/v1/devices/${d.device_id}/activity-token`, { auth: d.device_secret })).status).toBe(204);
+    expect(await startToken(d.device_id)).toBeNull();
+  });
+
+  it("starts an activity with a push-to-start token", async () => {
+    const { l } = await setup({ start: true });
+    const e = activity();
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: e });
+    expect(r).toMatchObject({ status: 200, json: { sent: true, activity: "start" } });
+    const c = apnsCalls[0];
+    expect(c.url).toBe(`https://api.sandbox.push.apple.com/3/device/${START}`);
+    expect(c.headers.get("apns-push-type")).toBe("liveactivity");
+    expect(c.headers.get("apns-topic")).toBe("dev.hura.test.push-type.liveactivity");
+    expect(c.headers.get("apns-priority")).toBe("10");
+    expect(Number(c.headers.get("apns-expiration"))).toBeLessThanOrEqual(Date.now() / 1000 + 3601);
+    expect(c.body).toEqual({
+      aps: {
+        timestamp: e.at,
+        event: "start",
+        "content-state": { phase: "working", at: e.at, title: "Fix the tests", subtitle: "studio", body: "Claude is working" },
+        "attributes-type": "SessionActivityAttributes",
+        attributes: { server_id: SERVER, link_id: l.link_id, session: "fix-tests" },
+        alert: { title: "studio", body: "Claude is working" },
+      },
+    });
+    // The app reports the started activity's token itself; until then the
+    // relay only knows it is starting.
+    expect(await rows(l.link_id)).toEqual([{ token: "" }]);
+  });
+
+  it("holds the next event off until a started activity's token comes, rather than starting another", async () => {
+    const { d, l } = await setup({ start: true });
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: activity() })).json.activity).toBe("start");
+
+    // Straight after, with no token yet: try again shortly, and the event id
+    // is free for that retry.
+    const next = activity({ phase: "permission", ask_id: "toolu_01" });
+    const held = await call("POST", "/v1/events", { auth: l.push_token, body: next });
+    expect(held.status).toBe(429);
+    expect(held.headers.get("retry-after")).toBe("5");
+    expect(apnsCalls).toHaveLength(1);
+
+    // The phone says where its updates go, and the retry updates it.
+    const body = { token: UPDATE };
+    expect((await call("PUT", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: d.device_secret, body })).status).toBe(204);
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: next });
+    expect(r.json).toEqual({ sent: true, activity: "update" });
+    expect(apnsCalls[1].url).toContain(UPDATE);
+  });
+
+  it("starts again when a started activity never gave its token", async () => {
+    const { l } = await setup({ start: true });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    await env.DB.prepare("UPDATE activities SET updated_at = ? WHERE link_id = ?").bind(Date.now() - 61_000, l.link_id).run();
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "input" }) });
+    expect(r.json).toEqual({ sent: true, activity: "start" });
+    expect(apnsCalls[1].url).toContain(START);
+  });
+
+  it("updates an activity it has the token of, and carries the request and ciphertext", async () => {
+    const { l } = await setup({ start: true, update: true });
+    const enc = "A".repeat(80);
+    const e = { ...activity({ phase: "permission", ask_id: "toolu_01" }), title: undefined, subtitle: undefined, body: undefined, encrypted: enc };
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: e });
+    expect(r.json).toEqual({ sent: true, activity: "update" });
+    expect(apnsCalls[0].url).toContain(UPDATE);
+    expect(apnsCalls[0].body).toEqual({
+      aps: { timestamp: e.at, event: "update", "content-state": { phase: "permission", at: e.at, ask_id: "toolu_01", enc } },
+    });
+  });
+
+  it("ends an activity, leaving it a while when done and not at all when ended", async () => {
+    for (const [phase, linger] of [["done", 1800], ["failed", 1800], ["ended", 0]] as const) {
+      apnsCalls = [];
+      const { l } = await setup({ start: true, update: true });
+      const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase }) });
+      expect(r.json).toEqual({ sent: true, activity: "end" });
+      const aps = apnsCalls[0].body.aps;
+      expect(aps.event).toBe("end");
+      expect(aps["dismissal-date"]).toBeGreaterThanOrEqual(Math.floor(Date.now() / 1000) + linger - 2);
+      expect(aps["dismissal-date"]).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + linger);
+      expect(await rows(l.link_id)).toEqual([]);
+    }
+  });
+
+  it("does nothing when there is nothing to update and nothing to start", async () => {
+    const { l } = await setup();
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: activity() })).json).toEqual({ sent: false, reason: "no_activity" });
+    const started = await setup({ start: true });
+    for (const phase of ["done", "failed", "ended"]) {
+      const r = await call("POST", "/v1/events", { auth: started.l.push_token, body: activity({ phase }) });
+      expect(r.json).toEqual({ sent: false, reason: "no_activity" });
+    }
+    expect(apnsCalls).toHaveLength(0);
+  });
+
+  it("validates activity events", async () => {
+    const { l } = await setup({ start: true });
+    const post = (body: unknown) => call("POST", "/v1/events", { auth: l.push_token, body });
+    expect((await post(activity({ phase: "sleeping" }))).status).toBe(400);
+    expect((await post(activity({ phase: undefined }))).status).toBe(400);
+    expect((await post(activity({ session: undefined }))).status).toBe(400);
+    expect((await post(activity({ at: -1 }))).status).toBe(400);
+    expect((await post(activity({ at: 1.5 }))).status).toBe(400);
+    expect((await post(activity({ at: "now" }))).status).toBe(400);
+    // A permission carries its request, and nothing else does.
+    expect((await post(activity({ phase: "permission" }))).status).toBe(400);
+    expect((await post(activity({ phase: "input", ask_id: "toolu_01" }))).status).toBe(400);
+    expect((await post(activity({ phase: "permission", ask_id: "toolu_01" }))).status).toBe(200);
+    // Phase and at belong to activities.
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: event({ phase: "working" }) })).status).toBe(400);
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: event({ at: 1 }) })).status).toBe(400);
+  });
+
+  it("takes a time in the future as now, and no time as now", async () => {
+    const { l } = await setup({ start: true });
+    const before = Math.floor(Date.now() / 1000);
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ at: before + 10_000 }) });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ at: undefined }) });
+    for (const c of apnsCalls) {
+      expect(c.body.aps.timestamp).toBeGreaterThanOrEqual(before);
+      expect(c.body.aps.timestamp).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+    }
+  });
+
+  it("starts anew when the activity's token is gone, without disabling the device", async () => {
+    const { d, l } = await setup({ start: true, update: true });
+    apnsReplies.push(apnsError(410, "Unregistered"));
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "input" }) });
+    expect(r.json).toEqual({ sent: true, activity: "start" });
+    expect(apnsCalls.map((c) => c.body.aps.event)).toEqual(["update", "start"]);
+    expect(apnsCalls[1].url).toContain(START);
+    // The dead token is gone; what is left is the new activity, starting.
+    expect(await rows(l.link_id)).toEqual([{ token: "" }]);
+    expect((await call("GET", "/v1/link", { auth: l.push_token })).json.device_enabled).toBe(true);
+    expect(d).toBeDefined();
+  });
+
+  it("forgets a push-to-start token APNs refuses", async () => {
+    const { d, l } = await setup({ start: true });
+    apnsReplies.push(apnsError(400, "BadDeviceToken"));
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: activity() })).json).toEqual({ sent: false, reason: "no_activity" });
+    expect(await startToken(d.device_id)).toBeNull();
+    expect((await call("GET", "/v1/link", { auth: l.push_token })).json.device_enabled).toBe(true);
+    // Ordinary notifications still go.
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: event() })).json).toEqual({ sent: true });
+  });
+
+  it("asks hurad to retry when APNs fails otherwise", async () => {
+    const { l } = await setup({ update: true });
+    const e = activity();
+    apnsReplies.push(apnsError(503, "ServiceUnavailable"));
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: e })).status).toBe(502);
+    expect(await rows(l.link_id)).toHaveLength(1);
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: e })).json).toEqual({ sent: true, activity: "update" });
+  });
+
+  it("says nothing to a device APNs no longer knows", async () => {
+    const { d, l } = await setup({ start: true });
+    await env.DB.prepare("UPDATE devices SET disabled_at = 1 WHERE id = ?").bind(d.device_id).run();
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: activity() })).json).toEqual({
+      sent: false,
+      reason: "device_unregistered",
+    });
+    expect(apnsCalls).toHaveLength(0);
+  });
+});
+
 describe("device test route", () => {
   it("reports what APNs said, which doubles as the connectivity check", async () => {
     const d = await device();
@@ -550,5 +780,16 @@ describe("cleanup", () => {
     await worker.scheduled({} as ScheduledController, env);
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE event_id = 'old'").first("n")).toBe(0);
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM registrations WHERE ip = 'x'").first("n")).toBe(0);
+  });
+
+  it("prunes activity tokens older than twelve hours", async () => {
+    const d = await device();
+    const l = await link(d.device_secret);
+    const insert = env.DB.prepare("INSERT INTO activities (link_id, session, token, updated_at) VALUES (?, ?, ?, ?)");
+    await insert.bind(l.link_id, "old", "7".repeat(64), Date.now() - 13 * 3600 * 1000).run();
+    await insert.bind(l.link_id, "new", "7".repeat(64), Date.now() - 11 * 3600 * 1000).run();
+    await worker.scheduled({} as ScheduledController, env);
+    const left = await env.DB.prepare("SELECT session FROM activities WHERE link_id = ?").bind(l.link_id).all();
+    expect(left.results).toEqual([{ session: "new" }]);
   });
 });

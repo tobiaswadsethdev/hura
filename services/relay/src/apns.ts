@@ -67,15 +67,22 @@ export interface ApnsResult {
 /** APNs reasons meaning the device token will never work again. */
 export const DEAD_TOKEN_REASONS = new Set(["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"]);
 
+/** The same for a Live Activity's tokens, which also expire with the activity. */
+export const DEAD_ACTIVITY_TOKEN_REASONS = new Set([...DEAD_TOKEN_REASONS, "ExpiredToken"]);
+
+export type PushType = "alert" | "background" | "liveactivity";
+
 export async function sendApns(
   env: RelayEnv,
   device: { token: string; environment: Environment },
   payload: unknown,
   expiresInSeconds = 6 * 3600,
   // A background push is sent at low priority, which is what APNs requires
-  // of one, and when the phone is ready rather than at once.
-  pushType: "alert" | "background" = "alert",
+  // of one, and when the phone is ready rather than at once. A Live Activity
+  // push goes to the app's Live Activity topic.
+  pushType: PushType = "alert",
 ): Promise<ApnsResult> {
+  const topic = pushType === "liveactivity" ? `${env.APNS_TOPIC}.push-type.liveactivity` : env.APNS_TOPIC;
   const url = `${apnsOrigin(env, device.environment)}/3/device/${device.token}`;
   const body = JSON.stringify(payload);
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -85,7 +92,7 @@ export async function sendApns(
         method: "POST",
         headers: {
           authorization: `bearer ${await providerToken(env)}`,
-          "apns-topic": env.APNS_TOPIC,
+          "apns-topic": topic,
           "apns-push-type": pushType,
           "apns-priority": pushType === "background" ? "5" : "10",
           "apns-expiration": String(Math.floor(Date.now() / 1000) + expiresInSeconds),

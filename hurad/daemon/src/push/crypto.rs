@@ -157,6 +157,8 @@ mod tests {
             body: v.body.clone(),
             session: v.session.clone(),
             ask_id: v.ask_id.clone(),
+            phase: None,
+            at: None,
         }
     }
 
@@ -227,6 +229,8 @@ mod tests {
             body: "Claude is asking to use Bash".into(),
             session: Some("fix-tests".into()),
             ask_id: None,
+            phase: None,
+            at: None,
         };
         let enc = encrypt(&key, "h_aaaabbbbccccdddd", &n).unwrap();
         let plain = open(&key, &enc, "h_aaaabbbbccccdddd", &n).unwrap();
@@ -246,6 +250,8 @@ mod tests {
             body: "😀".repeat(500),
             session: None,
             ask_id: None,
+            phase: None,
+            at: None,
         };
         let enc = encrypt(&[1u8; KEY_LEN], "h_aaaabbbbccccdddd", &n).unwrap();
         assert!(enc.len() <= MAX_ENCRYPTED, "{}", enc.len());
@@ -262,6 +268,8 @@ mod tests {
             body: "Bash: npm test".into(),
             session: Some("fix-tests".into()),
             ask_id: Some("toolu_1".into()),
+            phase: None,
+            at: None,
         };
         let enc = encrypt(&key, "h_aaaabbbbccccdddd", &n).unwrap();
         assert!(open(&key, &enc, "h_aaaabbbbccccdddd", &n).is_some());
@@ -307,6 +315,8 @@ mod tests {
             body: body.into(),
             session: session.map(Into::into),
             ask_id: ask.map(Into::into),
+            phase: None,
+            at: None,
         };
         let ok = |name: &str, n: Notification| {
             let sealed = seal(&k, nb, server, &n).unwrap();

@@ -36,6 +36,7 @@ targets:
       - package: HuraKit
       - package: SwiftTerm
       - target: HuraNotificationService
+      - target: HuraWidgets
     info:
       path: Hura/Info.plist
       properties:
@@ -62,6 +63,9 @@ targets:
         # hura cloud wakes the app quietly when the inbox was looked at on
         # another device, to clear what it showed (TrackersModel.syncSeen).
         UIBackgroundModes: [remote-notification]
+        # A session's Live Activity, which the relay starts and updates
+        # (docs/relay-api.md, "Live Activities"); HuraWidgets draws it.
+        NSSupportsLiveActivities: true
         HuraRelayHost: $(HURA_RELAY_HOST)
         HuraKeychainGroup: $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
     entitlements:
@@ -118,6 +122,41 @@ targets:
         DEVELOPMENT_TEAM: $(HURA_TEAM_ID)
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1"
+
+  # Draws a session's Live Activity on the Lock Screen and in the Dynamic
+  # Island, opening its sealed text with the push keys in the shared Keychain
+  # group, as the notification service extension does. Allow and Deny are
+  # LiveActivityIntents, compiled into the app too, where iOS runs them.
+  HuraWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - HuraWidgets
+      - Hura/LiveActivity/AnswerIntents.swift
+    dependencies:
+      - package: HuraKit
+    info:
+      path: HuraWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: hura
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        HuraKeychainGroup: $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: HuraWidgets/HuraWidgets.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(HURA_BUNDLE_ID).widgets
+        DEVELOPMENT_TEAM: $(HURA_TEAM_ID)
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
+        # AnswerIntents.swift does nothing here: iOS runs it in the app.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) HURA_WIDGET
 
   HuraTests:
     type: bundle.unit-test

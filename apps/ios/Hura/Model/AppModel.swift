@@ -227,13 +227,17 @@ final class AppModel {
     /// Allow or Deny on a permission notification: answer the request it
     /// named, and that request only. Runs in the background with a few
     /// seconds to spare, so on any failure it posts a notification saying so.
-    func answer(_ allow: Bool, to target: NotificationTarget) async {
+    /// Returns whether the server took the answer.
+    @discardableResult
+    func answer(_ allow: Bool, to target: NotificationTarget) async -> Bool {
         let failed = allow ? "Not allowed" : "Not declined"
         guard let server = server(target.serverID), let session = target.session, let ask = target.askID else {
-            return await notifyNotSent(target, title: failed, why: "That server is no longer paired with this phone.")
+            await notifyNotSent(target, title: failed, why: "That server is no longer paired with this phone.")
+            return false
         }
         do {
             try await server.answer(session: session, ask: ask, allow: allow)
+            return true
         } catch let ServerError.failed(_, message) {
             await notifyNotSent(target, title: failed, why: message)
         } catch let e as ServerError {
@@ -241,6 +245,7 @@ final class AppModel {
         } catch {
             await notifyNotSent(target, title: failed, why: "Couldn't reach \(server.record.name).")
         }
+        return false
     }
 
     private func notifyNotSent(_ target: NotificationTarget, title: String, why: String) async {
