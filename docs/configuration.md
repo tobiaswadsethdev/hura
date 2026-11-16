@@ -106,7 +106,7 @@ use. Each table has a `kind`, and (but for `azure-cli`) exactly one of
 | --- | --- | --- | --- |
 | `claude-code-oauth` | the token `claude setup-token` prints | `api.anthropic.com`, `platform.claude.com` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `azure-devops-pat` | an Azure DevOps personal access token | `dev.azure.com` | `AZURE_DEVOPS_PAT` |
-| `github` | a GitHub token | `github.com`, `api.github.com` | `GITHUB_TOKEN` |
+| `github` | a GitHub token | `api.github.com` as it is, `github.com` encoded for git | `GITHUB_TOKEN` and `GH_TOKEN`, and `HURA_GITHUB_BASIC` for git |
 | `azure-cli` | Entra tokens, minted by this machine's `az` | the hosts listed per resource | an `az` that answers with them |
 | `nuget-feed` | a private NuGet feed's password | the `hosts` you list | NuGet's own credential variable |
 | `docker-registry` | a private container registry's password | the `registry`, or the `hosts` you list | `DOCKER_AUTH_CONFIG` |
@@ -131,6 +131,12 @@ An Azure DevOps PAT is HTTP Basic with an empty user, so what belongs in the
 header is `base64(":" + PAT)`. A `command` prints the PAT itself and hura wraps
 it so the runtime stores the encoded form. A `ref` cannot be wrapped, so for
 Azure DevOps it has to name a secret that already holds the encoded form.
+
+A GitHub token is wanted in two forms: as it is by the API, and as Basic,
+`base64("x-access-token:" + token)`, by git on `github.com`, which refuses a
+bearer token. From a `command` a session gets both, as two secrets. A `ref`
+cannot be both, so it is the API's only, and nothing can be pushed with it;
+`hurad doctor` warns about one. [git-hosts.md](git-hosts.md) has the details.
 
 A session cannot be given two credentials that set the same variable: two of
 the first three kinds, two feeds with one key, one Azure resource twice, or

@@ -42,30 +42,33 @@ impl Forge {
         self.credential().name()
     }
 
-    /// Environment variable the session's credential placeholder is in.
+    /// Environment variable the placeholder for git's credential is in.
     ///
     /// Not the credential. The sandbox runtime's proxy writes the real value
     /// over the placeholder in the headers of requests to the forge's hosts,
     /// so the value is safe to write into a git config, and the secret never
-    /// exists inside the sandbox at all. See [`crate::credentials`].
-    pub fn credential_env(self) -> &'static str {
-        self.credential().env()
+    /// exists inside the sandbox at all. See [`crate::credentials`]. On GitHub
+    /// it is not `GITHUB_TOKEN`, which stands for the token in the form the
+    /// API takes, but the Basic credential git needs.
+    pub fn git_credential_env(self) -> &'static str {
+        match self {
+            Forge::GitHub => crate::credentials::GITHUB_BASIC_ENV,
+            Forge::AzureDevOps => self.credential().env(),
+        }
     }
 
     /// Shell expression evaluating to an `Authorization` header value.
     ///
-    /// The placeholder goes in as it is, because the proxy swaps only an exact
-    /// match. For Azure DevOps that means the stored value is already the
-    /// Basic credential, `base64(":" + pat)`, which is how
-    /// [`crate::credentials::Credential::secret`] stores a PAT. Sending a PAT as
-    /// a bearer token gets a 302 to an Entra sign-in page rather than a 401,
-    /// which is a singularly unhelpful way to fail. GitHub tokens are bearer.
+    /// HTTP Basic on both forges, with the placeholder as it is, because the
+    /// proxy swaps only an exact match: the stored value is already the whole
+    /// Basic credential, which is how [`crate::credentials::Credential::grant`]
+    /// stores it. A bearer token fails on both, in their own ways. Azure DevOps
+    /// answers a PAT sent as one with a 302 to an Entra sign-in page rather
+    /// than a 401, which is a singularly unhelpful way to fail; GitHub's git
+    /// endpoints answer with a 401, which git turns into "could not read
+    /// Username".
     pub fn auth_header_expr(self) -> String {
-        let var = self.credential_env();
-        match self {
-            Forge::AzureDevOps => format!(r#"Authorization: Basic ${var}"#),
-            Forge::GitHub => format!(r#"Authorization: Bearer ${var}"#),
-        }
+        format!(r#"Authorization: Basic ${}"#, self.git_credential_env())
     }
 }
 
@@ -96,7 +99,7 @@ gitc() {{
   if [ -n "$git_auth" ]; then git -c "$git_auth" "$@"; else git "$@"; fi
 }}
 "#,
-        var = forge.credential_env(),
+        var = forge.git_credential_env(),
         header = forge.auth_header_expr(),
     )
 }
@@ -456,19 +459,20 @@ mod tests {
         );
     }
 
-    /// Azure DevOps wants the token as a Basic *password*. Measured: sent as a
-    /// bearer token the API answers 302 to an Entra sign-in page, so getting
-    /// this wrong does not even look like an auth failure. The placeholder
-    /// goes in bare, since the proxy only replaces an exact match, and the
-    /// encoding is done on the host when the secret is stored.
+    /// Both forges want the token as a Basic *password*. Measured: sent as a
+    /// bearer token, Azure DevOps answers 302 to an Entra sign-in page, so
+    /// getting this wrong does not even look like an auth failure, and GitHub's
+    /// git endpoints answer 401. The placeholder goes in bare, since the proxy
+    /// only replaces an exact match, and the encoding is done on the host when
+    /// the secret is stored. On GitHub it is not `GITHUB_TOKEN`, which is the
+    /// token as the API takes it.
     #[test]
-    fn azure_authenticates_as_basic_and_github_as_bearer() {
+    fn both_forges_authenticate_git_as_basic() {
         let az = Forge::AzureDevOps.auth_header_expr();
         assert_eq!(az, "Authorization: Basic $AZURE_DEVOPS_PAT");
 
         let gh = Forge::GitHub.auth_header_expr();
-        assert!(gh.contains("Bearer $GITHUB_TOKEN"), "{gh}");
-        assert!(!gh.contains("base64"), "{gh}");
+        assert_eq!(gh, "Authorization: Basic $HURA_GITHUB_BASIC");
     }
 
     /// A public repository must still clone with no provider attached, so the
@@ -479,7 +483,7 @@ mod tests {
         for forge in [Forge::AzureDevOps, Forge::GitHub] {
             let p = git_auth_prelude(forge);
             assert!(
-                p.contains(&format!("${{{}:-}}", forge.credential_env())),
+                p.contains(&format!("${{{}:-}}", forge.git_credential_env())),
                 "{p}"
             );
             assert!(p.contains(r#"else git "$@""#), "plain git fallback: {p}");

@@ -1181,18 +1181,27 @@ mkdir -p "$dest/.git"
         );
     }
 
+    /// GitHub's git endpoints answer a bearer token with a 401, which git
+    /// turns into "could not read Username" and a failed clone even of a
+    /// public repository. So the clone sends the Basic placeholder, and only
+    /// when the session has one; `GITHUB_TOKEN` is the API's.
     #[test]
-    fn seeding_a_github_repo_sends_a_bearer_token() {
+    fn seeding_a_github_repo_sends_basic_not_bearer() {
         let s = Session::new(
             "x".into(),
             "https://github.com/octocat/Hello-World.git".into(),
             "t".into(),
         );
         let script = detached_script(&sandboxed(), &s, true, &Effort::default());
-        assert!(script.contains("Bearer $GITHUB_TOKEN"), "{script}");
+        assert!(script.contains("${HURA_GITHUB_BASIC:-}"), "{script}");
+        assert!(
+            script.contains("Authorization: Basic $HURA_GITHUB_BASIC"),
+            "{script}"
+        );
+        assert!(!script.contains("Bearer"), "git refuses a bearer: {script}");
         assert!(
             !script.contains("base64"),
-            "bearer needs no encoding: {script}"
+            "encoded on the host, not here: {script}"
         );
     }
 
