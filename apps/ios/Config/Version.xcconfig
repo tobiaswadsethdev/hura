@@ -10,5 +10,5 @@
 // upload's number is unique, only ever goes up on main, and names a commit;
 // it tags each one `ios-vX.Y.Z+N`.
 
-MARKETING_VERSION = 0.3.1
+MARKETING_VERSION = 0.3.2
 CURRENT_PROJECT_VERSION = 1
