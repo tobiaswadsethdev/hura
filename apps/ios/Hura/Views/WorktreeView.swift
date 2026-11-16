@@ -34,6 +34,7 @@ struct WorktreeView: View {
     @Environment(TrackersModel.self) private var trackers
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(TerminalLook.darkKey) private var terminalsDark = false
     @State private var tab: WorkTab?
     /// Nil until asked: the agent is only shown once the sandbox says it is
     /// there, since attaching to a closed one's terminal starts another.
@@ -83,13 +84,14 @@ struct WorktreeView: View {
     var body: some View {
         Group {
             if hasWorkspace, let tab {
-                // A terminal is drawn dark whatever the appearance; so is the
-                // bar over it, or its title is black on black. A conversation
-                // follows the appearance, and its bar with it.
+                // The bar is the colour of what is under it. A terminal kept
+                // dark in a light app takes a dark bar with it, or its title
+                // is black on black; otherwise both follow the appearance.
+                let dark = tab.isTerminal && terminalsDark
                 content(tab).id(tab)
-                    .toolbarBackground(tab.isTerminal ? Color.black : Color(.systemBackground), for: .navigationBar)
+                    .toolbarBackground(dark ? Color.black : Color(.systemBackground), for: .navigationBar)
                     .toolbarBackground(.visible, for: .navigationBar)
-                    .toolbarColorScheme(tab.isTerminal ? .dark : nil, for: .navigationBar)
+                    .toolbarColorScheme(dark ? .dark : nil, for: .navigationBar)
             } else if hasWorkspace, !listed, tabs.isEmpty {
                 ProgressView()
             } else if hasWorkspace, listed, tabs.isEmpty {

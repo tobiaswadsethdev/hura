@@ -44,6 +44,7 @@ enum Appearance: String, CaseIterable, Identifiable {
 /// The app's own settings, which are this phone's rather than a server's.
 struct AppSettingsView: View {
     @AppStorage(Appearance.key) private var appearance: Appearance = .system
+    @AppStorage(TerminalLook.darkKey) private var terminalsDark = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -58,7 +59,12 @@ struct AppSettingsView: View {
                 } header: {
                     Text("Appearance")
                 } footer: {
-                    Text("System follows the phone's own setting. Terminals stay dark either way.")
+                    Text("System follows the phone's own setting.")
+                }
+                Section {
+                    Toggle("Keep Terminals Dark", isOn: $terminalsDark)
+                } footer: {
+                    Text("For programs drawn for a dark terminal, when the app is light. Pinch a terminal to change the size of its text.")
                 }
             }
             .navigationTitle("Settings")

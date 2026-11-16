@@ -73,7 +73,7 @@ import { UpdateBadge } from "./Update";
 import { AboutScreen } from "./About";
 import { refreshPreviews } from "./previews";
 import { Select } from "./Select";
-import { applyAppearance } from "./theme";
+import { applyAppearance, applyTerminalsDark } from "./theme";
 
 /// Where in the window you are.
 ///
@@ -219,6 +219,7 @@ export default function App() {
   // Light, dark or the system's. Applied once already in `main.tsx`, before
   // the first paint; this is for when it is changed in Settings.
   useEffect(() => applyAppearance(prefs.appearance), [prefs.appearance]);
+  useEffect(() => applyTerminalsDark(prefs.terminalsDark), [prefs.terminalsDark]);
 
   /// Asking before something irreversible, in a dialog of this window's own.
   /// `dialog` is rendered at the end, beside the others.

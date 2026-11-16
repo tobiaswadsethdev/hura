@@ -1457,9 +1457,9 @@ fn edit_lists(f: impl FnOnce(&mut endpoints::Lists)) -> Result<(), String> {
 ///   image's own config already says it; the server user's usually does not.
 /// * `mouse on`: the wheel scrolls tmux's history rather than being turned into
 ///   arrow keys, which is what a terminal does with a wheel over a full-screen
-///   program and what tmux is to the terminal outside it. A drag selects in
-///   tmux, which copies on release through OSC 52 -- the clients put that on the
-///   clipboard -- and a modifier-drag is still the client's own selection.
+///   program and what tmux is to the terminal outside it. The clients keep the
+///   rest of the mouse for themselves -- a drag selects in the client, not in
+///   tmux -- and send tmux only the wheel.
 ///
 /// The resize afterwards is not cosmetic. tmux sizes a window to its latest
 /// client and *keeps* that size after the client leaves, and

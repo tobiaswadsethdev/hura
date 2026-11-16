@@ -69,6 +69,8 @@ export type Prefs = {
   inboxView: InboxView;
   /// Light, dark, or the system's. See `theme.ts`.
   appearance: Appearance;
+  /// Terminals dark even when the window is light. See `theme.ts`.
+  terminalsDark: boolean;
 };
 
 export type InboxView = "tickets" | "pulls";
@@ -125,6 +127,7 @@ export const DEFAULTS: Prefs = {
   // The system's, as on the phone. Somebody who has run this window in dark for
   // as long as it had no other gets the same window unless their Mac is light.
   appearance: "system",
+  terminalsDark: false,
 };
 
 function clamp(value: number, { min, max }: { min: number; max: number }): number {
@@ -168,6 +171,8 @@ export function sanitize(stored: unknown): Prefs {
       raw.appearance === "system" || raw.appearance === "light" || raw.appearance === "dark"
         ? raw.appearance
         : DEFAULTS.appearance,
+    terminalsDark:
+      typeof raw.terminalsDark === "boolean" ? raw.terminalsDark : DEFAULTS.terminalsDark,
   };
 }
 

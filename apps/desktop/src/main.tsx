@@ -9,7 +9,7 @@ import { markUntrustedMetrics } from "./charSize";
 import { ICON_SIZE, ICON_STROKE } from "./icons";
 import { watchForUpdates } from "./Update";
 import { readPrefs } from "./prefs";
-import { applyAppearance } from "./theme";
+import { applyAppearance, applyTerminalsDark } from "./theme";
 import "./style.css";
 
 // Before the first render: the correction is a stylesheet rule keyed on a class
@@ -22,7 +22,9 @@ import "./style.css";
 if (navigator.userAgent.includes("Mac")) document.documentElement.classList.add("mac");
 // The palette, for the same reason: chosen before anything is drawn, or a light
 // window opens dark for a frame. See `theme.ts`.
-applyAppearance(readPrefs().appearance);
+const initial = readPrefs();
+applyAppearance(initial.appearance);
+applyTerminalsDark(initial.terminalsDark);
 
 markUntrustedMetrics();
 routeLinks();

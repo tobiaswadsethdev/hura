@@ -22,9 +22,9 @@
    iOS app has no such setting and uses the system's blue, which is what this
    is too until somebody picks another. */
 /* Dark: the default, and the palette everything below was drawn against.
-   Also any subtree marked `data-theme="dark"`, which is how the terminal stays
-   dark whatever the window is in -- custom properties inherit, so a pane can
-   take the other palette by declaring it, as the iOS app's terminal does. */
+   Also any subtree marked `data-theme="dark"`, which is how a terminal stays
+   dark in a light window when Settings says so -- custom properties inherit,
+   so a pane can take the other palette by declaring it. */
 :root, [data-theme="dark"] {
   /* The content area: the editor, the dock, a screen. What the window is
      *made of* behind the translucent sidebar and toolbar. */
@@ -114,6 +114,12 @@
   --checker: #222;
   --checker-2: #2c2c2c;
 
+  /* A terminal's text and selection. Opaque, unlike `--text`: xterm measures
+     contrast against the cell behind the text, and an alpha it would have to
+     blend first is a guess. The selection is the system's blue. */
+  --term-fg: #e4e4e6;
+  --term-selection: rgb(10 132 255 / 0.4);
+
   color-scheme: dark;
 }
 
@@ -173,6 +179,10 @@
   --scrim: rgb(0 0 0 / 0.18);
   --flyout-shadow: -12px 0 32px rgb(0 0 0 / 0.12);
   --sheet-shadow: 0 24px 64px rgb(0 0 0 / 0.18);
+
+  --term-fg: #1d1d1f;
+  --term-selection: rgb(0 122 255 / 0.24);
+
   --checker: #fff;
   --checker-2: #e9e9eb;
 
@@ -3202,21 +3212,53 @@ img.zoomable { cursor: zoom-in; }
 /* the terminal                                                              */
 /* ------------------------------------------------------------------------- */
 
-/* Edge to edge, and no padding anywhere in here.
+/* The pane is the terminal's surface, and the screen sits in it with a margin
+   of that same surface around it.
 
-   There was 6px by 8px on `.xterm`, and every part of it was working against
-   the pane. It was subtracted from the width columns were fitted into, so it
-   cost a column rather than framing one; and the viewport is `inset: 0` against
-   `.xterm`, which lands it over the padding rather than inside it -- so the
-   padding was never the pane's surface showing through, it was the emulator's
-   own, in whatever colour the theme said.
+   The margin is on `.terminal-screen`'s *parent*, never on `.xterm`. There was
+   6px by 8px on `.xterm` once, and every part of it worked against the pane:
+   the viewport is `inset: 0` against `.xterm`, which landed it over the padding
+   rather than inside it, so the padding was the emulator's surface rather than
+   the pane's. Out here it is outside xterm entirely, and `gridFor` in
+   Terminal.tsx fits the columns to what is inside it.
 
-   What is left at the right and the bottom is not padding and cannot be styled
-   away: a grid draws whole cells, so the last column and the last row leave up
-   to one of each over. Both are the pane's own surface, which is why neither
-   reads as a border. See `gridFor` in Terminal.tsx for the rest of it. */
-.terminal { height: 100%; width: 100%; background: var(--sunken); }
+   What is left at the right and the bottom of the screen is not padding: a
+   grid draws whole cells, so the last column and row leave up to one of each
+   over. Both are the pane's own surface, which is why neither reads as a
+   border. */
+.terminal {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  padding: 6px 4px 0 10px;
+  background: var(--sunken);
+}
+.terminal-screen { height: 100%; width: 100%; }
 .terminal .xterm { height: 100%; width: 100%; }
+
+/* The way back out of tmux's history, over the bottom of the screen while it
+   is showing that history. A floating pill, as a chat's "jump to latest" is,
+   so it is plainly not part of what the program drew. */
+.terminal-latest {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 5px 10px;
+  border: none;
+  border-radius: 999px;
+  background: var(--menu);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  backdrop-filter: blur(20px) saturate(1.8);
+  box-shadow: var(--float-shadow);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.terminal-latest:hover { background: var(--control-hover); }
 
 /* xterm.css paints the viewport `#000`, for a macOS native scrollbar that this
    build does not have -- xterm 6 draws its own slider as an element instead.
@@ -3248,7 +3290,7 @@ img.zoomable { cursor: zoom-in; }
    cell; the spans inside inherit it, and it is only there that it can be put
    back without `!important`. `normal` is the same number of pixels, and the
    number is not the problem: WebKit derives a different baseline from it. */
-.terminal.broken-font-metrics .xterm-rows span { line-height: normal; }
+.terminal-screen.broken-font-metrics .xterm-rows span { line-height: normal; }
 
 /* ------------------------------------------------------------------------- */
 /* the about screen                                                          */
