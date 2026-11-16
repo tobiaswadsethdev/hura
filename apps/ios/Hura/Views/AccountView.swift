@@ -8,6 +8,7 @@ import SwiftUI
 struct AccountView: View {
     @Environment(AccountModel.self) private var account
     @Environment(TrackersModel.self) private var trackers
+    @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -19,6 +20,12 @@ struct AccountView: View {
                 }
             }
             .navigationTitle("Account")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showingSettings = true } label: { Label("Settings", glyph: .settings) }
+                }
+            }
+            .sheet(isPresented: $showingSettings) { AppSettingsView() }
         }
         .task { await account.load() }
     }

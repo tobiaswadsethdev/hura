@@ -51,7 +51,7 @@ struct ServerDot: View {
     private var color: Color {
         switch state {
         case .online: .green
-        case .connecting: .yellow
+        case .connecting: Color.working
         case .offline: .gray
         }
     }

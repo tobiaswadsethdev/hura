@@ -80,7 +80,6 @@ struct AgentScreen: View {
             }
             .navigationBarTitleDisplayMode(.inline)
         }
-        .environment(\.colorScheme, .dark)
     }
 
     private func content(_ agent: AgentInfo) -> some View {
@@ -123,7 +122,7 @@ struct AgentScreen: View {
             .onChange(of: items.count) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
         }
         .navigationTitle(agent.description)
-        .background(Color.black)
+        .background(Color(.systemBackground))
     }
 
     private func facts(_ agent: AgentInfo, progress: JSONValue?, now: Date) -> String {

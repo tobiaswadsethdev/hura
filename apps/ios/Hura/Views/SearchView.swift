@@ -202,8 +202,7 @@ struct KeptChatView: View {
                 if let located { ChatView.reveal(located.id, in: proxy) }
             }
         }
-        .background(Color.black)
-        .environment(\.colorScheme, .dark)
+        .background(Color(.systemBackground))
         .navigationTitle(hit.title ?? hit.session)
         .navigationBarTitleDisplayMode(.inline)
     }

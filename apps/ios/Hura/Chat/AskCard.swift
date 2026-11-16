@@ -105,7 +105,7 @@ private struct PermissionForm: View {
             .font(.caption.monospaced())
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+            .background(Color.well, in: RoundedRectangle(cornerRadius: 6))
         case "Write":
             code(text("content").split(separator: "\n", omittingEmptySubsequences: false).prefix(20).joined(separator: "\n"))
         default:
@@ -118,7 +118,7 @@ private struct PermissionForm: View {
             Text(s).font(.caption.monospaced()).textSelection(.enabled).padding(8)
         }
         .frame(maxHeight: 160)
-        .background(Color.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color.well, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func decline() {
@@ -169,7 +169,7 @@ private struct QuestionsForm: View {
                 HStack(alignment: .firstTextBaseline) {
                     if let h = q.header {
                         Text(h).font(.caption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.white.opacity(0.1), in: Capsule())
+                            .background(Color.primary.opacity(0.1), in: Capsule())
                     }
                     Text(q.question).font(.subheadline)
                 }
@@ -188,7 +188,7 @@ private struct QuestionsForm: View {
                             Spacer(minLength: 0)
                         }
                         .padding(8)
-                        .background(on ? Color.accentColor.opacity(0.2) : Color.white.opacity(0.05),
+                        .background(on ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.05),
                                     in: RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)

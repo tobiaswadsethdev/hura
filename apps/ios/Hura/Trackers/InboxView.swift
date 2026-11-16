@@ -264,7 +264,7 @@ struct ChecksMark: View {
         switch checks {
         case "passing": Image(glyph: .passing).font(.caption2).foregroundStyle(.green).accessibilityLabel("Checks passed")
         case "failing": Image(glyph: .failing).font(.caption2).foregroundStyle(.red).accessibilityLabel("Checks failed")
-        case "pending": Image(glyph: .pending).font(.caption2).foregroundStyle(.yellow).accessibilityLabel("Checks running")
+        case "pending": Image(glyph: .pending).font(.caption2).foregroundStyle(Color.working).accessibilityLabel("Checks running")
         default: EmptyView()
         }
     }

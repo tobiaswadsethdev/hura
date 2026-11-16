@@ -70,6 +70,9 @@ struct WorkingDots: View {
 }
 
 extension Color {
-    /// The desktop's `--working`, which is the system's yellow.
-    static let working = Color.yellow
+    /// The desktop's `--working`: the system's yellow in dark mode, and in
+    /// light a deeper amber, since yellow on white can hardly be read.
+    static let working = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark ? .systemYellow : UIColor(red: 0.78, green: 0.54, blue: 0.0, alpha: 1)
+    })
 }

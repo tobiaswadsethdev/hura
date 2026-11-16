@@ -21,6 +21,10 @@ enum WorkTab: Hashable {
     }
 
     var isAgent: Bool { self == .chat("agent") || self == .terminal(nil) }
+
+    var isTerminal: Bool {
+        if case .terminal = self { true } else { false }
+    }
 }
 
 struct WorktreeView: View {
@@ -79,12 +83,13 @@ struct WorktreeView: View {
     var body: some View {
         Group {
             if hasWorkspace, let tab {
-                // Conversations and terminals are drawn dark; so is the bar
-                // over them, or its title is black on black.
+                // A terminal is drawn dark whatever the appearance; so is the
+                // bar over it, or its title is black on black. A conversation
+                // follows the appearance, and its bar with it.
                 content(tab).id(tab)
-                    .toolbarBackground(Color.black, for: .navigationBar)
+                    .toolbarBackground(tab.isTerminal ? Color.black : Color(.systemBackground), for: .navigationBar)
                     .toolbarBackground(.visible, for: .navigationBar)
-                    .toolbarColorScheme(.dark, for: .navigationBar)
+                    .toolbarColorScheme(tab.isTerminal ? .dark : nil, for: .navigationBar)
             } else if hasWorkspace, !listed, tabs.isEmpty {
                 ProgressView()
             } else if hasWorkspace, listed, tabs.isEmpty {

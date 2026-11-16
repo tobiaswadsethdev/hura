@@ -47,12 +47,12 @@ struct ToolCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(borderColor, lineWidth: 1))
     }
 
     private var borderColor: Color {
-        call.failed && !call.stopped ? .red.opacity(0.5) : .white.opacity(0.08)
+        call.failed && !call.stopped ? .red.opacity(0.5) : .primary.opacity(0.08)
     }
 
     @ViewBuilder
@@ -217,9 +217,9 @@ struct ShellCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10)
-            .strokeBorder(run.failed ? Color.red.opacity(0.5) : Color.white.opacity(0.08), lineWidth: 1))
+            .strokeBorder(run.failed ? Color.red.opacity(0.5) : Color.primary.opacity(0.08), lineWidth: 1))
     }
 
     /// The end of it, which is where a command says how it went, with the
@@ -277,7 +277,7 @@ struct DiffView: View {
                 Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w }
             }
         }
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
         .textSelection(.enabled)
     }
 

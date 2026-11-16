@@ -171,10 +171,10 @@ struct ChatView: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room = $0 }
             }
         }
-        .background(Color.black)
-        // Dark whatever the system setting: the rows and tool cards are drawn
-        // for a dark background.
-        .environment(\.colorScheme, .dark)
+        // The system's background, black in dark mode as it always was here,
+        // and white in light: the rows and cards take their shades from the
+        // text colour over it (`Color.primary`), so they follow.
+        .background(Color(.systemBackground))
         .sheet(item: $following) { f in AgentScreen(chat: chat, id: f.id) }
         .alert("Couldn't do that", isPresented: Binding(get: { chat.error != nil }, set: { if !$0 { chat.error = nil } })) {
             Button("OK") { chat.error = nil }
@@ -352,7 +352,7 @@ struct ChatView: View {
                 .font(.body.weight(.medium))
                 .foregroundStyle(.primary)
                 .frame(width: 34, height: 34)
-                .background(Color.white.opacity(0.1), in: Circle())
+                .background(Color.primary.opacity(0.1), in: Circle())
                 .contentShape(Circle())
         }
         .accessibilityLabel("Attach")
@@ -762,7 +762,7 @@ private struct Chip: ViewModifier {
             .lineLimit(1)
             .padding(.horizontal, 12)
             .frame(height: 34)
-            .background(Color.white.opacity(0.1), in: Capsule())
+            .background(Color.primary.opacity(0.1), in: Capsule())
             .contentShape(Capsule())
     }
 }
