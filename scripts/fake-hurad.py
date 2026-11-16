@@ -80,7 +80,8 @@ polls = {
     "docs-search": (report("running", "Bash"), usage(4.12, 48, 412, 18, 41), (412, 18, 3)),
     "relay-tls": (report("waiting", "Edit", "Edit relay/src/tls.ts", "toolu_relay_edit"), usage(1.87, 22, 94, 31, 23), (94, 31, 0)),
     "ios-widgets": (report("idle"), usage(6.40, 95, 840, 122, 67), (840, 122, 5)),
-    "price-rounding": (report("running", "Bash"), usage(0.92, 11, 23, 9, 12, "claude-sonnet-5-5"), (23, 9, 0)),
+    "price-rounding": (report("waiting", "AskUserQuestion", "Where should a price be rounded?", "toolu_price_ask"),
+                       usage(0.92, 11, 23, 9, 12, "claude-sonnet-5-5"), (23, 9, 0)),
     "checkout-flow": (report("idle"), usage(2.35, 40, 310, 77, 30), (310, 77, 2)),
 }
 
@@ -194,6 +195,19 @@ ASKS = {
                    "input": {"file_path": "/sandbox/repo/relay/src/tls.ts", "old_string": TLS_OLD, "new_string": TLS_NEW},
                    "title": None, "description": None, "display_name": None, "reason": None, "blocked_path": None,
                    "can_remember": True, "default_to_no": False, "agent": None}],
+    # A question with as many choices as Claude usually offers, which is
+    # taller than the room left above the keyboard.
+    "price-rounding": [{"id": "toolu_price_ask", "tool": "AskUserQuestion",
+                        "input": {"questions": [{
+                            "question": "Where should a price be rounded: once on the total, or on each line?",
+                            "header": "Rounding", "multiSelect": False,
+                            "options": [
+                                {"label": "Once, after tax", "description": "Round the order total only; lines keep their exact amounts."},
+                                {"label": "Each line", "description": "Round every line, then add them up, as the receipts do now."},
+                                {"label": "Each line, before tax", "description": "Round lines before tax and the tax once on the total."},
+                                {"label": "Ask finance", "description": "Leave it as it is until finance says which the books expect."}]}]},
+                        "title": None, "description": None, "display_name": None, "reason": None, "blocked_path": None,
+                        "can_remember": False, "default_to_no": False, "agent": None}],
 }
 
 MODELS = [{"value": v, "display_name": d, "description": "", "resolved": None, "efforts": ["low", "medium", "high"]}
