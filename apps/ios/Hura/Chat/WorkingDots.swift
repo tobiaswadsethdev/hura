@@ -8,6 +8,10 @@ import SwiftUI
 /// so it takes the colour of where it is.
 struct WorkingDots: View {
     var size: CGFloat = 14
+    /// Drawn standing still, in a pose of its own: three equal dots in a
+    /// triangle. For a Live Activity, which can't run an animation, and would
+    /// otherwise freeze the loop wherever it was drawn -- lopsided, mid-turn.
+    var still = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let loop = 1.8
@@ -42,6 +46,22 @@ struct WorkingDots: View {
     ]
 
     var body: some View {
+        if still {
+            Canvas { gc, box in
+                let d = Self.dot * 0.95 * box.width
+                for (x, y) in [(0.27, 0.36), (0.73, 0.36), (0.5, 0.75)] {
+                    gc.fill(Path(ellipseIn: CGRect(x: x * box.width - d / 2, y: y * box.height - d / 2,
+                                                   width: d, height: d)), with: .foreground)
+                }
+            }
+            .frame(width: size, height: size)
+            .accessibilityLabel("Working")
+        } else {
+            turning
+        }
+    }
+
+    private var turning: some View {
         // Still, the three dots where the loop begins.
         TimelineView(.animation(paused: reduceMotion)) { context in
             Canvas { gc, box in

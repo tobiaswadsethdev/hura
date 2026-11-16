@@ -116,6 +116,8 @@ enum LiveActivityAnswer {
 extension LiveActivities {
     /// A made-up session's activity, started here rather than by a push, for
     /// `-HuraActivity` (`HuraApp.pairFromLaunchArguments`).
+    static let demoServerID = "h_demodemodemodemo"
+
     static func demo(_ phase: SessionPhase) {
         let body = switch phase {
         case .working: "Claude is working"
@@ -127,13 +129,16 @@ extension LiveActivities {
         }
         // Sealed as hurad seals it, under a key kept where the real ones are,
         // so the widget has to open it as it opens a real one.
-        let serverID = "h_demodemodemodemo", session = "fix-flaky-login-test"
+        let serverID = demoServerID, session = "fix-flaky-login-test"
         let askID = phase == .permission ? "toolu_demo" : nil
         let keys = KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup)
         do {
             let key = try keys.key(serverID: serverID) ?? PushCrypto.newKey()
             try keys.save(key, serverID: serverID)
             try keys.saveName("devbox", serverID: serverID)
+            // Where the widget reads it on a phone (`ActivityKeyFile`).
+            try ActivityKeyFile.shared?.save(key, serverID: serverID)
+            try ActivityKeyFile.shared?.saveName("devbox", serverID: serverID)
             let enc = try PushCrypto.seal(PushCrypto.Text(title: "Fix the flaky login test", subtitle: "scope-creep",
                                                           body: body),
                                           key: key, serverID: serverID, kind: SessionActivity.kind, session: session,

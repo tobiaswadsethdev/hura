@@ -10,7 +10,7 @@ import WidgetKit
 ///
 /// The relay sends the text sealed, as it does a notification's, so it is
 /// opened here, each time the activity is drawn, with the key the app keeps
-/// for the server in the Keychain group this extension shares. When it can't
+/// for the server in the App Group this extension shares. When it can't
 /// be, the activity says why: there is nowhere else a failure here shows.
 struct SessionActivityWidget: Widget {
     var body: some WidgetConfiguration {
@@ -63,6 +63,12 @@ struct SessionActivityWidget: Widget {
 
 /// What an activity shows, worked out once per drawing.
 struct Shown {
+    /// The app's copy of the keys in the App Group: on a phone, the Keychain
+    /// is not available here (`ActivityKeyFile`).
+    static var keys: PushKeyStore {
+        ActivityKeyFile.shared ?? KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup)
+    }
+
     var serverID: String
     var session: String
     var phase: SessionPhase
@@ -81,8 +87,7 @@ struct Shown {
         self.init(attributes: context.attributes, state: context.state)
     }
 
-    init(attributes: SessionActivityAttributes, state: SessionActivityState,
-         keys: PushKeyStore = KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup)) {
+    init(attributes: SessionActivityAttributes, state: SessionActivityState, keys: PushKeyStore = Shown.keys) {
         serverID = attributes.serverID
         session = attributes.session
         phase = state.phase
@@ -254,8 +259,9 @@ struct Answers: View {
     }
 }
 
-/// The phase as one mark, as the app draws it: its turning dots, still, while
-/// Claude works, and its own icons otherwise.
+/// The phase as one mark, as the app draws it: its working dots while Claude
+/// works, in a still pose since an activity can't animate, and its own icons
+/// otherwise.
 struct PhaseMark: View {
     let phase: SessionPhase
     let size: CGFloat
@@ -263,7 +269,7 @@ struct PhaseMark: View {
     var body: some View {
         Group {
             if phase == .working {
-                WorkingDots(size: size)
+                WorkingDots(size: size, still: true)
             } else {
                 Image(phase.glyph)
                     .resizable()

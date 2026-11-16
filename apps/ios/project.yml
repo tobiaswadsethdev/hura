@@ -68,6 +68,7 @@ targets:
         NSSupportsLiveActivities: true
         HuraRelayHost: $(HURA_RELAY_HOST)
         HuraKeychainGroup: $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+        HuraAppGroup: group.$(HURA_BUNDLE_ID)
     entitlements:
       path: Hura/Hura.entitlements
       properties:
@@ -82,6 +83,10 @@ targets:
         # the capability on for the App ID; the service checks the identity
         # token against Apple's published keys.
         com.apple.developer.applesignin: [Default]
+        # Where the app keeps a copy of the push keys for the Live Activity
+        # widget, which has no Keychain on a phone (ActivityKeyFile).
+        com.apple.security.application-groups:
+          - group.$(HURA_BUNDLE_ID)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(HURA_BUNDLE_ID)
@@ -144,6 +149,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         HuraKeychainGroup: $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+        HuraAppGroup: group.$(HURA_BUNDLE_ID)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
@@ -151,6 +157,8 @@ targets:
       properties:
         keychain-access-groups:
           - $(AppIdentifierPrefix)$(HURA_BUNDLE_ID).shared
+        com.apple.security.application-groups:
+          - group.$(HURA_BUNDLE_ID)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(HURA_BUNDLE_ID).widgets

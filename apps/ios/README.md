@@ -192,8 +192,9 @@ The relay starts each one with ActivityKit's push-to-start and updates and
 ends it with pushes of its own ([docs/relay-api.md](../../docs/relay-api.md#live-activities));
 the app only hands the relay the tokens ActivityKit gives out, and isn't
 running for any of it. `HuraWidgets/` draws them, and opens their text, which
-is sealed like a notification's, with the push keys in the Keychain group it
-shares with the app. Allow and Deny are `LiveActivityIntent`s
+is sealed like a notification's, with a copy of the push keys the app keeps
+in the App Group they share: on a phone, the widget has no Keychain
+(`ActivityKeyFile` in HuraKit). Allow and Deny are `LiveActivityIntent`s
 (`Hura/LiveActivity/AnswerIntents.swift`, compiled into both), which iOS runs
 in the app. Each server's Notifications section can switch them off.
 
