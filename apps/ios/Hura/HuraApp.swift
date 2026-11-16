@@ -89,6 +89,7 @@ struct HuraApp: App {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
+                delegate.liveActivities.resumed()
                 model.resumeAll()
                 trackers.resume()
                 Task { await lock.unlock() }
@@ -145,7 +146,7 @@ extension HuraApp {
             await trackers.refresh()
         }
         if let phase = defaults.string(forKey: "HuraActivity").flatMap(SessionPhase.init(rawValue:)) {
-            LiveActivities.demo(phase, serverID: model.servers.first?.id ?? "h_aaaabbbbccccdddd")
+            LiveActivities.demo(phase)
         }
         guard let open = defaults.string(forKey: "HuraOpen") else { return }
         // After the first frame: a screen only hears a change made while it is

@@ -75,6 +75,8 @@ pub struct Said {
     /// What a [`SESSION_ACTIVITY`] says the session is doing; nothing for a
     /// notification.
     pub phase: Option<Phase>,
+    /// When the turn a [`SESSION_ACTIVITY`] shows began, in Unix seconds.
+    pub since: Option<u64>,
 }
 
 /// What a session is doing, as its Live Activity shows it. The words are the
@@ -123,6 +125,9 @@ struct Last {
     ask: Option<String>,
     /// What its activity was last told, if anything.
     phase: Option<Phase>,
+    /// When the turn its activity shows began: the first live phase, kept
+    /// through a wait and the work after it, and gone once the turn is.
+    since: Option<u64>,
 }
 
 /// The states last seen, which is what tells a transition from a state.
@@ -139,6 +144,11 @@ impl Watch {
 
     /// Take one look, and say what has just happened.
     pub fn look(&mut self, now: &[Seen]) -> Vec<Said> {
+        self.look_at(now, super::now())
+    }
+
+    /// [`Watch::look`], with the time it is: `at`, in Unix seconds.
+    pub fn look_at(&mut self, now: &[Seen], at: u64) -> Vec<Said> {
         let first = self.seen.is_none();
         let before = self.seen.take().unwrap_or_default();
         let mut said = Vec::new();
@@ -155,6 +165,10 @@ impl Watch {
             };
             let was_phase = was.and_then(|w| w.phase);
             let phase = phase_of(s, was_phase);
+            let since = match phase {
+                Some(p) if p.live() => was.and_then(|w| w.since).or(Some(at)),
+                _ => None,
+            };
             after.insert(
                 s.name.clone(),
                 Last {
@@ -162,6 +176,7 @@ impl Watch {
                     agent,
                     ask: ask.clone(),
                     phase,
+                    since,
                 },
             );
             if first {
@@ -176,7 +191,8 @@ impl Watch {
                 || (phase == Some(Phase::Permission)
                     && was.and_then(|w| w.ask.as_ref()) != ask.as_ref());
             if let Some(p) = phase.filter(|_| moved) {
-                said.push(activity(s, p));
+                // The turn that is over still began when it began.
+                said.push(activity(s, p, since.or(was.and_then(|w| w.since))));
             }
         }
         // A session that has gone while its activity showed a turn: the
@@ -190,6 +206,7 @@ impl Watch {
                         body: "The session ended".into(),
                         ask: None,
                         phase: Some(Phase::Ended),
+                        since: w.since,
                     });
                 }
             }
@@ -223,7 +240,7 @@ fn phase_of(s: &Seen, was: Option<Phase>) -> Option<Phase> {
 }
 
 /// What a session's activity is told on moving into `phase`.
-fn activity(s: &Seen, phase: Phase) -> Said {
+fn activity(s: &Seen, phase: Phase, since: Option<u64>) -> Said {
     let (body, ask) = match phase {
         Phase::Working => ("Claude is working".into(), None),
         Phase::Permission | Phase::Input => {
@@ -240,6 +257,7 @@ fn activity(s: &Seen, phase: Phase) -> Said {
         body,
         ask,
         phase: Some(phase),
+        since,
     }
 }
 
@@ -279,6 +297,7 @@ fn said_about(s: &Seen, was: Option<&Last>) -> Option<Said> {
         body,
         ask,
         phase: None,
+        since: None,
     };
     if s.record == State::Failed && was.map(|w| w.record) != Some(State::Failed) {
         return Some(said(CLAUDE_FAILED, "The session failed".into(), None));
@@ -420,6 +439,7 @@ pub async fn run(server: Arc<Server>, pusher: Arc<Pusher>) {
                     ask_id: said.ask,
                     phase: said.phase.map(|p| p.as_str().into()),
                     at: said.phase.map(|_| at),
+                    since: said.since,
                 },
                 None,
             );
@@ -696,6 +716,32 @@ mod tests {
         assert!(phases(&w.look(&[seen("a", State::Running, Some(State::Idle))])).is_empty());
         // Nor does it end one when it goes.
         assert!(w.look(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_turn_keeps_its_start_through_a_wait() {
+        let since = |said: &[Said]| -> Vec<Option<u64>> {
+            said.iter()
+                .filter(|s| s.phase.is_some())
+                .map(|s| s.since)
+                .collect()
+        };
+        let mut w = Watch::default();
+        w.look_at(&[seen("a", State::Running, Some(State::Idle))], 100);
+        let said = w.look_at(&[seen("a", State::Running, Some(State::Running))], 105);
+        assert_eq!(since(&said), [Some(105)]);
+        let said = w.look_at(&[asking_for("a", "Bash", "toolu_1")], 200);
+        assert_eq!(since(&said), [Some(105)], "the wait is the same turn");
+        let said = w.look_at(&[seen("a", State::Running, Some(State::Running))], 230);
+        assert_eq!(since(&said), [Some(105)], "and so is the work after it");
+        let said = w.look_at(&[seen("a", State::Running, Some(State::Idle))], 300);
+        assert_eq!(since(&said), [Some(105)], "done says when the turn began");
+        let said = w.look_at(&[seen("a", State::Running, Some(State::Running))], 400);
+        assert_eq!(
+            since(&said),
+            [Some(400)],
+            "the next turn starts its own clock"
+        );
     }
 
     #[test]

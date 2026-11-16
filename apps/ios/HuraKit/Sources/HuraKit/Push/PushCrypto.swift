@@ -16,6 +16,14 @@ public enum PushCrypto {
         /// which.
         public var tracker: String?
         public var id: String?
+
+        public init(title: String, subtitle: String? = nil, body: String, tracker: String? = nil, id: String? = nil) {
+            self.title = title
+            self.subtitle = subtitle
+            self.body = body
+            self.tracker = tracker
+            self.id = id
+        }
     }
 
     public enum Failure: Error, Equatable {
@@ -34,6 +42,17 @@ public enum PushCrypto {
     /// at a different request from the one whose text is shown.
     static func additionalData(serverID: String, kind: String, session: String?, askID: String?) -> Data {
         Data("hura-push-v1\n\(serverID)\n\(kind)\n\(session ?? "")\n\(askID ?? "")".utf8)
+    }
+
+    /// Encrypts text as `hurad` does: what the app's own stand-ins and the
+    /// tests send, since nothing on the phone has to seal for real.
+    public static func seal(_ text: Text, key: Data, serverID: String, kind: String, session: String?,
+                            askID: String?) throws -> String {
+        let plain = try JSONEncoder().encode(text)
+        let box = try AES.GCM.seal(plain, using: SymmetricKey(data: key),
+                                   authenticating: additionalData(serverID: serverID, kind: kind, session: session,
+                                                                  askID: askID))
+        return box.combined!.base64URL
     }
 
     /// Decrypts the `enc` field of a notification's `hura` payload.

@@ -106,6 +106,11 @@ pub struct Notification {
     /// retry that arrives late cannot undo what came after it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<u64>,
+    /// When a [`SESSION_ACTIVITY`]'s turn began, in Unix seconds: what the
+    /// phone counts from, so a wait and the work after it are one turn on the
+    /// clock, as in the app, rather than each starting again from nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<u64>,
 }
 
 /// Where one paired client's notifications go, as kept in `push.json`.
@@ -546,6 +551,7 @@ pub fn handle(pusher: &Pusher, caller: &Entry, request: &Request) -> Option<Outc
                         ask_id: None,
                         phase: None,
                         at: None,
+                        since: None,
                     },
                     Some(key),
                 );
@@ -603,6 +609,9 @@ fn event_body(route: &Route, n: &Notification) -> Result<String, String> {
     }
     if let Some(at) = n.at {
         body["at"] = at.into();
+    }
+    if let Some(since) = n.since {
+        body["since"] = since.into();
     }
     serde_json::to_string(&body).map_err(|e| e.to_string())
 }
@@ -854,11 +863,14 @@ mod tests {
             if (phase == "permission") != event.get("ask_id").is_some() {
                 return Err("ask_id goes with the permission phase, and only it".into());
             }
-            if event.get("at").is_some_and(|at| !at.is_u64()) {
-                return Err("at must be a number of seconds".into());
+            if ["at", "since"]
+                .iter()
+                .any(|k| event.get(*k).is_some_and(|v| !v.is_u64()))
+            {
+                return Err("at and since must be numbers of seconds".into());
             }
-        } else if phase.is_some() || event.get("at").is_some() {
-            return Err("phase and at are only for session_activity".into());
+        } else if phase.is_some() || event.get("at").is_some() || event.get("since").is_some() {
+            return Err("phase, at and since are only for session_activity".into());
         }
         Ok(())
     }
@@ -905,6 +917,7 @@ mod tests {
             ask_id: None,
             phase: None,
             at: None,
+            since: None,
         }
     }
 
@@ -1253,6 +1266,7 @@ mod tests {
         Notification {
             phase: Some(phase.into()),
             at: Some(1_763_300_000),
+            since: Some(1_763_299_000),
             ..note(p, SESSION_ACTIVITY)
         }
     }
@@ -1279,6 +1293,7 @@ mod tests {
         assert_eq!(sent["kind"], SESSION_ACTIVITY);
         assert_eq!(sent["phase"], "permission");
         assert_eq!(sent["at"], 1_763_300_000);
+        assert_eq!(sent["since"], 1_763_299_000);
         assert_eq!(sent["ask_id"], "toolu_01abc");
         assert!(sent["encrypted"].is_string());
         assert!(sent.get("body").is_none());
