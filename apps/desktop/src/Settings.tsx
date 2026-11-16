@@ -380,7 +380,19 @@ export function SettingsScreen({
             </button>
           ))}
         </div>
-        <p className="hint">System follows the computer's own. Terminals stay dark either way.</p>
+        <p className="hint">System follows the computer's own.</p>
+
+        <label className="tick">
+          <input
+            type="checkbox"
+            checked={prefs.terminalsDark}
+            onChange={(e) => onPrefs({ terminalsDark: e.target.checked })}
+          />
+          <span>Keep terminals dark</span>
+        </label>
+        <p className="hint indent">
+          For programs drawn for a dark terminal, when the window is light.
+        </p>
 
         <label className="tick">
           <input

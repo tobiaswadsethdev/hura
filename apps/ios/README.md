@@ -33,8 +33,11 @@ button keeps a message to be said at a time, or when the turn running then
 ends. See [docs/server.md](../../docs/server.md#queued-and-scheduled-sessions).
 
 The app is light or dark as the phone is, or as chosen under Account →
-Settings; a conversation follows it, and a terminal stays dark either way,
-as terminals are drawn for.
+Settings; a conversation follows it, and so does a terminal, unless Settings
+keeps terminals dark for programs drawn for one. In a terminal a long press
+selects as text does anywhere on the phone, with the magnifier and handles; a
+swipe scrolls tmux's history, and typing or **Latest** goes back to the live
+screen; a pinch changes the size of the text.
 
 The Search tab searches every conversation the phone has seen, including
 ended ones and deleted sessions: words in what was said, `file:` for the files

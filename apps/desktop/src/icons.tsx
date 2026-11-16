@@ -59,6 +59,7 @@ import {
   CircleDashed,
   CloudDownload,
   CloudUpload,
+  ClipboardPaste,
   Copy as CopyGlyph,
   ExternalLink,
   FileDiff,
@@ -117,6 +118,7 @@ import {
   Undo2,
   Unplug,
   X,
+  TextSelect,
 } from "lucide-react";
 
 import {
@@ -310,6 +312,12 @@ export const Forget = Trash;
 export const Chosen = Check;
 /// Putting a name, a path or an endpoint on the clipboard, from a menu.
 export const Copy = CopyGlyph;
+/// Putting the clipboard into a terminal, from its menu.
+export const Paste = ClipboardPaste;
+/// Selecting everything a terminal has on screen.
+export const SelectAll = TextSelect;
+/// Back to the live screen from a terminal scrolled into its history.
+export const Latest = ArrowDownToLine;
 /// Opening a file's diff, from the change list's menu.
 export const Diff = FileDiff;
 

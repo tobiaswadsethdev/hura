@@ -11,6 +11,12 @@ inbox. What the screenshots on gethura.app are taken against.
 The desktop selects the first worktree in the list when it opens; set
 FAKE_FIRST to a session's name to have that one first.
 
+A terminal shows a canned screen. With FAKE_TMUX=1 it is a real tmux instead,
+on a socket of its own (`tmux -L hura-fake`), set up as hurad sets up the
+agent's -- no status line, the mouse on, copies passed out as OSC 52 -- with a
+few hundred lines of history to scroll back through. For looking at what the
+terminals do with the mouse, the wheel and a selection.
+
 Not the protocol in full -- an op it does not know answers `unsupported`,
 which the apps show as they would any other failure. The shapes are
 hura-proto's: see apps/desktop/src/gen for each, since the desktop's client
@@ -22,7 +28,7 @@ app against it (for the iPhone, see `pairFromLaunchArguments` in
 apps/ios/Hura/HuraApp.swift). The Files pane is this checkout. Python's
 standard library and openssl only.
 """
-import base64, hashlib, json, os, ssl, struct, subprocess, sys, tempfile, threading, time
+import base64, fcntl, hashlib, json, os, pty, ssl, struct, subprocess, sys, tempfile, termios, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 18555
@@ -264,6 +270,33 @@ TERMINAL = ("\x1b[1;32m~/repo\x1b[0m on \x1b[1;35mhura/ios-widgets\x1b[0m\r\n$ c
             "\x1b[38;5;245m⏺\x1b[0m Built and ran in the simulator; the widget refreshes when a push arrives.\r\n\r\n"
             "\x1b[38;5;240m────────────────────────────────────────────────────────────\x1b[0m\r\n> ")
 
+# With FAKE_TMUX, a real tmux behind each terminal channel. See the top.
+FAKE_TMUX = os.environ.get("FAKE_TMUX") == "1"
+TMUX = ["tmux", "-L", "hura-fake", "-f", "/dev/null"]
+HISTORY = ("for i in $(seq 1 300); do printf '\\033[38;5;%dm%3d\\033[0m  history line, scroll back to read it\\n' $((i % 6 + 31)) $i; done; "
+           "printf '\\033[1;32m~/repo\\033[0m on \\033[1;35mhura/ios-widgets\\033[0m  -- the live screen\\n'")
+
+def tmux_attach(name, cols=100, rows=30):
+    """A pty with a tmux client in it, attached to `name`'s session."""
+    target = "fake-" + name
+    if subprocess.run(TMUX + ["has-session", "-t", "=" + target], capture_output=True).returncode != 0:
+        subprocess.run(TMUX + ["new-session", "-d", "-s", target, "-x", "200", "-y", "50"], check=True)
+        for opt in (["status", "off"], ["mouse", "on"]):
+            subprocess.run(TMUX + ["set", "-t", "=" + target + ":", *opt], check=True)
+        subprocess.run(TMUX + ["set", "-s", "set-clipboard", "on"], check=True)
+        # Typed once the shell is up, or it is typed into nothing.
+        time.sleep(1)
+        subprocess.run(TMUX + ["send-keys", "-t", "=" + target + ":", HISTORY, "Enter"], check=True)
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ["TERM"] = "xterm-256color"
+        os.execvp(TMUX[0], TMUX + ["-u", "attach", "-t", "=" + target])
+    tty_size(fd, cols, rows)
+    return pid, fd
+
+def tty_size(fd, cols, rows):
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
 # ---------------------------------------------------------- the dock's panes
 
 def ev(minutes_ago, subject, verdict, count=1, cls="NET:OPEN", policy=None, reason=None):
@@ -413,26 +446,55 @@ class H(BaseHTTPRequestHandler):
         accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
         self.send_response(101); self.send_header("Upgrade", "websocket"); self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", accept); self.end_headers(); self.wfile.flush()
+        lock = threading.Lock()
+        send = lambda obj: (lock.acquire(), ws_send(self.wfile, obj), lock.release())
+        ptys = {}
+        def pump(cid, fd):
+            while True:
+                try: out = os.read(fd, 65536)
+                except OSError: out = b""
+                if not out:
+                    try: send({"is": "closed", "id": cid, "reason": "detached"})
+                    except OSError: pass
+                    return
+                try: send({"is": "output", "id": cid, "data": base64.b64encode(out).decode()})
+                except OSError: return
         try:
             while True:
                 op, data = ws_recv(self.rfile)
                 if op == 8: return
                 if op != 1: continue
                 req = json.loads(data)
+                if req.get("do") == "input" and req.get("id") in ptys:
+                    os.write(ptys[req["id"]][1], base64.b64decode(req["data"]))
+                    continue
+                if req.get("do") == "resize" and req.get("id") in ptys:
+                    tty_size(ptys[req["id"]][1], req["cols"], req["rows"])
+                    continue
                 if req.get("do") != "open": continue
                 cid, ch = req["id"], req.get("channel", {})
                 kind, name = ch.get("kind"), ch.get("session")
-                ws_send(self.wfile, {"is": "opened", "id": cid})
+                if kind == "terminal" and FAKE_TMUX:
+                    pid, fd = tmux_attach(name)
+                    ptys[cid] = (pid, fd)
+                    send({"is": "opened", "id": cid})
+                    threading.Thread(target=pump, args=(cid, fd), daemon=True).start()
+                    continue
+                send({"is": "opened", "id": cid})
                 if kind == "chat":
-                    for frame in chat_frames(name, cid): ws_send(self.wfile, frame)
+                    for frame in chat_frames(name, cid): send(frame)
                 elif kind == "status":
-                    ws_send(self.wfile, {"is": "status", "id": cid, "poll": poll(name)})
+                    send({"is": "status", "id": cid, "poll": poll(name)})
                 elif kind == "events":
-                    ws_send(self.wfile, {"is": "events", "id": cid, "events": events})
+                    send({"is": "events", "id": cid, "events": events})
                 elif kind == "terminal":
-                    ws_send(self.wfile, {"is": "output", "id": cid, "data": base64.b64encode(TERMINAL.encode()).decode()})
+                    send({"is": "output", "id": cid, "data": base64.b64encode(TERMINAL.encode()).decode()})
         except (ConnectionError, OSError):
             return
+        finally:
+            for pid, fd in ptys.values():
+                try: os.kill(pid, 15); os.close(fd)
+                except OSError: pass
 
     def log_message(self, fmt, *a): sys.stderr.write("%s\n" % (fmt % a))
     def send(self, code, obj):

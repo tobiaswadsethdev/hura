@@ -61,6 +61,23 @@ export function applyAppearance(appearance: Appearance): void {
 
 dark.addEventListener("change", paint);
 
+/// Whether the terminals keep to dark when the window is light. What runs in
+/// one is often drawn for a dark terminal -- Claude Code's own default theme
+/// is -- so somebody who finds that unreadable in light can have the screen
+/// back as it was without giving up the window.
+let terminalsDark = false;
+
+/// The palette a terminal is in now.
+export function terminalScheme(): Scheme {
+  return terminalsDark ? "dark" : scheme();
+}
+
+export function applyTerminalsDark(on: boolean): void {
+  if (terminalsDark === on) return;
+  terminalsDark = on;
+  for (const listener of listeners) listener(scheme());
+}
+
 /// Told when the palette changes, for the panes that cannot read the
 /// stylesheet's -- see `palette.ts`.
 export function onScheme(listener: (scheme: Scheme) => void): () => void {

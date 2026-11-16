@@ -43,8 +43,8 @@
 /// the case where something later does not.
 ///
 /// `within` is where the properties are read: the window's by default, or a
-/// pane's own where it declares a palette of its own -- the terminal is
-/// `data-theme="dark"` whatever the window is in.
+/// pane's own where it declares a palette of its own -- a terminal declares
+/// the one Settings gives terminals, which can be dark in a light window.
 export function palette<K extends string>(
   wanted: Record<K, [string, string]>,
   within: Element = document.body,
