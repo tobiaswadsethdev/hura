@@ -86,13 +86,23 @@ function sameDay(a: number, b: number): boolean {
 }
 
 /// The text in a tool result, however it was sent. An image is left out:
-/// it is drawn, by `resultImages`.
+/// it is drawn, by `resultImages`. A `tool_reference`, which is how
+/// ToolSearch answers, is the name of the tool it loaded.
 function resultText(content: Extract<Block, { type: "tool_result" }>["content"]): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
     .filter((part) => part.type !== "image")
-    .map((part) => (part.type === "text" ? (part.text ?? "") : `[${part.type}]`))
+    .map((part) => {
+      switch (part.type) {
+        case "text":
+          return part.text ?? "";
+        case "tool_reference":
+          return part.tool_name ?? "";
+        default:
+          return `[${part.type}]`;
+      }
+    })
     .join("\n");
 }
 

@@ -17,7 +17,7 @@ export type Block =
   | {
       type: "tool_result";
       tool_use_id: string;
-      content?: string | Array<{ type: string; text?: string }>;
+      content?: string | Array<{ type: string; text?: string; tool_name?: string }>;
       is_error?: boolean;
     }
   | { type: "image" }

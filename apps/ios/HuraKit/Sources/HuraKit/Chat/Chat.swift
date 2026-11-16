@@ -330,10 +330,15 @@ public enum ChatTranscript {
         }
     }
 
+    /// A `tool_reference`, which is how ToolSearch answers, is the name of the
+    /// tool it loaded.
     static func resultText(_ content: JSONValue?) -> String {
         switch content {
         case let .string(s)?: s
-        case let .array(parts)?: parts.compactMap { $0["text"]?.string }.joined(separator: "\n")
+        case let .array(parts)?:
+            parts.compactMap { p in
+                p["type"]?.string == "tool_reference" ? p["tool_name"]?.string : p["text"]?.string
+            }.joined(separator: "\n")
         default: ""
         }
     }
