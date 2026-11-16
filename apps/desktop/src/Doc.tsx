@@ -10,6 +10,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { api, messageOf } from "./api";
 import type { DocBlock } from "./gen/DocBlock";
 import type { DocInline } from "./gen/DocInline";
+import { Zoomable } from "./Picture";
 
 // The tracker a document's images are attachments of. Without one, an image
 // is named, as it always was.
@@ -174,7 +175,7 @@ function Picture({ id, name }: { id: string; name: string }) {
   if (src) {
     return (
       <p className="doc-image">
-        <img src={src} alt={name} title={name} />
+        <Zoomable src={src} alt={name} title={name} />
       </p>
     );
   }

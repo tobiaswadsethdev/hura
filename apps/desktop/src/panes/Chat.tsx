@@ -45,6 +45,7 @@ import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
 import { PullBar } from "../chat/PullBar";
 import type { PullRequest as Pull } from "../gen/PullRequest";
 import { ContextRing } from "../chat/Usage";
+import { Zoomable } from "../Picture";
 
 /// The reply being written, from the stream events: the main thread's
 /// current message, block by block.
@@ -239,7 +240,7 @@ function AttachedFiles({ files, onRemove }: { files: Attached[]; onRemove: (key:
       {files.map((f) => (
         <li key={f.key} title={`${f.name}, ${size(f.size)}`}>
           {isPicture(f.mime) ? (
-            <img src={`data:${f.mime};base64,${f.data}`} alt={f.name} />
+            <Zoomable src={`data:${f.mime};base64,${f.data}`} alt={f.name} />
           ) : (
             <span className="chat-file">
               <Attach />
