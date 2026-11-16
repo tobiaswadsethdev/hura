@@ -51,6 +51,7 @@ use hura_core::integrations::View as IntegrationsView;
 use hura_core::ops::{NewOptions, NewSession, Picked, Poll};
 use hura_core::policy::View as PolicyView;
 use hura_core::projects::{NewProject, Project};
+use hura_core::queue::Queue;
 use hura_core::repos::Listing;
 use hura_core::session::Session;
 use hura_core::settings::{Settings, SettingsView};
@@ -750,6 +751,53 @@ fn create(server: String, session: NewSession) -> Result<String, Failed> {
         }
     })?;
     expect_reply!(reply, Reply::Created { name } => name, "a created session")
+}
+
+/// What is waiting on a server: sessions queued or scheduled to start, and
+/// messages waiting to be said.
+#[tauri::command(async)]
+fn queue(server: String) -> Result<Queue, Failed> {
+    queue_call(&server, Request::Queue)
+}
+
+/// Start a session later: at `at`, in seconds since the epoch, or once the
+/// queue has room when `at` is null.
+#[tauri::command(async)]
+fn enqueue(server: String, session: NewSession, at: Option<u64>) -> Result<Queue, Failed> {
+    queue_call(
+        &server,
+        Request::Enqueue {
+            new: Box::new(session),
+            at,
+        },
+    )
+}
+
+#[tauri::command(async)]
+fn unqueue(server: String, id: u64) -> Result<Queue, Failed> {
+    queue_call(&server, Request::Unqueue { id })
+}
+
+#[tauri::command(async)]
+fn start_queued(server: String, id: u64) -> Result<Queue, Failed> {
+    queue_call(&server, Request::StartQueued { id })
+}
+
+/// Say something to a session's agent once it has finished its turn, and not
+/// before `at` when there is one.
+#[tauri::command(async)]
+fn queue_message(
+    server: String,
+    name: String,
+    text: String,
+    at: Option<u64>,
+) -> Result<Queue, Failed> {
+    queue_call(&server, Request::QueueMessage { name, text, at })
+}
+
+fn queue_call(server: &str, request: Request) -> Result<Queue, Failed> {
+    let reply = remote(server)?.call(request).map_err(to_message)?;
+    expect_reply!(reply, Reply::Queue(queue) => queue, "the queue")
 }
 
 /// What the server holds on a session's behalf: the MCP catalog and what each
@@ -1781,6 +1829,11 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             servers,
+            queue,
+            enqueue,
+            unqueue,
+            start_queued,
+            queue_message,
             about,
             previews::previews,
             previews::preview_open,

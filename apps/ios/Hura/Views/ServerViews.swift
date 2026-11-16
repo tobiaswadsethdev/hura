@@ -94,6 +94,7 @@ struct ServerView: View {
                 Section {
                     let worktrees = server.worktrees(in: project)
                     ForEach(worktrees) { row($0) }
+                    ForEach(server.waiting(in: project)) { waitingRow($0) }
                     Button {
                         creatingIn = project
                     } label: {
@@ -104,9 +105,10 @@ struct ServerView: View {
                     ProjectHeader(project: project) { forgetting = project }
                 }
             }
-            if !server.unfiled.isEmpty {
+            if !server.unfiled.isEmpty || !server.waitingUnfiled.isEmpty {
                 Section(server.projects.isEmpty ? "Sessions" : "Not in a project") {
                     ForEach(server.unfiled) { row($0) }
+                    ForEach(server.waitingUnfiled) { waitingRow($0) }
                 }
             }
             if server.state == .online, server.projects.isEmpty, server.sessions.isEmpty {
@@ -238,6 +240,28 @@ struct ServerView: View {
         }
     }
 
+    /// A session on the server's queue, where it will appear. Nothing to
+    /// open yet: starting it now or taking it off is a swipe or a long press.
+    private func waitingRow(_ w: QueuedSession) -> some View {
+        QueuedRow(waiting: w, place: server.queue.place(of: w), limit: server.queue.limit)
+            .swipeActions {
+                if !w.started {
+                    Button("Remove") { act { try await server.unqueue(w.id) } }
+                        .tint(.red)
+                    Button("Start") { act { try await server.startQueued(w.id) } }
+                        .tint(.accentColor)
+                }
+            }
+            .contextMenu {
+                if !w.started {
+                    Button("Start Now", systemImage: "play") { act { try await server.startQueued(w.id) } }
+                    Button("Remove from Queue", systemImage: "trash", role: .destructive) {
+                        act { try await server.unqueue(w.id) }
+                    }
+                }
+            }
+    }
+
     private func act(_ work: @escaping () async throws -> Void) {
         Task {
             do { try await work() } catch { self.error = error.userMessage }
@@ -314,6 +338,41 @@ struct SessionRow: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.tertiary)
         }
+    }
+}
+
+/// A session waiting on the server's queue: a row like a session's, dimmed,
+/// with when it starts where the branch would be.
+struct QueuedRow: View {
+    let waiting: QueuedSession
+    let place: Int?
+    let limit: Int
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: waiting.at == nil ? "hourglass" : "calendar.badge.clock")
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(waiting.label).font(.body.weight(.medium)).lineLimit(1)
+                Text(when)
+                    .font(.caption)
+                    .foregroundStyle(waiting.failed == nil ? Color.secondary : Color.red)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+        }
+        .opacity(0.7)
+    }
+
+    private var when: String {
+        if waiting.started { return "Starting…" }
+        if let failed = waiting.failed { return "Couldn't start: \(failed)" }
+        if let at = waiting.at {
+            return "Starts \(at.formatted(.relative(presentation: .named))), \(at.formatted(date: .abbreviated, time: .shortened))"
+        }
+        if place == 1 { return "Next, when fewer than \(limit) are running" }
+        return "Queued, \(place.map { "\($0)" } ?? "?") in line"
     }
 }
 

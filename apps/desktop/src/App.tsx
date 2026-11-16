@@ -66,6 +66,7 @@ import { PullPanel, type PullStart } from "./Pull";
 import { TicketPanel } from "./Ticket";
 import { Split } from "./Split";
 import type { Against } from "./gen/Against";
+import type { QueueView } from "./gen/QueueView";
 import { keyOf, Tabs, type Tab } from "./Tabs";
 import { group, Tree } from "./Tree";
 import { UpdateBadge } from "./Update";
@@ -222,6 +223,9 @@ export default function App() {
   const [server, setServer] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
+  // What is waiting on the server: sessions to start and messages to say.
+  // Null from a server too old to have a queue, which then shows none.
+  const [queue, setQueue] = useState<QueueView | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -492,9 +496,14 @@ export default function App() {
   const refresh = useCallback(async () => {
     if (!server) return null;
     try {
-      const [list, known] = await Promise.all([api.sessions(server), api.projects(server)]);
+      const [list, known, waiting] = await Promise.all([
+        api.sessions(server),
+        api.projects(server),
+        api.queue(server).catch(() => null),
+      ]);
       setSessions(list);
       setProjects(known);
+      setQueue(waiting);
       setError(null);
       // A worktree that has gone should not leave the panes showing its last
       // known state, which is indistinguishable from it still being there.
@@ -716,7 +725,10 @@ export default function App() {
     return () => window.removeEventListener("focus", look);
   }, [inbox, inboxOpen]);
 
-  const groups = useMemo(() => group(projects, live), [projects, live]);
+  const groups = useMemo(
+    () => group(projects, live, queue?.sessions ?? []),
+    [projects, live, queue],
+  );
 
   // The two asks below follow the name and not the record. The list is
   // fetched again every few seconds and each fetch is a new object, so
@@ -1068,6 +1080,21 @@ export default function App() {
               api
                 .retitle(server, s.name, title)
                 .then(setSessions)
+                .catch((e) => setError(messageOf(e)));
+            }}
+            queueLimit={queue?.limit ?? 0}
+            onUnqueue={(w) => {
+              if (!server) return;
+              api
+                .unqueue(server, w.id)
+                .then(setQueue)
+                .catch((e) => setError(messageOf(e)));
+            }}
+            onStartQueued={(w) => {
+              if (!server) return;
+              api
+                .startQueued(server, w.id)
+                .then(setQueue)
                 .catch((e) => setError(messageOf(e)));
             }}
           />
@@ -1480,6 +1507,12 @@ export default function App() {
             // what puts it in the sidebar rather than the next poll.
             setSelected(name);
             void refreshUntil(name);
+          }}
+          onQueued={(waiting) => {
+            setCreatingIn(null);
+            setFromTask(null);
+            setFromPull(null);
+            setQueue(waiting);
           }}
         />
       )}

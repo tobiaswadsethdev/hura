@@ -44,6 +44,7 @@ import type { PortsView } from "./gen/PortsView";
 import type { NewOptions } from "./gen/NewOptions";
 import type { NewProject } from "./gen/NewProject";
 import type { Project } from "./gen/Project";
+import type { QueueView } from "./gen/QueueView";
 import type { NewSession } from "./gen/NewSession";
 import type { Poll } from "./gen/Poll";
 import type { Session } from "./gen/Session";
@@ -246,6 +247,17 @@ export const api = {
     invoke<Picked>("inspect", { server, path, branch }),
   newOptions: (server: string) => invoke<NewOptions>("new_options", { server }),
   create: (server: string, session: NewSession) => invoke<string>("create", { server, session }),
+
+  // What is waiting on a server: sessions to start, at a time or once the
+  // queue has room, and messages for a session's agent. `at` is seconds since
+  // the epoch; null is "when there is room" or "when its turn ends".
+  queue: (server: string) => invoke<QueueView>("queue", { server }),
+  enqueue: (server: string, session: NewSession, at: number | null) =>
+    invoke<QueueView>("enqueue", { server, session, at }),
+  unqueue: (server: string, id: number) => invoke<QueueView>("unqueue", { server, id }),
+  startQueued: (server: string, id: number) => invoke<QueueView>("start_queued", { server, id }),
+  queueMessage: (server: string, name: string, text: string, at: number | null) =>
+    invoke<QueueView>("queue_message", { server, name, text, at }),
 
   // What the server holds on your sessions' behalf. Every action answers with
   // the whole view, re-read: a secret is usually what a container was waiting

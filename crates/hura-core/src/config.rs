@@ -132,6 +132,9 @@ pub struct Config {
     /// How a session given no name is named. `None` is
     /// [`crate::naming::Mode::Ai`]; see [`Self::naming`].
     pub names: Option<crate::naming::Mode>,
+    /// How many sessions the queue lets run at once. `None` is
+    /// [`crate::queue::DEFAULT_LIMIT`]; see [`Self::queue_limit`].
+    pub queue_limit: Option<u32>,
 }
 
 impl Config {
@@ -368,6 +371,13 @@ impl Config {
             credentials.push(credential(&name, c).map_err(named)?);
         }
 
+        if raw.queue_limit == Some(0) {
+            return Err(invalid(
+                "queue_limit",
+                "must be at least 1, or the queue would never start anything".into(),
+            ));
+        }
+
         if raw.sandbox_cpus == Some(0) {
             return Err(invalid(
                 "sandbox_cpus",
@@ -410,6 +420,7 @@ impl Config {
             branch_prefix: raw.branch_prefix,
             interface,
             names,
+            queue_limit: raw.queue_limit,
         })
     }
 
@@ -418,6 +429,12 @@ impl Config {
     /// what every session made before the choice existed stays.
     pub fn interface(&self) -> chat::Interface {
         self.interface.unwrap_or(chat::Interface::Chat)
+    }
+
+    /// How many sessions the queue lets run at once before it holds the next
+    /// one back. A scheduled session starts at its time whatever this says.
+    pub fn queue_limit(&self) -> u32 {
+        self.queue_limit.unwrap_or(crate::queue::DEFAULT_LIMIT)
     }
 
     /// How a session given no name is named: by a model when one can be
@@ -512,6 +529,7 @@ struct Raw {
     branch_prefix: Option<String>,
     interface: Option<String>,
     names: Option<String>,
+    queue_limit: Option<u32>,
     /// `[credentials.NAME]` tables. Ordered by name so the create form lists
     /// them the same way every time.
     credentials: Option<std::collections::BTreeMap<String, RawCredential>>,

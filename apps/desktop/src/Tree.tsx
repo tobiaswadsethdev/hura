@@ -29,6 +29,7 @@ import type { Poll } from "./gen/Poll";
 import type { Usage } from "./gen/Usage";
 import type { Project } from "./gen/Project";
 import type { PullRequest as Pull } from "./gen/PullRequest";
+import type { QueuedSession } from "./gen/QueuedSession";
 import type { Session } from "./gen/Session";
 import { copy, useContextMenu } from "./ContextMenu";
 import { ChecksMark, sessionPull } from "./Inbox";
@@ -44,6 +45,9 @@ import {
   Plus,
   Ports,
   PullRequest,
+  Queued,
+  Scheduled,
+  Start,
   StateDot,
   Unsandboxed,
 } from "./icons";
@@ -54,15 +58,20 @@ export type Group = {
   label: string;
   hint: string;
   worktrees: Session[];
+  /// Sessions on the server's queue that will start in this group, at a time
+  /// or once there is room. Drawn after the worktrees, which is where they
+  /// will appear.
+  waiting: QueuedSession[];
 };
 
-/// Sort sessions into their projects.
-export function group(projects: Project[], sessions: Session[]): Group[] {
+/// Sort sessions, and the ones waiting to start, into their projects.
+export function group(projects: Project[], sessions: Session[], queued: QueuedSession[] = []): Group[] {
   const groups: Group[] = projects.map((project) => ({
     project,
     label: project.name,
     hint: project.repo,
     worktrees: sessions.filter((s) => s.project === project.name),
+    waiting: queued.filter((q) => q.new.project === project.name),
   }));
 
   // Anything whose project is gone counts as unassigned too, not just anything
@@ -70,12 +79,15 @@ export function group(projects: Project[], sessions: Session[]): Group[] {
   // purpose, and they would otherwise vanish from the tree with it.
   const known = new Set(projects.map((p) => p.name));
   const loose = sessions.filter((s) => !s.project || !known.has(s.project));
-  for (const repo of [...new Set(loose.map((s) => s.repo))].sort()) {
+  const looseQueued = queued.filter((q) => !q.new.project || !known.has(q.new.project));
+  const repos = [...loose.map((s) => s.repo), ...looseQueued.map((q) => q.new.repo)];
+  for (const repo of [...new Set(repos)].sort()) {
     groups.push({
       project: null,
       label: shortRepo(repo),
       hint: repo,
       worktrees: loose.filter((s) => s.repo === repo),
+      waiting: looseQueued.filter((q) => q.new.repo === repo),
     });
   }
   return groups;
@@ -107,6 +119,9 @@ export function Tree({
   onForget,
   onDestroy,
   onRename,
+  queueLimit,
+  onUnqueue,
+  onStartQueued,
 }: {
   /// How wide, in pixels. From the window's own preferences and written by the
   /// handle on this sidebar's right edge -- see `prefs.ts` and `Split.tsx`.
@@ -131,6 +146,11 @@ export function Tree({
   onDestroy: (session: Session) => void;
   /// Give a worktree a new title. Blank takes it away, and the slug shows.
   onRename: (session: Session, title: string) => void;
+  /// How many sessions the server's queue lets run at once.
+  queueLimit: number;
+  /// Take a waiting session off the queue, or start it now.
+  onUnqueue: (waiting: QueuedSession) => void;
+  onStartQueued: (waiting: QueuedSession) => void;
 }) {
   // Which groups are shut. Held as the collapsed set rather than the open one
   // so a project that appears while the window is open -- created here, or by
@@ -243,7 +263,7 @@ export function Tree({
                       no words: `no worktrees yet` was three of them restating
                       the `0` already sitting in the group's own header two
                       lines above. */}
-                  {g.worktrees.length === 0 ? (
+                  {g.worktrees.length === 0 && g.waiting.length === 0 ? (
                     <Empty size="row" icon={Branch} />
                   ) : (
                     g.worktrees.map((s) => (
@@ -263,6 +283,16 @@ export function Tree({
                       />
                     ))
                   )}
+                  {g.waiting.map((w) => (
+                    <Waiting
+                      key={w.id}
+                      waiting={w}
+                      place={placeOf(w, groups)}
+                      limit={queueLimit}
+                      onUnqueue={onUnqueue}
+                      onStartQueued={onStartQueued}
+                    />
+                  ))}
                 </div>
               )}
             </section>
@@ -443,6 +473,96 @@ function Worktree({
     )}
     </div>
   );
+}
+
+/// Where a queued session stands among every one waiting for room: 1 is
+/// next. Null for one waiting for a time instead.
+function placeOf(w: QueuedSession, groups: Group[]): number | null {
+  if (w.at !== null) return null;
+  const line = groups
+    .flatMap((g) => g.waiting)
+    .filter((q) => q.at === null && !q.started && q.failed === null)
+    .sort((a, b) => a.id - b.id);
+  const i = line.findIndex((q) => q.id === w.id);
+  return i < 0 ? null : i + 1;
+}
+
+/// A session on the server's queue: the shape of a worktree's row, dimmed,
+/// with when it starts where the branch would be. It is not a session yet,
+/// so there is nothing to select; what there is to do is in its menu.
+function Waiting({
+  waiting: w,
+  place,
+  limit,
+  onUnqueue,
+  onStartQueued,
+}: {
+  waiting: QueuedSession;
+  place: number | null;
+  limit: number;
+  onUnqueue: (waiting: QueuedSession) => void;
+  onStartQueued: (waiting: QueuedSession) => void;
+}) {
+  const menu = useContextMenu();
+  const name = w.new.name ?? "";
+  const when = w.started
+    ? "Starting…"
+    : w.failed !== null
+      ? `Could not start: ${w.failed}`
+      : w.at !== null
+        ? `Starts ${startsAt(w.at)}`
+        : place === 1
+          ? `Next, when fewer than ${limit} are running`
+          : `Queued, ${ordinal(place ?? 0)} in line`;
+  return (
+    <div
+      className="worktree-row waiting"
+      {...menu(() =>
+        w.started
+          ? [{ label: "Copy Name", icon: Copy, hint: name, run: () => copy(name) }]
+          : [
+              { label: "Start Now", icon: Start, run: () => onStartQueued(w) },
+              "separator",
+              { label: "Copy Name", icon: Copy, hint: name, run: () => copy(name) },
+              "separator",
+              { label: "Remove from Queue", icon: Forget, danger: true, run: () => onUnqueue(w) },
+            ],
+      )}
+    >
+      <div className="worktree" title={w.new.task || undefined}>
+        <span className="wt-state">{w.at !== null ? <Scheduled /> : <Queued />}</span>
+        <span className="wt-body">
+          <span className="wt-head">
+            <span className="wt-name" title={w.new.title ? name : undefined}>
+              {w.new.title ?? name}
+            </span>
+          </span>
+          <span className="wt-meta">
+            <span className={`wt-branch${w.failed !== null ? " failed" : ""}`} title={when}>
+              {when}
+            </span>
+          </span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/// When a scheduled session starts, as briefly as is unambiguous: a time
+/// alone today, a weekday within the week, and a date beyond that.
+export function startsAt(at: number): string {
+  const t = new Date(at * 1000);
+  const now = new Date();
+  const time = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (t.toDateString() === now.toDateString()) return `at ${time}`;
+  const days = (t.getTime() - now.getTime()) / 86_400_000;
+  if (days >= 0 && days < 6) return `${t.toLocaleDateString([], { weekday: "short" })} at ${time}`;
+  return `${t.toLocaleDateString([], { day: "numeric", month: "short" })} at ${time}`;
+}
+
+function ordinal(n: number): string {
+  const tail = n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th";
+  return `${n}${tail}`;
 }
 
 /// The row's name, as a field. Enter keeps it, Escape or leaving puts the row

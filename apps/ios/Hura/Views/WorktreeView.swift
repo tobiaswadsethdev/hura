@@ -167,7 +167,10 @@ struct WorktreeView: View {
             if let c = chats[conv] {
                 ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? ""), pull: pull,
                          usage: { [server, name] in try? await server.api.poll(name).usage },
-                         jump: jump?.conv == conv ? jump?.to : nil, onJumped: { jump = nil })
+                         jump: jump?.conv == conv ? jump?.to : nil, onJumped: { jump = nil },
+                         waiting: server.queue.messages(for: name),
+                         onSchedule: { [server, name] text, at in try await server.queueMessage(name, text: text, at: at) },
+                         onUnqueue: { [server] m in Task { try? await server.unqueue(m.id) } })
                     .environment(\.readPicture) { [server, name] path in
                         try? await server.api.file(name, path: path).image
                     }

@@ -28,7 +28,15 @@ struct ChatView: View {
     /// `onJumped` said, so that coming back later does not go there again.
     var jump: ChatJump?
     var onJumped: (() -> Void)?
+    /// Messages waiting on the server to be said to this session's agent.
+    var waiting: [QueuedMessage] = []
+    /// Keep a message on the server to say at a time. nil hides the clock.
+    var onSchedule: ((String, Date) async throws -> Void)?
+    /// Take one of `waiting` back.
+    var onUnqueue: ((QueuedMessage) -> Void)?
     @State private var target: ChatJump?
+    /// While a message is being written for later: the time it is for.
+    @State private var later: Date?
     @State private var found: FoundRow?
     @State private var draft = ""
     @State private var sending = false
@@ -229,6 +237,9 @@ struct ChatView: View {
                 AgentsStrip(agents: agents) { following = Following(id: $0.id) }
             }
             if let pull { PullBar(pull: pull) }
+            if !waiting.isEmpty {
+                WaitingMessages(messages: waiting, onRemove: onUnqueue)
+            }
             if !suggestions.isEmpty {
                 CommandSuggestions(commands: suggestions) { draft = "/\($0.name) " }
                     .padding(.vertical, 4)
@@ -336,7 +347,18 @@ struct ChatView: View {
     /// Stop while Claude works and nothing is typed; send otherwise.
     @ViewBuilder
     private var sendButton: some View {
-        if working && draft.isEmpty && attached.isEmpty {
+        if later != nil {
+            Button(action: send) {
+                Image(systemName: "calendar.badge.clock")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(Color.accentColor, in: Circle())
+                    .opacity(!canSend || sending ? 0.4 : 1)
+            }
+            .disabled(!canSend || sending)
+            .accessibilityLabel("Schedule")
+        } else if working && draft.isEmpty && attached.isEmpty {
             Button {
                 Task { try? await chat.interrupt() }
             } label: {
@@ -371,7 +393,19 @@ struct ChatView: View {
                 AttachedStrip(files: attached) { f in attached.removeAll { $0.id == f.id } }
             }
             modeNote
-            TextField("Message Claude", text: $draft, axis: .vertical)
+            if let at = later {
+                HStack(spacing: 6) {
+                    DatePicker("Say it at", selection: Binding(get: { at }, set: { later = $0 }),
+                               in: Date.now..., displayedComponents: [.date, .hourAndMinute])
+                        .font(.footnote)
+                    Button { later = nil } label: { Image(systemName: "xmark.circle.fill") }
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Send now instead")
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
+            TextField(later == nil ? "Message Claude" : "Message for later", text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 // A `!` command is code, and set as code.
                 .font(isShell ? Font.body.monospaced() : Font.body)
@@ -397,6 +431,16 @@ struct ChatView: View {
                 ModelMenu(chat: chat)
                 ModeMenu(chat: chat)
                 Spacer(minLength: 0)
+                // Text only: a file isn't something the server keeps for later.
+                if onSchedule != nil, later == nil, attached.isEmpty, !isShell {
+                    Button { later = .now.addingTimeInterval(60 * 60) } label: {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 30, height: 34)
+                    }
+                    .accessibilityLabel("Send later")
+                }
                 if chat.status == "compacting" {
                     Text("compacting").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -439,6 +483,22 @@ struct ChatView: View {
     }
 
     private func send() {
+        if let at = later, let onSchedule {
+            let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return }
+            sending = true
+            Task {
+                defer { sending = false }
+                do {
+                    try await onSchedule(text, at)
+                    draft = ""
+                    later = nil
+                } catch {
+                    chat.error = error.userMessage
+                }
+            }
+            return
+        }
         if case let .shell(line) = input {
             run(line)
             return
@@ -774,3 +834,35 @@ final class ListEnd {
     }
 }
 
+/// Messages waiting on the server to be said, above the composer: when, what,
+/// and a way to take one back.
+private struct WaitingMessages: View {
+    let messages: [QueuedMessage]
+    let onRemove: ((QueuedMessage) -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(messages) { m in
+                HStack(spacing: 8) {
+                    Image(systemName: m.at == nil ? "hourglass" : "calendar.badge.clock")
+                        .foregroundStyle(.secondary)
+                    Text(m.at.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "After this turn")
+                        .font(.caption.weight(.medium))
+                    Text(m.text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let onRemove {
+                        Button { onRemove(m) } label: { Image(systemName: "xmark") }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Don't say it")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .glass(in: RoundedRectangle(cornerRadius: 18))
+        .padding(.horizontal, 12)
+        .buttonStyle(.plain)
+    }
+}

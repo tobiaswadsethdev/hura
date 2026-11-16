@@ -35,6 +35,9 @@ public final class Server: Identifiable {
     /// Why the last delete failed; the session is back in the list.
     public var deleteFailure: String?
     public private(set) var projects: [Project] = []
+    /// What is waiting on the server: sessions to start and messages to say.
+    /// Empty from a server too old to have a queue.
+    public private(set) var queue = QueueView()
     /// The agent's state per session name, for the sessions that have one.
     public private(set) var reports: [String: AgentReport] = [:]
     /// Why the last refresh failed, when the server answered with a failure
@@ -94,11 +97,13 @@ public final class Server: Identifiable {
         let client = self.client
         do {
             async let named = client.projects()
+            async let waiting = client.queue()
             let listed = try await client.sessions()
             self.listed = listed
             deleting.formIntersection(listed.map(\.name))
             // An older hurad without projects still lists its sessions.
             if let named = try? await named { projects = named }
+            if let waiting = try? await waiting { queue = waiting }
             problem = nil
             state = .online
             for s in listed {
@@ -154,6 +159,36 @@ public final class Server: Identifiable {
     /// A project's worktrees, newest first.
     public func worktrees(in project: Project) -> [Session] {
         sessions.filter { $0.project == project.name }.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// Sessions waiting to start in a project, in the order they will.
+    public func waiting(in project: Project) -> [QueuedSession] {
+        queue.sessions.filter { $0.new.project == project.name }
+    }
+
+    /// Sessions waiting to start in no project this server knows.
+    public var waitingUnfiled: [QueuedSession] {
+        let known = Set(projects.map(\.name))
+        return queue.sessions.filter { $0.new.project.map { !known.contains($0) } ?? true }
+    }
+
+    /// Starts a session later: at `at`, or once the queue has room.
+    public func enqueue(_ session: NewSession, at: Date?) async throws {
+        queue = try await client.enqueue(session, at: at)
+    }
+
+    public func unqueue(_ id: Int64) async throws {
+        queue = try await client.unqueue(id)
+    }
+
+    public func startQueued(_ id: Int64) async throws {
+        queue = try await client.startQueued(id)
+    }
+
+    /// Says something to a session's agent once its turn is over, and not
+    /// before `at`.
+    public func queueMessage(_ name: String, text: String, at: Date?) async throws {
+        queue = try await client.queueMessage(name, text: text, at: at)
     }
 
     /// Sessions that belong to no project this server knows.

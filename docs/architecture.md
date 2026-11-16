@@ -110,6 +110,8 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `projects.rs` | the repositories someone has said they are working on, which is what worktrees are grouped under. A decision, not a discovery: stored rather than derived from the sessions that exist |
 | `git.rs` | the working copy inside a sandbox as git describes it, and the operations on it. The status parser is pure, because git's output is the part that is easy to get subtly wrong and impossible to notice |
 | `files.rs` | reading a worktree's files from outside it, one directory at a time. Read-only: the agent owns the working copy |
+| `queue.rs` | sessions waiting to start, at a time or once fewer than the limit are running, and messages waiting to be said to a session's agent. On disk, and taken off only once done, so a restart of the server or the machine carries on where it was. What to start and what to say are pure functions over the sessions as seen; the looking is `schedule.rs`'s |
+| `schedule.rs` | *(hurad)* acting on the queue every few seconds: starting what is due through the same path a window's create takes, and telling an idle agent its next message. Polls sessions only when something waiting needs to know |
 | `comments.rs` | review comments on a diff, kept per session until they go to the agent as one message; a pull request's reviewers' comments sent the same way, each once |
 | `config.rs` | `~/.config/hura/config.toml`, and which default wins |
 | `doctor.rs` | the preflight checks, each carrying its fix |

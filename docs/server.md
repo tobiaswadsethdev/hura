@@ -187,6 +187,38 @@ moved or a token that was revoked shows up:
               machine should dial. `hurad remotes --forget work` drops it
 ```
 
+## Queued and scheduled sessions
+
+A session can start later instead of now: at a time, or once fewer than
+`queue_limit` sessions (2 unless the config file says otherwise) are creating,
+seeding or running. Starting a worktree from an app offers **Now**, **When one
+is free** and **At a time**; from the terminal it is a flag:
+
+```sh
+hurad new --task "Upgrade the dependencies" --at 02:00   # the next 02:00 here
+hurad new --task "Fix the flaky test" --queue             # when there is room
+hurad queue                  # what is waiting
+hurad queue start 3          # start #3 now, whatever the limit says
+hurad queue rm 3             # take it off
+```
+
+`--at` takes `02:00`, `2026-11-20 14:30`, or `+90m`, `+2h`, `+1d`. A session
+scheduled for a time starts then whether or not the queue has room; one that is
+waiting on someone (a permission request, a question) does not count as
+running.
+
+Messages can wait too. `hurad queue say <session> --at 08:00 "Rebase on main and
+rerun the tests"` -- or the clock beside a chat's send button -- is said to the
+session's agent at that time, or when its turn ends if it is busy then. Without a
+time it is said as soon as the agent has finished what it is doing. Several
+for one session are said one at a time, in the order they were written.
+
+All of it is kept in `~/.config/hura/queue.json` and acted on by `hurad serve`,
+so it happens with nothing connected, and carries on after the server or the
+machine restarts: something that was being started when the server stopped is
+started again unless its session had already been made. Both apps list the
+queue in the project tree, and a chat shows what is waiting to be said to it.
+
 ## What this costs
 
 **An authenticated client can create sandboxes, which are microVMs, on the

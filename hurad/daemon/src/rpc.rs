@@ -14,7 +14,9 @@ use std::path::Path;
 use hura_core::backend::{Backend, Backends};
 use hura_core::session::Session;
 use hura_core::store::Store;
-use hura_core::{chat, comments, config, files, git, image, ops, projects, repos, secrets, skills};
+use hura_core::{
+    chat, comments, config, files, git, image, ops, projects, queue, repos, secrets, skills,
+};
 use hura_proto::{Failure, GitOp, McpOp, Outcome, Reply, Request};
 
 /// Answer one request.
@@ -248,6 +250,31 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             Err(e) => Failure::failed(format!("could not read the config file: {e}")).into(),
         },
         Request::Create(new) | Request::CreateFromPull(new) => create(*new),
+        Request::Queue => queue_view(),
+        Request::Enqueue { new, at } => {
+            let cfg = match config::Config::load() {
+                Ok(c) => c,
+                Err(e) => {
+                    return Failure::failed(format!("could not read the config file: {e}")).into();
+                }
+            };
+            match queue::add(*new, at, &cfg) {
+                Ok(_) => queue_view(),
+                Err(e) => Failure::failed(e).into(),
+            }
+        }
+        Request::Unqueue { id } => queue_change(
+            |q| q.remove(id),
+            "it has already started, or was never queued",
+        ),
+        Request::StartQueued { id } => queue_change(
+            |q| q.start_now(id, queue::now()),
+            "it has already started, or was never queued",
+        ),
+        Request::QueueMessage { name, text, at } => match queue::say(&name, &text, at) {
+            Ok(_) => queue_view(),
+            Err(e) => Failure::failed(e).into(),
+        },
 
         // The list, and not an acknowledgement: `destroy` answers whether it
         // deleted a sandbox or only a record, and neither is what a client
@@ -484,46 +511,71 @@ fn create(new: hura_core::ops::NewSession) -> Outcome {
     };
     let name = draft.name.clone();
 
-    std::thread::spawn(move || {
-        // The CLI builds the image before creating, because the build streams
-        // docker's output to a terminal. There is no terminal here, so it
-        // happens on this thread with the session sitting in `creating` -- which
-        // is what a client watching the list sees either way, only for longer
-        // the first time a set of toolchains is used.
-        let backends = backends();
-        // Said on the record as well as here, because the window that asked
-        // for this session reads the record and nothing else. `ops::create`
-        // records its own failures, so for those this only prints; the ones it
-        // cannot record are the image build below and its refusals before its
-        // first write, which would otherwise leave no session at all.
-        let failed = |why: String| {
-            eprintln!("hurad: {}: {why}", draft.name);
-            if let Err(e) = ops::record_failure(&draft, &why) {
-                eprintln!("hurad: {}: could not record why: {e}", draft.name);
-            }
-        };
-        if let Err(e) = image::ensure_session(&draft, &cfg) {
-            failed(format!("could not build the image: {e}"));
-            return;
-        }
-        // The managed MCP containers, before the seeder registers them with the
-        // agent. Here rather than in `ops::create` for the same reason the image
-        // build is here: it is a side effect on the host with output of its own,
-        // and `ops` is what both front ends share. A server that will not start
-        // is a warning -- the session is still worth having, and the agent will
-        // report the tool as unreachable, which the events pane explains.
-        for warning in hura_core::mcp::ensure(cfg.mcp()) {
-            eprintln!("hurad: {}: {warning}", draft.name);
-        }
-        // Progress is dropped rather than reported: the steps map onto states
-        // the record already carries, and a channel per create would be a second
-        // way to learn the same thing.
-        if let Err(e) = ops::create(&backends, &draft, &mut |_| {}) {
-            failed(format!("could not create the session: {e}"));
-        }
-    });
+    std::thread::spawn(move || start(&draft, &cfg));
 
     Reply::Created { name }.into()
+}
+
+/// Build what a session needs on this machine and make it, on the calling
+/// thread, until it has started or failed. What a create from a client runs on
+/// a thread of its own, and what the queue runs for a session whose turn has
+/// come: both should start the same way.
+pub fn start(draft: &ops::Draft, cfg: &config::Config) {
+    // The CLI builds the image before creating, because the build streams
+    // docker's output to a terminal. There is no terminal here, so it
+    // happens on this thread with the session sitting in `creating` -- which
+    // is what a client watching the list sees either way, only for longer
+    // the first time a set of toolchains is used.
+    let backends = backends();
+    // Said on the record as well as here, because the window that asked
+    // for this session reads the record and nothing else. `ops::create`
+    // records its own failures, so for those this only prints; the ones it
+    // cannot record are the image build below and its refusals before its
+    // first write, which would otherwise leave no session at all.
+    let failed = |why: String| {
+        eprintln!("hurad: {}: {why}", draft.name);
+        if let Err(e) = ops::record_failure(draft, &why) {
+            eprintln!("hurad: {}: could not record why: {e}", draft.name);
+        }
+    };
+    if let Err(e) = image::ensure_session(draft, cfg) {
+        failed(format!("could not build the image: {e}"));
+        return;
+    }
+    // The managed MCP containers, before the seeder registers them with the
+    // agent. Here rather than in `ops::create` for the same reason the image
+    // build is here: it is a side effect on the host with output of its own,
+    // and `ops` is what both front ends share. A server that will not start
+    // is a warning -- the session is still worth having, and the agent will
+    // report the tool as unreachable, which the events pane explains.
+    for warning in hura_core::mcp::ensure(cfg.mcp()) {
+        eprintln!("hurad: {}: {warning}", draft.name);
+    }
+    // Progress is dropped rather than reported: the steps map onto states
+    // the record already carries, and a channel per create would be a second
+    // way to learn the same thing.
+    if let Err(e) = ops::create(&backends, draft, &mut |_| {}) {
+        failed(format!("could not create the session: {e}"));
+    }
+}
+
+/// What is waiting, as every queue request answers.
+fn queue_view() -> Outcome {
+    let cfg = config::Config::load().unwrap_or_default();
+    match queue::view(&cfg) {
+        Ok(q) => Reply::Queue(q).into(),
+        Err(e) => Failure::failed(format!("could not read the queue: {e}")).into(),
+    }
+}
+
+/// Change the queue, and answer with it, or with `missing` when the change
+/// found nothing to change.
+fn queue_change(f: impl FnOnce(&mut queue::Queue) -> bool, missing: &str) -> Outcome {
+    match queue::update(f) {
+        Ok(true) => queue_view(),
+        Ok(false) => Failure::failed(missing).into(),
+        Err(e) => Failure::failed(format!("could not change the queue: {e}")).into(),
+    }
 }
 
 fn ls(backends: &Backends) -> Outcome {

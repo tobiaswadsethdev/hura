@@ -34,6 +34,11 @@ struct NewWorktreeView: View {
     @State private var error: String?
     /// The work branch a ticket or a pull request names; empty otherwise.
     @State private var branch = ""
+    /// Now, once the server's queue has room, or at a time.
+    @State private var when: When = .now
+    @State private var at = Date.now.addingTimeInterval(60 * 60)
+
+    enum When: Hashable { case now, queue, at }
 
     var body: some View {
         NavigationStack {
@@ -57,7 +62,8 @@ struct NewWorktreeView: View {
                     if busy {
                         ProgressView()
                     } else {
-                        Button("Start", action: submit).disabled(options == nil)
+                        Button(when == .now ? "Start" : when == .queue ? "Queue" : "Schedule", action: submit)
+                            .disabled(options == nil)
                     }
                 }
             }
@@ -115,6 +121,24 @@ struct NewWorktreeView: View {
                 } else {
                     Text("Its own VM, under a network policy.")
                 }
+            }
+        }
+        Section {
+            Picker("Starts", selection: $when) {
+                Text("Now").tag(When.now)
+                Text("When one is free").tag(When.queue)
+                Text("At a time").tag(When.at)
+            }
+            if when == .at {
+                DatePicker("At", selection: $at, in: Date.now..., displayedComponents: [.date, .hourAndMinute])
+            }
+        } footer: {
+            switch when {
+            case .now: EmptyView()
+            case .queue:
+                Text("Starts once fewer sessions are running than the server's queue allows: \(server.queue.limit) at once.")
+            case .at:
+                Text("The server keeps it and starts it then, whether or not this phone is around.")
             }
         }
         Section {
@@ -283,9 +307,15 @@ struct NewWorktreeView: View {
         Task {
             defer { busy = false }
             do {
-                let created = try await server.create(session)
-                dismiss()
-                onCreated(created)
+                switch when {
+                case .now:
+                    let created = try await server.create(session)
+                    dismiss()
+                    onCreated(created)
+                case .queue, .at:
+                    try await server.enqueue(session, at: when == .at ? at : nil)
+                    dismiss()
+                }
             } catch {
                 self.error = error.userMessage
             }

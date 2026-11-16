@@ -27,7 +27,9 @@ import {
   Policy,
   Publish,
   PullRequest as PullMark,
+  Queued,
   Sandbox,
+  Scheduled,
   Secret,
   Skill,
   Start,
@@ -40,6 +42,7 @@ import type { Interface } from "./gen/Interface";
 import type { NewOptions } from "./gen/NewOptions";
 import type { Picked } from "./gen/Picked";
 import type { Project } from "./gen/Project";
+import type { QueueView } from "./gen/QueueView";
 import type { PullOrigin } from "./gen/PullOrigin";
 import type { PullRequest } from "./gen/PullRequest";
 import type { Task } from "./gen/Task";
@@ -55,6 +58,7 @@ export function NewWorktreeDialog({
   fromPull,
   onClose,
   onCreated,
+  onQueued,
 }: {
   server: string;
   project: Project;
@@ -67,6 +71,8 @@ export function NewWorktreeDialog({
   fromPull?: { pull: PullRequest; mode: PullStart } | null;
   onClose: () => void;
   onCreated: (name: string) => void;
+  /// Started later instead: the queue as the server now has it.
+  onQueued: (queue: QueueView) => void;
 }) {
   const [options, setOptions] = useState<NewOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +108,7 @@ export function NewWorktreeDialog({
             options={options}
             onClose={onClose}
             onCreated={onCreated}
+            onQueued={onQueued}
           />
         )}
       </div>
@@ -118,6 +125,7 @@ function Form({
   options,
   onClose,
   onCreated,
+  onQueued,
 }: {
   server: string;
   project: Project;
@@ -126,6 +134,7 @@ function Form({
   options: NewOptions;
   onClose: () => void;
   onCreated: (name: string) => void;
+  onQueued: (queue: QueueView) => void;
 }) {
   // A ticket fills three fields and leaves the rest alone. The prompt carries
   // the key and the link as well as the title: the agent's first instruction is
@@ -156,6 +165,11 @@ function Form({
   const [worktree, setWorktree] = useState(false);
   const [facts, setFacts] = useState<Facts | null>(null);
   const [busy, setBusy] = useState(false);
+  // Now, once the server's queue has room, or at a time. The time is this
+  // machine's, in the form a datetime input gives it, and goes to the server
+  // as an instant.
+  const [when, setWhen] = useState<When>("now");
+  const [at, setAt] = useState(() => localInput(Date.now() + 60 * 60 * 1000));
   const [error, setError] = useState<string | null>(null);
   // The skills on *this* machine, pushed to the server on submit. Read on the
   // Rust side of the bridge: `~/.claude/skills` is here, and a webview cannot
@@ -223,7 +237,7 @@ function Form({
       // wrong answer.
       if (mine.length > 0) await api.uploadSkills(server);
 
-      const created = await api.create(server, {
+      const session = {
         project: project.name,
         branch: branch || null,
         // A note on the session of where the work came from.
@@ -246,8 +260,14 @@ function Form({
         start: true,
         interface: agentInterface,
         worktree,
-      });
-      onCreated(created);
+      };
+      if (when === "now") {
+        onCreated(await api.create(server, session));
+      } else {
+        const instant = when === "at" ? epochOf(at) : null;
+        if (when === "at" && instant === null) throw new Error("Pick a time to start it at");
+        onQueued(await api.enqueue(server, session, instant));
+      }
     } catch (e) {
       setError(messageOf(e));
       setBusy(false);
@@ -347,6 +367,25 @@ function Form({
             onChange={(e) => setBase(e.target.value)}
           />
         </label>
+        <label className="chip-field" title="When it starts">
+          {when === "now" ? <Start /> : when === "queue" ? <Queued /> : <Scheduled />}
+          <Select
+            value={when}
+            onChange={(v) => setWhen(v as When)}
+            aria-label="When"
+            options={[
+              { value: "now", label: "Now" },
+              { value: "queue", label: "When one is free", hint: "Once fewer are running than the server's limit" },
+              { value: "at", label: "At a time", hint: "Kept by the server, through a restart" },
+            ]}
+          />
+        </label>
+        {when === "at" && (
+          <label className="chip-field" title="Starts at, on this machine's clock">
+            <Scheduled />
+            <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
+          </label>
+        )}
         <label className="chip-field" title="How you talk to the agent">
           <Agent />
           <Select
@@ -476,12 +515,29 @@ function Form({
           ctrl ↵
         </span>
         <button className="go" disabled={busy} onClick={() => void submit()}>
-          {busy ? <Busy className="turning" /> : <Start />}
-          {busy ? "Starting…" : "Start"}
+          {busy ? <Busy className="turning" /> : when === "now" ? <Start /> : when === "queue" ? <Queued /> : <Scheduled />}
+          {busy ? (when === "now" ? "Starting…" : "Adding…") : when === "now" ? "Start" : when === "queue" ? "Queue" : "Schedule"}
         </button>
       </footer>
     </div>
   );
+}
+
+type When = "now" | "queue" | "at";
+
+/// A time as a `datetime-local` input holds it: this machine's clock, to the
+/// minute.
+export function localInput(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/// What a `datetime-local` input says, as seconds since the epoch; null for a
+/// blank or half-typed one.
+export function epochOf(input: string): number | null {
+  const ms = new Date(input).getTime();
+  return input && Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
 /// One line of choices: the icon says what they are, the tooltip says it in
