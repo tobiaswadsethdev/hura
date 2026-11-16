@@ -33,7 +33,7 @@ private struct GlassBackground<S: Shape>: ViewModifier {
             content
                 .background((tint ?? .clear).opacity(0.5), in: shape)
                 .background(.ultraThinMaterial, in: shape)
-                .overlay(shape.stroke(Color.white.opacity(0.1), lineWidth: 0.5))
+                .overlay(shape.stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
         }
     }
 }

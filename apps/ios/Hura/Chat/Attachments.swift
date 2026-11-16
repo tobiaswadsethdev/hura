@@ -84,7 +84,7 @@ struct AttachedStrip: View {
                 .lineLimit(1)
                 .frame(maxWidth: 160, minHeight: 56)
                 .padding(.horizontal, 8)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         }
     }
 }

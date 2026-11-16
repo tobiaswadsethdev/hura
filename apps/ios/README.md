@@ -32,6 +32,10 @@ its project, to start now or take off; and the clock beside a chat's send
 button keeps a message to be said at a time, or when the turn running then
 ends. See [docs/server.md](../../docs/server.md#queued-and-scheduled-sessions).
 
+The app is light or dark as the phone is, or as chosen under Account →
+Settings; a conversation follows it, and a terminal stays dark either way,
+as terminals are drawn for.
+
 The Search tab searches every conversation the phone has seen, including
 ended ones and deleted sessions: words in what was said, `file:` for the files
 a tool call touched and `tool:` for the tool, as on the desktop. A result opens

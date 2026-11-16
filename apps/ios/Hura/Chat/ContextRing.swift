@@ -42,7 +42,7 @@ struct ContextRing: View {
 
 /// Yellow from 70, red from 90: the desktop's steps.
 private func fullness(_ pct: Double, plain: Color) -> Color {
-    pct >= 90 ? .red : pct >= 70 ? .yellow : plain
+    pct >= 90 ? .red : pct >= 70 ? Color.working : plain
 }
 
 private struct UsageCard: View {

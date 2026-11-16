@@ -10,6 +10,7 @@ struct HuraApp: App {
     private var trackers: TrackersModel { delegate.trackers }
     @State private var tab = 0
     @State private var pendingPairURL: String?
+    @AppStorage(Appearance.key) private var appearance: Appearance = .system
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -68,6 +69,7 @@ struct HuraApp: App {
             .task {
                 // Launch: scenePhase may already be .active, so onChange
                 // wouldn't fire.
+                appearance.apply()
                 model.resumeAll()
                 trackers.resume()
                 await lock.unlock()

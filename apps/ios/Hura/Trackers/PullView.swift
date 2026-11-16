@@ -315,7 +315,7 @@ struct PullView: View {
         switch s {
         case "passing": .green
         case "failing": .red
-        case "pending": .yellow
+        case "pending": Color.working
         default: .secondary
         }
     }
