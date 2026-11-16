@@ -21,7 +21,11 @@
    the primary action and the lit control -- never for an agent's state. The
    iOS app has no such setting and uses the system's blue, which is what this
    is too until somebody picks another. */
-:root {
+/* Dark: the default, and the palette everything below was drawn against.
+   Also any subtree marked `data-theme="dark"`, which is how the terminal stays
+   dark whatever the window is in -- custom properties inherit, so a pane can
+   take the other palette by declaring it, as the iOS app's terminal does. */
+:root, [data-theme="dark"] {
   /* The content area: the editor, the dock, a screen. What the window is
      *made of* behind the translucent sidebar and toolbar. */
   --bg: #1e1e1e;
@@ -84,6 +88,98 @@
     inset 0 0.5px 0 rgb(255 255 255 / 0.12),
     0 12px 32px rgb(0 0 0 / 0.45);
 
+  /* The foreground as a bare triplet, for a fill written `rgb(var(--fg) / a)`
+     -- the alpha trick above, where a rule wants its own alpha rather than one
+     of the named ones. White here, black in light. */
+  --fg: 255 255 255;
+
+  /* The surfaces that are not the foreground at an alpha, because in light
+     they stop being tints and become white: a field, a button, the raised
+     segment, a menu's material. */
+  --field: rgb(0 0 0 / 0.2);
+  --track: rgb(0 0 0 / 0.22);
+  --control: rgb(255 255 255 / 0.1);
+  --control-hover: rgb(255 255 255 / 0.16);
+  --control-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.1), 0 0.5px 1px rgb(0 0 0 / 0.3);
+  --segment-on: rgb(255 255 255 / 0.16);
+  --segment-shadow: 0 1px 2px rgb(0 0 0 / 0.3), inset 0 0.5px 0 rgb(255 255 255 / 0.1);
+  --menu: rgb(40 40 42 / 0.82);
+  /* The edge of the sidebar material against the content, on macOS. */
+  --edge: rgb(0 0 0 / 0.35);
+  /* Behind a dialog, and the drops under the things that float highest. */
+  --scrim: rgb(0 0 0 / 0.4);
+  --flyout-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
+  --sheet-shadow: 0 24px 64px rgb(0 0 0 / 0.4);
+  /* Behind a picture, so a transparent one shows where it ends. */
+  --checker: #222;
+  --checker-2: #2c2c2c;
+
+  color-scheme: dark;
+}
+
+/* Light: macOS's light appearance, by the same rules -- the label greys at
+   AppKit's alphas over black, lines and fills the foreground at an alpha, and
+   the system hues. Two of those are deepened, as the iOS app does: yellow and
+   green are made to be read on black, and on white they can hardly be read.
+
+   Chosen by `theme.ts`, which puts the attribute on <html> -- from the
+   window's preference, or from the system's when that is "System". */
+[data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #fbfbfc;
+  --surface-2: #f2f2f4;
+  --sunken: #f6f6f8;
+  --chrome: #ececee;
+
+  --text: rgb(0 0 0 / 0.85);
+  --dim: rgb(60 60 67 / 0.66);
+  --dimmer: rgb(60 60 67 / 0.4);
+
+  --line: rgb(0 0 0 / 0.1);
+  --line-strong: rgb(0 0 0 / 0.17);
+  --hover: rgb(0 0 0 / 0.05);
+  --selected: rgb(0 0 0 / 0.08);
+  --selected-line: rgb(0 0 0 / 0.14);
+  --hover-line: rgb(0 0 0 / 0.26);
+
+  --accent: #007aff;
+  --accent-ink: #fff;
+  --ring: color-mix(in srgb, var(--accent) 50%, transparent);
+  --primary: var(--accent);
+  --primary-ink: var(--accent-ink);
+
+  /* The iOS app's light `working`, so the two agree. */
+  --working: #c78a00;
+  --attention: #a64fd6;
+  --ok: #24a148;
+  --bad: #e5342b;
+  --warn: #e07800;
+
+  --float-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.16),
+    0 12px 32px rgb(0 0 0 / 0.16);
+
+  --fg: 0 0 0;
+
+  --field: #fff;
+  --track: rgb(0 0 0 / 0.06);
+  --control: #fff;
+  --control-hover: #f3f3f5;
+  --control-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.16), 0 0.5px 1px rgb(0 0 0 / 0.1);
+  --segment-on: #fff;
+  --segment-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.14);
+  --menu: rgb(246 246 248 / 0.86);
+  --edge: rgb(0 0 0 / 0.12);
+  --scrim: rgb(0 0 0 / 0.18);
+  --flyout-shadow: -12px 0 32px rgb(0 0 0 / 0.12);
+  --sheet-shadow: 0 24px 64px rgb(0 0 0 / 0.18);
+  --checker: #fff;
+  --checker-2: #e9e9eb;
+
+  color-scheme: light;
+}
+
+:root {
   /* Chrome is set in the UI font and content in the mono one. Content means
      code: a terminal, a diff, a file, a command to copy. A branch name in the
      sidebar is a *label* and is set as one, as Xcode and Tower do -- the old
@@ -112,15 +208,13 @@
   --font-mono:
     ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", "Adwaita Mono",
     "Liberation Mono", Menlo, Consolas, monospace;
-
-  color-scheme: dark;
 }
 
 /* The user's own accent colour, where WebKit on macOS can name it. Guarded,
    because an engine that does not know the keyword would drop the whole
    declaration and leave `--accent` unset rather than falling back. */
 @supports (color: -apple-system-control-accent) {
-  :root { --accent: -apple-system-control-accent; }
+  :root, [data-theme] { --accent: -apple-system-control-accent; }
 }
 
 * { box-sizing: border-box; }
@@ -226,7 +320,7 @@ body { user-select: none; }
    field wins over it. The terminal and the editor have text areas of their
    own that are not fields, and keep their own styles. */
 :where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"]), textarea):not(:where(.monaco-editor, .xterm) *) {
-  background: rgb(0 0 0 / 0.2);
+  background: var(--field);
   color: var(--text);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
@@ -287,7 +381,7 @@ html.mac { --chrome: transparent; }
   border-bottom: 1px solid var(--line);
   flex: none;
 }
-html.mac .app > header { padding-left: 86px; border-bottom-color: rgb(0 0 0 / 0.35); }
+html.mac .app > header { padding-left: 86px; border-bottom-color: var(--edge); }
 .app > header .mark {
   display: inline-flex;
   align-items: baseline;
@@ -470,7 +564,7 @@ main { display: flex; flex: 1; min-height: 0; }
   border-right: 1px solid var(--line);
   background: var(--chrome);
 }
-html.mac .sidebar { border-right-color: rgb(0 0 0 / 0.35); }
+html.mac .sidebar { border-right-color: var(--edge); }
 .tree {
   flex: 1;
   min-height: 0;
@@ -892,7 +986,7 @@ html.mac .sidebar { border-right-color: rgb(0 0 0 / 0.35); }
 .file.picture { align-items: center; justify-content: center; overflow: auto; }
 .file.picture img {
   max-width: calc(100% - 32px); max-height: calc(100% - 64px); object-fit: contain;
-  background: repeating-conic-gradient(#222 0 25%, #2c2c2c 0 50%) 0 0 / 16px 16px;
+  background: repeating-conic-gradient(var(--checker) 0 25%, var(--checker-2) 0 50%) 0 0 / 16px 16px;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1285,7 +1379,7 @@ main { position: relative; }
   display: flex;
   /* The width and its cap are inline styles: the width is dragged by the
      `.split` on the left edge -- see `flyoutMax` in `prefs.ts`. */
-  box-shadow: -12px 0 32px rgb(0 0 0 / 0.35);
+  box-shadow: var(--flyout-shadow);
 }
 .inbox-flyout > .ticket-panel { flex: 1; }
 
@@ -1573,7 +1667,7 @@ main { position: relative; }
 /* A commented line, marked where Monaco will let us mark one. Neutral now
    rather than amber: the mark says "there is a comment here", and the comment
    is not a warning. */
-.commented-line { background: rgb(255 255 255 / 0.06); }
+.commented-line { background: rgb(var(--fg) / 0.06); }
 .commented-glyph { background: var(--dim); width: 3px !important; margin-left: 3px; }
 .filediff .composer { display: flex; gap: 8px; padding: 8px 16px 14px; }
 .diff .composer { display: flex; gap: 8px; padding: 8px 0 0; }
@@ -1671,7 +1765,7 @@ main { position: relative; }
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  background: rgb(255 255 255 / 0.04);
+  background: rgb(var(--fg) / 0.04);
   border-radius: var(--r-md);
 }
 .tile-value { color: var(--text); font-size: 15px; font-weight: 600; line-height: 20px; white-space: nowrap; }
@@ -1776,7 +1870,7 @@ main { position: relative; }
   display: inline-flex;
   padding: 2px;
   gap: 2px;
-  background: rgb(0 0 0 / 0.22);
+  background: var(--track);
   border-radius: var(--r-md);
   box-shadow: inset 0 0 0 0.5px var(--line);
 }
@@ -1796,9 +1890,9 @@ main { position: relative; }
 /* The chosen segment is raised out of the track, as AppKit draws it: a lighter
    surface and a shadow under it, not merely a tint. */
 .segmented button.on {
-  background: rgb(255 255 255 / 0.16);
+  background: var(--segment-on);
   color: var(--text);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3), inset 0 0.5px 0 rgb(255 255 255 / 0.1);
+  box-shadow: var(--segment-shadow);
 }
 
 .traffic-filters { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -2067,11 +2161,11 @@ main { position: relative; }
   gap: 6px;
   min-width: 0;
   padding: 3px 7px 3px 9px;
-  background: rgb(255 255 255 / 0.1);
+  background: var(--control);
   color: var(--text);
   border: 1px solid transparent;
   border-radius: var(--r-sm);
-  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.1), 0 0.5px 1px rgb(0 0 0 / 0.3);
+  box-shadow: var(--control-shadow);
   font: inherit;
   font-size: 12px;
   text-align: left;
@@ -2096,7 +2190,7 @@ main { position: relative; }
   margin: 0;
   padding: 5px;
   list-style: none;
-  background: rgb(40 40 42 / 0.82);
+  background: var(--menu);
   -webkit-backdrop-filter: blur(24px) saturate(1.8);
   backdrop-filter: blur(24px) saturate(1.8);
   border: none;
@@ -2142,7 +2236,7 @@ main { position: relative; }
   min-width: 190px;
   max-width: 320px;
   padding: 5px;
-  background: rgb(40 40 42 / 0.82);
+  background: var(--menu);
   -webkit-backdrop-filter: blur(24px) saturate(1.8);
   backdrop-filter: blur(24px) saturate(1.8);
   border: none;
@@ -2209,7 +2303,7 @@ main { position: relative; }
      dialog, since a fixed element with an automatic z-index is on the same
      layer as everything else. */
   z-index: 100;
-  background: rgb(0 0 0 / 0.4);
+  background: var(--scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -2225,7 +2319,7 @@ main { position: relative; }
   padding: 20px 22px 20px;
   /* A sheet: the floating edge every popover has, and a deeper drop, because
      it is the one thing genuinely above everything else. */
-  box-shadow: var(--float-shadow), 0 24px 64px rgb(0 0 0 / 0.4);
+  box-shadow: var(--float-shadow), var(--sheet-shadow);
 }
 /* A question, which is a narrower thing than a form. */
 .dialog.narrow { width: 420px; }
@@ -2240,10 +2334,10 @@ main { position: relative; }
 .dialog-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .dialog-head h2 { font-size: 15px; font-weight: 700; margin: 0; flex: 1; }
 :is(.dialog, .screen, .tabs-empty) .quiet {
-  background: rgb(255 255 255 / 0.1);
+  background: var(--control);
   border: none;
   border-radius: var(--r-sm);
-  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.1), 0 0.5px 1px rgb(0 0 0 / 0.3);
+  box-shadow: var(--control-shadow);
   color: var(--text);
   font: inherit;
   font-size: 12px;
@@ -2252,10 +2346,10 @@ main { position: relative; }
   white-space: nowrap;
   transition: background-color 150ms, color 150ms;
 }
-:is(.dialog, .screen, .tabs-empty) .quiet:hover { background: rgb(255 255 255 / 0.16); }
+:is(.dialog, .screen, .tabs-empty) .quiet:hover { background: var(--control-hover); }
 
 :is(.dialog, .screen) input, :is(.dialog, .screen) textarea, :is(.dialog, .screen) .select-trigger {
-  background: rgb(0 0 0 / 0.2);
+  background: var(--field);
   color: var(--text);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
@@ -2901,7 +2995,7 @@ img.zoomable { cursor: zoom-in; }
   padding: 14px 18px 16px;
   border: none;
   border-radius: var(--r);
-  background: rgb(255 255 255 / 0.035);
+  background: rgb(var(--fg) / 0.035);
   box-shadow: inset 0 0 0 0.5px var(--line);
 }
 .screen section:is(.setting-group, .panel):first-of-type { margin-top: 4px; padding-top: 14px; }
@@ -2923,6 +3017,8 @@ img.zoomable { cursor: zoom-in; }
 /* The explanation under a field, aligned to the field rather than to the
    label: it is about the value, and starting it in the label column would make
    it read as a second label. */
+/* Light, dark or the system's, at the top of "This window". */
+.setting-group .appearance { margin: 4px 0 6px; }
 .setting-group .hint.indent { margin: 0 0 12px; padding-left: 128px; max-width: 74ch; }
 .setting-group > label.tick + .hint.indent { padding-left: 22px; }
 /* A key: the field, then what to do with it, on one line. */
@@ -3710,7 +3806,7 @@ img.zoomable { cursor: zoom-in; }
 /* One tool call. Bordered like a card elsewhere in the window, quiet at rest:
    most of them are reading, and a transcript of loud boxes is one where the
    agent's words get lost between them. */
-.chat-tool { border-radius: var(--r); background: rgb(255 255 255 / 0.045); }
+.chat-tool { border-radius: var(--r); background: rgb(var(--fg) / 0.045); }
 .chat-tool-head {
   display: flex;
   align-items: center;
@@ -4058,7 +4154,7 @@ p.chat-quiet { margin: 0; font-size: 12px; }
 }
 .chat-round:focus-visible { outline-offset: 1px; }
 .chat-attach { margin-right: 4px; background: var(--hover); color: var(--dim); }
-.chat-attach:hover { background: rgb(255 255 255 / 0.12); color: var(--text); }
+.chat-attach:hover { background: rgb(var(--fg) / 0.12); color: var(--text); }
 .chat-send, .chat-stop { margin-left: 2px; background: var(--primary); color: var(--primary-ink); }
 .chat-send:hover:not(:disabled), .chat-stop:hover { filter: brightness(1.1); }
 .chat-send:active:not(:disabled), .chat-stop:active { filter: brightness(0.9); }
@@ -4094,7 +4190,7 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   z-index: 1000;
   width: 300px;
   padding: 10px 14px 12px;
-  background: rgb(40 40 42 / 0.82);
+  background: var(--menu);
   -webkit-backdrop-filter: blur(24px) saturate(1.8);
   backdrop-filter: blur(24px) saturate(1.8);
   border-radius: var(--r);
@@ -4170,7 +4266,7 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   list-style: none;
   margin: 0;
   padding: 5px;
-  background: rgb(40 40 42 / 0.82);
+  background: var(--menu);
   -webkit-backdrop-filter: blur(24px) saturate(1.8);
   backdrop-filter: blur(24px) saturate(1.8);
   border-radius: var(--r);

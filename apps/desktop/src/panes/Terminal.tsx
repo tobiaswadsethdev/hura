@@ -149,7 +149,7 @@ export function TerminalPane({
       // Taken from style.css, because the emulator paints its own background
       // and would otherwise sit as a rectangle of some other colour inside the
       // pane. See `palette`.
-      theme: palette(THEME),
+      theme: palette(THEME, element),
       // The sandbox's tmux keeps the scrollback that matters; this is just what
       // the pane can scroll back through without asking for it again.
       scrollback: 5000,
@@ -256,5 +256,7 @@ export function TerminalPane({
     };
   }, [server, name, tmux]);
 
-  return <div className="terminal" ref={host} />;
+  // Dark whatever the window is in, as on the phone: what runs in it was
+  // written for a dark terminal, and its colours are its own.
+  return <div className="terminal" data-theme="dark" ref={host} />;
 }

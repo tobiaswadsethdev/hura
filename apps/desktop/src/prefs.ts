@@ -16,6 +16,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import type { Appearance } from "./theme";
+
 /// One key, so a stray `hura.theme` from some future build cannot be mistaken
 /// for part of this object.
 const KEY = "hura.prefs";
@@ -65,6 +67,8 @@ export type Prefs = {
   /// Which of the two the sidebar shows: your tickets or your pull requests.
   /// One at a time, so neither is scrolled past to reach the other.
   inboxView: InboxView;
+  /// Light, dark, or the system's. See `theme.ts`.
+  appearance: Appearance;
 };
 
 export type InboxView = "tickets" | "pulls";
@@ -118,6 +122,9 @@ export const DEFAULTS: Prefs = {
   dockOpen: true,
   inboxShut: [],
   inboxView: "tickets",
+  // The system's, as on the phone. Somebody who has run this window in dark for
+  // as long as it had no other gets the same window unless their Mac is light.
+  appearance: "system",
 };
 
 function clamp(value: number, { min, max }: { min: number; max: number }): number {
@@ -157,10 +164,14 @@ export function sanitize(stored: unknown): Prefs {
       : DEFAULTS.inboxShut,
     inboxView:
       raw.inboxView === "tickets" || raw.inboxView === "pulls" ? raw.inboxView : DEFAULTS.inboxView,
+    appearance:
+      raw.appearance === "system" || raw.appearance === "light" || raw.appearance === "dark"
+        ? raw.appearance
+        : DEFAULTS.appearance,
   };
 }
 
-function read(): Prefs {
+export function readPrefs(): Prefs {
   try {
     const stored = window.localStorage.getItem(KEY);
     return sanitize(stored === null ? null : JSON.parse(stored));
@@ -178,7 +189,7 @@ function read(): Prefs {
 /// each component reads: the widths are laid out by the grid in `App`, and two
 /// components holding their own copy is how two of them start disagreeing.
 export function usePrefs(): [Prefs, (change: Partial<Prefs>) => void] {
-  const [prefs, setPrefs] = useState<Prefs>(read);
+  const [prefs, setPrefs] = useState<Prefs>(readPrefs);
 
   const update = useCallback((change: Partial<Prefs>) => {
     setPrefs((current) => sanitize({ ...current, ...change }));
