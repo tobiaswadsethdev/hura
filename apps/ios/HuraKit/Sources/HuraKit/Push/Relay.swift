@@ -126,6 +126,27 @@ public struct RelayClient: Sendable {
         let _: Empty = try await request("DELETE", "/v1/servers/\(linkID)", secret: device.deviceSecret)
     }
 
+    /// `PUT /v1/devices/{id}/activity-token`: the push-to-start token, which
+    /// lets the relay start a session's Live Activity.
+    public func setActivityStartToken(_ token: String, device: PushDevice) async throws {
+        let _: Empty = try await request("PUT", "/v1/devices/\(device.deviceID)/activity-token",
+                                         secret: device.deviceSecret, body: ["token": token])
+    }
+
+    /// `PUT /v1/servers/{link}/activities/{session}`: the update token of the
+    /// activity showing `session`.
+    public func setActivityToken(_ token: String, linkID: String, session: String, device: PushDevice) async throws {
+        let _: Empty = try await request("PUT", "/v1/servers/\(linkID)/activities/\(session)",
+                                         secret: device.deviceSecret, body: ["token": token])
+    }
+
+    /// `DELETE /v1/servers/{link}/activities/{session}`: the activity has ended
+    /// or been dismissed.
+    public func deleteActivityToken(linkID: String, session: String, device: PushDevice) async throws {
+        let _: Empty = try await request("DELETE", "/v1/servers/\(linkID)/activities/\(session)",
+                                         secret: device.deviceSecret)
+    }
+
     public struct TestResult: Decodable, Equatable, Sendable {
         public var sent: Bool
         public var apnsStatus: Int

@@ -15,7 +15,14 @@ struct NotificationSettings: View {
         ("claude_needs_input", "Claude needs input or permission"),
         ("claude_turn_finished", "Claude finished a turn"),
         ("claude_failed", "A session failed"),
+        // A server from before Live Activities doesn't know this kind and
+        // would refuse it, so it is only offered by one that reports it.
+        ("session_activity", "Live Activities"),
     ]
+
+    private var shownKinds: [(key: String, label: String)] {
+        Self.kinds.filter { $0.key != "session_activity" || prefs[$0.key] != nil }
+    }
 
     private var online: Bool { server.state == .online }
 
@@ -36,7 +43,7 @@ struct NotificationSettings: View {
                     .foregroundStyle(.secondary)
             }
             if isOn {
-                ForEach(Self.kinds, id: \.key) { kind in
+                ForEach(shownKinds, id: \.key) { kind in
                     Toggle(kind.label, isOn: Binding(get: { prefs[kind.key] ?? true }, set: { value in
                         var next = prefs
                         next[kind.key] = value
@@ -61,7 +68,7 @@ struct NotificationSettings: View {
             if let message = message ?? model.pushError {
                 Text(message).foregroundStyle(.red)
             } else if encrypted {
-                Text("When Claude needs you or a session fails, \(server.record.name) notifies this phone through hura's push relay. Only this phone can read the text; the relay and Apple see which kind of notification it is.")
+                Text("When Claude needs you or a session fails, \(server.record.name) notifies this phone through hura's push relay, and a working session shows on the Lock Screen as a Live Activity. Only this phone can read the text; the relay and Apple see which kind of notification it is.")
             } else {
                 Text("When Claude needs you or a session fails, \(server.record.name) notifies this phone through hura's push relay. Notifications show the session name and a short message.")
             }

@@ -25,7 +25,7 @@ a notification, and that is all it can do. The relay stores only a hash of it.
 | What happened | Kind | Body |
 | --- | --- | --- |
 | A chat session asks for permission | `claude_permission`, with Allow and Deny | what it asks, e.g. `Bash: npm test` |
-| Any other wait: a terminal session's prompt, or a question or plan in a chat session | `claude_needs_input` | `Claude is asking to use Bash`, or Claude Code's own sentence |
+| Any other wait: a terminal session's prompt, or a question or plan in a chat session | `claude_needs_input` | a question in its own words (`Which database should we use?`), `Claude has a plan for you to review`, `Claude is asking to use Bash`, or Claude Code's own sentence |
 | A turn finishes: running or waiting, then idle | `claude_turn_finished` | `Claude finished and is waiting for you` |
 | A session fails | `claude_failed` | `The session failed` |
 
@@ -35,6 +35,13 @@ for the server in front, as `Mac · scope-creep`, because the server does not
 know what the phone calls it.
 `claude_permission` follows the `claude_needs_input` preference, because to a
 person they are the same thing.
+
+A tool's name is for a program, so it is not what a notification says when
+there is anything better: `AskUserQuestion` is the question itself (the first,
+with how many more there are), or `Claude has a question for you` from an
+image too old to say it; `ExitPlanMode` is `Claude has a plan for you to
+review`; and an MCP server's tool is said as `create_issue (github)` rather
+than `mcp__github__create_issue`.
 
 Notifications are sent **on the transition, not on the state**, as in the
 desktop application. A session that has been waiting for an hour doesn't
@@ -69,6 +76,37 @@ terminal session's prompt, which is on its screen and has no id.
 When one request is answered and the next arrives straight after, the next
 gets a notification of its own, even though the session never stopped
 waiting.
+
+## Live Activities
+
+A session also shows on the phone's Lock Screen and in the Dynamic Island as
+a Live Activity, through the same route. The watcher sends a
+`session_activity` event whenever what a session is doing changes:
+
+| Phase | When | Body |
+| --- | --- | --- |
+| `working` | a turn starts, or carries on after an answer | `Claude is working` |
+| `permission` | it waits on a permission request, which Allow and Deny on the activity answer | what it asks, as for `claude_permission` |
+| `input` | it waits on anything else | as for `claude_needs_input` |
+| `done` | the turn finishes | `Claude finished and is waiting for you` |
+| `failed` | the session fails | `The session failed` |
+| `ended` | the session is deleted or stopped mid-turn | `The session ended` |
+
+As with notifications, these are sent on the change, not on the state, and
+not on the first look; a `done` or an `ended` is only sent after a turn the
+activity showed. The text is encrypted like a notification's, and each event
+carries `at`, when the change was seen, so the phone ignores a retry that
+arrives after something newer. A newer event for a session also replaces one
+still queued for it. The relay decides whether that starts an activity,
+updates it or ends it: see [relay-api.md](relay-api.md#live-activities).
+
+The `session_activity` preference switches them off for a phone without
+touching its notifications.
+
+Allow and Deny on an activity are the notification's: the app sends the same
+`answer` with the `ask_id` the activity carries, Allow only once the phone is
+unlocked. The activity shows the session working again straight away, and the
+next look says what came after.
 
 ## Setting it up
 
@@ -106,6 +144,9 @@ rejected token is a failure, and nothing is stored.
 | `push-status` | `configured: false` when this connection has no route |
 | `push-remove` | the route is gone |
 | `push-test` | a test notification, queued like a real one |
+
+`prefs` takes `claude_needs_input`, `claude_turn_finished`, `claude_failed`
+and `session_activity`, each on unless it says `false`.
 
 Every one answers with `PushView`: `configured`, `relay_url`, `label`,
 `prefs`, `encrypted`, `broken`, `last_success_at`, `last_error` and `queued`.

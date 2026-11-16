@@ -52,9 +52,19 @@ pub const TEST: &str = "test";
 /// category with Allow and Deny on it. Switched with `claude_needs_input`'s
 /// preference, since to a person it is the same thing.
 pub const CLAUDE_PERMISSION: &str = "claude_permission";
+/// Not a notification but a session's Live Activity on the phone's Lock
+/// Screen: what it is doing now, sent on every change of
+/// [`Notification::phase`]. The relay starts, updates or ends the activity
+/// from it (`docs/relay-api.md`, "Live Activities").
+pub const SESSION_ACTIVITY: &str = "session_activity";
 
 /// The kinds a client can switch off.
-pub const PREF_KINDS: [&str; 3] = [CLAUDE_NEEDS_INPUT, CLAUDE_TURN_FINISHED, CLAUDE_FAILED];
+pub const PREF_KINDS: [&str; 4] = [
+    CLAUDE_NEEDS_INPUT,
+    CLAUDE_TURN_FINISHED,
+    CLAUDE_FAILED,
+    SESSION_ACTIVITY,
+];
 
 /// More than this and the oldest go: a phone that has been unreachable long
 /// enough to fill it is better told the recent things than all of them.
@@ -87,6 +97,15 @@ pub struct Notification {
     /// a different request from the one whose text the phone shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask_id: Option<String>,
+    /// A [`SESSION_ACTIVITY`]'s phase: `working`, `permission`, `input`,
+    /// `done`, `failed` or `ended`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    /// When a [`SESSION_ACTIVITY`]'s session moved into its phase, in Unix
+    /// seconds. The phone drops an update older than the one it shows, so a
+    /// retry that arrives late cannot undo what came after it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
 }
 
 /// Where one paired client's notifications go, as kept in `push.json`.
@@ -324,6 +343,17 @@ impl Pusher {
     pub fn enqueue(&self, n: Notification, only: Option<&str>) -> usize {
         let mut inner = self.lock();
         let at = now();
+        // A session's activity says what it is doing now, so a newer one
+        // replaces whatever of the same session is still waiting to go. Sent
+        // after it, a retried `working` would start the activity again that
+        // a `done` had just ended.
+        if n.kind == SESSION_ACTIVITY {
+            inner.queue.retain(|it| {
+                !(it.n.kind == SESSION_ACTIVITY
+                    && it.n.session == n.session
+                    && only.is_none_or(|k| k == it.route))
+            });
+        }
         let targets: Vec<String> = inner
             .routes
             .values()
@@ -514,6 +544,8 @@ pub fn handle(pusher: &Pusher, caller: &Entry, request: &Request) -> Option<Outc
                         body: format!("Test notification from {}", crate::default_host()),
                         session: None,
                         ask_id: None,
+                        phase: None,
+                        at: None,
                     },
                     Some(key),
                 );
@@ -565,6 +597,12 @@ fn event_body(route: &Route, n: &Notification) -> Result<String, String> {
     }
     if let Some(ask) = &n.ask_id {
         body["ask_id"] = ask.clone().into();
+    }
+    if let Some(phase) = &n.phase {
+        body["phase"] = phase.clone().into();
+    }
+    if let Some(at) = n.at {
+        body["at"] = at.into();
     }
     serde_json::to_string(&body).map_err(|e| e.to_string())
 }
@@ -804,6 +842,24 @@ mod tests {
                 return Err(format!("ask_id is malformed: {ask}"));
             }
         }
+        let phase = event.get("phase").and_then(|p| p.as_str());
+        if event["kind"] == SESSION_ACTIVITY {
+            let phase = phase.ok_or("phase is required for session_activity")?;
+            if !["working", "permission", "input", "done", "failed", "ended"].contains(&phase) {
+                return Err(format!("phase is malformed: {phase}"));
+            }
+            if event.get("session").is_none() {
+                return Err("session is required for session_activity".into());
+            }
+            if (phase == "permission") != event.get("ask_id").is_some() {
+                return Err("ask_id goes with the permission phase, and only it".into());
+            }
+            if event.get("at").is_some_and(|at| !at.is_u64()) {
+                return Err("at must be a number of seconds".into());
+            }
+        } else if phase.is_some() || event.get("at").is_some() {
+            return Err("phase and at are only for session_activity".into());
+        }
         Ok(())
     }
 
@@ -847,6 +903,8 @@ mod tests {
             body: "Claude is asking to use Bash".into(),
             session: Some("fix-tests".into()),
             ask_id: None,
+            phase: None,
+            at: None,
         }
     }
 
@@ -1189,6 +1247,88 @@ mod tests {
         );
         p.deliver(&relay);
         assert!(relay.sent()[0].get("session").is_none());
+    }
+
+    fn activity(p: &Pusher, phase: &str) -> Notification {
+        Notification {
+            phase: Some(phase.into()),
+            at: Some(1_763_300_000),
+            ..note(p, SESSION_ACTIVITY)
+        }
+    }
+
+    #[test]
+    fn an_activity_carries_its_phase_and_time_beside_the_ciphertext() {
+        let (p, _dir) = pusher();
+        let relay = Fake::default();
+        let keyed = PushRoute {
+            push_key: Some("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into()),
+            ..route()
+        };
+        p.configure(&relay, "k", "phone", keyed).unwrap();
+        p.enqueue(
+            Notification {
+                ask_id: Some("toolu_01abc".into()),
+                ..activity(&p, "permission")
+            },
+            None,
+        );
+        assert_eq!(p.deliver(&relay), None);
+        assert_eq!(p.status("k").last_error, None, "the relay took it");
+        let sent = &relay.sent()[0];
+        assert_eq!(sent["kind"], SESSION_ACTIVITY);
+        assert_eq!(sent["phase"], "permission");
+        assert_eq!(sent["at"], 1_763_300_000);
+        assert_eq!(sent["ask_id"], "toolu_01abc");
+        assert!(sent["encrypted"].is_string());
+        assert!(sent.get("body").is_none());
+    }
+
+    #[test]
+    fn a_newer_activity_replaces_one_still_queued_for_the_session() {
+        let (p, _dir) = pusher();
+        let relay = Fake::answering(vec![status(0)]);
+        p.configure(&relay, "k", "phone", route()).unwrap();
+        p.enqueue(activity(&p, "working"), None);
+        p.deliver(&relay);
+        assert_eq!(p.status("k").queued, 1, "waiting for a retry");
+
+        // Another session's, and a notification, stay; the same session's
+        // `working` goes.
+        p.enqueue(
+            Notification {
+                session: Some("other".into()),
+                ..activity(&p, "working")
+            },
+            None,
+        );
+        p.enqueue(note(&p, CLAUDE_TURN_FINISHED), None);
+        p.enqueue(activity(&p, "done"), None);
+        let queue = p.lock().queue.clone();
+        let phases: Vec<_> = queue
+            .iter()
+            .map(|it| (it.n.session.as_deref(), it.n.phase.as_deref()))
+            .collect();
+        assert_eq!(
+            phases,
+            [
+                (Some("other"), Some("working")),
+                (Some("fix-tests"), None),
+                (Some("fix-tests"), Some("done")),
+            ]
+        );
+    }
+
+    #[test]
+    fn activities_can_be_switched_off_alone() {
+        let (p, _dir) = pusher();
+        let off = PushRoute {
+            prefs: BTreeMap::from([(SESSION_ACTIVITY.to_string(), false)]),
+            ..route()
+        };
+        p.configure(&Fake::default(), "k", "phone", off).unwrap();
+        assert_eq!(p.enqueue(activity(&p, "working"), None), 0);
+        assert_eq!(p.enqueue(note(&p, CLAUDE_NEEDS_INPUT), None), 1);
     }
 
     #[test]

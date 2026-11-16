@@ -41,12 +41,19 @@ struct ServerListView: View {
                 }
             }
             .navigationDestination(for: Route.self) { route in
-                switch route {
-                case let .server(id):
-                    if let s = model.server(id) { ServerView(server: s) }
-                case let .session(serverID, name):
-                    if let s = model.server(serverID) { WorktreeView(server: s, name: name) }
+                // Each screen is the route's own. A notification replaces the
+                // whole path, and SwiftUI would otherwise keep the view in the
+                // same place on it: a session opened over another got the new
+                // name but kept the old one's chats.
+                Group {
+                    switch route {
+                    case let .server(id):
+                        if let s = model.server(id) { ServerView(server: s) }
+                    case let .session(serverID, name):
+                        if let s = model.server(serverID) { WorktreeView(server: s, name: name) }
+                    }
                 }
+                .id(route)
             }
             // A worktree's pull request, from its chat.
             .navigationDestination(for: PullRequestSummary.self) { LinkedPullView(pull: $0) }

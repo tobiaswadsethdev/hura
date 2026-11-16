@@ -137,6 +137,20 @@ test("a request is described by what it would do", () => {
   assert.equal(describeAsk({ tool: "Bash", input: { command: "x".repeat(400) } }).length, 300);
 });
 
+test("a question is described in its own words, and a plan as one", () => {
+  const q = (question) => ({ question, header: "h", options: [], multiSelect: false });
+  assert.equal(
+    describeAsk({ tool: "AskUserQuestion", input: { questions: [q("Which  database\nshould we use?")] } }),
+    "Which database should we use?",
+  );
+  assert.equal(
+    describeAsk({ tool: "AskUserQuestion", input: { questions: [q("Which database?"), q("Which port?"), q("Why?")] } }),
+    "Which database? (+2 more)",
+  );
+  assert.equal(describeAsk({ tool: "AskUserQuestion", input: {} }), "Claude has a question for you");
+  assert.equal(describeAsk({ tool: "ExitPlanMode", input: { plan: "# Plan\n..." } }), "Claude has a plan for you to review");
+});
+
 test("a request is found by its id in whichever conversation holds it", () => {
   const first = conversation({ pending: new Map([["t1", { request: { id: "t1", tool: "Edit" } }]]) });
   const second = conversation({ pending: new Map([["t2", { request: { id: "t2", tool: "Bash" } }]]) });

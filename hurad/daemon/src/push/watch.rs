@@ -14,6 +14,11 @@
 //! server starting, or push being switched on, with three sessions already
 //! waiting has learnt something rather than seen it happen.
 //!
+//! A session's Live Activity is told the same way, and also only on a
+//! change: what the session is doing now, in one word ([`Phase`]), whenever
+//! that word changes. The relay decides from it whether the phone's activity
+//! starts, moves on or ends.
+//!
 //! **Only while somebody is listening.** A poll is an exec into the sandbox,
 //! and a server with no routes has no reason to pay for one.
 
@@ -26,7 +31,7 @@ use hura_core::{ops, store::Store};
 
 use super::{
     CLAUDE_FAILED, CLAUDE_NEEDS_INPUT, CLAUDE_PERMISSION, CLAUDE_TURN_FINISHED, Notification,
-    Pusher,
+    Pusher, SESSION_ACTIVITY,
 };
 use crate::serve::Server;
 
@@ -64,8 +69,45 @@ pub struct Said {
     pub kind: &'static str,
     pub session: String,
     pub body: String,
-    /// The request a [`CLAUDE_PERMISSION`] notification can answer.
+    /// The request a [`CLAUDE_PERMISSION`] notification can answer, or a
+    /// Live Activity's Allow and Deny.
     pub ask: Option<String>,
+    /// What a [`SESSION_ACTIVITY`] says the session is doing; nothing for a
+    /// notification.
+    pub phase: Option<Phase>,
+}
+
+/// What a session is doing, as its Live Activity shows it. The words are the
+/// relay's (`docs/relay-api.md`, "Live Activities").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    Working,
+    /// Waiting on a permission request, which Allow and Deny can answer.
+    Permission,
+    /// Waiting on anything else: a question, a plan, a terminal's prompt.
+    Input,
+    Done,
+    Failed,
+    /// The session is gone.
+    Ended,
+}
+
+impl Phase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Phase::Working => "working",
+            Phase::Permission => "permission",
+            Phase::Input => "input",
+            Phase::Done => "done",
+            Phase::Failed => "failed",
+            Phase::Ended => "ended",
+        }
+    }
+
+    /// A turn under way, which is what a phone has an activity showing for.
+    fn live(self) -> bool {
+        matches!(self, Phase::Working | Phase::Permission | Phase::Input)
+    }
 }
 
 /// Tools that ask a question rather than for permission. Answering one takes
@@ -79,6 +121,8 @@ struct Last {
     record: State,
     agent: Option<State>,
     ask: Option<String>,
+    /// What its activity was last told, if anything.
+    phase: Option<Phase>,
 }
 
 /// The states last seen, which is what tells a transition from a state.
@@ -109,12 +153,15 @@ impl Watch {
                 Some(a) => (Some(a), s.ask.clone()),
                 None => (was.and_then(|w| w.agent), was.and_then(|w| w.ask.clone())),
             };
+            let was_phase = was.and_then(|w| w.phase);
+            let phase = phase_of(s, was_phase);
             after.insert(
                 s.name.clone(),
                 Last {
                     record: s.record,
                     agent,
-                    ask,
+                    ask: ask.clone(),
+                    phase,
                 },
             );
             if first {
@@ -123,9 +170,104 @@ impl Watch {
             if let Some(it) = said_about(s, was) {
                 said.push(it);
             }
+            // A new phase, or a permission request answered and the next
+            // one straight after it, whose Allow is for another request.
+            let moved = phase != was_phase
+                || (phase == Some(Phase::Permission)
+                    && was.and_then(|w| w.ask.as_ref()) != ask.as_ref());
+            if let Some(p) = phase.filter(|_| moved) {
+                said.push(activity(s, p));
+            }
+        }
+        // A session that has gone while its activity showed a turn: the
+        // phone would otherwise show it working until the activity expires.
+        if !first {
+            for (name, w) in &before {
+                if !after.contains_key(name) && w.phase.is_some_and(Phase::live) {
+                    said.push(Said {
+                        kind: SESSION_ACTIVITY,
+                        session: name.clone(),
+                        body: "The session ended".into(),
+                        ask: None,
+                        phase: Some(Phase::Ended),
+                    });
+                }
+            }
         }
         self.seen = Some(after);
         said
+    }
+}
+
+/// What a session's activity shows now: from its record and what the agent
+/// is doing, and `was`, what it showed before -- which is also what it shows
+/// through a poll that could not tell, as with notifications. Finishing is
+/// only `done` after a turn the activity showed, and stopping only `ended`
+/// then: an idle session the phone never heard about has nothing to finish.
+fn phase_of(s: &Seen, was: Option<Phase>) -> Option<Phase> {
+    let live = was.is_some_and(Phase::live);
+    match s.record {
+        State::Failed => return Some(Phase::Failed),
+        State::Dead => return if live { Some(Phase::Ended) } else { was },
+        _ => {}
+    }
+    match s.agent {
+        Some(State::Running) => Some(Phase::Working),
+        Some(State::Waiting) => Some(match waiting(s) {
+            (CLAUDE_PERMISSION, ..) => Phase::Permission,
+            _ => Phase::Input,
+        }),
+        Some(State::Idle) if live => Some(Phase::Done),
+        _ => was,
+    }
+}
+
+/// What a session's activity is told on moving into `phase`.
+fn activity(s: &Seen, phase: Phase) -> Said {
+    let (body, ask) = match phase {
+        Phase::Working => ("Claude is working".into(), None),
+        Phase::Permission | Phase::Input => {
+            let (_, body, ask) = waiting(s);
+            (body, ask)
+        }
+        Phase::Done => ("Claude finished and is waiting for you".into(), None),
+        Phase::Failed => ("The session failed".into(), None),
+        Phase::Ended => ("The session ended".into(), None),
+    };
+    Said {
+        kind: SESSION_ACTIVITY,
+        session: s.name.clone(),
+        body,
+        ask,
+        phase: Some(phase),
+    }
+}
+
+/// What a wait is: a permission request the phone can answer, with what it
+/// asks and its id, or input needed and what for.
+fn waiting(s: &Seen) -> (&'static str, String, Option<String>) {
+    let tool = s.detail.as_deref().unwrap_or_default();
+    match &s.ask {
+        // What is being allowed, when the host said, since a lock screen
+        // Allow is only an answer if the screen says that.
+        Some(id) if !QUESTIONS.contains(&tool) => (
+            CLAUDE_PERMISSION,
+            s.prompt
+                .clone()
+                .unwrap_or_else(|| asking(s.detail.as_deref())),
+            Some(id.clone()),
+        ),
+        // A question in its own words, when the host said them. An older
+        // host's line for one is only the tool's name, which says nothing.
+        Some(_) => (
+            CLAUDE_NEEDS_INPUT,
+            s.prompt
+                .clone()
+                .filter(|p| !p.trim().is_empty() && p.trim() != tool)
+                .unwrap_or_else(|| asking(s.detail.as_deref())),
+            None,
+        ),
+        None => (CLAUDE_NEEDS_INPUT, asking(s.detail.as_deref()), None),
     }
 }
 
@@ -136,6 +278,7 @@ fn said_about(s: &Seen, was: Option<&Last>) -> Option<Said> {
         session: s.name.clone(),
         body,
         ask,
+        phase: None,
     };
     if s.record == State::Failed && was.map(|w| w.record) != Some(State::Failed) {
         return Some(said(CLAUDE_FAILED, "The session failed".into(), None));
@@ -153,19 +296,8 @@ fn said_about(s: &Seen, was: Option<&Last>) -> Option<Said> {
             if !fresh {
                 return None;
             }
-            let tool = s.detail.as_deref().unwrap_or_default();
-            Some(match &s.ask {
-                // What is being allowed, when the host said, since a lock
-                // screen Allow is only an answer if the screen says that.
-                Some(id) if !QUESTIONS.contains(&tool) => said(
-                    CLAUDE_PERMISSION,
-                    s.prompt
-                        .clone()
-                        .unwrap_or_else(|| asking(s.detail.as_deref())),
-                    Some(id.clone()),
-                ),
-                _ => said(CLAUDE_NEEDS_INPUT, asking(s.detail.as_deref()), None),
-            })
+            let (kind, body, ask) = waiting(s);
+            Some(said(kind, body, ask))
         }
         State::Idle if matches!(was_agent, Some(State::Running | State::Waiting)) => Some(said(
             CLAUDE_TURN_FINISHED,
@@ -180,10 +312,21 @@ fn said_about(s: &Seen, was: Option<&Last>) -> Option<Said> {
 ///
 /// A chat session's detail is the tool it is asking about; a terminal
 /// session's is that, or Claude Code's own sentence when the hook had one
-/// ("Claude needs your permission to use Bash"), which needs no help.
+/// ("Claude needs your permission to use Bash"), which needs no help. A
+/// tool's name is for a program: the two that ask rather than act are said
+/// as what they are, and an MCP server's tool by its own name and its
+/// server's.
 fn asking(detail: Option<&str>) -> String {
     match detail.map(str::trim).filter(|d| !d.is_empty()) {
+        Some("AskUserQuestion") => "Claude has a question for you".into(),
+        Some("ExitPlanMode") => "Claude has a plan for you to review".into(),
         Some(tool) if !tool.contains(char::is_whitespace) => {
+            let tool = match tool.strip_prefix("mcp__").and_then(|t| t.split_once("__")) {
+                Some((server, name)) if !server.is_empty() && !name.is_empty() => {
+                    format!("{name} ({server})")
+                }
+                _ => tool.to_string(),
+            };
             format!("Claude is asking to use {tool}")
         }
         Some(sentence) => sentence.to_string(),
@@ -191,13 +334,13 @@ fn asking(detail: Option<&str>) -> String {
     }
 }
 
-/// One look at every session the store knows.
-fn observe() -> Vec<Seen> {
-    let Ok(store) = Store::load() else {
-        return Vec::new();
-    };
+/// One look at every session the store knows, or nothing when the store
+/// could not be read: that is not every session having gone, which would end
+/// every activity on the phone.
+fn observe() -> Option<Vec<Seen>> {
+    let store = Store::load().ok()?;
     let backends = crate::rpc::backends();
-    store
+    let seen = store
         .list()
         .into_iter()
         .map(|s: &Session| {
@@ -218,7 +361,8 @@ fn observe() -> Vec<Seen> {
                 detail: report.and_then(|r| r.detail),
             }
         })
-        .collect()
+        .collect();
+    Some(seen)
 }
 
 /// What a session's notification is titled with: its title, or its name for
@@ -258,9 +402,10 @@ pub async fn run(server: Arc<Server>, pusher: Arc<Pusher>) {
             continue;
         }
 
-        let Ok(seen) = tokio::task::spawn_blocking(observe).await else {
+        let Ok(Some(seen)) = tokio::task::spawn_blocking(observe).await else {
             continue;
         };
+        let at = super::now();
         for said in watch.look(&seen) {
             let title = title(&seen, &said.session);
             let subtitle = subtitle(&seen, &said.session, &host);
@@ -273,6 +418,8 @@ pub async fn run(server: Arc<Server>, pusher: Arc<Pusher>) {
                     body: said.body,
                     session: Some(said.session),
                     ask_id: said.ask,
+                    phase: said.phase.map(|p| p.as_str().into()),
+                    at: said.phase.map(|_| at),
                 },
                 None,
             );
@@ -305,8 +452,19 @@ mod tests {
         }
     }
 
+    /// The notifications said, leaving out the activities.
     fn kinds(said: &[Said]) -> Vec<(&str, &str)> {
-        said.iter().map(|s| (s.kind, s.session.as_str())).collect()
+        said.iter()
+            .filter(|s| s.phase.is_none())
+            .map(|s| (s.kind, s.session.as_str()))
+            .collect()
+    }
+
+    /// The activities said, leaving out the notifications.
+    fn phases(said: &[Said]) -> Vec<(Phase, &str)> {
+        said.iter()
+            .filter_map(|s| Some((s.phase?, s.session.as_str())))
+            .collect()
     }
 
     #[test]
@@ -325,6 +483,7 @@ mod tests {
         let said = w.look(std::slice::from_ref(&waiting));
         assert_eq!(kinds(&said), [(CLAUDE_NEEDS_INPUT, "a")]);
         assert_eq!(said[0].body, "Claude is asking to use Bash");
+        assert_eq!(phases(&said), [(Phase::Input, "a")]);
         assert!(w.look(&[waiting]).is_empty(), "still waiting is not news");
     }
 
@@ -463,8 +622,134 @@ mod tests {
     }
 
     #[test]
+    fn a_question_is_said_in_its_own_words() {
+        let mut w = Watch::default();
+        w.look(&[seen("a", State::Running, Some(State::Running))]);
+        let said = w.look(&[Seen {
+            prompt: Some("Which database should we use?".into()),
+            ..asking_for("a", "AskUserQuestion", "toolu_1")
+        }]);
+        assert_eq!(said[0].body, "Which database should we use?");
+
+        // An older host's line is only the tool's name.
+        let mut w = Watch::default();
+        w.look(&[seen("a", State::Running, Some(State::Running))]);
+        let said = w.look(&[Seen {
+            prompt: Some("AskUserQuestion".into()),
+            ..asking_for("a", "AskUserQuestion", "toolu_1")
+        }]);
+        assert_eq!(said[0].body, "Claude has a question for you");
+    }
+
+    #[test]
+    fn an_activity_follows_a_turn() {
+        let mut w = Watch::default();
+        w.look(&[seen("a", State::Running, Some(State::Idle))]);
+        let said = w.look(&[seen("a", State::Running, Some(State::Running))]);
+        assert_eq!(phases(&said), [(Phase::Working, "a")]);
+        assert_eq!(said[0].body, "Claude is working");
+        assert!(
+            w.look(&[seen("a", State::Running, Some(State::Running))])
+                .is_empty(),
+            "still working is not news"
+        );
+
+        let said = w.look(&[Seen {
+            prompt: Some("Bash: npm test".into()),
+            ..asking_for("a", "Bash", "toolu_1")
+        }]);
+        let activity = said.iter().find(|s| s.phase.is_some()).unwrap();
+        assert_eq!(activity.phase, Some(Phase::Permission));
+        assert_eq!(activity.kind, SESSION_ACTIVITY);
+        assert_eq!(activity.ask.as_deref(), Some("toolu_1"));
+        assert_eq!(activity.body, "Bash: npm test");
+
+        // The next request straight after is another Allow.
+        let said = w.look(&[asking_for("a", "Edit", "toolu_2")]);
+        assert_eq!(phases(&said), [(Phase::Permission, "a")]);
+
+        let said = w.look(&[seen("a", State::Running, Some(State::Running))]);
+        assert_eq!(phases(&said), [(Phase::Working, "a")]);
+        let said = w.look(&[seen("a", State::Running, Some(State::Idle))]);
+        assert_eq!(phases(&said), [(Phase::Done, "a")]);
+        assert!(
+            w.look(&[seen("a", State::Running, Some(State::Idle))])
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_question_is_input_not_permission() {
+        let mut w = Watch::default();
+        w.look(&[seen("a", State::Running, Some(State::Running))]);
+        let said = w.look(&[asking_for("a", "ExitPlanMode", "toolu_1")]);
+        assert_eq!(phases(&said), [(Phase::Input, "a")]);
+        let activity = said.iter().find(|s| s.phase.is_some()).unwrap();
+        assert_eq!(activity.ask, None);
+        assert_eq!(activity.body, "Claude has a plan for you to review");
+    }
+
+    #[test]
+    fn an_idle_session_nobody_saw_working_has_no_activity() {
+        let mut w = Watch::default();
+        w.look(&[]);
+        assert!(phases(&w.look(&[seen("a", State::Running, Some(State::Idle))])).is_empty());
+        // Nor does it end one when it goes.
+        assert!(w.look(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_session_that_goes_mid_turn_ends_its_activity() {
+        let mut w = Watch::default();
+        w.look(&[seen("a", State::Running, Some(State::Running))]);
+        w.look(&[seen("a", State::Running, Some(State::Running))]);
+        let said = w.look(&[]);
+        assert_eq!(phases(&said), [(Phase::Ended, "a")]);
+        assert_eq!(said[0].body, "The session ended");
+
+        // And one stopped, which the store still lists as dead.
+        let mut w = Watch::default();
+        w.look(&[seen("b", State::Running, Some(State::Waiting))]);
+        let said = w.look(&[seen("b", State::Dead, None)]);
+        assert_eq!(phases(&said), [(Phase::Ended, "b")]);
+        assert!(w.look(&[seen("b", State::Dead, None)]).is_empty());
+        assert!(w.look(&[]).is_empty(), "already ended");
+    }
+
+    #[test]
+    fn a_failure_shows_on_the_activity() {
+        let mut w = Watch::default();
+        w.look(&[seen("a", State::Running, Some(State::Running))]);
+        let said = w.look(&[seen("a", State::Failed, None)]);
+        assert_eq!(phases(&said), [(Phase::Failed, "a")]);
+    }
+
+    #[test]
+    fn a_poll_that_could_not_tell_keeps_the_activity() {
+        let mut w = Watch::default();
+        w.look(&[seen("a", State::Running, Some(State::Running))]);
+        assert!(w.look(&[seen("a", State::Running, None)]).is_empty());
+        assert!(
+            w.look(&[seen("a", State::Running, Some(State::Running))])
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn the_body_reads_either_kind_of_detail() {
         assert_eq!(asking(Some("Edit")), "Claude is asking to use Edit");
+        assert_eq!(
+            asking(Some("AskUserQuestion")),
+            "Claude has a question for you"
+        );
+        assert_eq!(
+            asking(Some("ExitPlanMode")),
+            "Claude has a plan for you to review"
+        );
+        assert_eq!(
+            asking(Some("mcp__github__create_issue")),
+            "Claude is asking to use create_issue (github)"
+        );
         assert_eq!(
             asking(Some("Claude needs your permission to use Bash")),
             "Claude needs your permission to use Bash"

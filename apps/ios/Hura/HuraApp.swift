@@ -76,9 +76,12 @@ struct HuraApp: App {
                 #endif
             }
             .onOpenURL { url in
-                // A hura:// pairing string opens the pairing screen; nothing
-                // is sent until the user confirms.
-                if url.scheme == "hura" {
+                // A Live Activity, tapped, opens its session. Any other
+                // hura:// is a pairing string, which opens the pairing
+                // screen; nothing is sent until the user confirms.
+                if let target = SessionActivity.target(of: url) {
+                    model.open(NotificationTarget(serverID: target.serverID, session: target.session))
+                } else if url.scheme == "hura" {
                     pendingPairURL = url.absoluteString
                 }
             }
@@ -117,6 +120,10 @@ extension HuraApp {
     /// confirmation is skipped; the sign-in is the emailed-code one, with a
     /// code the stand-in takes.
     ///
+    /// `-HuraActivity permission` (or any other phase) puts a made-up
+    /// session's Live Activity on the Lock Screen, in that phase, with no
+    /// relay: how it looks, and whether Allow and Deny reach the app.
+    ///
     /// `-HuraOpen inbox`, `account` or `search` opens that tab, searching for
     /// `-HuraSearch` when it is given; `server` the first server's list, and
     /// a session's name that session, by the same route a tapped
@@ -136,6 +143,9 @@ extension HuraApp {
                                               deviceName: UIDevice.current.name, base: base)
             await account.load()
             await trackers.refresh()
+        }
+        if let phase = defaults.string(forKey: "HuraActivity").flatMap(SessionPhase.init(rawValue:)) {
+            LiveActivities.demo(phase, serverID: model.servers.first?.id ?? "h_aaaabbbbccccdddd")
         }
         guard let open = defaults.string(forKey: "HuraOpen") else { return }
         // After the first frame: a screen only hears a change made while it is

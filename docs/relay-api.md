@@ -170,6 +170,7 @@ per minute.
 | `tracker_change` | `TRACKER_CHANGE` | `active` | Something changed on your trackers |
 | `inbox_seen` | — | — | — (a background push: nothing is shown) |
 | `test` | `TEST` | `active` | Test notification |
+| `session_activity` | — | — | — (a Live Activity push: see [Live Activities](#live-activities)) |
 
 `tracker_change` is sent by hura cloud rather than an `hurad` (see
 [cloud.md](cloud.md)): the phone links the service as it links a server, and
@@ -254,6 +255,146 @@ request. The relay therefore can't move one notification's text onto
 another's, or point an Allow at a different request from the one whose text
 the phone shows. The phone rebuilds the additional data from the `hura`
 fields of the payload.
+
+## Live Activities
+
+A session can also show on the phone's Lock Screen and in the Dynamic Island
+as a Live Activity: working, waiting on a permission (with Allow and Deny),
+waiting on input, done. `hurad` sends a `session_activity` event whenever a
+session moves from one of those to another, and the relay turns it into an
+ActivityKit push: one that starts an activity, updates it or ends it. Which of
+the three is the relay's choice, from the tokens the app has given it.
+
+### The tokens
+
+Live Activity pushes don't go to the device token. ActivityKit hands the app
+two other kinds, and the app passes both on to the relay.
+
+#### `PUT /v1/devices/{device_id}/activity-token`
+
+The device's push-to-start token, which lets the relay start an activity on
+the phone when nothing is showing yet (iOS 17.2 and later). The app sends it
+whenever ActivityKit hands out a new one.
+
+```json
+→ {"token": "<hex>"}
+← 204
+```
+
+`DELETE` on the same path forgets it, after which nothing new is started. `204`.
+
+#### `PUT /v1/servers/{link_id}/activities/{session}`
+
+The update token of the activity showing `session` from the server on
+`link_id`. The app sends it once the activity exists, whether the app started it
+or a push did, and again whenever it changes.
+
+```json
+→ {"token": "<hex>"}
+← 204
+```
+
+`DELETE` on the same path forgets it, when the activity has ended or been
+dismissed on the phone. `204` whether or not there was one; `404` for a link
+that is not this device's.
+
+Both tokens are 64–200 hex characters, and go to APNs in the device's
+environment.
+
+### The event
+
+`POST /v1/events`, with these fields:
+
+```json
+→ {
+    "event_id": "h_4pgsopgu-43",
+    "kind": "session_activity",
+    "session": "fix-tests",
+    "phase": "permission",
+    "at": 1763300000,
+    "ask_id": "toolu_01abc",
+    "encrypted": "…"
+  }
+← 200 {"sent": true, "activity": "update"}
+← 200 {"sent": false, "reason": "no_activity"}
+```
+
+| Field | Notes |
+|---|---|
+| `session` | required |
+| `phase` | required: `working`, `permission`, `input`, `done`, `failed` or `ended` |
+| `at` | optional: when the session moved into the phase, in Unix seconds. It becomes the push's `timestamp`, which iOS uses to drop an update older than the one it shows, so a retried event can't undo a newer one. Defaults to now; a time in the future is taken as now |
+| `ask_id` | required with `permission`, refused with any other phase: the request Allow and Deny answer |
+| `title`, `subtitle`, `body` or `encrypted` | as for any event. The text is encrypted as in [Encrypted text](#encrypted-text), with `session_activity` as the kind |
+
+| `phase` | What the session is doing |
+|---|---|
+| `working` | Claude is working on a turn |
+| `permission` | waiting on a permission request, which Allow and Deny answer |
+| `input` | waiting on anything else: a question, a plan, a terminal's prompt |
+| `done` | the turn finished |
+| `failed` | the session failed |
+| `ended` | the session is gone (deleted, or stopped) |
+
+What the relay does:
+
+| The relay has | `working`, `permission`, `input` | `done`, `failed` | `ended` |
+|---|---|---|---|
+| an update token for the session | updates the activity | ends it, leaving it on the Lock Screen for 30 minutes | ends it and removes it at once |
+| none, but a push-to-start token | starts an activity | nothing (`no_activity`) | nothing (`no_activity`) |
+| neither | nothing (`no_activity`) | nothing (`no_activity`) | nothing (`no_activity`) |
+
+Ending an activity forgets its update token, so the next turn starts a new one.
+`activity` in the answer is `start`, `update` or `end`.
+
+A started activity has no update token until the phone, woken in the
+background, gives one, which takes a second or two. An event for the same
+session in that time would start a second activity, so for a minute after a
+start the relay answers it `429` with `Retry-After: 5` instead, and the retry
+updates the activity. An activity whose token hasn't come after a minute is
+taken never to have started.
+
+When APNs says an update token is gone (`BadDeviceToken`, `Unregistered`,
+`ExpiredToken`), the relay forgets it and, for a phase that can start one,
+starts a new activity instead. A push-to-start token that APNs refuses the same
+way is forgotten. Neither disables the device: they are only those tokens,
+not the phone's.
+
+The 30-per-minute limit and the 24-hour idempotency are the same as for every
+other event, and counted together with them.
+
+### The ActivityKit payload
+
+```json
+{
+  "aps": {
+    "timestamp": 1763300000,
+    "event": "update",
+    "content-state": {"phase": "permission", "at": 1763300000,
+                      "ask_id": "toolu_01abc", "enc": "…"}
+  }
+}
+```
+
+`content-state` has `phase` and `at`, then `ask_id` when there is one, and the
+text: `enc` for an encrypted event, `title`, `subtitle` and `body` for a
+plaintext one. Absent fields are left out.
+
+- **`start`** adds `"attributes-type": "SessionActivityAttributes"`,
+  `"attributes": {"server_id": "h_…", "link_id": "l_…", "session": "fix-tests"}`,
+  and an `alert` (APNs requires one to start an activity): the link's label as
+  the title and a generic body, `Claude is working`, `Claude needs your
+  permission` or `Claude needs your input`. It has no sound.
+- **`end`** adds `dismissal-date`: 30 minutes ahead for `done` and `failed`,
+  now for `ended`.
+
+Headers: `apns-push-type: liveactivity`, `apns-topic: <bundle ID>.push-type.liveactivity`,
+`apns-priority: 10` and `apns-expiration` an hour ahead.
+
+The phone decrypts `enc` in the widget that draws the activity, with the key
+stored for `server_id` and the additional data
+`hura-push-v1\n<server_id>\nsession_activity\n<session>\n<ask_id>`, taking the
+server and session from `attributes`.
 
 ## `GET /v1/health`
 
