@@ -42,6 +42,7 @@ import { Screen } from "./Screen";
 import { Pill } from "./Pill";
 import { Select } from "./Select";
 import { TrackersSection } from "./Trackers";
+import { APPEARANCES } from "./theme";
 
 export function SettingsScreen({
   server,
@@ -365,6 +366,21 @@ export function SettingsScreen({
       <section className="setting-group">
         <h3>This window</h3>
         <p className="hint">Stored on this machine only.</p>
+
+        <div className="segmented appearance" role="radiogroup" aria-label="Appearance">
+          {APPEARANCES.map(({ value, label }) => (
+            <button
+              key={value}
+              role="radio"
+              aria-checked={prefs.appearance === value}
+              className={prefs.appearance === value ? "on" : ""}
+              onClick={() => onPrefs({ appearance: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="hint">System follows the computer's own. Terminals stay dark either way.</p>
 
         <label className="tick">
           <input

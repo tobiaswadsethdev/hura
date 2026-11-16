@@ -41,10 +41,17 @@
 /// reading the palette at module scope reads it before there is one. Panes call
 /// this from an effect, by which time the stylesheet is in; the fallbacks cover
 /// the case where something later does not.
-export function palette<K extends string>(wanted: Record<K, [string, string]>): Record<K, string> {
+///
+/// `within` is where the properties are read: the window's by default, or a
+/// pane's own where it declares a palette of its own -- the terminal is
+/// `data-theme="dark"` whatever the window is in.
+export function palette<K extends string>(
+  wanted: Record<K, [string, string]>,
+  within: Element = document.body,
+): Record<K, string> {
   const probe = document.createElement("span");
   probe.style.display = "none";
-  document.body.appendChild(probe);
+  within.appendChild(probe);
   try {
     return Object.fromEntries(
       Object.entries<[string, string]>(wanted).map(([key, [property, fallback]]) => {

@@ -27,14 +27,18 @@ import { api, messageOf } from "../api";
 import { Empty, Waiting } from "../Empty";
 import { NotText } from "../icons";
 import { palette } from "../palette";
+import { onScheme, scheme } from "../theme";
 import type { FileText } from "../gen/FileText";
 
 (self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
 };
 
-/// Matching style.css, so the editor is not a white rectangle in a dark pane.
-export const THEME = "hura-dark";
+/// Matching style.css, so the editor is not a white rectangle in a dark pane,
+/// nor a dark one in a light window. One name for both palettes: Monaco's
+/// theme is global, so redefining it and setting it again repaints every
+/// editor open.
+export const THEME = "hura";
 
 /// Define it, once, against the palette the window is actually using.
 ///
@@ -44,22 +48,33 @@ export const THEME = "hura-dark";
 /// properties to read yet and every colour would come back a fallback. By the
 /// time a pane renders, the stylesheet is in.
 ///
-/// `vs-dark` underneath supplies the syntax rules, which are a palette of their
-/// own and not this window's business. What is overridden is only the surface:
-/// the editor and its gutter, which are the two that sit against the pane and
-/// so the two that showed the seam.
+/// `vs-dark` or `vs` underneath supplies the syntax rules, which are a palette
+/// of their own and not this window's business. What is overridden is only the
+/// surface: the editor and its gutter, which are the two that sit against the
+/// pane and so the two that showed the seam.
 let defined = false;
-export function ensureTheme(): void {
-  if (defined) return;
+function define(): void {
   const { surface } = palette({ surface: ["--sunken", "#0a0a0a"] });
   monaco.editor.defineTheme(THEME, {
-    base: "vs-dark",
+    base: scheme() === "dark" ? "vs-dark" : "vs",
     inherit: true,
     rules: [],
     colors: { "editor.background": surface, "editorGutter.background": surface },
   });
+}
+export function ensureTheme(): void {
+  if (defined) return;
+  define();
   defined = true;
 }
+
+// Again when the window changes palette, if there is an editor to repaint.
+// Before then there is nothing to do: the first editor defines it.
+onScheme(() => {
+  if (!defined) return;
+  define();
+  monaco.editor.setTheme(THEME);
+});
 
 export function FilePane({
   server,

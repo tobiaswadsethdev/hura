@@ -73,6 +73,7 @@ import { UpdateBadge } from "./Update";
 import { AboutScreen } from "./About";
 import { refreshPreviews } from "./previews";
 import { Select } from "./Select";
+import { applyAppearance } from "./theme";
 
 /// Where in the window you are.
 ///
@@ -214,6 +215,10 @@ export default function App() {
   // see `prefs.ts` for why none of it is on the server beside the branch
   // prefix.
   const [prefs, setPrefs] = usePrefs();
+
+  // Light, dark or the system's. Applied once already in `main.tsx`, before
+  // the first paint; this is for when it is changed in Settings.
+  useEffect(() => applyAppearance(prefs.appearance), [prefs.appearance]);
 
   /// Asking before something irreversible, in a dialog of this window's own.
   /// `dialog` is rendered at the end, beside the others.
