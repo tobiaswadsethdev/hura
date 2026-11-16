@@ -259,8 +259,9 @@ struct Answers: View {
     }
 }
 
-/// The phase as one mark, as the app draws it: its turning dots, still, while
-/// Claude works, and its own icons otherwise.
+/// The phase as one mark, as the app draws it: its working dots while Claude
+/// works, in a still pose since an activity can't animate, and its own icons
+/// otherwise.
 struct PhaseMark: View {
     let phase: SessionPhase
     let size: CGFloat
@@ -268,7 +269,7 @@ struct PhaseMark: View {
     var body: some View {
         Group {
             if phase == .working {
-                WorkingDots(size: size)
+                WorkingDots(size: size, still: true)
             } else {
                 Image(phase.glyph)
                     .resizable()
