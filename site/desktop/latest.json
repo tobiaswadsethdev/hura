@@ -1,0 +1,10 @@
+{
+  "version": "0.55.0",
+  "pub_date": "2026-11-16T16:50:23Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUb0RBL2d2cDFMWG01OExRZE9mTTJ5eGJUSWN0RlFxYWluRHBtd3dtQUZCR0RJMzdyMUNsR2ZpeTVTMWdrak9pazBrcm15UDJDUlBYSDVYNnpBTTYvcDd3TDUyVlZ3Y2c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0ODQ3ODIzCWZpbGU6aHVyYV8wLjU1LjBfeDY0LXNldHVwLmV4ZQp4a1JsWHZhRVo3enRtU0oxaWZhaitjajUvb2tzMExkcStFM2tLT21DbW03UFBwdzBrbVFzRHZIbTZDWjQ2THRQZmRsZ1lZRXYveVQzRVE2K3NaMm1DQT09Cg==",
+      "url": "https://github.com/tobiaswadsethdev/hura/releases/download/desktop-v0.55.0/hura-desktop-v0.55.0-x86_64-pc-windows-msvc-setup.exe"
+    }
+  }
+}
