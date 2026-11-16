@@ -159,6 +159,7 @@ mod tests {
             ask_id: v.ask_id.clone(),
             phase: None,
             at: None,
+            since: None,
         }
     }
 
@@ -231,6 +232,7 @@ mod tests {
             ask_id: None,
             phase: None,
             at: None,
+            since: None,
         };
         let enc = encrypt(&key, "h_aaaabbbbccccdddd", &n).unwrap();
         let plain = open(&key, &enc, "h_aaaabbbbccccdddd", &n).unwrap();
@@ -252,6 +254,7 @@ mod tests {
             ask_id: None,
             phase: None,
             at: None,
+            since: None,
         };
         let enc = encrypt(&[1u8; KEY_LEN], "h_aaaabbbbccccdddd", &n).unwrap();
         assert!(enc.len() <= MAX_ENCRYPTED, "{}", enc.len());
@@ -270,6 +273,7 @@ mod tests {
             ask_id: Some("toolu_1".into()),
             phase: None,
             at: None,
+            since: None,
         };
         let enc = encrypt(&key, "h_aaaabbbbccccdddd", &n).unwrap();
         assert!(open(&key, &enc, "h_aaaabbbbccccdddd", &n).is_some());
@@ -317,6 +321,7 @@ mod tests {
             ask_id: ask.map(Into::into),
             phase: None,
             at: None,
+            since: None,
         };
         let ok = |name: &str, n: Notification| {
             let sealed = seal(&k, nb, server, &n).unwrap();

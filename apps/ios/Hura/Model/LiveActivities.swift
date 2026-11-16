@@ -34,6 +34,35 @@ final class LiveActivities {
         Task {
             for await activity in Activity<SessionActivityAttributes>.activityUpdates { watch(activity) }
         }
+        Task { await Self.dedupe() }
+    }
+
+    /// Each time the app comes to the front: the relay is told every
+    /// activity's token again. iOS doesn't always give the app the time to
+    /// tell it when a push starts one, and until it hears, the relay can only
+    /// keep what it would have said (`docs/relay-api.md`, "Live Activities").
+    func resumed() {
+        guard #available(iOS 17.2, *) else { return }
+        for activity in Activity<SessionActivityAttributes>.activities {
+            let a = activity.attributes
+            guard let token = activity.pushToken, activity.activityState == .active else { continue }
+            Task { await push.activityTokenChanged(token, linkID: a.linkID, session: a.session) }
+        }
+        Task { await Self.dedupe() }
+    }
+
+    /// One activity per session. A relay from before it waited for an
+    /// activity's token started another on each change, and the stack stayed
+    /// on the Lock Screen; the newest is the one the relay can update.
+    nonisolated private static func dedupe() async {
+        let live = Activity<SessionActivityAttributes>.activities.filter { $0.activityState == .active }
+        let bySession = Dictionary(grouping: live) { "\($0.attributes.serverID):\($0.attributes.session)" }
+        for (_, same) in bySession where same.count > 1 {
+            let newest = same.max { ($0.content.state.at ?? 0) < ($1.content.state.at ?? 0) }
+            for activity in same where activity.id != newest?.id {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
     }
 
     private func watch(_ activity: Activity<SessionActivityAttributes>) {
@@ -87,7 +116,7 @@ enum LiveActivityAnswer {
 extension LiveActivities {
     /// A made-up session's activity, started here rather than by a push, for
     /// `-HuraActivity` (`HuraApp.pairFromLaunchArguments`).
-    static func demo(_ phase: SessionPhase, serverID: String) {
+    static func demo(_ phase: SessionPhase) {
         let body = switch phase {
         case .working: "Claude is working"
         case .permission: "Bash: npm test -- --run login.spec.ts"
@@ -96,12 +125,23 @@ extension LiveActivities {
         case .failed: "The session failed"
         case .ended: "The session ended"
         }
-        let state = SessionActivityState(phase: phase, at: Date().addingTimeInterval(-73),
-                                         askID: phase == .permission ? "toolu_demo" : nil,
-                                         title: "Fix the flaky login test", subtitle: "scope-creep", body: body)
+        // Sealed as hurad seals it, under a key kept where the real ones are,
+        // so the widget has to open it as it opens a real one.
+        let serverID = "h_demodemodemodemo", session = "fix-flaky-login-test"
+        let askID = phase == .permission ? "toolu_demo" : nil
+        let keys = KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup)
         do {
+            let key = try keys.key(serverID: serverID) ?? PushCrypto.newKey()
+            try keys.save(key, serverID: serverID)
+            try keys.saveName("devbox", serverID: serverID)
+            let enc = try PushCrypto.seal(PushCrypto.Text(title: "Fix the flaky login test", subtitle: "scope-creep",
+                                                          body: body),
+                                          key: key, serverID: serverID, kind: SessionActivity.kind, session: session,
+                                          askID: askID)
+            let state = SessionActivityState(phase: phase, at: Date().addingTimeInterval(-73),
+                                             since: Date().addingTimeInterval(-312), askID: askID, enc: enc)
             _ = try Activity.request(attributes: SessionActivityAttributes(serverID: serverID, linkID: "l_demo",
-                                                                           session: "fix-flaky-login-test"),
+                                                                           session: session),
                                      content: ActivityContent(state: state, staleDate: nil))
         } catch {
             print("hura: couldn't start the demo activity: \(error)")

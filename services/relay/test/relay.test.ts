@@ -599,33 +599,67 @@ describe("live activities", () => {
     expect(await rows(l.link_id)).toEqual([{ token: "" }]);
   });
 
-  it("holds the next event off until a started activity's token comes, rather than starting another", async () => {
+  it("keeps what comes while an activity starts for when its token does, rather than starting another", async () => {
     const { d, l } = await setup({ start: true });
     expect((await call("POST", "/v1/events", { auth: l.push_token, body: activity() })).json.activity).toBe("start");
 
-    // Straight after, with no token yet: try again shortly, and the event id
-    // is free for that retry.
-    const next = activity({ phase: "permission", ask_id: "toolu_01" });
+    // No token yet, however long it takes: kept, not sent, and no second start.
+    const next = { ...activity({ phase: "permission", ask_id: "toolu_01", since: 1_000 }) };
     const held = await call("POST", "/v1/events", { auth: l.push_token, body: next });
-    expect(held.status).toBe(429);
-    expect(held.headers.get("retry-after")).toBe("5");
+    expect(held).toMatchObject({ status: 200, json: { sent: false, reason: "activity_starting" } });
+    await env.DB.prepare("UPDATE activities SET updated_at = ? WHERE link_id = ?").bind(Date.now() - 3600_000, l.link_id).run();
+    const later = { ...next, event_id: `${next.event_id}-later`, body: "Bash: npm test" };
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: later })).json.reason).toBe("activity_starting");
     expect(apnsCalls).toHaveLength(1);
 
-    // The phone says where its updates go, and the retry updates it.
+    // The phone says where its updates go, and the latest is sent there at once.
     const body = { token: UPDATE };
     expect((await call("PUT", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: d.device_secret, body })).status).toBe(204);
-    const r = await call("POST", "/v1/events", { auth: l.push_token, body: next });
-    expect(r.json).toEqual({ sent: true, activity: "update" });
+    expect(apnsCalls).toHaveLength(2);
     expect(apnsCalls[1].url).toContain(UPDATE);
+    expect(apnsCalls[1].headers.get("apns-push-type")).toBe("liveactivity");
+    expect(apnsCalls[1].body.aps).toMatchObject({
+      event: "update",
+      "content-state": { phase: "permission", ask_id: "toolu_01", since: 1_000, body: "Bash: npm test" },
+    });
+    expect(await rows(l.link_id)).toEqual([{ token: UPDATE }]);
+    const pending = await env.DB.prepare("SELECT pending FROM activities WHERE link_id = ?").bind(l.link_id).first("pending");
+    expect(pending).toBeNull();
+
+    // And from then on, events update it as usual.
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    expect(r.json).toEqual({ sent: true, activity: "update" });
   });
 
-  it("starts again when a started activity never gave its token", async () => {
+  it("ends an activity that finished while it was starting, once its token comes", async () => {
+    const { d, l } = await setup({ start: true });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "done" }) });
+    expect(apnsCalls).toHaveLength(1);
+    const body = { token: UPDATE };
+    expect((await call("PUT", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: d.device_secret, body })).status).toBe(204);
+    expect(apnsCalls[1].body.aps.event).toBe("end");
+    expect(apnsCalls[1].body.aps["dismissal-date"]).toBeGreaterThan(Date.now() / 1000);
+    expect(await rows(l.link_id)).toEqual([]);
+  });
+
+  it("starts anew when an activity has waited eight hours for its token", async () => {
     const { l } = await setup({ start: true });
     await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
-    await env.DB.prepare("UPDATE activities SET updated_at = ? WHERE link_id = ?").bind(Date.now() - 61_000, l.link_id).run();
+    await env.DB.prepare("UPDATE activities SET updated_at = ? WHERE link_id = ?").bind(Date.now() - 8 * 3600_000 - 1, l.link_id).run();
     const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "input" }) });
     expect(r.json).toEqual({ sent: true, activity: "start" });
     expect(apnsCalls[1].url).toContain(START);
+  });
+
+  it("carries when the turn began, and only on an activity", async () => {
+    const { l } = await setup({ start: true, update: true });
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ since: future }) });
+    expect(apnsCalls[0].body.aps["content-state"].since).toBeLessThanOrEqual(Date.now() / 1000);
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: activity({ since: -1 }) })).status).toBe(400);
+    const plain = { ...event(), since: 5 };
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: plain })).status).toBe(400);
   });
 
   it("updates an activity it has the token of, and carries the request and ciphertext", async () => {

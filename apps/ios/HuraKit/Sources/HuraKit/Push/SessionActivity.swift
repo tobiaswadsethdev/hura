@@ -37,6 +37,10 @@ public struct SessionActivityState: Codable, Hashable, Sendable {
     /// Unix seconds. Not a `Date`: ActivityKit decodes the content state with
     /// a plain `JSONDecoder`, which would read a number as seconds since 2001.
     public var at: Double?
+    /// When the turn began, Unix seconds: what the activity's clock counts
+    /// from, as the app's own "working" clock does. `at` moves on with every
+    /// phase; this stays put until the turn ends.
+    public var since: Double?
     public var askID: String?
     public var enc: String?
     public var title: String?
@@ -45,15 +49,16 @@ public struct SessionActivityState: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case phaseName = "phase"
-        case at
+        case at, since
         case askID = "ask_id"
         case enc, title, subtitle, body
     }
 
-    public init(phase: SessionPhase, at: Date? = nil, askID: String? = nil, enc: String? = nil,
+    public init(phase: SessionPhase, at: Date? = nil, since: Date? = nil, askID: String? = nil, enc: String? = nil,
                 title: String? = nil, subtitle: String? = nil, body: String? = nil) {
         phaseName = phase.rawValue
         self.at = at?.timeIntervalSince1970
+        self.since = since?.timeIntervalSince1970
         self.askID = askID
         self.enc = enc
         self.title = title
@@ -62,25 +67,66 @@ public struct SessionActivityState: Codable, Hashable, Sendable {
     }
 
     public var phase: SessionPhase { SessionPhase(rawValue: phaseName) ?? .working }
-    public var since: Date? { at.map(Date.init(timeIntervalSince1970:)) }
+    /// What the clock counts from: the turn's start, or for a relay or
+    /// server that doesn't send one, the phase's.
+    public var turnStart: Date? { (since ?? at).map(Date.init(timeIntervalSince1970:)) }
 
     /// The text to show: opened with the server's key when it is sealed, or
     /// as it came. Nil when it is sealed and can't be opened (no key, a key
     /// from an older link, tampered with), and for a state with no text.
     public func text(serverID: String, session: String, keys: PushKeyStore) -> PushCrypto.Text? {
-        if let enc {
-            guard let key = try? keys.key(serverID: serverID) else { return nil }
-            return try? PushCrypto.open(enc, key: key, serverID: serverID, kind: SessionActivity.kind,
-                                        session: session, askID: askID)
+        try? opened(serverID: serverID, session: session, keys: keys).get()
+    }
+
+    /// Why the text couldn't be read, in a few words for the activity to show
+    /// in place of it: the activity is the only place a failure on the Lock
+    /// Screen can be seen.
+    public enum Unread: Error, Equatable {
+        /// No text came at all.
+        case none
+        /// The Keychain wouldn't give the key, with its status.
+        case keychain(Int32)
+        /// There is no key for the server on this phone.
+        case noKey
+        /// The key didn't open it: from an older link, or not for this.
+        case sealed
+
+        public var why: String {
+            switch self {
+            case .none: ""
+            case let .keychain(status): "Couldn't read this phone's key (\(status))"
+            case .noKey: "No key for this server on this phone"
+            case .sealed: "Couldn't open the text with this phone's key"
+            }
         }
-        guard let body else { return nil }
-        return PushCrypto.Text(title: title ?? session, subtitle: subtitle, body: body)
+    }
+
+    public func opened(serverID: String, session: String, keys: PushKeyStore) -> Result<PushCrypto.Text, Unread> {
+        if let enc {
+            let key: Data?
+            do {
+                key = try keys.key(serverID: serverID)
+            } catch let e as KeychainError {
+                return .failure(.keychain(e.status))
+            } catch {
+                return .failure(.keychain(0))
+            }
+            guard let key else { return .failure(.noKey) }
+            guard let text = try? PushCrypto.open(enc, key: key, serverID: serverID, kind: SessionActivity.kind,
+                                                  session: session, askID: askID)
+            else { return .failure(.sealed) }
+            return .success(text)
+        }
+        guard let body else { return .failure(.none) }
+        return .success(PushCrypto.Text(title: title ?? session, subtitle: subtitle, body: body))
     }
 
     /// The same state with its text in the clear and a new phase: what the app
     /// shows straight after answering, before the server says what came next.
     public func answered(_ text: PushCrypto.Text?, body: String, now: Date = Date()) -> SessionActivityState {
-        SessionActivityState(phase: .working, at: now, title: text?.title, subtitle: text?.subtitle, body: body)
+        var next = SessionActivityState(phase: .working, at: now, title: text?.title, subtitle: text?.subtitle, body: body)
+        next.since = since
+        return next
     }
 }
 

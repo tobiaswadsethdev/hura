@@ -46,10 +46,12 @@ const SESSION_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 // What an activity's token is while it is being started, until the phone
 // gives the real one. Never valid hex, so never mistaken for a token.
 const STARTING_TOKEN = "";
-// How long a started activity waits for its token before the next event
-// starts another instead: the phone is woken in the background to give it,
-// which takes a second or two.
-const START_GRACE_MS = 60 * 1000;
+// How long a started activity is taken to be waiting for its token. The
+// phone gives it when the app next runs, which may be much later; until then
+// another start would put the session on the Lock Screen twice. ActivityKit
+// ends an activity after eight hours, so one still waiting by then never
+// started.
+const STARTING_MS = 8 * 3600 * 1000;
 
 interface DeviceRow {
   id: string;
@@ -308,27 +310,54 @@ async function deleteLink(req: Request, env: RelayEnv, p: Record<string, string>
 async function activityTarget(req: Request, env: RelayEnv, p: Record<string, string>) {
   const dev = await authDevice(req, env);
   if (!SESSION_RE.test(p.session)) throw badRequest("session is malformed");
-  const owned = await env.DB.prepare("SELECT id FROM links WHERE id = ? AND device_id = ?").bind(p.link, dev.id).first();
+  const owned = await env.DB.prepare("SELECT id, server_id, label FROM links WHERE id = ? AND device_id = ?")
+    .bind(p.link, dev.id)
+    .first<{ id: string; server_id: string; label: string }>();
   if (!owned) throw notFound();
-  return { link: p.link, session: p.session };
+  return { dev, link: owned, session: p.session };
 }
 
-/** The update token of the activity showing one session. */
+/**
+ * The update token of the activity showing one session. An activity the
+ * relay started has been waiting for it, perhaps through events that changed
+ * what it should show: the latest of those goes to it now.
+ */
 async function setActivityToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
-  const { link, session } = await activityTarget(req, env, p);
+  const { dev, link, session } = await activityTarget(req, env, p);
   const token = activityToken(await readJSON(req));
+  const was = await env.DB.prepare("SELECT token, pending FROM activities WHERE link_id = ? AND session = ?")
+    .bind(link.id, session)
+    .first<{ token: string; pending: string | null }>();
   await env.DB.prepare(
     `INSERT INTO activities (link_id, session, token, updated_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT (link_id, session) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at`,
+     ON CONFLICT (link_id, session) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at,
+                                                  pending = NULL`,
   )
-    .bind(link, session, token, Date.now())
+    .bind(link.id, session, token, Date.now())
     .run();
+  if (was?.token === STARTING_TOKEN && was.pending) {
+    const a = JSON.parse(was.pending) as SessionActivity;
+    const event: ActivityEvent = STARTING.has(a.phase) ? "update" : "end";
+    const r = await sendApns(
+      env,
+      { token, environment: dev.environment },
+      activityPayload(a, event, { id: link.id, serverId: link.server_id, label: link.label }),
+      ACTIVITY_EXPIRY_SECONDS,
+      "liveactivity",
+    );
+    // Best effort: the phone has done its part, and the next event will
+    // update the activity anyway.
+    log("activity caught up", { link: link.id, phase: a.phase, event, apns_status: r.status, apns_reason: r.reason });
+    if (r.status === 200 && event === "end") {
+      await env.DB.prepare("DELETE FROM activities WHERE link_id = ? AND session = ?").bind(link.id, session).run();
+    }
+  }
   return json(204, null);
 }
 
 async function deleteActivityToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
   const { link, session } = await activityTarget(req, env, p);
-  await env.DB.prepare("DELETE FROM activities WHERE link_id = ? AND session = ?").bind(link, session).run();
+  await env.DB.prepare("DELETE FROM activities WHERE link_id = ? AND session = ?").bind(link.id, session).run();
   return json(204, null);
 }
 
@@ -386,6 +415,15 @@ async function postEvent(req: Request, env: RelayEnv): Promise<Response> {
   } else if (!activity && body.at !== undefined) {
     throw badRequest("at is only for session_activity");
   }
+  let since: number | undefined;
+  if (activity && body.since !== undefined && body.since !== null) {
+    if (typeof body.since !== "number" || !Number.isInteger(body.since) || body.since < 0) {
+      throw badRequest("since must be a whole number of seconds");
+    }
+    since = Math.min(body.since, Math.floor(now / 1000));
+  } else if (!activity && body.since !== undefined) {
+    throw badRequest("since is only for session_activity");
+  }
   const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM events WHERE link_id = ? AND created_at > ?")
     .bind(link.id, now - 60 * 1000)
     .first<{ n: number }>();
@@ -401,8 +439,8 @@ async function postEvent(req: Request, env: RelayEnv): Promise<Response> {
   if (activity) {
     const a: SessionActivity =
       encrypted !== undefined
-        ? { session: session!, phase: phase!, at, askId, encrypted }
-        : { session: session!, phase: phase!, at, askId, title, subtitle, body: text };
+        ? { session: session!, phase: phase!, at, since, askId, encrypted }
+        : { session: session!, phase: phase!, at, since, askId, title, subtitle, body: text };
     return sendActivity(env, link, a, eventId, now);
   }
 
@@ -471,14 +509,16 @@ async function sendActivity(
     .bind(link.id, a.session)
     .first<{ token: string; updated_at: number }>();
   if (row?.token === STARTING_TOKEN) {
-    // Started a moment ago, and the phone hasn't yet said where its updates
-    // go. Starting another would put the session on the Lock Screen twice,
-    // so hurad is asked to try again shortly, by when it usually has.
-    if (now - row.updated_at < START_GRACE_MS) {
-      await env.DB.prepare("DELETE FROM events WHERE link_id = ? AND event_id = ?").bind(link.id, eventId).run();
-      throw new HttpError(429, "rate_limited", "the activity is still starting", { "retry-after": "5" });
+    // Started, and the phone hasn't yet said where its updates go: it says
+    // so when the app next runs. Another start would put the session on the
+    // Lock Screen twice, so this is kept for then instead.
+    if (now - row.updated_at < STARTING_MS) {
+      await env.DB.prepare("UPDATE activities SET pending = ? WHERE link_id = ? AND session = ?")
+        .bind(JSON.stringify(a), link.id, a.session)
+        .run();
+      return json(200, { sent: false, reason: "activity_starting" });
     }
-    // It never did: the start was lost, or the phone said no.
+    // Long enough that it never did: the start was lost, or the phone said no.
     await forget();
     row = null;
   }

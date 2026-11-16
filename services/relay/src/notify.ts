@@ -105,6 +105,8 @@ export type SessionActivity = {
   phase: Phase;
   /** Unix seconds: when the session moved into the phase. */
   at: number;
+  /** Unix seconds: when the turn began, which the phone counts from. */
+  since?: number;
   askId?: string;
 } & ({ title: string; subtitle?: string; body: string; encrypted?: undefined } | { encrypted: string });
 
@@ -115,6 +117,7 @@ export function activityPayload(
   now = Date.now(),
 ) {
   const state: Record<string, unknown> = { phase: a.phase, at: a.at };
+  if (a.since !== undefined) state.since = a.since;
   if (a.askId !== undefined) state.ask_id = a.askId;
   if (a.encrypted !== undefined) {
     state.enc = a.encrypted;

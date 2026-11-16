@@ -21,7 +21,12 @@ struct SessionActivityTests {
         let state = try JSONDecoder().decode(SessionActivityState.self, from: Data(json.utf8))
         #expect(state.phase == .permission)
         #expect(state.askID == "toolu_01abc")
-        #expect(state.since == Date(timeIntervalSince1970: 1_763_300_000))
+        // Without the turn's start, the clock counts from the phase's.
+        #expect(state.turnStart == Date(timeIntervalSince1970: 1_763_300_000))
+
+        let turn = #"{"phase":"working","at":1763300500,"since":1763300000}"#
+        let working = try JSONDecoder().decode(SessionActivityState.self, from: Data(turn.utf8))
+        #expect(working.turnStart == Date(timeIntervalSince1970: 1_763_300_000))
 
         let plain = #"{"phase":"done","at":1763300000,"title":"Fix the tests","body":"Claude finished"}"#
         let done = try JSONDecoder().decode(SessionActivityState.self, from: Data(plain.utf8))
@@ -55,14 +60,19 @@ struct SessionActivityTests {
         var moved = state
         moved.askID = "toolu_2"
         #expect(moved.text(serverID: serverID, session: "fix-tests", keys: keys) == nil)
-        // And without the key, nothing either.
-        #expect(state.text(serverID: serverID, session: "fix-tests", keys: InMemoryPushKeyStore()) == nil)
+        // And without the key, nothing either; each failure says which it was,
+        // for the activity to show.
+        #expect(state.opened(serverID: serverID, session: "fix-tests", keys: InMemoryPushKeyStore())
+            == .failure(.noKey))
+        #expect(moved.opened(serverID: serverID, session: "fix-tests", keys: keys) == .failure(.sealed))
     }
 
     @Test func anAnswerShowsTheSessionWorkingInTheClear() {
         let text = PushCrypto.Text(title: "Fix the tests", subtitle: "scope-creep", body: "Bash: npm test")
-        let next = SessionActivityState(phase: .permission, askID: "toolu_1", enc: "x")
+        let next = SessionActivityState(phase: .permission, since: Date(timeIntervalSince1970: 4), askID: "toolu_1",
+                                        enc: "x")
             .answered(text, body: "Allowed", now: Date(timeIntervalSince1970: 10))
+        #expect(next.since == 4, "the turn's clock carries on")
         #expect(next.phase == .working)
         #expect(next.askID == nil)
         #expect(next.enc == nil)

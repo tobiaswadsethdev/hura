@@ -46,6 +46,9 @@ struct ChatView: View {
     @State private var justSent: (text: String, at: Date)?
     @State private var answering: String?
     @State private var atBottom = true
+    /// How tall the transcript and what floats over it may be: the screen
+    /// under the navigation bar, less the keyboard when it is up.
+    @State private var room: CGFloat = 0
     @State private var end = ListEnd()
     @State private var items: [ChatItem] = []
     /// Sent and not yet read: drawn after the turn in progress.
@@ -165,6 +168,7 @@ struct ChatView: View {
                 // Over the transcript rather than under it, which scrolls on
                 // beneath the glass.
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottom }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room = $0 }
             }
         }
         .background(Color.black)
@@ -212,6 +216,16 @@ struct ChatView: View {
         }
     }
 
+    /// The most a question, plan or permission may take of the screen. A
+    /// fixed height was more than there is with the keyboard up, and the card
+    /// pushed past both ends: its question went under the navigation bar and
+    /// the composer under the keyboard. A share of the room there is instead,
+    /// within which the card scrolls, from its question down.
+    private var askHeight: CGFloat {
+        guard room > 0 else { return 420 }
+        return min(420, max(120, room * 0.6))
+    }
+
     /// What floats over the end of the transcript: what is waiting on you,
     /// the subagents, the pull request, and the composer, each its own glass.
     private var bottom: some View {
@@ -227,7 +241,7 @@ struct ChatView: View {
                     }
                 }
                 .scrollBounceBehavior(.basedOnSize)
-                .frame(maxHeight: 420)
+                .frame(maxHeight: askHeight)
                 .fixedSize(horizontal: false, vertical: true)
                 .clipShape(RoundedRectangle(cornerRadius: 24))
                 .glass(in: RoundedRectangle(cornerRadius: 24))

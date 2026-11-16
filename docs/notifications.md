@@ -96,7 +96,8 @@ As with notifications, these are sent on the change, not on the state, and
 not on the first look; a `done` or an `ended` is only sent after a turn the
 activity showed. The text is encrypted like a notification's, and each event
 carries `at`, when the change was seen, so the phone ignores a retry that
-arrives after something newer. A newer event for a session also replaces one
+arrives after something newer, and `since`, when the turn began, which the
+activity's clock counts from as the app's does. A newer event for a session also replaces one
 still queued for it. The relay decides whether that starts an activity,
 updates it or ends it: see [relay-api.md](relay-api.md#live-activities).
 

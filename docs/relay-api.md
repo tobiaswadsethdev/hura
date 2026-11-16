@@ -324,6 +324,7 @@ environment.
 | `session` | required |
 | `phase` | required: `working`, `permission`, `input`, `done`, `failed` or `ended` |
 | `at` | optional: when the session moved into the phase, in Unix seconds. It becomes the push's `timestamp`, which iOS uses to drop an update older than the one it shows, so a retried event can't undo a newer one. Defaults to now; a time in the future is taken as now |
+| `since` | optional: when the turn began, in Unix seconds, which the phone counts from: a wait and the work after it are one turn on its clock. A time in the future is taken as now |
 | `ask_id` | required with `permission`, refused with any other phase: the request Allow and Deny answer |
 | `title`, `subtitle`, `body` or `encrypted` | as for any event. The text is encrypted as in [Encrypted text](#encrypted-text), with `session_activity` as the kind |
 
@@ -347,12 +348,15 @@ What the relay does:
 Ending an activity forgets its update token, so the next turn starts a new one.
 `activity` in the answer is `start`, `update` or `end`.
 
-A started activity has no update token until the phone, woken in the
-background, gives one, which takes a second or two. An event for the same
-session in that time would start a second activity, so for a minute after a
-start the relay answers it `429` with `Retry-After: 5` instead, and the retry
-updates the activity. An activity whose token hasn't come after a minute is
-taken never to have started.
+A started activity has no update token until the phone gives one, which it
+does when the app next runs: at once if iOS wakes it for that, otherwise when
+it is opened. Until then the relay never starts another activity for the
+session, which would show it twice. It keeps the latest event instead,
+answering `{"sent": false, "reason": "activity_starting"}`, and sends that
+event to the activity as soon as its token arrives: an update, or an end if
+the turn finished meanwhile. An activity still without a token after eight
+hours, when ActivityKit would have ended it anyway, is taken never to have
+started, and the next event starts a new one.
 
 When APNs says an update token is gone (`BadDeviceToken`, `Unregistered`,
 `ExpiredToken`), the relay forgets it and, for a phase that can start one,
@@ -376,7 +380,7 @@ other event, and counted together with them.
 }
 ```
 
-`content-state` has `phase` and `at`, then `ask_id` when there is one, and the
+`content-state` has `phase` and `at`, then `since` and `ask_id` when there are, and the
 text: `enc` for an encrypted event, `title`, `subtitle` and `body` for a
 plaintext one. Absent fields are left out.
 
