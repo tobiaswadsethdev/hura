@@ -13,7 +13,6 @@
 // overview is what it is opened for most of the time.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import * as monaco from "monaco-editor/editor/editor.api";
 
 import { api, messageOf } from "./api";
 import { useConfirm } from "./Confirm";
@@ -49,7 +48,7 @@ import {
 import { pullName } from "./inboxNotify";
 import { Markdown } from "./Markdown";
 import { openExternal } from "./open";
-import { ensureTheme, languageOf, THEME } from "./panes/File";
+import { showSides } from "./panes/sides";
 import { Select } from "./Select";
 import { ago, Nobody, Who } from "./Ticket";
 import { MarkdownBox } from "./TicketEdit";
@@ -970,34 +969,15 @@ function FileSides({ tracker, files, file }: { tracker: string; files: PullFiles
   useEffect(() => {
     const element = host.current;
     if (!element || !sides || sides.binary) return;
-    ensureTheme();
-    const editor = monaco.editor.createDiffEditor(element, {
-      theme: THEME,
-      readOnly: true,
-      domReadOnly: true,
-      automaticLayout: true,
+    const shown = showSides(element, sides, file.path, {
       // Two columns when the panel is wide enough for them, and Monaco's one
       // column of removed-then-added lines when it is not.
-      renderSideBySide: true,
       useInlineViewWhenSpaceIsLimited: true,
       // A review reads the changes. Unchanged stretches fold away, and open
       // when clicked.
       hideUnchangedRegions: { enabled: true },
-      // The colours say which lines went and which came; the + and − beside
-      // them are drawn in an icon font, and say nothing the colours do not.
-      renderIndicators: false,
-      minimap: { enabled: false },
-      scrollBeyondLastLine: false,
-      fontSize: 13,
     });
-    const original = monaco.editor.createModel(sides.original, languageOf(file.path));
-    const modified = monaco.editor.createModel(sides.modified, languageOf(file.path));
-    editor.setModel({ original, modified });
-    return () => {
-      original.dispose();
-      modified.dispose();
-      editor.dispose();
-    };
+    return shown.dispose;
   }, [sides, file.path]);
 
   if (error) return <p className="error">{error}</p>;

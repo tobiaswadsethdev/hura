@@ -2637,6 +2637,40 @@ main { position: relative; }
   display: block; max-width: 100%; max-height: 60vh; object-fit: contain;
   margin: 8px 0; border-radius: 6px;
 }
+/* An image in a message or a ticket opens on its own when clicked. */
+img.zoomable { cursor: zoom-in; }
+.picture-scrim {
+  position: fixed;
+  inset: 0;
+  /* Over the dialogs too: an image can be in a ticket opened over a screen. */
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: rgb(0 0 0 / 0.85);
+  cursor: zoom-out;
+}
+.picture-scrim img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 40px rgb(0 0 0 / 0.5);
+}
+.picture-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  padding: 6px;
+  border: none;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.12);
+  color: #fff;
+  cursor: pointer;
+}
+.picture-close:hover { background: rgb(255 255 255 / 0.22); }
 .doc p { margin: 0 0 8px; }
 .doc :is(h3, h4, h5, h6) { margin: 14px 0 6px; font-size: 13px; font-weight: 600; }
 .doc h3 { font-size: 14px; }

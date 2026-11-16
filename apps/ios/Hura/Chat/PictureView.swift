@@ -61,43 +61,59 @@ struct PictureScreen: View {
     @State private var dragged: CGSize = .zero
 
     var body: some View {
-        NavigationStack {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .scaleEffect(scale)
-                .offset(offset)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black)
-                .gesture(MagnifyGesture()
-                    .onChanged { scale = max(1, settled * $0.magnification) }
-                    .onEnded { _ in
-                        settled = scale
-                        if scale == 1 { withAnimation { offset = .zero; dragged = .zero } }
-                    })
-                .simultaneousGesture(DragGesture()
-                    .onChanged { v in
-                        guard scale > 1 else { return }
-                        offset = CGSize(width: dragged.width + v.translation.width,
-                                        height: dragged.height + v.translation.height)
-                    }
-                    .onEnded { _ in dragged = offset })
-                .onTapGesture(count: 2) {
-                    withAnimation {
-                        scale = scale > 1 ? 1 : 2.5
-                        settled = scale
-                        if scale == 1 { offset = .zero; dragged = .zero }
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFit()
+            .scaleEffect(scale)
+            .offset(offset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.ignoresSafeArea())
+            .gesture(MagnifyGesture()
+                .onChanged { scale = max(1, settled * $0.magnification) }
+                .onEnded { _ in
+                    settled = scale
+                    if scale == 1 { withAnimation { offset = .zero; dragged = .zero } }
+                })
+            .simultaneousGesture(DragGesture()
+                .onChanged { v in
+                    guard scale > 1 else { return }
+                    offset = CGSize(width: dragged.width + v.translation.width,
+                                    height: dragged.height + v.translation.height)
+                }
+                .onEnded { _ in dragged = offset })
+            .onTapGesture(count: 2) {
+                withAnimation {
+                    scale = scale > 1 ? 1 : 2.5
+                    settled = scale
+                    if scale == 1 { offset = .zero; dragged = .zero }
+                }
+            }
+            // Its own buttons rather than a navigation bar's, which squeezed
+            // "Done" down to "D…".
+            .overlay(alignment: .top) {
+                HStack {
+                    Button("Done") { dismiss() }
+                        .font(.body.weight(.semibold))
+                        .fixedSize()
+                        .padding(.horizontal, 16)
+                        .frame(height: 44)
+                        .contentShape(Capsule())
+                        .glass(interactive: true)
+                    Spacer()
+                    ShareLink(item: Image(uiImage: image), preview: SharePreview("Image", image: Image(uiImage: image))) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                            .glass(in: Circle(), interactive: true)
                     }
                 }
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-                    ToolbarItem(placement: .primaryAction) {
-                        ShareLink(item: Image(uiImage: image), preview: SharePreview("Image", image: Image(uiImage: image)))
-                    }
-                }
-                .toolbarBackground(.visible, for: .navigationBar)
-                .toolbarColorScheme(.dark, for: .navigationBar)
-        }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
+            .environment(\.colorScheme, .dark)
     }
 }
 

@@ -60,18 +60,28 @@ struct DiffLayout {
     var gutter: CGFloat
     var width: CGFloat
     var char: CGFloat
+    /// Whether there is an old side and a new one to number. A new file has
+    /// no old line numbers and a deleted one no new ones, and an empty column
+    /// for them is room taken for nothing.
+    var old: Bool
+    var new: Bool
 
     init(diff lines: [UnifiedDiff.Line], size: CGFloat, wrap: Bool, viewport: CGFloat) {
         char = ("M" as NSString).size(withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: size, weight: .regular)]).width
         let digits = String(lines.map { max($0.old ?? 0, $0.new ?? 0) }.max() ?? 0).count
         gutter = CGFloat(max(digits, 2)) * char + 6
+        old = lines.isEmpty || lines.contains { $0.old != nil }
+        new = lines.isEmpty || lines.contains { $0.new != nil }
         let longest = lines.map { DiffLayout.shown($0.text).count }.max() ?? 0
         let text = CGFloat(longest + 2) * char
-        width = wrap ? viewport : max(viewport, 2 * gutter + 2 * char + text + 12)
+        let gutters = CGFloat((old ? 1 : 0) + (new ? 1 : 0)) * gutter
+        width = wrap ? viewport : max(viewport, gutters + 2 * char + text + 12)
     }
 
     /// Where a line's text starts, for what is drawn under it.
-    var indent: CGFloat { 2 * gutter + 2 * char }
+    var indent: CGFloat { gutters + 2 * char }
+
+    private var gutters: CGFloat { CGFloat((old ? 1 : 0) + (new ? 1 : 0)) * gutter }
 
     /// Tabs as four spaces: a monospaced column is only as good as every
     /// character being one wide.
@@ -149,8 +159,12 @@ struct DiffLines<Below: View>: View {
     @ViewBuilder
     private func row(_ line: UnifiedDiff.Line, _ layout: DiffLayout) -> some View {
         HStack(alignment: .top, spacing: 0) {
-            Text(line.old.map(String.init) ?? "").frame(width: layout.gutter, alignment: .trailing).foregroundStyle(.tertiary)
-            Text(line.new.map(String.init) ?? "").frame(width: layout.gutter, alignment: .trailing).foregroundStyle(.tertiary)
+            if layout.old {
+                Text(line.old.map(String.init) ?? "").frame(width: layout.gutter, alignment: .trailing).foregroundStyle(.tertiary)
+            }
+            if layout.new {
+                Text(line.new.map(String.init) ?? "").frame(width: layout.gutter, alignment: .trailing).foregroundStyle(.tertiary)
+            }
             Text(line.kind == .added ? "+" : line.kind == .removed ? "-" : " ")
                 .foregroundStyle(line.kind == .added ? .green : line.kind == .removed ? .red : .secondary)
                 .frame(width: layout.char * 2)

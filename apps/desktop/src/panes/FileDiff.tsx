@@ -19,7 +19,7 @@ import { Forget, NotText } from "../icons";
 import type { Against } from "../gen/Against";
 import type { Comment } from "../gen/Comment";
 import type { FileDiff as Sides } from "../gen/FileDiff";
-import { ensureTheme, languageOf, THEME } from "./File";
+import { showSides } from "./sides";
 
 export function FileDiffPane({
   server,
@@ -36,7 +36,7 @@ export function FileDiffPane({
   const [sides, setSides] = useState<Sides | null>(null);
   const [review, setReview] = useState<Comment[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [editor, setEditor] = useState<monaco.editor.IStandaloneDiffEditor | null>(null);
+  const [editor, setEditor] = useState<monaco.editor.ICodeEditor | null>(null);
   const [writing, setWriting] = useState<{ line: number; excerpt: string } | null>(null);
   const [draft, setDraft] = useState("");
 
@@ -55,38 +55,24 @@ export function FileDiffPane({
     const element = host.current;
     if (!element || !sides || sides.binary) return;
 
-    ensureTheme();
-    const created = monaco.editor.createDiffEditor(element, {
-      theme: THEME,
-      readOnly: true,
-      domReadOnly: true,
-      automaticLayout: true,
-      renderSideBySide: true,
-      minimap: { enabled: false },
-      scrollBeyondLastLine: false,
-      fontSize: 13,
-    });
-    const original = monaco.editor.createModel(sides.original, languageOf(path));
-    const modified = monaco.editor.createModel(sides.modified, languageOf(path));
-    created.setModel({ original, modified });
+    const shown = showSides(element, sides, path);
 
     // A comment is written against the *modified* side: the line you are
     // objecting to is the one that is there now, and it is the one the stored
-    // line number means.
-    const right = created.getModifiedEditor();
-    const clicked = right.onMouseDown((e) => {
+    // line number means. A file that is gone has no such line.
+    const right = shown.now;
+    const clicked = right?.onMouseDown((e) => {
       const line = e.target.position?.lineNumber;
-      if (!line) return;
-      setWriting({ line, excerpt: modified.getLineContent(line) });
+      const model = right.getModel();
+      if (!line || !model) return;
+      setWriting({ line, excerpt: model.getLineContent(line) });
       setDraft("");
     });
 
-    setEditor(created);
+    setEditor(right);
     return () => {
-      clicked.dispose();
-      original.dispose();
-      modified.dispose();
-      created.dispose();
+      clicked?.dispose();
+      shown.dispose();
       setEditor(null);
     };
   }, [sides, path]);
@@ -100,7 +86,7 @@ export function FileDiffPane({
     if (!editor) return;
     const mine = review.filter((c) => c.file === path);
     if (mine.length === 0) return;
-    const collection = editor.getModifiedEditor().createDecorationsCollection(
+    const collection = editor.createDecorationsCollection(
       mine.map((c) => ({
         range: new monaco.Range(Math.max(1, c.line), 1, Math.max(1, c.line), 1),
         options: {

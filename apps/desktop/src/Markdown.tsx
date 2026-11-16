@@ -16,6 +16,7 @@ import remarkGfm from "remark-gfm";
 
 import { api } from "./api";
 import type { Picture } from "./gen/Picture";
+import { Zoomable } from "./Picture";
 
 /// Reads a working-copy path as an image, for the session a reply is about.
 /// Absent where there is no session, and then an image is its alt text.
@@ -69,7 +70,7 @@ function Img({ src, alt }: { src?: string; alt?: string }) {
     };
   }, [read, path, forge, url]);
   if (!picture) return <>{alt ? `[${alt}]` : null}</>;
-  return <img className="doc-img" src={`data:${picture.mime};base64,${picture.data}`} alt={alt ?? path ?? ""} />;
+  return <Zoomable className="doc-img" src={`data:${picture.mime};base64,${picture.data}`} alt={alt ?? path ?? ""} />;
 }
 
 const OPENABLE = /^(https?:|mailto:)/i;

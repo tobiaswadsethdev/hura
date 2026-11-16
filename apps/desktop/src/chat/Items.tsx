@@ -22,6 +22,7 @@ import { Markdown } from "../Markdown";
 import { leadingCommand } from "./commands";
 import { since, Ticking, useNow } from "./elapsed";
 import { type Item, type Located, type ToolCall, type ToolResult, TYPED_SKILL } from "./transcript";
+import { Zoomable } from "../Picture";
 
 /// Where the working copy is in the sandbox. Paths under it are shown relative
 /// to it, which is how the file tree and the git pane show them.
@@ -354,7 +355,7 @@ export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
         <div className="chat-tool-body">
           <ToolBody call={call} />
           {call.result?.images.map((p, i) => (
-            <img key={i} className="chat-image" src={`data:${p.mime};base64,${p.data}`} alt="" />
+            <Zoomable key={i} className="chat-image" src={`data:${p.mime};base64,${p.data}`} alt="" />
           ))}
           {call.answer && !call.answer.allow && call.answer.message && (
             <p className="chat-quiet">You said: {call.answer.message}</p>
@@ -406,7 +407,7 @@ function SentFiles({ files }: { files: ChatFile[] }) {
       {files.map((f) =>
         f.data ? (
           <li key={f.path} title={f.path}>
-            <img src={`data:${f.mime};base64,${f.data}`} alt={f.name} />
+            <Zoomable src={`data:${f.mime};base64,${f.data}`} alt={f.name} />
           </li>
         ) : (
           <li key={f.path} title={f.path}>
