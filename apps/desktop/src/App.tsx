@@ -1083,6 +1083,7 @@ export default function App() {
                 .catch((e) => setError(messageOf(e)));
             }}
             queueLimit={queue?.limit ?? 0}
+            messages={queue?.messages ?? []}
             onUnqueue={(w) => {
               if (!server) return;
               api

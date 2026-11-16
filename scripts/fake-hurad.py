@@ -66,6 +66,32 @@ sessions = [
 first = os.environ.get("FAKE_FIRST")
 sessions.sort(key=lambda s: s["name"] != first)
 
+# What is waiting: a session queued for room and one scheduled for later,
+# and messages for three of the sessions above -- one for after its turn, and
+# the rest at times -- so each list shows a row's mark in every form.
+def queued(id, name, project, task, at=None):
+    new = {"project": project, "name": name, "title": None, "repo": REPOS[project], "task": task, "base": None,
+           "branch": None, "policy": "feature-work", "providers": ["claude"], "toolchains": ["node"], "start": True,
+           "ticket": None, "pull": None, "interface": "chat", "worktree": False}
+    return {"id": id, "new": new, "at": at, "added": now - 600, "started": False, "failed": None}
+
+def message(id, session, text, at=None):
+    return {"id": id, "session": session, "text": text, "at": at, "added": now - 300}
+
+queue = {
+    "sessions": [
+        queued(1, "release-notes", "hura", "Draft the release notes for the next hurad"),
+        queued(2, "nightly-deps", "storefront", "Update dependencies and run the suite", at=now + 6 * 3600),
+    ],
+    "messages": [
+        message(3, "docs-search", "Now add a keyboard shortcut to open the search"),
+        message(4, "relay-tls", "Check the rotation held overnight", at=now + 3 * 3600),
+        message(5, "relay-tls", "Then open a pull request", at=now + 4 * 3600),
+        message(6, "price-rounding", "Re-run the checkout tests against staging", at=now + 86400 * 2),
+    ],
+    "limit": 2,
+}
+
 def report(state, detail=None, prompt=None, ask=None):
     return {"state": state, "detail": detail, "source": "hook", "ask": ask, "prompt": prompt}
 
@@ -338,6 +364,7 @@ def answer(req):
     op, name = req.get("op"), req.get("name")
     if op == "ls": return {"reply": "ls", "sessions": sessions, "adopted": [], "dead": [], "warnings": []}
     if op == "projects": return {"reply": "projects", "projects": projects}
+    if op == "queue": return {"reply": "queue", **queue}
     if op == "poll": return {"reply": "poll", **poll(name)}
     if op == "shells": return {"reply": "shells", "shells": []}
     if op == "chats": return {"reply": "chats", "chats": ["agent"], "opened": None}
