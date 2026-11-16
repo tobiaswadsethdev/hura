@@ -681,8 +681,37 @@ pub fn run(backend: &dyn Backend, config: &Result<Config, config::Error>) -> Vec
     }
     if let Ok(cfg) = config {
         checks.extend(check_azure(cfg.credentials()));
+        checks.extend(check_github(cfg.credentials()));
     }
     checks
+}
+
+/// Whether each `github` credential reaches git as well as the API.
+///
+/// git needs the token in another form than `gh` does, and only a `command`
+/// can be wrapped to store it (see [`crate::credentials`]). From a `ref` a
+/// session still has `gh` and still clones a public repository, so this is a
+/// warning; but a push or a private clone is refused with "could not read
+/// Username", which says nothing about why. Silent for a `command`, the
+/// usual case, since there is nothing to check without spending the token.
+fn check_github(credentials: &[crate::credentials::Credential]) -> Vec<Check> {
+    use crate::credentials::{Delivery, Kind, Source};
+    credentials
+        .iter()
+        .filter(|c| c.kind == Kind::GitHub && matches!(c.delivery, Delivery::Value(Source::Ref(_))))
+        .map(|c| {
+            Check::warn(
+                "github",
+                format!(
+                    "`{}` is a `ref`, which reaches GitHub's API but not git: no push, and no \
+                     private clone",
+                    c.name
+                ),
+                "give it a `command` that prints the token instead, such as \
+                 `op read 'op://Private/github/token'`",
+            )
+        })
+        .collect()
 }
 
 /// Whether each `azure-cli` credential's `az` can mint a token here.
@@ -877,5 +906,35 @@ mod wsl_tests {
         if let Some(check) = check_wsl(12345) {
             assert!(check.detail.contains("12345"), "{}", check.detail);
         }
+    }
+}
+
+#[cfg(test)]
+mod github_tests {
+    use super::*;
+    use crate::credentials::{Credential, Kind, Source};
+
+    /// Only a reference is worth a line: a command reaches git and the API
+    /// alike, and the other kinds have no git form to miss.
+    #[test]
+    fn only_a_github_reference_is_warned_about() {
+        let checks = check_github(&[
+            Credential::value("cmd", Kind::GitHub, Source::Command("gh auth token".into())),
+            Credential::value("vault", Kind::GitHub, Source::Ref("op://P/gh/token".into())),
+            Credential::value(
+                "ado",
+                Kind::AzureDevOpsPat,
+                Source::Ref("op://P/ado/pat".into()),
+            ),
+        ]);
+        let [check] = checks.as_slice() else {
+            panic!(
+                "one warning: {:?}",
+                checks.iter().map(|c| &c.detail).collect::<Vec<_>>()
+            );
+        };
+        assert_eq!(check.level, Level::Warn);
+        assert!(check.detail.contains("`vault`"), "{}", check.detail);
+        assert!(check.fix.as_deref().unwrap().contains("command"));
     }
 }

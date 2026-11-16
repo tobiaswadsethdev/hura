@@ -14,6 +14,18 @@
 //! created without the credential has neither the placeholder nor a secret
 //! behind it, so ticking the box per session still decides something.
 //!
+//! A GitHub token is two secrets, because GitHub takes it in two forms and the
+//! proxy only swaps an exact match. Its REST API, which `gh` talks to, takes
+//! `Authorization: Bearer <token>`, so `GITHUB_TOKEN` stands for the token as
+//! it is, on `api.github.com`. Its git endpoints on `github.com` answer a
+//! bearer token with a 401 (measured with a fine-grained token and with `gh`'s
+//! own OAuth token, the latter also as `token <token>`) and take HTTP Basic. So
+//! `HURA_GITHUB_BASIC` stands for `base64("x-access-token:" + token)`, on
+//! `github.com`, which is what the clone's `http.extraHeader` sends.
+//! `GH_TOKEN` gets the API placeholder too: the runtime sets one of its own for
+//! a GitHub service hura does not use, `gh` reads it before `GITHUB_TOKEN`,
+//! and with no secret behind it `gh` went out unauthenticated.
+//!
 //! Three kinds have no fixed hosts, because what they reach is the repository's
 //! business rather than hura's, and the config file names it:
 //!
@@ -91,13 +103,15 @@ impl Kind {
         Kind::ALL.into_iter().find(|k| k.name() == s)
     }
 
-    /// The hosts whose requests carry it. Empty for the kinds whose hosts the
-    /// config file names.
+    /// The hosts whose requests carry the value behind [`Kind::env`]. Empty
+    /// for the kinds whose hosts the config file names. GitHub's git host is
+    /// not here: it takes the token in another form, under a placeholder of
+    /// its own (see [`GITHUB_BASIC_ENV`]).
     pub fn hosts(self) -> &'static [&'static str] {
         match self {
             Kind::ClaudeOauth => &["api.anthropic.com", "platform.claude.com"],
             Kind::AzureDevOpsPat => &["dev.azure.com"],
-            Kind::GitHub => &["github.com", "api.github.com"],
+            Kind::GitHub => &["api.github.com"],
             Kind::AzureCli | Kind::NugetFeed | Kind::DockerRegistry => &[],
         }
     }
@@ -129,6 +143,29 @@ impl Kind {
         }
     }
 }
+
+/// The variable a GitHub credential's git placeholder is in: the whole Basic
+/// credential, so `Authorization: Basic $HURA_GITHUB_BASIC` is the header git
+/// sends. The seeding script writes that into the clone's `http.extraHeader`.
+pub const GITHUB_BASIC_ENV: &str = "HURA_GITHUB_BASIC";
+
+/// The variable `gh` reads first, before `GITHUB_TOKEN`. The runtime sets it
+/// in every sandbox to a placeholder of its own (`gho_sbxproxymana...`), for
+/// its built-in GitHub service, which hura does not use: with no secret behind
+/// that placeholder, `gh` was refused as an invalid token and its API calls
+/// went out unauthenticated, at 60 an hour per address (measured). A value
+/// given at create replaces the runtime's (measured), so a GitHub credential
+/// puts its API placeholder here as well.
+const GH_TOKEN_ENV: &str = "GH_TOKEN";
+
+/// Where GitHub serves git over HTTPS, the one host the Basic form goes to.
+const GITHUB_GIT_HOSTS: [&str; 1] = ["github.com"];
+
+/// The user GitHub's git endpoints are given the token with. Any user works
+/// with a personal access token (measured: this, an empty one, and the
+/// account's own login); this one is also the user GitHub documents for an
+/// app's installation token, so it is right for every token a user could pick.
+const GITHUB_GIT_USER: &str = "x-access-token";
 
 /// What the image's `az` reads a resource's placeholder from, followed by
 /// [`resource_slug`]. The two have to agree; a test runs the script to check.
@@ -291,11 +328,38 @@ impl Credential {
         match &self.delivery {
             Delivery::Value(source) => {
                 let placeholder = format!("{}{}", self.kind.prefix(), fresh());
-                Grant {
+                let mut grant = Grant {
                     env: vec![(self.kind.env().to_string(), placeholder.clone())],
                     secrets: vec![self.value_secret(sandbox, source, &placeholder)],
                     registries: Vec::new(),
+                };
+                if self.kind == Kind::GitHub {
+                    grant
+                        .env
+                        .push((GH_TOKEN_ENV.to_string(), placeholder.clone()));
                 }
+                // Git's form of a GitHub token. Only from a command, which can
+                // be wrapped to store the encoding: a reference names one
+                // stored value, and that is already the API's. Without it git
+                // sends no header at all, which still clones a public
+                // repository; `hurad doctor` says what to write instead.
+                if self.kind == Kind::GitHub
+                    && let Source::Command(_) = source
+                {
+                    let basic = format!("{}{}", self.kind.prefix(), fresh());
+                    grant
+                        .env
+                        .push((GITHUB_BASIC_ENV.to_string(), basic.clone()));
+                    grant.secrets.push(SecretSpec {
+                        sandbox: sandbox.to_string(),
+                        hosts: GITHUB_GIT_HOSTS.iter().map(|h| (*h).to_string()).collect(),
+                        env: GITHUB_BASIC_ENV.to_string(),
+                        source: login_source(source, GITHUB_GIT_USER),
+                        placeholder: Some(basic),
+                        refresh: self.refresh.clone(),
+                    });
+                }
+                grant
             }
             Delivery::Feed {
                 source,
@@ -384,7 +448,8 @@ impl Credential {
     ///
     /// The value is what the proxy writes over the placeholder, so it has to
     /// be what belongs in the header. Claude and GitHub tokens go in as they
-    /// are. An Azure DevOps PAT is HTTP Basic with the token as the password
+    /// are (git's form of a GitHub token is a second secret, made in
+    /// [`Self::grant_with`]). An Azure DevOps PAT is HTTP Basic with the token as the password
     /// and an empty user, `base64(":" + pat)`: from a command, the command is
     /// wrapped so the runtime stores that form, and the sandbox sends
     /// `Authorization: Basic <placeholder>`. A reference cannot be wrapped,
@@ -421,10 +486,10 @@ fn basic_source(source: &Source) -> SecretSource {
     }
 }
 
-/// A registry password's source, made to store `base64(username:password)`:
-/// the Basic credential Docker's engine sends the registry's token service.
-/// A reference cannot be wrapped, so it has to name a secret that already
-/// holds the encoded form.
+/// A password's source, made to store `base64(username:password)`: the Basic
+/// credential Docker's engine sends a registry's token service, and the one
+/// git sends GitHub. A reference cannot be wrapped, so it has to name a secret
+/// that already holds the encoded form.
 fn login_source(source: &Source, username: &str) -> SecretSource {
     match source {
         Source::Command(cmd) => SecretSource::Command(format!(
@@ -608,6 +673,71 @@ mod tests {
         let encoded = sh(&wrapped);
         let decoded = sh(&format!("printf %s {} | base64 -d", sh_quote(&encoded)));
         assert_eq!(decoded, ":it's-a-pat");
+    }
+
+    /// A GitHub token is two secrets: as it is for the API, which `gh` sends
+    /// as a bearer, and encoded as Basic for git on github.com, which answers
+    /// a bearer with a 401. Each placeholder is swapped on its own host only,
+    /// and `gh`'s own variable holds the API's rather than the runtime's.
+    #[test]
+    fn a_github_command_is_a_bearer_for_the_api_and_basic_for_git() {
+        let cmd = "echo 'github_pat_it'\"'\"'s' | tr -d '\\n'";
+        let c = Credential::value("gh", Kind::GitHub, Source::Command(cmd.into()));
+        let grant = c.grant_with("hura-a", &mut counter());
+        assert_eq!(
+            grant.env,
+            [
+                ("GITHUB_TOKEN".to_string(), "hura-cred-r1".to_string()),
+                ("GH_TOKEN".to_string(), "hura-cred-r1".to_string()),
+                ("HURA_GITHUB_BASIC".to_string(), "hura-cred-r2".to_string()),
+            ]
+        );
+        let [api, git] = grant.secrets.as_slice() else {
+            panic!("two secrets: {grant:?}");
+        };
+        assert_eq!(api.hosts, ["api.github.com"]);
+        assert_eq!(api.env, "GITHUB_TOKEN");
+        assert_eq!(api.placeholder.as_deref(), Some("hura-cred-r1"));
+        assert_eq!(api.source, SecretSource::Command(cmd.into()));
+
+        assert_eq!(git.sandbox, "hura-a");
+        assert_eq!(git.hosts, ["github.com"]);
+        assert_eq!(git.env, "HURA_GITHUB_BASIC");
+        assert_eq!(git.placeholder.as_deref(), Some("hura-cred-r2"));
+        assert_eq!(git.refresh, None);
+        let SecretSource::Command(wrapped) = &git.source else {
+            panic!("a command stays a command");
+        };
+        let encoded = sh(wrapped);
+        let decoded = sh(&format!("printf %s {} | base64 -d", sh_quote(&encoded)));
+        assert_eq!(decoded, "x-access-token:github_pat_it's");
+    }
+
+    /// A reference names one stored value, which cannot be both forms, so it
+    /// stays the API's; git then sends no header rather than a wrong one.
+    #[test]
+    fn a_github_reference_reaches_the_api_only() {
+        let c = Credential::value(
+            "gh",
+            Kind::GitHub,
+            Source::Ref("op://Private/github/token".into()),
+        );
+        let grant = c.grant_with("hura-a", &mut counter());
+        assert_eq!(
+            grant.env,
+            [
+                ("GITHUB_TOKEN".to_string(), "hura-cred-r1".to_string()),
+                ("GH_TOKEN".to_string(), "hura-cred-r1".to_string()),
+            ]
+        );
+        let [api] = grant.secrets.as_slice() else {
+            panic!("one secret: {grant:?}");
+        };
+        assert_eq!(api.hosts, ["api.github.com"]);
+        assert_eq!(
+            api.source,
+            SecretSource::Ref("op://Private/github/token".into())
+        );
     }
 
     #[test]

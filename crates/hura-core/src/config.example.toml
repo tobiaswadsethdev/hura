@@ -44,7 +44,8 @@
 # never reads it: a session the credential is ticked for gets a secret of its
 # own from the sandbox runtime, which runs the command itself and swaps the
 # value into requests to the kind's hosts. Inside the sandbox there is only a
-# placeholder. An Azure DevOps command prints the PAT itself; hura encodes it.
+# placeholder. An Azure DevOps or GitHub command prints the token itself; hura
+# encodes it for git.
 #
 # Three kinds send to hosts you name, for what a repository reaches beyond its
 # forge. "azure-cli" gives code in the sandbox Entra tokens minted by this
