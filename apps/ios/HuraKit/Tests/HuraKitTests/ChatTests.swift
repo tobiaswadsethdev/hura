@@ -23,6 +23,11 @@ struct ChatTranscriptTests {
         #expect(entries[3].durationMS == 4200)
     }
 
+    @Test func aToolSearchResultNamesTheToolsItLoaded() {
+        let e = json(#"{"seq":3,"at":0,"ev":{"kind":"sdk","msg":{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"tool_reference","tool_name":"WebSearch"},{"type":"tool_reference","tool_name":"WebFetch"}]}]}}}}"#)
+        #expect(ChatTranscript.entry(e)?.blocks?.first?.text == "WebSearch\nWebFetch")
+    }
+
     @Test func marksSubagentsAndLeavesOutAllows() {
         let sub = json(#"{"seq":5,"at":0,"ev":{"kind":"sdk","msg":{"type":"assistant","parent_tool_use_id":"toolu_9","message":{"content":[{"type":"text","text":"inner"}]}}}}"#)
         #expect(ChatTranscript.entry(sub)?.parent == "toolu_9")
