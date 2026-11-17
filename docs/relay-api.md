@@ -295,8 +295,10 @@ or a push did, and again whenever it changes.
 ```
 
 `DELETE` on the same path forgets it, when the activity has ended or been
-dismissed on the phone. `204` whether or not there was one; `404` for a link
-that is not this device's.
+dismissed on the phone. With the activity's token as the body, `{"token":
+"<hex>"}`, only while that is still the session's: an older activity of the
+session going away leaves a newer one's token be. `204` whether or not there
+was one; `404` for a link that is not this device's.
 
 Both tokens are 64–200 hex characters, and go to APNs in the device's
 environment.
@@ -341,11 +343,16 @@ What the relay does:
 
 | The relay has | `working`, `permission`, `input` | `done`, `failed` | `ended` |
 |---|---|---|---|
-| an update token for the session | updates the activity | ends it, leaving it on the Lock Screen for 30 minutes | ends it and removes it at once |
+| an update token for the session | updates the activity | updates it to show the turn done | ends it and removes it at once |
 | none, but a push-to-start token | starts an activity | nothing (`no_activity`) | nothing (`no_activity`) |
 | neither | nothing (`no_activity`) | nothing (`no_activity`) | nothing (`no_activity`) |
 
-Ending an activity forgets its update token, so the next turn starts a new one.
+A session keeps one activity from turn to turn: the next turn carries on in the
+finished one's, rather than putting the session on the Lock Screen twice. When
+30 minutes go by with no turn after a finished one, the relay ends its activity
+and takes it away. ActivityKit ends an activity after eight hours, so a turn
+that begins seven hours or more after its activity started gets a new one, the
+old one taken away first. Ending an activity forgets its update token.
 `activity` in the answer is `start`, `update` or `end`.
 
 A started activity has no update token until the phone gives one, which it
@@ -354,7 +361,7 @@ it is opened. Until then the relay never starts another activity for the
 session, which would show it twice. It keeps the latest event instead,
 answering `{"sent": false, "reason": "activity_starting"}`, and sends that
 event to the activity as soon as its token arrives: an update, or an end if
-the turn finished meanwhile. An activity still without a token after eight
+the session ended meanwhile. An activity still without a token after eight
 hours, when ActivityKit would have ended it anyway, is taken never to have
 started, and the next event starts a new one.
 
@@ -389,8 +396,7 @@ plaintext one. Absent fields are left out.
   and an `alert` (APNs requires one to start an activity): the link's label as
   the title and a generic body, `Claude is working`, `Claude needs your
   permission` or `Claude needs your input`. It has no sound.
-- **`end`** adds `dismissal-date`: 30 minutes ahead for `done` and `failed`,
-  now for `ended`.
+- **`end`** adds `dismissal-date`: now, since an activity only ends to go.
 
 Headers: `apns-push-type: liveactivity`, `apns-topic: <bundle ID>.push-type.liveactivity`,
 `apns-priority: 10` and `apns-expiration` an hour ahead.

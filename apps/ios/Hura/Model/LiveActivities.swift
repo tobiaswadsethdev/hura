@@ -52,14 +52,21 @@ final class LiveActivities {
     }
 
     /// One activity per session. A relay from before it waited for an
-    /// activity's token started another on each change, and the stack stayed
-    /// on the Lock Screen; the newest is the one the relay can update.
+    /// activity's token started another on each change, and one from before it
+    /// kept a finished turn's activity started another each turn, leaving the
+    /// ended one on the Lock Screen beside it. The one kept is the newest still
+    /// going, which the relay can update, or failing that the newest.
     nonisolated private static func dedupe() async {
-        let live = Activity<SessionActivityAttributes>.activities.filter { $0.activityState == .active }
-        let bySession = Dictionary(grouping: live) { "\($0.attributes.serverID):\($0.attributes.session)" }
+        let shown = Activity<SessionActivityAttributes>.activities.filter {
+            $0.activityState == .active || $0.activityState == .ended
+        }
+        let bySession = Dictionary(grouping: shown) { "\($0.attributes.serverID):\($0.attributes.session)" }
         for (_, same) in bySession where same.count > 1 {
-            let newest = same.max { ($0.content.state.at ?? 0) < ($1.content.state.at ?? 0) }
-            for activity in same where activity.id != newest?.id {
+            let keep = same.max {
+                ($0.activityState == .active ? 1 : 0, $0.content.state.at ?? 0)
+                    < ($1.activityState == .active ? 1 : 0, $1.content.state.at ?? 0)
+            }
+            for activity in same where activity.id != keep?.id {
                 await activity.end(nil, dismissalPolicy: .immediate)
             }
         }
@@ -75,7 +82,7 @@ final class LiveActivities {
         }
         Task {
             for await state in activity.activityStateUpdates where state == .ended || state == .dismissed {
-                await push.activityEnded(linkID: a.linkID, session: a.session)
+                await push.activityEnded(activity.pushToken, linkID: a.linkID, session: a.session)
                 watching.remove(activity.id)
                 break
             }

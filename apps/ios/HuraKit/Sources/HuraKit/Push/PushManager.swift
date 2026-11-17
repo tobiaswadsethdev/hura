@@ -220,11 +220,12 @@ public final class PushManager {
         try? await relay.setActivityToken(SessionActivity.hex(token), linkID: linkID, session: session, device: device)
     }
 
-    /// The activity showing `session` has ended or been dismissed, so its token
+    /// An activity showing `session` has ended or been dismissed, so its token
     /// is no use to the relay.
-    public func activityEnded(linkID: String, session: String) async {
+    public func activityEnded(_ token: Data?, linkID: String, session: String) async {
         guard let relay, let device else { return }
-        try? await relay.deleteActivityToken(linkID: linkID, session: session, device: device)
+        try? await relay.deleteActivityToken(token.map(SessionActivity.hex), linkID: linkID, session: session,
+                                             device: device)
     }
 
     /// Asks the relay to send this phone a test notification.

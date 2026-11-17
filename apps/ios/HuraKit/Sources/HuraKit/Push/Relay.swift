@@ -141,10 +141,12 @@ public struct RelayClient: Sendable {
     }
 
     /// `DELETE /v1/servers/{link}/activities/{session}`: the activity has ended
-    /// or been dismissed.
-    public func deleteActivityToken(linkID: String, session: String, device: PushDevice) async throws {
+    /// or been dismissed. With its token, the relay forgets it only while it is
+    /// still the session's, not a newer activity's.
+    public func deleteActivityToken(_ token: String?, linkID: String, session: String,
+                                    device: PushDevice) async throws {
         let _: Empty = try await request("DELETE", "/v1/servers/\(linkID)/activities/\(session)",
-                                         secret: device.deviceSecret)
+                                         secret: device.deviceSecret, body: token.map { ["token": $0] })
     }
 
     public struct TestResult: Decodable, Equatable, Sendable {
