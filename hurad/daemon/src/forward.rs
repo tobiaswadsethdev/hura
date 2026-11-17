@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use hura_core::ports::Loopback;
-use hura_core::session::Session;
+use hura_core::session::{Kind, Session};
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex as AsyncMutex;
@@ -88,8 +88,19 @@ fn slots() -> &'static Mutex<HashMap<Key, Slot>> {
 
 /// A connection's claim on a forward. The forward stays up while one exists.
 pub struct Lease {
-    pub local: u16,
+    local: u16,
+    /// Whether [`Lease::connect`] goes through `lo` by name. Only a sandbox's
+    /// is a port the runtime published; see [`connect`].
+    through_lo: bool,
     slot: Slot,
+}
+
+impl Lease {
+    /// A connection to the forward's local port, made the way its listener
+    /// can answer.
+    pub async fn connect(&self) -> std::io::Result<tokio::net::TcpStream> {
+        connect(self.local, self.through_lo).await
+    }
 }
 
 impl Drop for Lease {
@@ -110,20 +121,30 @@ impl Drop for Lease {
 
 /// A connection to a forward's local port.
 ///
-/// Made through `lo` by name on Linux. Docker Sandboxes v0.50.1 binds a
-/// published port to that device as well as to `127.0.0.1`, and WSL's mirrored
-/// networking routes `127.0.0.1` by way of an interface of its own,
+/// A sandbox's is made through `lo` by name on Linux. Docker Sandboxes v0.50.1
+/// binds a published port to that device as well as to `127.0.0.1`, and WSL's
+/// mirrored networking routes `127.0.0.1` by way of an interface of its own,
 /// `loopback0`, so a connection left to the routing table arrives on the other
 /// device and is refused: os error 111 on every session's chat. Measured on
 /// WSL, where binding the connecting socket to `lo` gets through, as an
-/// ordinary user. Everywhere else loopback traffic takes `lo` anyway, and a
-/// listener bound to no device accepts it either way.
-pub async fn connect(local: u16) -> std::io::Result<tokio::net::TcpStream> {
+/// ordinary user.
+///
+/// A worktree session's is left to the routing table, because there the port
+/// is the agent's own listener, bound to `127.0.0.1` and no device. On WSL its
+/// answer is routed back by way of `loopback0` too, so a socket held to `lo`
+/// never hears it: the connect hangs until the kernel gives up, two minutes
+/// on, and the chat never shows. Measured on WSL against a worktree session's
+/// chat host. Everywhere else loopback traffic takes `lo` either way.
+pub async fn connect(local: u16, through_lo: bool) -> std::io::Result<tokio::net::TcpStream> {
     let socket = tokio::net::TcpSocket::new_v4()?;
     // A kernel older than 5.7 refuses this to an unprivileged process. There
     // the routing table decides, as it did before this existed.
     #[cfg(target_os = "linux")]
-    let _ = socket.bind_device(Some(b"lo"));
+    if through_lo {
+        let _ = socket.bind_device(Some(b"lo"));
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = through_lo;
     socket
         .connect((std::net::Ipv4Addr::LOCALHOST, local).into())
         .await
@@ -154,7 +175,11 @@ pub async fn acquire(session: &Session, port: u16, host: Loopback) -> Result<Lea
     running.users += 1;
     let local = running.local;
     drop(guard);
-    Ok(Lease { local, slot })
+    Ok(Lease {
+        local,
+        through_lo: session.backend == Kind::Sandbox,
+        slot,
+    })
 }
 
 async fn start(session: &Session, port: u16, host: Loopback) -> Result<Running, String> {
@@ -394,7 +419,31 @@ mod tests {
 
         // The backlog completes the handshake, so a refusal is an error here
         // rather than an accept that never returns.
-        connect(port).await.unwrap();
+        connect(port, true).await.unwrap();
+        listener.accept().await.unwrap();
+    }
+
+    /// A worktree session's forward reaches a listener on `127.0.0.1` bound
+    /// to no device, as its chat host is. On WSL with mirrored networking a
+    /// connection held to `lo` hangs here instead, so the wait is bounded.
+    #[tokio::test]
+    async fn a_worktree_forward_reaches_a_plain_listener() {
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut session = Session::new("wt".into(), String::new(), String::new());
+        session.backend = Kind::Worktree;
+        session.sandbox = format!("hura-forward-test-{port}");
+
+        let lease = acquire(&session, port, Loopback::V4)
+            .await
+            .expect("a forward");
+        assert_eq!(lease.local, port, "nothing between it and the listener");
+        tokio::time::timeout(Duration::from_secs(5), lease.connect())
+            .await
+            .expect("connected within five seconds")
+            .unwrap();
         listener.accept().await.unwrap();
     }
 
@@ -429,7 +478,7 @@ mod tests {
             "one forward, shared"
         );
 
-        let mut stream = connect(local).await.unwrap();
+        let mut stream = leases[0].connect().await.unwrap();
         stream
             .write_all(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
             .await

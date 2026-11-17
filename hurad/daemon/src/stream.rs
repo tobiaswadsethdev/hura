@@ -318,7 +318,7 @@ async fn chat(
                     Ok(lease) => lease,
                     Err(reason) => return Some(reason),
                 };
-            match crate::forward::connect(lease.local).await {
+            match lease.connect().await {
                 Ok(stream) => {
                     match converse(id, stream, conv, &mut since, &mut held, out, input).await {
                         Conversed::ClientGone => return None,
@@ -485,20 +485,20 @@ async fn port_channel(
 ) {
     let reason = match crate::forward::acquire(&session, port, host).await {
         Err(reason) => Some(reason),
-        Ok(lease) => pipe(id, lease.local, &out, &mut input).await,
+        Ok(lease) => pipe(id, &lease, &out, &mut input).await,
     };
     let _ = out.send(ServerFrame::Closed { id, reason }).await;
 }
 
 async fn pipe(
     id: ChannelId,
-    local: u16,
+    lease: &crate::forward::Lease,
     out: &mpsc::Sender<ServerFrame>,
     input: &mut mpsc::Receiver<ToChannel>,
 ) -> Option<String> {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-    let stream = match crate::forward::connect(local).await {
+    let stream = match lease.connect().await {
         Ok(stream) => stream,
         Err(e) => return Some(format!("could not reach the forward: {e}")),
     };

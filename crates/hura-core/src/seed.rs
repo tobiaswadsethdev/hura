@@ -484,12 +484,13 @@ fi
 mkdir -p {hura}
 printf '%s' {task} > {task_path}
 {markers}
-{tmux_bin} new-session -d -s {tmux} -c {repo}
+{tmux_new} new-session -d -s {tmux} -c {repo}
 {tmux_bin} send-keys -t {tmux} {launch} Enter
 "#,
         markers = agent_markers(&paths),
         agent_env = AGENT_ENV,
         tmux_bin = backend.tmux(),
+        tmux_new = backend.tmux_new(),
         tmux = sh_quote(&session.tmux),
         hura = sh_quote(&paths.hura),
         task = sh_quote(&session.task),
@@ -604,12 +605,13 @@ if {tmux_bin} has-session -t {exact} 2>/dev/null; then
   exit 0
 fi
 {markers}
-{tmux_bin} new-session -d -s {tmux} -c {repo}
+{tmux_new} new-session -d -s {tmux} -c {repo}
 {tmux_bin} send-keys -t {exact}: {launch} Enter
 "#,
         agent_env = AGENT_ENV,
         markers = agent_markers(&paths),
         tmux_bin = backend.tmux(),
+        tmux_new = backend.tmux_new(),
         tmux = sh_quote(&session.tmux),
         exact = sh_quote(&format!("={}", session.tmux)),
         repo = sh_quote(&paths.repo),
