@@ -1495,7 +1495,7 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
     // with no agent, so this exec's environment is every pane's.
     format!(
         "{no_proxy}\n{resume}{bin} has-session -t ={tmux} 2>/dev/null \
-         || {bin} new-session -d -s {tmux} -c {repo}; \
+         || {new} new-session -d -s {tmux} -c {repo}; \
          {bin} set -t ={tmux}: status off 2>/dev/null; \
          {bin} set -t ={tmux}: mouse on 2>/dev/null; \
          {bin} attach -d -t ={tmux}; \
@@ -1503,6 +1503,7 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
          {bin} set -w -t {tmux} window-size latest 2>/dev/null; \
          true",
         no_proxy = seed::LOOPBACK_NO_PROXY,
+        new = backend.tmux_new(),
         tmux = seed::sh_quote(tmux),
         repo = seed::sh_quote(&backend.paths(session).repo),
     )
@@ -1673,7 +1674,7 @@ fn new_shell_script(backend: &dyn Backend, session: &Session, name: &str) -> Str
     format!(
         "{no_proxy}\n{bin} new-session -d -s {name} -c {repo}",
         no_proxy = seed::LOOPBACK_NO_PROXY,
-        bin = backend.tmux(),
+        bin = backend.tmux_new(),
         name = seed::sh_quote(name),
         repo = seed::sh_quote(&backend.paths(session).repo),
     )
@@ -2194,6 +2195,23 @@ mod tests {
             .unwrap_or_else(|| panic!("no proxy exception for [::1]: {script}"));
         assert!(
             Some(no_proxy) < script.find("new-session -d -s 'shell-1'"),
+            "{script}"
+        );
+    }
+
+    /// A shell can also be the first thing to start a worktree session's tmux
+    /// server, so under a service it starts in a scope of its own, like the
+    /// agent's. See `backend::worktree`.
+    #[test]
+    fn a_worktree_shell_starts_in_a_scope_under_a_service() {
+        let tmp = std::env::temp_dir();
+        let wt = crate::backend::Worktree::at(tmp.join("w"), tmp.join("s"), tmp.join("h"))
+            .with_scope(true);
+        let mut s = session();
+        s.backend = session::Kind::Worktree;
+        let script = new_shell_script(&wt, &s, "hura-x-shell-1");
+        assert!(
+            script.contains("systemd-run --user --scope --quiet --collect tmux -u new-session"),
             "{script}"
         );
     }

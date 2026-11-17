@@ -29,6 +29,13 @@
 //! that, two worktree sessions would attach to each other's agent, and a
 //! person's own tmux sessions would show up as shells.
 //!
+//! Where the server starts is where every agent in it lives, and under a
+//! systemd service that was the service's own cgroup: stopping the service,
+//! which a restart or an update does, killed the tmux server and every agent
+//! with it, and the boot marker then kept them from being brought back. So
+//! under a service a `new-session` starts in a scope of its own, which the
+//! server stays in after the command has gone. See [`Worktree::tmux_new`].
+//!
 //! ## What the image would have carried
 //!
 //! The sandbox image brings the chat host, the hooks that report a terminal
@@ -76,6 +83,9 @@ pub struct Worktree {
     state: PathBuf,
     /// Where the chat host, the hooks and the SDK go.
     support: PathBuf,
+    /// Whether a `new-session` starts in a scope of its own. Unset is
+    /// [`scoped`]'s answer, which is this process's; a test says outright.
+    scope: Option<bool>,
 }
 
 impl Worktree {
@@ -89,7 +99,16 @@ impl Worktree {
             root,
             state,
             support,
+            scope: None,
         }
+    }
+
+    /// Say outright whether a `new-session` starts in a scope of its own,
+    /// rather than leaving it to what this process is running under.
+    #[cfg(test)]
+    pub(crate) fn with_scope(mut self, scope: bool) -> Self {
+        self.scope = Some(scope);
+        self
     }
 
     pub fn from_config(cfg: &Config) -> Self {
@@ -381,6 +400,72 @@ pub fn tmux_name(name: &str) -> String {
     format!("hura-{name}")
 }
 
+/// No `-f`: this is the server user's own tmux, and their config is theirs.
+/// The locale is still said outright, because a service manager's environment
+/// is not a login shell's and tmux with no UTF-8 locale draws an agent's
+/// glyphs as `_`.
+const TMUX: &str = "LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor tmux -u";
+
+/// [`TMUX`] in a transient systemd scope of its own. `systemd-run --scope`
+/// runs the command itself, in the caller's environment, so a server it
+/// starts inherits what the exec gave it, as it would without. `--collect`
+/// drops the scope once it is empty, however it ended: at once when the
+/// server was already running, and when the server stops otherwise.
+const TMUX_IN_A_SCOPE: &str = "LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor \
+     systemd-run --user --scope --quiet --collect tmux -u";
+
+/// Whether a `new-session` starts in a scope of its own: this process is in a
+/// systemd service's cgroup, and the user's systemd makes scopes. Asked once,
+/// the first time a session needs it.
+///
+/// Only under a service, because that is what kills the whole cgroup when it
+/// stops. A `hurad serve` in a terminal, or on a machine with no systemd,
+/// starts tmux as it always has. Under a service where a scope cannot be had,
+/// it says so once and starts tmux as before, which works until the service
+/// stops.
+fn scoped() -> bool {
+    static SCOPED: OnceLock<bool> = OnceLock::new();
+    *SCOPED.get_or_init(|| {
+        let in_service =
+            std::fs::read_to_string("/proc/self/cgroup").is_ok_and(|c| in_a_service(&c));
+        if !in_service {
+            return false;
+        }
+        let works = Command::new("systemd-run")
+            .args(["--user", "--scope", "--quiet", "--collect", "true"])
+            .current_dir("/")
+            .env("PATH", search_path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !works {
+            eprintln!(
+                "hurad: `systemd-run --user --scope` did not work, so worktree sessions' \
+                 agents run in this service and stop when it does"
+            );
+        }
+        works
+    })
+}
+
+/// Whether `/proc/self/cgroup` puts this process in a service's own cgroup:
+/// the unified hierarchy's line, or systemd's own on a legacy one.
+fn in_a_service(cgroup: &str) -> bool {
+    cgroup
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("0::")
+                .or_else(|| line.split_once(":name=systemd:").map(|(_, path)| path))
+        })
+        .any(|path| {
+            path.rsplit('/')
+                .next()
+                .is_some_and(|unit| unit.ends_with(".service"))
+        })
+}
+
 impl Backend for Worktree {
     fn kind(&self) -> Kind {
         Kind::Worktree
@@ -465,12 +550,19 @@ impl Backend for Worktree {
         ])
     }
 
-    /// No `-f`: this is the server user's own tmux, and their config is
-    /// theirs. The locale is still said outright, because a service manager's
-    /// environment is not a login shell's and tmux with no UTF-8 locale draws
-    /// an agent's glyphs as `_`.
     fn tmux(&self) -> &'static str {
-        "LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor tmux -u"
+        TMUX
+    }
+
+    /// In a scope of its own under a systemd service, so the server it may
+    /// start, and every agent in it, outlives the service. See the module
+    /// comment.
+    fn tmux_new(&self) -> &'static str {
+        if self.scope.unwrap_or_else(scoped) {
+            TMUX_IN_A_SCOPE
+        } else {
+            TMUX
+        }
     }
 
     fn shell_prefix(&self, session: &Session) -> String {
@@ -780,6 +872,7 @@ mod tests {
             tmp.join("state"),
             tmp.join("support"),
         )
+        .with_scope(false)
     }
 
     fn scratch(tag: &str) -> PathBuf {
@@ -847,6 +940,65 @@ mod tests {
         assert!(cmd.contains("HURA_AGENT_PORT=47801"), "{cmd}");
         let start = crate::chat::start_script(&b, &s);
         assert!(start.contains("serve --port 47801"), "{start}");
+    }
+
+    /// Under a service, every script that can start the tmux server starts it
+    /// in a scope of its own, and nothing else in them goes through systemd:
+    /// the status poll runs these often, and a scope per tmux call would be a
+    /// line in the journal each time.
+    #[test]
+    fn under_a_service_every_new_session_starts_in_a_scope() {
+        let tmp = scratch("scope");
+        let scoped = backend(&tmp).with_scope(true);
+        let mut s = session("alpha", &tmp);
+        s.interface = crate::chat::Interface::Chat;
+        let mut scripts = vec![
+            crate::chat::start_script(&scoped, &s),
+            crate::seed::resume_check(&scoped, &s),
+            crate::ops::attach_script(&scoped, &s, &s.tmux),
+        ];
+        s.interface = crate::chat::Interface::Terminal;
+        scripts.push(crate::seed::start_agent_script(&scoped, &s));
+        scripts.push(crate::seed::launch_agent_script(&scoped, &s, true));
+        scripts.push(crate::ops::attach_script(&scoped, &s, &s.tmux));
+        for script in &scripts {
+            let new = script.matches("new-session").count();
+            assert!(new > 0, "{script}");
+            let in_scope = script
+                .matches("systemd-run --user --scope --quiet --collect tmux -u new-session")
+                .count();
+            assert_eq!(in_scope, new, "{script}");
+            assert_eq!(script.matches("systemd-run").count(), new, "{script}");
+        }
+
+        let plain = backend(&tmp);
+        s.interface = crate::chat::Interface::Chat;
+        let script = crate::chat::start_script(&plain, &s);
+        assert!(script.contains("tmux -u new-session"), "{script}");
+        assert!(!script.contains("systemd-run"), "{script}");
+    }
+
+    /// What `/proc/self/cgroup` says under a user service, in a login
+    /// session, and on a legacy hierarchy.
+    #[test]
+    fn a_service_is_told_from_its_cgroup() {
+        let service = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/hurad.service\n";
+        assert!(in_a_service(service));
+        let system = "0::/system.slice/hurad.service\n";
+        assert!(in_a_service(system));
+
+        // `user@1000.service` is the user's manager, not this process's unit.
+        let terminal = "0::/user.slice/user-1000.slice/session-c3.scope\n";
+        assert!(!in_a_service(terminal));
+        let app = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-term.scope\n";
+        assert!(!in_a_service(app));
+        assert!(!in_a_service("0::/\n"));
+        assert!(!in_a_service(""));
+
+        let legacy = "12:cpu,cpuacct:/user.slice\n1:name=systemd:/user.slice/user-1000.slice/user@1000.service/hurad.service\n";
+        assert!(in_a_service(legacy));
+        let legacy_terminal = "12:cpu,cpuacct:/user.slice/user-1000.slice/user@1000.service\n1:name=systemd:/user.slice/user-1000.slice/session-2.scope\n";
+        assert!(!in_a_service(legacy_terminal));
     }
 
     /// The fallback that makes `--repo ~/dev/thing` work, and the error that

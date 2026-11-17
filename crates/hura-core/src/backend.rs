@@ -216,6 +216,15 @@ pub trait Backend {
     /// inferring it from an environment.
     fn tmux(&self) -> &'static str;
 
+    /// How to invoke tmux for a `new-session`, the one command here that can
+    /// start the tmux server. The server outlives the command, and every agent
+    /// and shell in it runs wherever the server started, so a backend that has
+    /// to start it somewhere in particular says how here. Every `new-session`
+    /// goes through this rather than [`Self::tmux`].
+    fn tmux_new(&self) -> &'static str {
+        self.tmux()
+    }
+
     /// The prefix the shells beside the agent are named with.
     fn shell_prefix(&self, session: &Session) -> String;
 

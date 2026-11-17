@@ -446,12 +446,13 @@ fi
 mkdir -p {hura}
 printf '%s' {task} > {task_path}
 {markers}
-{tmux_bin} new-session -d -s {tmux} -c {repo}
+{tmux_new} new-session -d -s {tmux} -c {repo}
 {tmux_bin} send-keys -t {tmux} {serve} Enter
 "#,
         markers = crate::seed::agent_markers(&paths),
         agent_env = crate::seed::AGENT_ENV,
         tmux_bin = backend.tmux(),
+        tmux_new = backend.tmux_new(),
         tmux = sh_quote(&session.tmux),
         hura = sh_quote(&paths.hura),
         task = sh_quote(&session.task),
