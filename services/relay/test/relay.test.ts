@@ -544,6 +544,11 @@ describe("live activities", () => {
 
   const rows = (linkId: string) =>
     env.DB.prepare("SELECT token FROM activities WHERE link_id = ?").bind(linkId).all<{ token: string }>().then((r) => r.results);
+  const done = (linkId: string) =>
+    env.DB.prepare("SELECT done FROM activities WHERE link_id = ?")
+      .bind(linkId)
+      .first<string | null>("done")
+      .then((d) => (d ? JSON.parse(d) : null));
   const startToken = (deviceId: string) =>
     env.DB.prepare("SELECT activity_token FROM devices WHERE id = ?").bind(deviceId).first<string | null>("activity_token");
 
@@ -571,6 +576,42 @@ describe("live activities", () => {
     expect(await rows(l.link_id)).toEqual([]);
     expect((await call("DELETE", `/v1/devices/${d.device_id}/activity-token`, { auth: d.device_secret })).status).toBe(204);
     expect(await startToken(d.device_id)).toBeNull();
+  });
+
+  it("forgets an activity's token only while it is still the session's", async () => {
+    const { d, l } = await setup({ update: true });
+    const del = (token: string) =>
+      call("DELETE", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: d.device_secret, body: { token } });
+    expect((await del("7".repeat(64))).status).toBe(204);
+    expect(await rows(l.link_id)).toEqual([{ token: UPDATE }]);
+    expect((await del("zz")).status).toBe(400);
+    expect((await del(UPDATE.toUpperCase())).status).toBe(204);
+    expect(await rows(l.link_id)).toEqual([]);
+  });
+
+  it("ends a finished turn's activity half an hour on, unless another turn began", async () => {
+    const { l } = await setup({ start: true, update: true });
+    const other = await setup({ start: true, update: true });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "done" }) });
+    await call("POST", "/v1/events", { auth: other.l.push_token, body: activity({ phase: "done" }) });
+    await call("POST", "/v1/events", { auth: other.l.push_token, body: activity() });
+    apnsCalls = [];
+
+    await worker.scheduled({} as ScheduledController, env);
+    expect(apnsCalls).toHaveLength(0);
+    expect(await rows(l.link_id)).toHaveLength(1);
+
+    const ago = Date.now() - 30 * 60_000 - 1;
+    await env.DB.prepare("UPDATE activities SET updated_at = ? WHERE link_id IN (?, ?)").bind(ago, l.link_id, other.l.link_id).run();
+    await worker.scheduled({} as ScheduledController, env);
+    expect(apnsCalls).toHaveLength(1);
+    expect(apnsCalls[0].url).toContain(UPDATE);
+    expect(apnsCalls[0].headers.get("apns-push-type")).toBe("liveactivity");
+    const aps = apnsCalls[0].body.aps;
+    expect(aps).toMatchObject({ event: "end", "content-state": { phase: "done" } });
+    expect(aps["dismissal-date"]).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+    expect(await rows(l.link_id)).toEqual([]);
+    expect(await rows(other.l.link_id)).toHaveLength(1);
   });
 
   it("starts an activity with a push-to-start token", async () => {
@@ -631,15 +672,25 @@ describe("live activities", () => {
     expect(r.json).toEqual({ sent: true, activity: "update" });
   });
 
-  it("ends an activity that finished while it was starting, once its token comes", async () => {
+  it("shows an activity done that finished while it was starting, once its token comes", async () => {
     const { d, l } = await setup({ start: true });
     await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
     await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "done" }) });
     expect(apnsCalls).toHaveLength(1);
     const body = { token: UPDATE };
     expect((await call("PUT", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: d.device_secret, body })).status).toBe(204);
+    expect(apnsCalls[1].body.aps).toMatchObject({ event: "update", "content-state": { phase: "done" } });
+    expect(await rows(l.link_id)).toEqual([{ token: UPDATE }]);
+    expect(await done(l.link_id)).toMatchObject({ phase: "done" });
+  });
+
+  it("ends an activity that the session ended while it was starting, once its token comes", async () => {
+    const { d, l } = await setup({ start: true });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "ended" }) });
+    const body = { token: UPDATE };
+    expect((await call("PUT", `/v1/servers/${l.link_id}/activities/fix-tests`, { auth: d.device_secret, body })).status).toBe(204);
     expect(apnsCalls[1].body.aps.event).toBe("end");
-    expect(apnsCalls[1].body.aps["dismissal-date"]).toBeGreaterThan(Date.now() / 1000);
     expect(await rows(l.link_id)).toEqual([]);
   });
 
@@ -674,18 +725,53 @@ describe("live activities", () => {
     });
   });
 
-  it("ends an activity, leaving it a while when done and not at all when ended", async () => {
-    for (const [phase, linger] of [["done", 1800], ["failed", 1800], ["ended", 0]] as const) {
+  it("keeps a finished turn's activity, showing it done, and ends one whose session ended", async () => {
+    for (const phase of ["done", "failed"] as const) {
       apnsCalls = [];
       const { l } = await setup({ start: true, update: true });
       const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase }) });
-      expect(r.json).toEqual({ sent: true, activity: "end" });
-      const aps = apnsCalls[0].body.aps;
-      expect(aps.event).toBe("end");
-      expect(aps["dismissal-date"]).toBeGreaterThanOrEqual(Math.floor(Date.now() / 1000) + linger - 2);
-      expect(aps["dismissal-date"]).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + linger);
-      expect(await rows(l.link_id)).toEqual([]);
+      expect(r.json).toEqual({ sent: true, activity: "update" });
+      expect(apnsCalls[0].body.aps).toMatchObject({ event: "update", "content-state": { phase } });
+      expect(await rows(l.link_id)).toEqual([{ token: UPDATE }]);
+      expect(await done(l.link_id)).toMatchObject({ phase });
     }
+    apnsCalls = [];
+    const { l } = await setup({ start: true, update: true });
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "ended" }) });
+    expect(r.json).toEqual({ sent: true, activity: "end" });
+    const aps = apnsCalls[0].body.aps;
+    expect(aps.event).toBe("end");
+    expect(aps["dismissal-date"]).toBeGreaterThanOrEqual(Math.floor(Date.now() / 1000) - 2);
+    expect(aps["dismissal-date"]).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+    expect(await rows(l.link_id)).toEqual([]);
+  });
+
+  it("carries the next turn on in the finished one's activity, rather than starting another", async () => {
+    const { l } = await setup({ start: true, update: true });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "done" }) });
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    expect(r.json).toEqual({ sent: true, activity: "update" });
+    expect(apnsCalls.map((c) => [c.body.aps.event, c.url.endsWith(UPDATE)])).toEqual([
+      ["update", true],
+      ["update", true],
+    ]);
+    expect(await done(l.link_id)).toBeNull();
+  });
+
+  it("takes an activity away and starts a new one when a turn begins seven hours on", async () => {
+    const { l } = await setup({ start: true, update: true });
+    await env.DB.prepare("UPDATE activities SET started_at = ? WHERE link_id = ?").bind(Date.now() - 7 * 3600_000 - 1, l.link_id).run();
+    // A finished turn still goes to the old one...
+    expect((await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "done" }) })).json.activity).toBe("update");
+    // ...and the next turn replaces it.
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    expect(r.json).toEqual({ sent: true, activity: "start" });
+    expect(apnsCalls.slice(1).map((c) => [c.body.aps.event, c.url.endsWith(UPDATE)])).toEqual([
+      ["end", true],
+      ["start", false],
+    ]);
+    expect(apnsCalls[1].body.aps["dismissal-date"]).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+    expect(await rows(l.link_id)).toEqual([{ token: "" }]);
   });
 
   it("does nothing when there is nothing to update and nothing to start", async () => {

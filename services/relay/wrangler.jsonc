@@ -29,6 +29,7 @@
     // end-to-end tests against a fake APNs. Leave empty in production.
     "APNS_ORIGIN_OVERRIDE": ""
   },
-  // Hourly cleanup of idempotency and rate-limit rows.
-  "triggers": { "crons": ["17 * * * *"] }
+  // Cleanup of idempotency and rate-limit rows, and the end of Live
+  // Activities whose turn finished half an hour ago.
+  "triggers": { "crons": ["*/5 * * * *"] }
 }

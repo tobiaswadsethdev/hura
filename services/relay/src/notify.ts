@@ -95,9 +95,6 @@ const START_BODY: Partial<Record<Phase, string>> = {
   input: "Claude needs your input",
 };
 
-/** How long an ended activity stays on the Lock Screen. */
-const DONE_LINGER_SECONDS = 30 * 60;
-
 export type ActivityEvent = "start" | "update" | "end";
 
 export type SessionActivity = {
@@ -133,8 +130,9 @@ export function activityPayload(
     // APNs wants an alert to start an activity; this one makes no sound.
     aps.alert = { title: clip(link.label, 100) || "hura", body: START_BODY[a.phase] ?? "" };
   } else if (event === "end") {
-    const seconds = Math.floor(now / 1000);
-    aps["dismissal-date"] = a.phase === "ended" ? seconds : seconds + DONE_LINGER_SECONDS;
+    // An activity only ends to go: a finished turn is an update, which the
+    // relay ends later (docs/relay-api.md, "Live Activities").
+    aps["dismissal-date"] = Math.floor(now / 1000);
   }
   return { aps };
 }

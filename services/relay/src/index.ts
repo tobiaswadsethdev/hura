@@ -52,6 +52,11 @@ const STARTING_TOKEN = "";
 // ends an activity after eight hours, so one still waiting by then never
 // started.
 const STARTING_MS = 8 * 3600 * 1000;
+// A session keeps its activity from turn to turn, but ActivityKit ends one
+// after eight hours: a turn that begins after this long gets a new one.
+const RENEW_MS = 7 * 3600 * 1000;
+// How long a finished turn's activity stays on the Lock Screen.
+const DONE_LINGER_MS = 30 * 60 * 1000;
 
 interface DeviceRow {
   id: string;
@@ -114,6 +119,7 @@ export default {
       env.DB.prepare("DELETE FROM registrations WHERE at < ?").bind(now - 3600 * 1000),
       env.DB.prepare("DELETE FROM activities WHERE updated_at < ?").bind(now - ACTIVITY_MS),
     ]);
+    await endFinished(env, now);
   },
 } satisfies ExportedHandler<RelayEnv>;
 
@@ -328,16 +334,18 @@ async function setActivityToken(req: Request, env: RelayEnv, p: Record<string, s
   const was = await env.DB.prepare("SELECT token, pending FROM activities WHERE link_id = ? AND session = ?")
     .bind(link.id, session)
     .first<{ token: string; pending: string | null }>();
+  const now = Date.now();
   await env.DB.prepare(
-    `INSERT INTO activities (link_id, session, token, updated_at) VALUES (?, ?, ?, ?)
+    `INSERT INTO activities (link_id, session, token, updated_at, started_at) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT (link_id, session) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at,
+                                                  started_at = COALESCE(started_at, excluded.started_at),
                                                   pending = NULL`,
   )
-    .bind(link.id, session, token, Date.now())
+    .bind(link.id, session, token, now, now)
     .run();
   if (was?.token === STARTING_TOKEN && was.pending) {
     const a = JSON.parse(was.pending) as SessionActivity;
-    const event: ActivityEvent = STARTING.has(a.phase) ? "update" : "end";
+    const event: ActivityEvent = a.phase === "ended" ? "end" : "update";
     const r = await sendApns(
       env,
       { token, environment: dev.environment },
@@ -350,14 +358,30 @@ async function setActivityToken(req: Request, env: RelayEnv, p: Record<string, s
     log("activity caught up", { link: link.id, phase: a.phase, event, apns_status: r.status, apns_reason: r.reason });
     if (r.status === 200 && event === "end") {
       await env.DB.prepare("DELETE FROM activities WHERE link_id = ? AND session = ?").bind(link.id, session).run();
+    } else if (r.status === 200 && !STARTING.has(a.phase)) {
+      await env.DB.prepare("UPDATE activities SET done = ? WHERE link_id = ? AND session = ?")
+        .bind(was.pending, link.id, session)
+        .run();
     }
   }
   return json(204, null);
 }
 
+/**
+ * The activity has ended or been dismissed on the phone. With its token, only
+ * when that is still the session's: an older activity of the session going
+ * away must not take the newer one's token with it.
+ */
 async function deleteActivityToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
   const { link, session } = await activityTarget(req, env, p);
-  await env.DB.prepare("DELETE FROM activities WHERE link_id = ? AND session = ?").bind(link.id, session).run();
+  if (await req.clone().text()) {
+    const token = activityToken(await readJSON(req));
+    await env.DB.prepare("DELETE FROM activities WHERE link_id = ? AND session = ? AND token = ?")
+      .bind(link.id, session, token)
+      .run();
+  } else {
+    await env.DB.prepare("DELETE FROM activities WHERE link_id = ? AND session = ?").bind(link.id, session).run();
+  }
   return json(204, null);
 }
 
@@ -505,9 +529,9 @@ async function sendActivity(
     return json(200, { sent: true, activity: event });
   };
 
-  let row = await env.DB.prepare("SELECT token, updated_at FROM activities WHERE link_id = ? AND session = ?")
+  let row = await env.DB.prepare("SELECT token, updated_at, started_at FROM activities WHERE link_id = ? AND session = ?")
     .bind(link.id, a.session)
-    .first<{ token: string; updated_at: number }>();
+    .first<{ token: string; updated_at: number; started_at: number | null }>();
   if (row?.token === STARTING_TOKEN) {
     // Started, and the phone hasn't yet said where its updates go: it says
     // so when the app next runs. Another start would put the session on the
@@ -522,14 +546,25 @@ async function sendActivity(
     await forget();
     row = null;
   }
+  if (row && STARTING.has(a.phase) && row.started_at !== null && now - row.started_at > RENEW_MS) {
+    // Old enough that ActivityKit is about to end it, or has: taken away at
+    // once, and a new one started below.
+    const r = await send(row.token, "end");
+    log("activity renewed", { link: link.id, apns_status: r.status, apns_reason: r.reason });
+    await forget();
+    row = null;
+  }
   if (row) {
-    const event: ActivityEvent = STARTING.has(a.phase) ? "update" : "end";
+    // A finished turn's activity stays, showing it done, so the next turn
+    // carries on in the same one rather than putting the session on the Lock
+    // Screen twice; `endFinished` takes it away if no turn comes.
+    const event: ActivityEvent = a.phase === "ended" ? "end" : "update";
     const r = await send(row.token, event);
     if (r.status === 200) {
       if (event === "end") await forget();
       else {
-        await env.DB.prepare("UPDATE activities SET updated_at = ? WHERE link_id = ? AND session = ?")
-          .bind(now, link.id, a.session)
+        await env.DB.prepare("UPDATE activities SET updated_at = ?, done = ? WHERE link_id = ? AND session = ?")
+          .bind(now, STARTING.has(a.phase) ? null : JSON.stringify(a), link.id, a.session)
           .run();
       }
       return delivered(event);
@@ -545,10 +580,11 @@ async function sendActivity(
   const r = await send(link.device.activity_token, "start");
   if (r.status === 200) {
     await env.DB.prepare(
-      `INSERT INTO activities (link_id, session, token, updated_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT (link_id, session) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at`,
+      `INSERT INTO activities (link_id, session, token, updated_at, started_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (link_id, session) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at,
+                                                    started_at = excluded.started_at, done = NULL, pending = NULL`,
     )
-      .bind(link.id, a.session, STARTING_TOKEN, now)
+      .bind(link.id, a.session, STARTING_TOKEN, now, now)
       .run();
     return delivered("start");
   }
@@ -558,6 +594,38 @@ async function sendActivity(
     return json(200, { sent: false, reason: "no_activity" });
   }
   return failed(r);
+}
+
+/**
+ * Ends the activities whose turn finished half an hour ago with no other
+ * since, taking them off the Lock Screen.
+ */
+async function endFinished(env: RelayEnv, now: number): Promise<void> {
+  const { results } = await env.DB.prepare(
+    `DELETE FROM activities WHERE done IS NOT NULL AND updated_at < ?
+     RETURNING link_id, session, token, done`,
+  )
+    .bind(now - DONE_LINGER_MS)
+    .all<{ link_id: string; session: string; token: string; done: string }>();
+  for (const row of results) {
+    const link = await env.DB.prepare(
+      `SELECT l.id, l.server_id, l.label, d.environment, d.disabled_at
+       FROM links l JOIN devices d ON d.id = l.device_id WHERE l.id = ?`,
+    )
+      .bind(row.link_id)
+      .first<{ id: string; server_id: string; label: string; environment: Environment; disabled_at: number | null }>();
+    if (!link || link.disabled_at !== null) continue;
+    // Newer than what it shows, so iOS doesn't drop it as stale.
+    const a = { ...(JSON.parse(row.done) as SessionActivity), at: Math.floor(now / 1000) };
+    const r = await sendApns(
+      env,
+      { token: row.token, environment: link.environment },
+      activityPayload(a, "end", { id: link.id, serverId: link.server_id, label: link.label }, now),
+      ACTIVITY_EXPIRY_SECONDS,
+      "liveactivity",
+    );
+    log("activity done", { link: link.id, apns_status: r.status, apns_reason: r.reason });
+  }
 }
 
 function log(msg: string, fields: Record<string, unknown>) {
