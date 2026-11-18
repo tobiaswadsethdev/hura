@@ -11,3 +11,15 @@ tasks:
     command: 'node --test hura-base/hura-agent.test.mjs'
     inputs:
       - 'hura-base/**/*'
+
+  # The same host on a Windows server, where a worktree session's chat runs
+  # it on the server's own Node and its `!` commands go through Git Bash,
+  # which the Windows runners carry where Git for Windows puts it.
+  check-windows:
+    command: 'node --test hura-base/hura-agent.test.mjs'
+    env:
+      HURA_BASH: 'C:\Program Files\Git\bin\bash.exe'
+    inputs:
+      - 'hura-base/**/*'
+    options:
+      os: 'windows'

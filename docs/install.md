@@ -187,7 +187,8 @@ does once it is running.
 
 `hurad` runs on Windows itself, with no WSL: sandboxes through Docker
 Sandboxes' Windows build, which runs each microVM on the Windows Hypervisor
-Platform. Everything above about policy, credentials and the image applies;
+Platform, and [worktree sessions](worktrees.md#on-windows) under Git Bash and
+psmux for the work that has to happen on Windows. Everything above about policy, credentials and the image applies;
 what differs is how the pieces get there.
 
 | | |

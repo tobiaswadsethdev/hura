@@ -275,13 +275,12 @@ test("a picture goes to the model and every file is named by where it was saved"
     ],
     "/sandbox/.hura/uploads/agent/u1",
   );
+  // Joined the way the platform joins them: `\` on Windows, where Claude
+  // Code reads a Windows path.
+  const at = (name) => path.join("/sandbox/.hura/uploads/agent/u1", name);
   assert.deepEqual(
     saved.map((f) => f.path),
-    [
-      "/sandbox/.hura/uploads/agent/u1/shot.png",
-      "/sandbox/.hura/uploads/agent/u1/shot-2.png",
-      "/sandbox/.hura/uploads/agent/u1/icon.svg",
-    ],
+    [at("shot.png"), at("shot-2.png"), at("icon.svg")],
   );
   assert.equal(saved[1].bytes.toString(), "a,b");
   assert.equal(saved[0].data, png, "a picture the API takes is kept to draw");
@@ -289,7 +288,7 @@ test("a picture goes to the model and every file is named by where it was saved"
   assert.equal(content.length, 2);
   assert.deepEqual(content[0], { type: "image", source: { type: "base64", media_type: "image/png", data: png } });
   assert.match(content[1].text, /^what is wrong here\?\n\nFiles sent with this message/);
-  assert.match(content[1].text, /- \/sandbox\/\.hura\/uploads\/agent\/u1\/shot-2\.png \(text\/csv, 3 B\)/);
+  assert.ok(content[1].text.includes(`- ${at("shot-2.png")} (text/csv, 3 B)`), content[1].text);
 });
 
 test("files without words are still a message, and too many bytes are refused", () => {
@@ -447,7 +446,9 @@ test("a ! command runs in the working copy and is kept with what it printed", as
   assert.equal(exited.ev.uuid, started.ev.uuid);
   assert.equal(exited.ev.code, 3);
   assert.equal(exited.ev.stopped, false);
-  assert.match(exited.ev.output, new RegExp(`^${fs.realpathSync(dir)}\nout\n`));
+  // Git Bash, on Windows, says where it is in its own spelling, `/c/...`.
+  const here = process.platform === "win32" ? `/${path.basename(dir)}` : `^${fs.realpathSync(dir)}`;
+  assert.match(exited.ev.output, new RegExp(`${here}\nout\n`));
   assert.match(exited.ev.output, /err/);
   assert.equal(frames.findLast((f) => f.t === "state").state.activity, "idle");
   assert.equal(c.snapshot().shell, true);

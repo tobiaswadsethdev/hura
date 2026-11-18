@@ -60,6 +60,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -543,10 +544,22 @@ function log(...parts) {
 }
 
 /// Write and rename, so a reader polling the file never sees half of it.
+///
+/// On Windows a rename over a file another process has open, a poll reading
+/// it, is refused for the moment that read takes, so it is tried again for
+/// a little while. Unix never refuses one.
 function writeAtomically(file, text) {
   const tmp = `${file}.${process.pid}`;
   fs.writeFileSync(tmp, text);
-  fs.renameSync(tmp, file);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(tmp, file);
+      return;
+    } catch (e) {
+      if (attempt >= 20 || !["EPERM", "EACCES", "EBUSY"].includes(e.code)) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
 }
 
 /// Exported for the tests, which run `!` commands through one without an SDK.
@@ -1171,16 +1184,32 @@ class Conversation {
     if (!text) throw new Error("nothing to run");
     const uuid = randomUUID();
     const output = new Output();
-    const child = spawn("bash", ["-c", text], {
+    // `HURA_BASH` on a Windows server, where the `bash` on the `PATH` is
+    // WSL's and Git Bash is the one meant. There the shell first writes down
+    // its own pid as Git Bash numbers it, which is what stopping it needs: see
+    // `#stop`.
+    const windows = process.platform === "win32";
+    const pidFile = windows ? path.join(os.tmpdir(), `hura-shell-${uuid}.pid`) : null;
+    const argv = windows ? ["-c", 'echo $$ > "$HURA_SHELL_PID"; eval "$1"', "bash", text] : ["-c", text];
+    const child = spawn(process.env.HURA_BASH || "bash", argv, {
       cwd: this.host.cwd,
       // A pager or a prompt for a password would wait on a terminal that is
       // not there; with no input, either gives up at once.
-      env: { ...process.env, PAGER: "cat", GIT_PAGER: "cat", GIT_TERMINAL_PROMPT: "0" },
+      env: {
+        ...process.env,
+        PAGER: "cat",
+        GIT_PAGER: "cat",
+        GIT_TERMINAL_PROMPT: "0",
+        ...(pidFile ? { HURA_SHELL_PID: pidFile } : {}),
+      },
       stdio: ["ignore", "pipe", "pipe"],
-      // Its own process group, so stopping it stops what it started too.
-      detached: true,
+      // Its own process group, so stopping it stops what it started too. Not
+      // on Windows, where it would also be given a console window of its own;
+      // there `taskkill /T` stops the tree.
+      detached: process.platform !== "win32",
+      windowsHide: true,
     });
-    const run = { child, stopped: false, late: false };
+    const run = { child, stopped: false, late: false, pidFile };
     this.shells.set(uuid, run);
     this.append({ kind: "shell", uuid, command: text });
     this.changed();
@@ -1201,6 +1230,7 @@ class Conversation {
     void ended.then(async (code) => {
       clearTimeout(limit);
       this.shells.delete(uuid);
+      if (pidFile) fs.rm(pidFile, { force: true }, () => {});
       if (run.late) output.add(`\n[stopped after ${SHELL_TIME_MS / 60_000} minutes]`);
       const said = output.text();
       const exit = run.stopped || run.late ? null : code;
@@ -1228,6 +1258,40 @@ class Conversation {
   #stop(run) {
     if (run.child.exitCode !== null || run.child.signalCode !== null) return;
     run.stopped ||= !run.late;
+    if (process.platform === "win32") {
+      // Git Bash starts what a command runs so that Windows does not count it
+      // as the command's: `taskkill /T` ends the shell and leaves a `sleep &`
+      // running and holding its output, so the command never ends. Measured.
+      // Git Bash's own `kill` reaches its process group, by the pid the shell
+      // writes down as it starts, waited for when the stop comes first;
+      // `taskkill` is for a shell that never got that far.
+      const bash = process.env.HURA_BASH || "bash";
+      const attempt = (tries) => {
+        if (run.child.exitCode !== null || run.child.signalCode !== null) return;
+        let pid = "";
+        try {
+          pid = fs.readFileSync(run.pidFile, "utf8").trim();
+        } catch {
+          // Not written yet.
+        }
+        let stop;
+        if (/^\d+$/.test(pid)) {
+          const group = `-- -${pid}`;
+          stop = spawn(bash, ["-c", `kill -TERM ${group} 2>/dev/null; sleep 3; kill -KILL ${group} 2>/dev/null; true`], {
+            stdio: "ignore",
+            windowsHide: true,
+          });
+        } else if (tries < 40) {
+          setTimeout(() => attempt(tries + 1), 50);
+          return;
+        } else {
+          stop = spawn("taskkill", ["/T", "/F", "/PID", String(run.child.pid)], { stdio: "ignore", windowsHide: true });
+        }
+        stop.on("error", () => {});
+      };
+      attempt(0);
+      return;
+    }
     const group = (signal) => {
       try {
         process.kill(-run.child.pid, signal);

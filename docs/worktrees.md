@@ -61,3 +61,31 @@ run Claude Code as anyway.
 
 `hurad doctor` checks for `git`, `tmux`, `claude`, `node` and `npm` when
 worktrees are on.
+
+## On Windows
+
+A server [on Windows](install.md#running-the-server-on-windows) makes worktree
+sessions too, for the work that has to happen on Windows. The scripts are the
+same ones, run by Git Bash, and **psmux**, a tmux for Windows, holds the
+agents and shells:
+
+| | |
+| --- | --- |
+| Git for Windows | its `bash.exe` runs every script, and every pane is a login Git Bash. Claude Code on Windows needs it anyway |
+| [psmux](https://github.com/psmux/psmux) | `winget install psmux`, or `cargo install psmux`. hura runs it as `psmux` |
+| jq | `winget install jqlang.jq`. The hooks read the agent's state with it, and Git for Windows does not carry it |
+| Claude Code, Node.js and npm | as everywhere: the agent, and the chat host |
+
+What is different there:
+
+* **Attach by hand** with `psmux attach -t hura-<name>`, from a terminal.
+* **Scripts longer than about 8 KiB go to Git Bash as a file** in the
+  temporary directory, because it cuts a longer argument off.
+* **A pane is Git Bash, not PowerShell**, which is psmux's default, because
+  hura types POSIX shell into it. Your own psmux sessions are left as they are.
+* **A restart of the machine brings agents back** as on Linux, although
+  Windows keeps the temporary directory the marker is in: its name carries
+  when the machine started.
+
+`hurad doctor` checks for Git Bash, `git`, `psmux`, `claude`, `node`, `npm`
+and `jq` there.

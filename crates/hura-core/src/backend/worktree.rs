@@ -44,6 +44,26 @@
 //! the same files, which read where to write from `HURA_DIR` -- and the chat
 //! host's Agent SDK is installed beside them the first time a chat session
 //! needs it. Claude Code itself, `node` and `tmux` are the server's own.
+//!
+//! ## On Windows
+//!
+//! The same scripts, run by Git Bash, with psmux as the tmux. Git for Windows
+//! is what Claude Code on Windows needs anyway, and psmux is a tmux for
+//! Windows that speaks tmux's commands over the console Windows has. Where the
+//! two differ from a Unix server it is said here and nowhere else:
+//!
+//! * `sh` is Git Bash's `bash.exe`, found by [`host::posix_shell`], and every
+//!   other program is run through it, since a script's tools (`cat`, `awk`,
+//!   `true`) are Git Bash's and not on Windows' own `PATH`.
+//! * A script longer than [`ARG_MAX`] goes to Git Bash as a file: measured,
+//!   it cuts any one argument off at about 8 KiB.
+//! * A pane runs Git Bash ([`Backend::tmux_shell`]), not psmux's default,
+//!   PowerShell, which cannot run the lines typed into it.
+//! * Paths written into scripts and settings use `/`, which Git Bash and
+//!   Windows both read; a hook is run by naming Git Bash, so it works whichever
+//!   shell Claude Code hands it to.
+//! * The temporary directory survives a restart of the machine, so the boot
+//!   marker's name carries when the machine started.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -53,6 +73,7 @@ use super::{Backend, Error, ExecOutput, Paths, Result, Torn};
 use crate::config::Config;
 use crate::doctor::Check;
 use crate::events::Event;
+use crate::host;
 use crate::ops::{Draft, ProviderChoice};
 use crate::policy;
 use crate::projects;
@@ -218,12 +239,20 @@ impl Worktree {
         let (bin, args) = argv
             .split_first()
             .ok_or_else(|| Error::Local("nothing to run".into()))?;
-        let mut cmd = Command::new(bin);
+        let script = posix_argv(argv, None)?;
+        let (program, args): (&std::ffi::OsStr, Vec<String>) = match &script {
+            Some(posix) => (posix.program.as_os_str(), posix.args.clone()),
+            None => (
+                std::ffi::OsStr::new(*bin),
+                args.iter().map(|a| (*a).to_string()).collect(),
+            ),
+        };
+        let mut cmd = Command::new(program);
         // An explicit directory rather than whatever the server was started
         // in, which may have been deleted under a long-lived process. Every
         // script says where it wants to be anyway.
-        cmd.current_dir("/")
-            .args(args)
+        cmd.current_dir(neutral_dir())
+            .args(&args)
             .env("PATH", search_path())
             .stdin(if input.is_some() {
                 Stdio::piped()
@@ -236,6 +265,16 @@ impl Worktree {
         {
             use std::os::unix::process::CommandExt as _;
             cmd.process_group(0);
+        }
+        // The same on Windows, with no console window for it either. And a
+        // login Git Bash, which is what a psmux pane runs, stays in the
+        // directory it was started in rather than going home.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            cmd.creation_flags(host::CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
+                .env("CHERE_INVOKING", "1");
         }
         let mut child = cmd
             .spawn()
@@ -308,7 +347,7 @@ impl Worktree {
     "@anthropic-ai/claude-agent-sdk@${{sdk:-latest}}" >&2
 fi
 "#,
-            dir = sh_quote(&self.support.display().to_string()),
+            dir = sh_quote(&slash(&self.support)),
             claude = sh_quote(&tool("claude")),
         )
     }
@@ -323,40 +362,177 @@ fn home() -> Option<PathBuf> {
 /// Inherited by the tmux server when an exec here is what starts it, and so
 /// by every agent in it.
 fn search_path() -> String {
-    let mut dirs: Vec<String> = std::env::var("PATH")
-        .unwrap_or_default()
-        .split(':')
-        .filter(|d| !d.is_empty())
-        .map(str::to_string)
-        .collect();
-    let mut extra = vec![
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-        PathBuf::from("/usr/bin"),
-        PathBuf::from("/bin"),
-    ];
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    dirs.retain(|d| !d.as_os_str().is_empty());
+    // Where tools go that a service manager's `PATH` may leave out. Windows'
+    // Task Scheduler gives a task the account's own `PATH`, so there it is
+    // only the two user directories Claude Code and cargo install into.
+    let mut extra: Vec<PathBuf> = if cfg!(windows) {
+        Vec::new()
+    } else {
+        vec![
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/usr/bin"),
+            PathBuf::from("/bin"),
+        ]
+    };
     if let Some(h) = home() {
-        extra.push(h.join(".local/bin"));
-        extra.push(h.join(".local/share/mise/shims"));
-        extra.push(h.join(".cargo/bin"));
+        extra.push(h.join(".local").join("bin"));
+        if !cfg!(windows) {
+            extra.push(h.join(".local").join("share").join("mise").join("shims"));
+        }
+        extra.push(h.join(".cargo").join("bin"));
     }
     for d in extra {
-        let d = d.display().to_string();
         if !dirs.contains(&d) {
             dirs.push(d);
         }
     }
-    dirs.join(":")
+    std::env::join_paths(dirs)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// A tool on [`search_path`], as an absolute path, or its bare name when it
-/// is not there and the failure is better left to the shell to report.
+/// is not there and the failure is better left to the shell to report. On
+/// Windows a program is a `.exe` or, installed by npm, a `.cmd`, and the path
+/// is written with `/` for the scripts it goes into.
 fn tool(name: &str) -> String {
-    search_path()
-        .split(':')
-        .map(|d| Path::new(d).join(name))
+    let names: Vec<String> = if cfg!(windows) {
+        vec![
+            format!("{name}.exe"),
+            format!("{name}.cmd"),
+            name.to_string(),
+        ]
+    } else {
+        vec![name.to_string()]
+    };
+    std::env::split_paths(&search_path())
+        .flat_map(|d| names.iter().map(move |n| d.join(n)).collect::<Vec<_>>())
         .find(|p| p.is_file())
-        .map_or_else(|| name.to_string(), |p| p.display().to_string())
+        .map_or_else(|| name.to_string(), |p| slash(&p))
+}
+
+/// A path as a script here writes it: see [`host::script_path`].
+fn slash(path: &Path) -> String {
+    host::script_path(path)
+}
+
+/// The longest script given to Git Bash as an argument. Measured: it cuts
+/// any one argument off at about 8 KiB, and the script then ends inside a
+/// quote. Longer ones go as a file.
+const ARG_MAX: usize = 7_000;
+
+/// Where a command here runs when it has not said: `/` on Unix, rather than
+/// whatever the server was started in, and the temporary directory on
+/// Windows, which has no `/`.
+fn neutral_dir() -> PathBuf {
+    if cfg!(windows) {
+        std::env::temp_dir()
+    } else {
+        PathBuf::from("/")
+    }
+}
+
+/// A command for Git Bash: the program, its arguments, and the script file
+/// to delete once it has run, if one was written.
+struct PosixArgv {
+    program: PathBuf,
+    args: Vec<String>,
+    /// Held for its `Drop`, which deletes the file once the command has run.
+    _script: Option<ScriptFile>,
+}
+
+/// A script written out for Git Bash to read, deleted with this.
+struct ScriptFile(PathBuf);
+
+impl Drop for ScriptFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// `argv` as Git Bash runs it on Windows, and `None` elsewhere, where it runs
+/// as it is.
+///
+/// `sh` is Git Bash itself. Anything else is run by it, `exec "$@"`, because
+/// the programs scripts name are Git Bash's and are not on Windows' `PATH`.
+/// A `-c` script past [`ARG_MAX`] is written to a file: in `keep` when the
+/// caller reads it later, where it is named for its contents and left;
+/// otherwise in the temporary directory, deleted when the result is dropped.
+fn posix_argv(argv: &[&str], keep: Option<&Path>) -> Result<Option<PosixArgv>> {
+    if !cfg!(windows) {
+        return Ok(None);
+    }
+    let bash = host::posix_shell().ok_or_else(|| {
+        Error::Local(
+            "Git for Windows is not installed: a worktree session's scripts run in its bash".into(),
+        )
+    })?;
+    let (first, rest) = argv
+        .split_first()
+        .ok_or_else(|| Error::Local("nothing to run".into()))?;
+    let mut args: Vec<String> = if *first == "sh" {
+        rest.iter().map(|a| (*a).to_string()).collect()
+    } else {
+        ["-c", "exec \"$@\"", "sh"]
+            .into_iter()
+            .chain(argv.iter().copied())
+            .map(str::to_string)
+            .collect()
+    };
+    let mut script = None;
+    if args.first().map(String::as_str) == Some("-c")
+        && args.get(1).is_some_and(|s| s.len() > ARG_MAX)
+    {
+        let text = &args[1];
+        let path = match keep {
+            Some(dir) => {
+                use std::hash::{Hash as _, Hasher as _};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                text.hash(&mut h);
+                dir.join(format!("hura-script-{:016x}.sh", h.finish()))
+            }
+            None => {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                std::env::temp_dir().join(format!("hura-script-{}-{n}.sh", std::process::id()))
+            }
+        };
+        std::fs::write(&path, text)
+            .map_err(|e| Error::Local(format!("could not write {}: {e}", path.display())))?;
+        if keep.is_none() {
+            script = Some(ScriptFile(path.clone()));
+        }
+        // `sh -c SCRIPT NAME ARGS` is `sh FILE ARGS`: the file is `$0`.
+        let tail: Vec<String> = args.iter().skip(3).cloned().collect();
+        args = std::iter::once(slash(&path)).chain(tail).collect();
+    }
+    Ok(Some(PosixArgv {
+        program: bash,
+        args,
+        _script: script,
+    }))
+}
+
+/// Part of the boot marker's name that changes when the machine restarts:
+/// nothing on Unix, where the temporary directory is emptied then, and on
+/// Windows the minute it started, which it is not.
+fn boot_suffix() -> String {
+    #[cfg(windows)]
+    {
+        // SAFETY: no arguments, no state.
+        let up = unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        format!("-{}", now.saturating_sub(up) / 60_000)
+    }
+    #[cfg(not(windows))]
+    String::new()
 }
 
 /// The settings a terminal agent here is started with, on top of the server
@@ -366,7 +542,7 @@ fn tool(name: &str) -> String {
 fn settings(support: &Path) -> String {
     let status = |state: &str| {
         serde_json::json!({ "hooks": [{ "type": "command",
-            "command": format!("{} {state}", sh_quote(&support.join("hura-status").display().to_string())) }] })
+            "command": format!("{} {state}", hook(&support.join("hura-status"))) }] })
     };
     let any = |state: &str| {
         let mut v = status(state);
@@ -376,7 +552,7 @@ fn settings(support: &Path) -> String {
     let value = serde_json::json!({
         "statusLine": {
             "type": "command",
-            "command": sh_quote(&support.join("hura-usage").display().to_string()),
+            "command": hook(&support.join("hura-usage")),
         },
         "hooks": {
             "SessionStart": [status("idle")],
@@ -391,6 +567,17 @@ fn settings(support: &Path) -> String {
     serde_json::to_string_pretty(&value).expect("plain JSON") + "\n"
 }
 
+/// The command that runs one of the hook scripts. The script itself on Unix.
+/// On Windows Git Bash is named to run it, in double quotes, which read the
+/// same in Git Bash and in `cmd`, so it works whichever Claude Code hands it
+/// to.
+fn hook(script: &Path) -> String {
+    match host::posix_shell() {
+        Some(bash) if cfg!(windows) => format!("\"{}\" \"{}\"", slash(&bash), slash(script)),
+        _ => sh_quote(&script.display().to_string()),
+    }
+}
+
 /// The tmux session name for a worktree session's agent, `hura-` prefixed so
 /// it is recognisable in a `tmux ls` beside the server user's own.
 pub fn tmux_name(name: &str) -> String {
@@ -401,7 +588,15 @@ pub fn tmux_name(name: &str) -> String {
 /// The locale is still said outright, because a service manager's environment
 /// is not a login shell's and tmux with no UTF-8 locale draws an agent's
 /// glyphs as `_`.
+#[cfg(not(windows))]
 const TMUX: &str = "LANG=C.UTF-8 LC_ALL=C.UTF-8 COLORTERM=truecolor tmux -u";
+
+/// psmux, which has no `-u` and needs none: it is UTF-8 throughout. Without
+/// its warm server, a spare it starts beside each one: that spare starts in
+/// the session's directory and keeps it, so a removed worktree's directory
+/// could not be deleted until it went. Measured.
+#[cfg(windows)]
+const TMUX: &str = "COLORTERM=truecolor PSMUX_NO_WARM=1 psmux";
 
 /// [`TMUX`] in a transient systemd scope of its own. `systemd-run --scope`
 /// runs the command itself, in the caller's environment, so a server it
@@ -471,14 +666,16 @@ impl Backend for Worktree {
     fn paths(&self, session: &Session) -> Paths {
         let hura = self.record_dir(&session.name);
         Paths {
-            repo: self.dir(session).display().to_string(),
+            repo: slash(&self.dir(session)),
             // In the temporary directory, which a restart of the machine
-            // empties: what the sandbox's tmpfs marker is for.
-            boot: std::env::temp_dir()
-                .join(format!("hura-agent-up-{}", session.name))
-                .display()
-                .to_string(),
-            hura: hura.display().to_string(),
+            // empties: what the sandbox's tmpfs marker is for. Windows keeps
+            // it, so there the name says which start of the machine it is.
+            boot: slash(&std::env::temp_dir().join(format!(
+                "hura-agent-up-{}{}",
+                session.name,
+                boot_suffix()
+            ))),
+            hura: slash(&hura),
         }
     }
 
@@ -487,21 +684,27 @@ impl Backend for Worktree {
     fn agent_command(&self, session: &Session) -> String {
         format!(
             "HURA_DIR={dir} {agent} --settings {settings}",
-            dir = sh_quote(&self.record_dir(&session.name).display().to_string()),
+            dir = sh_quote(&slash(&self.record_dir(&session.name))),
             agent = session.agent,
-            settings = sh_quote(&self.support.join("settings.json").display().to_string()),
+            settings = sh_quote(&slash(&self.support.join("settings.json"))),
         )
     }
 
     fn hura_agent(&self, session: &Session) -> String {
         format!(
-            "HURA_DIR={dir} HURA_AGENT_PORT={port} HURA_CLAUDE={claude} {node} \
+            "HURA_DIR={dir} HURA_AGENT_PORT={port} HURA_CLAUDE={claude}{bash} {node} \
              --disable-warning=UNDICI-EHPA {script}",
-            dir = sh_quote(&self.record_dir(&session.name).display().to_string()),
+            dir = sh_quote(&slash(&self.record_dir(&session.name))),
             port = crate::chat::port(session),
             claude = sh_quote(&tool("claude")),
+            // The shell a `!` line runs in. Unset on Unix, where `bash` on the
+            // `PATH` is it; on Windows that one is WSL's.
+            bash = host::posix_shell()
+                .filter(|_| cfg!(windows))
+                .map(|b| format!(" HURA_BASH={}", sh_quote(&slash(&b))))
+                .unwrap_or_default(),
             node = sh_quote(&tool("node")),
-            script = sh_quote(&self.support.join("hura-agent.mjs").display().to_string()),
+            script = sh_quote(&slash(&self.support.join("hura-agent.mjs"))),
         )
     }
 
@@ -518,6 +721,15 @@ impl Backend for Worktree {
     /// Nothing to wrap it in: what a terminal attaches to here is the command
     /// itself, under a pty on this machine.
     fn interactive_argv(&self, _session: &Session, argv: &[&str]) -> Result<Vec<String>> {
+        // On Windows the pty is given this process's environment, `PATH`
+        // included, and Git Bash finds its own tools; a long script is kept in
+        // the temporary directory, since the terminal reads it after this
+        // returns.
+        if let Some(posix) = posix_argv(argv, Some(&std::env::temp_dir()))? {
+            let mut out = vec![posix.program.display().to_string()];
+            out.extend(posix.args);
+            return Ok(out);
+        }
         let mut out = vec!["env".to_string(), format!("PATH={}", search_path())];
         out.extend(argv.iter().map(|a| (*a).to_string()));
         Ok(out)
@@ -537,18 +749,52 @@ impl Backend for Worktree {
                 "port {port} is only on [::1] here; bind it to 127.0.0.1 to preview it"
             )));
         }
-        Ok(vec![
+        // Waiting is `tail` on Unix, where the forward's guard stops it, and
+        // reading stdin to its end on Windows, where closing it is the stop.
+        let wait = if cfg!(windows) {
+            "exec cat > /dev/null"
+        } else {
+            "exec tail -f /dev/null"
+        };
+        let argv = [
             "sh".to_string(),
             "-c".to_string(),
-            "echo \"Forwarding 127.0.0.1:$1 -> 127.0.0.1:$1 on this machine\"; exec tail -f /dev/null"
-                .to_string(),
+            format!("echo \"Forwarding 127.0.0.1:$1 -> 127.0.0.1:$1 on this machine\"; {wait}"),
             "sh".to_string(),
             port.to_string(),
-        ])
+        ];
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        Ok(match posix_argv(&refs, None)? {
+            Some(posix) => std::iter::once(posix.program.display().to_string())
+                .chain(posix.args)
+                .collect(),
+            None => argv.to_vec(),
+        })
     }
 
     fn tmux(&self) -> &'static str {
         TMUX
+    }
+
+    /// Git Bash in every pane on Windows, as a login shell so it sets up its
+    /// own `PATH`, in the directory `-c` gave it (`CHERE_INVOKING`, set by
+    /// [`Self::run`]). Nothing elsewhere: tmux's default shell is a POSIX one.
+    fn tmux_shell(&self) -> String {
+        match host::posix_shell() {
+            Some(bash) if cfg!(windows) => format!(" -- {} --login -i", sh_quote(&slash(&bash))),
+            _ => String::new(),
+        }
+    }
+
+    /// psmux refuses `attach -d`, and its `=` prefix is not read by every
+    /// command, so on Windows the name is given plain. A shell's name is the
+    /// agent's plus a suffix, and an exact match is preferred over a prefix.
+    fn tmux_attach(&self, name: &str) -> String {
+        if cfg!(windows) {
+            format!("attach -t {}", sh_quote(name))
+        } else {
+            format!("attach -d -t ={}", sh_quote(name))
+        }
     }
 
     /// In a scope of its own under a systemd service, so the server it may
@@ -736,6 +982,16 @@ git -C \"$repo\" worktree prune >/dev/null 2>&1 || true
                 // or someone pruned it -- and still this session's to remove.
                 std::fs::remove_dir_all(&dir).map_err(Error::local)?;
             }
+            // Windows will not delete a directory that is some process's
+            // current one, and the panes just killed take a moment to go: git
+            // empties the worktree and leaves the directory. Measured. Only an
+            // empty one is removed here, and on Unix it has gone already.
+            for _ in 0..30 {
+                if !dir.exists() || std::fs::remove_dir(&dir).is_ok() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
         }
         let _ = std::fs::remove_dir_all(&record);
         if let Some(s) = session {
@@ -835,10 +1091,17 @@ git -C \"$repo\" worktree prune >/dev/null 2>&1 || true
     }
 
     fn health(&self) -> Check {
-        let missing: Vec<&str> = ["git", "tmux", "claude", "node", "npm"]
-            .into_iter()
-            .filter(|t| tool(t) == *t)
-            .collect();
+        // On Windows psmux is the tmux, jq is what the hooks need and Git
+        // Bash does not carry, and Git Bash itself runs every script.
+        let tools: &[&str] = if cfg!(windows) {
+            &["git", "psmux", "claude", "node", "npm", "jq"]
+        } else {
+            &["git", "tmux", "claude", "node", "npm"]
+        };
+        let mut missing: Vec<&str> = tools.iter().copied().filter(|t| tool(t) == *t).collect();
+        if host::posix_shell().is_none() {
+            missing.insert(0, "Git Bash");
+        }
         if missing.is_empty() {
             Check::ok("worktrees", format!("on, under {}", self.root.display()))
         } else {
@@ -922,7 +1185,54 @@ mod tests {
         let hook = written["hooks"]["Notification"][0]["hooks"][0]["command"]
             .as_str()
             .unwrap();
-        assert!(hook.ends_with("hura-status' waiting"), "{hook}");
+        if cfg!(windows) {
+            // Git Bash named to run it, in quotes `cmd` reads too.
+            assert!(hook.starts_with('"'), "{hook}");
+            assert!(hook.contains("bash.exe\" \""), "{hook}");
+            assert!(hook.ends_with("hura-status\" waiting"), "{hook}");
+        } else {
+            assert!(hook.ends_with("hura-status' waiting"), "{hook}");
+        }
+    }
+
+    /// Git Bash cuts an argument off at about 8 KiB, so a script longer than
+    /// that has to reach it some other way. Run for real, on every platform:
+    /// the same call is a plain `sh -c` on Unix.
+    #[test]
+    fn a_script_past_git_bash_s_limit_still_runs() {
+        let tmp = scratch("long");
+        let b = backend(&tmp);
+        let long = "a".repeat(9_000);
+        let script = format!("x='{long}'; printf '%s %s' \"${{#x}}\" \"$1\"");
+        let out = b.run(&["sh", "-c", &script, "sh", "second"], None).unwrap();
+        assert!(out.ok(), "{}", out.stderr);
+        assert_eq!(out.stdout, "9000 second");
+    }
+
+    /// A program a script would name, run as itself on Unix and through Git
+    /// Bash on Windows, where `true` is one of its tools and not Windows'.
+    #[test]
+    fn a_plain_program_runs_where_scripts_do() {
+        let tmp = scratch("plain");
+        let b = backend(&tmp);
+        let out = b.run(&["true"], None).unwrap();
+        assert!(out.ok(), "{}", out.stderr);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn on_windows_panes_are_git_bash_and_attach_is_plain() {
+        let tmp = scratch("panes");
+        let b = backend(&tmp);
+        let shell = b.tmux_shell();
+        assert!(shell.starts_with(" -- '"), "{shell}");
+        assert!(shell.ends_with("bash.exe' --login -i"), "{shell}");
+        assert_eq!(b.tmux_attach("hura-alpha"), "attach -t 'hura-alpha'");
+        assert!(b.tmux().contains("psmux"), "{}", b.tmux());
+        let s = session("alpha", &tmp);
+        for path in [b.paths(&s).repo, b.paths(&s).hura, b.paths(&s).boot] {
+            assert!(!path.contains('\\'), "a path in a script uses `/`: {path}");
+        }
     }
 
     /// Several hosts share this machine's loopback, so each listens where its
@@ -944,6 +1254,7 @@ mod tests {
     /// the status poll runs these often, and a scope per tmux call would be a
     /// line in the journal each time.
     #[test]
+    #[cfg(unix)]
     fn under_a_service_every_new_session_starts_in_a_scope() {
         let tmp = scratch("scope");
         let scoped = backend(&tmp).with_scope(true);
