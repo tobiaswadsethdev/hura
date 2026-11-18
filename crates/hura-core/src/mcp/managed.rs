@@ -26,7 +26,6 @@
 //! length and the window now says at the moment a server is added.
 
 use std::collections::BTreeMap;
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -440,7 +439,7 @@ fn inspect(container: &str, port: u16) -> Inspected {
     // `docker compose` names one it builds for a service of that name, matched
     // whenever the container was absent, failed the format on `.State`, and
     // read as "docker could not be asked".
-    let Ok(out) = Command::new("docker")
+    let Ok(out) = crate::host::command("docker")
         .args([
             "inspect",
             "--type",
@@ -495,7 +494,7 @@ fn inspect(container: &str, port: u16) -> Inspected {
 }
 
 fn logs(container: &str) -> Option<String> {
-    let out = Command::new("docker")
+    let out = crate::host::command("docker")
         .args(["logs", "--tail", &LOG_LINES.to_string(), container])
         .output()
         .ok()?;
@@ -509,7 +508,7 @@ fn logs(container: &str) -> Option<String> {
 /// Run `docker`, with any secret values placed in the child's environment
 /// rather than in its arguments.
 fn docker(argv: &[&str], env: &[(String, String)]) -> Result<std::process::Output, String> {
-    let mut cmd = Command::new("docker");
+    let mut cmd = crate::host::command("docker");
     cmd.args(argv);
     for (k, v) in env {
         cmd.env(k, v);

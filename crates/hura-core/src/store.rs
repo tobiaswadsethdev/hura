@@ -29,13 +29,10 @@ pub struct Store {
 }
 
 impl Store {
-    /// `$XDG_CONFIG_HOME/hura/sessions.json`, falling back to `~/.config`.
+    /// `sessions.json` in hura's config directory: `$XDG_CONFIG_HOME/hura`,
+    /// `~/.config/hura`, or `%APPDATA%\hura` on Windows. See [`crate::dirs`].
     pub fn default_path() -> PathBuf {
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-            .unwrap_or_else(|| PathBuf::from("."));
-        base.join("hura").join("sessions.json")
+        crate::dirs::config().join("sessions.json")
     }
 
     pub fn load() -> io::Result<Self> {

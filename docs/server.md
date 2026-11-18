@@ -4,6 +4,7 @@
 something else drive them: another machine on the network, a cloud box, or --
 the case this was built for -- a Linux server inside WSL with the window out on
 Windows. One binary does both, which is why `hurad` with no subcommand listens.
+It runs [on Windows itself](install.md#running-the-server-on-windows) as well.
 
 The sessions are the same sessions. One sandbox runtime, one cache, one set of
 sandboxes, whether the thing asking is a terminal on that machine or a client
@@ -332,6 +333,39 @@ launchctl bootout gui/$(id -u)/dev.hura.hurad         # stop it for good
 A release `hurad serve` downloads is applied at its next start, so a
 `kickstart -k` is also how an update takes effect. Releases are built for
 Apple silicon; `install.sh` and `hurad update` pick that build on one.
+
+## Running it on Windows, under Task Scheduler
+
+A task that starts `hurad serve` when you log on, as you, and starts it again
+if it stops. As you and in your logon session, rather than "whether the user is
+logged on or not", because that mode has no password to open what Windows
+keeps for you: the sandbox runtime's sign-in and Git's credentials among it.
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "$HOME\.local\bin\hurad.exe" -Argument serve
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName hurad -Action $action -Trigger $trigger -Settings $settings
+Start-ScheduledTask hurad
+```
+
+```powershell
+Stop-ScheduledTask hurad; Start-ScheduledTask hurad    # restart it
+Unregister-ScheduledTask hurad                          # stop it for good
+```
+
+The task runs `hurad.exe` itself, with nothing in between. Task Scheduler
+gives a console program a console window, and the usual ways of hiding one
+(`conhost --headless`, a hidden `cmd`, a script) put a process between the
+task and the server; stopping the task then ends only that process, and the
+server went on holding its port. Instead `hurad serve` notices that the
+console it was given has nobody else on it, lets go of it, and writes what it
+would have printed to `%LOCALAPPDATA%\hura\hurad.log`. A window shows for the
+moment that takes. Run from a terminal, it prints there as usual.
+
+A release `hurad serve` downloads is applied at its next start, so a restart
+is also how an update takes effect.
 
 ---
 

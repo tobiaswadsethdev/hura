@@ -115,7 +115,9 @@ marked as one:
 ## Quickstart
 
 Linux with systemd, KVM and a Docker daemon (WSL 2 counts, with nested
-virtualization). You need [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)
+virtualization), or Windows 11 with the Windows Hypervisor Platform, which has
+[its own section](docs/install.md#running-the-server-on-windows) and its own
+installer, `install.ps1`. You need [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)
 signed in with its `deny-all` policy, Docker to build the image, and tmux, plus
 Rust 1.89 or newer, but only to build it yourself.
 [docs/install.md](docs/install.md) walks through all of it, including the

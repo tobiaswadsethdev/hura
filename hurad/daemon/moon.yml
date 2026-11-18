@@ -12,3 +12,15 @@ tasks:
       - '@group(sources)'
       - '@group(workspace)'
       - '@group(shared)'
+
+  # The server runs on Windows too, so it has to compile there: the pieces
+  # only Windows builds (the forward's job object, the relay's stop on stdin,
+  # the restart after an update) are invisible to every Linux check.
+  check-windows:
+    command: 'cargo check -p $project --all-targets'
+    inputs:
+      - '@group(sources)'
+      - '@group(workspace)'
+      - '@group(shared)'
+    options:
+      os: 'windows'

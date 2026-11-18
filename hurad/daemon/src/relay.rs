@@ -10,7 +10,8 @@
 //! It is what [`crate::forward`] runs for each forward, so it keeps that
 //! contract: it says which port it bound as `Forwarding 127.0.0.1:N`, and it
 //! runs until it is told to stop. Stopping is a `SIGTERM` from the forward's
-//! guard, and it stops the `socat` on its way out.
+//! guard, or on Windows its stdin closing, and it stops the `socat` on its way
+//! out.
 //!
 //! **A relay port is published once and kept.** Measured against v0.47.0:
 //! unpublishing a port takes it off the running sandbox but not out of the
@@ -107,6 +108,7 @@ echo "every relay port is taken" >&2
 exit 1"#;
 
 /// Block until the forward's guard, or anything else, asks the relay to stop.
+#[cfg(unix)]
 fn wait_for_stop() {
     let Ok(rt) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -129,6 +131,38 @@ fn wait_for_stop() {
             _ = int.recv() => {}
         }
     });
+}
+
+/// Block until the forward closes this process's stdin, or a person running
+/// it by hand presses Ctrl-C.
+///
+/// Windows has no `SIGTERM` for a guard to send, and terminating the process
+/// from outside would leave its `socat` running in the sandbox. So there the
+/// forward runs the relay with no guard, holding its stdin, and dropping that
+/// is the request to stop. Unix keeps the signal: its guard starts the relay
+/// in the background, where stdin is `/dev/null` and would read as "stop" at
+/// once.
+#[cfg(windows)]
+fn wait_for_stop() {
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
+    let eof = stop.clone();
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+        let _ = eof.send(());
+    });
+    std::thread::spawn(move || {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        else {
+            return;
+        };
+        rt.block_on(async {
+            let _ = tokio::signal::ctrl_c().await;
+        });
+        let _ = stop.send(());
+    });
+    let _ = stopped.recv();
 }
 
 fn client() -> sbx_client::CliClient {
@@ -174,11 +208,12 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             let file = dir.join(format!("if_inet6-{}", table.len()));
             std::fs::write(&file, table).unwrap();
-            let out = std::process::Command::new("sh")
-                .args(["-c", &script, "sh", "t", "f"])
-                .arg(&file)
-                .output()
-                .unwrap();
+            let out =
+                std::process::Command::new(hura_core::host::posix_shell().expect("a POSIX shell"))
+                    .args(["-c", &script, "sh", "t", "f"])
+                    .arg(&file)
+                    .output()
+                    .unwrap();
             String::from_utf8(out.stdout).unwrap().trim().to_string()
         };
         assert_eq!(decide(&format!("{eth0}{lo}")), "kept");

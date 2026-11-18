@@ -15,8 +15,6 @@
 //! and the record is caught up either by the watcher or by the repair pass in
 //! [`crate::ops::refresh_with`] the next time anything runs.
 
-use std::process::Command;
-
 use crate::backend::{Backend, Paths};
 use crate::forge;
 use crate::session::{META_PATH, Session};
@@ -35,7 +33,7 @@ pub fn sh_quote(s: &str) -> String {
 /// commits are attributed to the person running hura rather than to a robot.
 fn host_git_identity() -> (String, String) {
     let get = |key: &str| -> Option<String> {
-        let out = Command::new("git")
+        let out = crate::host::command("git")
             .args(["config", "--get", key])
             .output()
             .ok()?;
@@ -645,13 +643,14 @@ mod tests {
     use crate::backend::testing::sandboxed;
     use crate::effort::Effort;
     use crate::session::Session;
+    use std::process::Command;
 
     /// Ask a real shell what the quoted value expands to. Inspecting the
     /// escaped string by eye is misleading -- a correctly escaped payload still
     /// *contains* the dangerous substring -- so the only meaningful assertion
     /// is that `sh` reproduces the input exactly and runs nothing.
     fn shell_roundtrip(s: &str) -> String {
-        let out = Command::new("sh")
+        let out = crate::host::sh()
             .arg("-c")
             .arg(format!("printf '%s' {}", sh_quote(s)))
             .output()
@@ -684,7 +683,7 @@ mod tests {
         upper: Option<&str>,
         lower: Option<&str>,
     ) -> (Option<String>, Option<String>) {
-        let mut sh = Command::new("sh");
+        let mut sh = crate::host::sh();
         sh.arg("-c").arg(format!(
             "set -eu\n{script}\nprintf '%s\\n%s\\n' \"${{NO_PROXY+=$NO_PROXY}}\" \"${{no_proxy+=$no_proxy}}\""
         ));
@@ -716,6 +715,9 @@ mod tests {
     /// and only once; a list that has it, and one that is not there at all,
     /// are left as they were.
     #[test]
+    // Unix only: Windows reads `no_proxy` and `NO_PROXY` as one variable, and
+    // the script this checks runs in the Linux sandbox.
+    #[cfg(unix)]
     fn the_loopback_is_added_to_the_proxy_exceptions_once() {
         const RUNTIME: &str = "localhost,127.0.0.1,::1,gateway.docker.internal";
         let added = format!("{RUNTIME},[::1]");
@@ -922,6 +924,7 @@ mod tests {
     /// this is run rather than inspected. `sleep` is cut to nothing -- the
     /// waiting is not what is being tested and four seconds of it in a unit test
     /// is four seconds nobody gets back.
+    #[cfg(unix)]
     fn run_clone(tag: &str, fails: u32) -> (bool, String, u32) {
         let dir = TempDir::new(tag);
         let bin = dir.0.join("bin");
@@ -964,7 +967,7 @@ mkdir -p "$dest/.git"
         let script =
             clone_and_branch(&s, &paths).replace(&format!("sleep {CLONE_RETRY_SECS}"), "sleep 0");
 
-        let out = Command::new("sh")
+        let out = crate::host::sh()
             .arg("-c")
             .arg(format!(
                 "set -eu\nexport PATH={bin}:$PATH\n{script}",
@@ -989,6 +992,9 @@ mkdir -p "$dest/.git"
     /// clone has to survive one like it: without the retry, a race nobody can
     /// see costs the whole session.
     #[test]
+    // Unix only: it fakes `git` with an executable script, which needs a mode
+    // bit, and the clone it checks runs in the Linux sandbox.
+    #[cfg(unix)]
     fn a_denied_first_clone_is_retried() {
         let (ok, _stderr, attempts) = run_clone("clone-retry", 1);
         assert!(ok, "the second attempt must be allowed to happen");
@@ -999,6 +1005,8 @@ mkdir -p "$dest/.git"
     /// cannot be cloned has to fail, with git's own last words, rather than
     /// spinning.
     #[test]
+    // Unix only, for the reason the test above is.
+    #[cfg(unix)]
     fn a_clone_that_never_works_gives_up_and_says_why() {
         let (ok, stderr, attempts) = run_clone("clone-give-up", CLONE_ATTEMPTS + 1);
         assert!(!ok, "must fail rather than loop");
@@ -1060,7 +1068,7 @@ mkdir -p "$dest/.git"
                 hura: dir.0.join("hura").to_string_lossy().into_owned(),
                 boot: dir.0.join("boot").to_string_lossy().into_owned(),
             };
-            Command::new("sh")
+            crate::host::sh()
                 .arg("-c")
                 .arg(format!("set -eu\n{}", clone_and_branch(s, &paths)))
                 .output()

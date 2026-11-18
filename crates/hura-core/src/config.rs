@@ -880,18 +880,7 @@ fn blank_to_none(v: Option<String>) -> Option<String> {
 /// `~` and `~/...`, which is how anyone writes a home-relative path in a config
 /// file and which the shell is not around to expand here.
 fn expand_tilde(path: &Path) -> PathBuf {
-    let Some(rest) = path.to_str().and_then(|s| s.strip_prefix('~')) else {
-        return path.to_path_buf();
-    };
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return path.to_path_buf();
-    };
-    match rest.strip_prefix('/') {
-        Some(tail) => home.join(tail),
-        None if rest.is_empty() => home,
-        // `~other/...` is another user's home, which is not ours to guess at.
-        None => path.to_path_buf(),
-    }
+    crate::dirs::expand_tilde(path)
 }
 
 /// A whole number of milliseconds or seconds.
@@ -1063,8 +1052,9 @@ mod tests {
     fn tilde_is_expanded_against_home() {
         // SAFETY: single-threaded test process for this variable; the rest of
         // the suite reads HOME only through this helper.
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let Some(home) = home else { return };
+        let Some(home) = crate::dirs::home() else {
+            return;
+        };
         let c = parse(r#"repo_roots = ["~/dev", "~", "/abs", "~other/x"]"#).unwrap();
         assert_eq!(
             c.repo_roots.unwrap(),

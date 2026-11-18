@@ -594,10 +594,7 @@ mod tests {
     }
 
     fn sh(script: &str) -> String {
-        let out = std::process::Command::new("sh")
-            .args(["-c", script])
-            .output()
-            .unwrap();
+        let out = crate::host::sh().args(["-c", script]).output().unwrap();
         String::from_utf8(out.stdout).unwrap()
     }
 
@@ -966,7 +963,7 @@ mod tests {
         let az = dir.join("az");
         std::fs::write(&az, stub).unwrap();
         let run = |args: &str| {
-            let out = std::process::Command::new("sh")
+            let out = crate::host::sh()
                 .arg("-c")
                 .arg(format!("sh {} {args}", sh_quote(&az.display().to_string())))
                 .env(azure_token_env("https://vault.azure.net"), "hura-az-vault")

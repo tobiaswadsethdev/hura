@@ -1,10 +1,11 @@
 # Installing hura
 
 There are two things to install and they do not go in the same place. **`hurad`
-runs where the sandboxes are**, which is Linux with KVM, because every session is
-a microVM. **The desktop application runs where you are sitting**, which may be
-the same machine or may be Windows. It makes requests of an `hurad` and needs no
-sandbox runtime, no Docker and no tmux of its own.
+runs where the sandboxes are**, because every session is a microVM: Linux with
+KVM, or Windows 11 with the Windows Hypervisor Platform ([below](#running-the-server-on-windows)).
+**The desktop application runs where you are sitting**, which may be the same
+machine or another one. It makes requests of an `hurad` and needs no sandbox
+runtime, no Docker and no tmux of its own.
 
 `hura` was a second Linux binary until v0.4.0, carrying this CLI and a terminal
 interface beside it. It folded into `hurad`: every command it had, `hurad` has,
@@ -12,9 +13,10 @@ and the window is the interactive surface now. Upgrading from v0.3.1 or earlier
 means running `install.sh` once. `hura update` cannot cross the rename, because
 there is no longer an `hura` for it to replace itself with.
 
-Most of this page is the first half. [The desktop
+Most of this page is the first half, on Linux and then [on
+Windows](#running-the-server-on-windows). [The desktop
 application](#the-desktop-application) at the end is the second, and is all that
-a Windows machine needs.
+a machine needs when its server is somewhere else.
 
 ## Prerequisites
 
@@ -177,8 +179,52 @@ was a terminal interface here until v0.4.0, and [desktop.md](desktop.md) is what
 replaced it.
 
 The desktop workspace talks to a server rather than to the sandboxes directly,
-so it works whether they are on this machine or another one. It is the next
-section; [desktop.md](desktop.md) is what the window does once it is running.
+so it works whether they are on this machine or another one. It is [its own
+section](#the-desktop-application); [desktop.md](desktop.md) is what the window
+does once it is running.
+
+## Running the server on Windows
+
+`hurad` runs on Windows itself, with no WSL: sandboxes through Docker
+Sandboxes' Windows build, which runs each microVM on the Windows Hypervisor
+Platform. Everything above about policy, credentials and the image applies;
+what differs is how the pieces get there.
+
+| | |
+| --- | --- |
+| Windows 11, x86-64 | the one Windows that Docker Sandboxes is built for |
+| Windows Hypervisor Platform | a Windows feature, off by default: `Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All` in an elevated PowerShell, then restart |
+| [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) | `winget install Docker.sbx`, then `sbx login` and `sbx policy init deny-all` as on Linux. It installs per user and starts its own daemon |
+| Docker Desktop | to pull and build the sandbox image, which then goes into the runtime's own store |
+| Git for Windows | its `bash.exe` runs a credential's `command` and the az checks, which are POSIX shell; Claude Code on Windows needs it too |
+
+Then `hurad` itself, from [install.ps1](../install.ps1), which does what
+`install.sh` does: finds the newest release, **checks it against the
+release's `SHA256SUMS`**, puts `hurad.exe` in `~\.local\bin` (where Claude
+Code's installer puts `claude.exe`), and runs `hurad doctor`:
+
+```powershell
+irm https://raw.githubusercontent.com/tobiaswadsethdev/hura/main/install.ps1 | iex
+```
+
+`-BinDir`, `-Version` and `-FromSource` are its flags, or `HURA_BIN_DIR`,
+`HURA_VERSION` and `HURA_FROM_SOURCE` when it is piped into `iex`, which
+cannot pass any. Then, as on Linux:
+
+```powershell
+hurad image pull
+hurad doctor
+hurad serve
+```
+
+Config and the session cache are in `%APPDATA%\hura`, the server's key and
+tokens in `%LOCALAPPDATA%\hura` (where the desktop application keeps its
+paired servers too). Run in the background, it is a scheduled task:
+[server.md](server.md#running-it-on-windows-under-task-scheduler).
+
+**A server in WSL on the same machine** listens on the same port, 17671, and
+WSL's mirrored networking shares ports with Windows, so only one of the two
+can have it. Give the other `--port`.
 
 ## The desktop application
 
@@ -230,10 +276,10 @@ the frontend from Vite's dev server, and that is what starts it; running
 
 ### Windows
 
-There is no `hurad` for Windows and there is not meant to be. The CLI drives
-Docker, tmux and the sandbox runtime, and none of those are on that side; what
-runs there is the window, which pairs itself. This is the arrangement the server was built
-for: Linux in WSL doing the work, the window out on Windows.
+The window, which pairs itself with a server. That server can be [on Windows
+too](#running-the-server-on-windows), or Linux in WSL doing the work with the
+window out on Windows, which is the arrangement the server was first built
+for.
 
 Download the installer for the release you want from the [releases
 page](https://github.com/tobiaswadsethdev/hura/releases) -- either of:
@@ -264,8 +310,8 @@ WebView2 is the only runtime it needs, and Windows 11 ships with it; on Windows
 
 Building it there instead needs Rust, Node 22 or newer, and the MSVC build tools
 (the *Desktop development with C++* workload), then the same two commands as on
-Linux. Only the client half of this repository compiles for Windows, which CI
-checks on every change; `hurad` does not, and is not asked to.
+Linux. CI checks on every change that the desktop crate and the libraries
+under it compile for Windows, and `hurad` with them.
 
 **The window updates itself, once you say so.** It checks for a newer release
 at launch, on focus after a few hours, and from *check* on the about screen
@@ -327,7 +373,11 @@ hurad update --force         # reinstall the version already running
 ```
 
 The replacement is a rename over the running binary, which Linux allows and
-which means a torn download cannot leave half an `hurad` on your `PATH`. A
+which means a torn download cannot leave half an `hurad` on your `PATH`.
+Windows refuses to replace a running `.exe` but lets it be renamed, so there
+the running `hurad.exe` moves aside first, to `.hurad-vX.Y.Z-old.exe`, goes on
+running from there, and is deleted by the next `hurad` to start once nothing
+runs it. A
 session already running is untouched -- its agent lives in a sandbox, not in
 this binary -- but the sandbox image is versioned separately, so `hurad image
 build` after an update is what picks up a change to the image recipe.
@@ -344,8 +394,9 @@ going to act on it:
 
 `hurad serve` looks for a newer release every six hours, and **downloads one
 without installing it**. The verified binary waits beside the running one as
-`.hurad-staged`, and the swap happens the next time `hurad` starts -- any start,
-whether that is a `systemctl --user restart hurad` or your next `hurad ls`.
+`.hurad-staged` (`.hurad-staged.exe` on Windows), and the swap happens the
+next time `hurad` starts -- any start, whether that is a `systemctl --user
+restart hurad` or your next `hurad ls`.
 
 That split is the point. Replacing a binary is safe; replacing it *now* is not,
 because a server driving four agents is a server somebody is using. Staging

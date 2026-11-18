@@ -119,7 +119,7 @@ pub fn host_settings() -> PathBuf {
     if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
         return PathBuf::from(dir).join("settings.json");
     }
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let home = crate::dirs::home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".claude").join("settings.json")
 }
 
@@ -211,7 +211,7 @@ mod tests {
             models: BTreeMap::from([("claude-opus-5-5".into(), "xhigh".into())]),
         };
         let run = |script: &str| {
-            let out = std::process::Command::new("sh")
+            let out = crate::host::sh()
                 .args(["-eu", "-c", script])
                 .output()
                 .unwrap();

@@ -227,7 +227,11 @@ fn ask_api(task: &str, key: &str) -> Result<Named, String> {
     config.push_str(&format!("max-time = {}\n", TIMEOUT.as_secs()));
     config.push_str(&format!("data-raw = {}\n", quote(&body.to_string())));
 
-    let out = run(Command::new("curl").args(["-K", "-"]), &config, "curl")?;
+    let out = run(
+        crate::host::command(crate::host::system_tool("curl")).args(["-K", "-"]),
+        &config,
+        "curl",
+    )?;
     parse_api(&out)
 }
 
@@ -239,7 +243,7 @@ fn ask_api(task: &str, key: &str) -> Result<Named, String> {
 /// want to resume.
 fn ask_claude(task: &str) -> Result<Named, String> {
     let schema = schema().to_string();
-    let mut command = Command::new("claude");
+    let mut command = crate::host::command("claude");
     command
         .current_dir(std::env::temp_dir())
         .args(["-p", "--model", "haiku", "--output-format", "json"])

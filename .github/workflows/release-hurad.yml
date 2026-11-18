@@ -48,6 +48,11 @@ jobs:
   build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
+    # bash on every runner, Windows' included (Git Bash), so the steps below
+    # are one script rather than one per shell.
+    defaults:
+      run:
+        shell: bash
     # An architecture whose runner is unavailable must not take the other one
     # down with it: a release with one binary in it beats a release with none.
     strategy:
@@ -62,6 +67,11 @@ jobs:
           # VM cannot do, beside sandboxes that Docker Sandboxes runs there.
           - target: aarch64-apple-darwin
             runner: macos-latest
+          # Windows runs both kinds too: sandboxes through Docker Sandboxes'
+          # Windows build, which is x86-64 only, and worktree sessions under
+          # Git Bash and psmux.
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
     steps:
       # The tag, explicitly, and not whatever ref the run was started from. On
       # a tag push those are the same thing; on a `workflow_dispatch` they are
@@ -113,10 +123,14 @@ jobs:
         run: |
           set -eu
           bin="target/${{ matrix.target }}/release"
+          # `hurad.exe` on Windows, and that is the name in its archive too,
+          # which is what `hurad update` and install.ps1 look for there.
+          exe=""
+          if [ "$RUNNER_OS" = Windows ]; then exe=".exe"; fi
           # Ask it what it is. A binary built from the wrong commit answers the
           # wrong version, and that is cheaper to find out here than in
           # `hurad update`, which refuses the swap over exactly this.
-          "$bin/hurad" --version
+          "$bin/hurad${exe}" --version
           # Flat, one file at the root of the archive: install.sh and
           # `hurad update` both expect to find `hurad` and nothing else.
           #
@@ -132,9 +146,20 @@ jobs:
           #
           # Named for the version and not the tag, so the name did not change
           # when the tag gained its `hurad-` prefix after v0.54.0.
-          tar -czf "hurad-v${VERSION}-${{ matrix.target }}.tar.gz" -C "$bin" hurad
-          # `shasum`, which both runners have; its output is `sha256sum`'s.
-          shasum -a 256 "hurad-v${VERSION}-${{ matrix.target }}.tar.gz" > "${{ matrix.target }}.sha256"
+          #
+          # A tarball on Windows as well, which Windows' own `tar.exe` unpacks,
+          # so `hurad update` has one way to unpack on every platform.
+          asset="hurad-v${VERSION}-${{ matrix.target }}.tar.gz"
+          tar -czf "$asset" -C "$bin" hurad${exe}
+          # `sha256sum` where there is one (Linux, Git Bash) and `shasum` on the
+          # Mac, read from stdin and printed in the one format, since Git
+          # Bash's marks a binary file with a `*` the others leave out.
+          if command -v sha256sum >/dev/null; then
+            sum=$(sha256sum < "$asset")
+          else
+            sum=$(shasum -a 256 < "$asset")
+          fi
+          printf '%s  %s\n' "${sum%% *}" "$asset" > "${{ matrix.target }}.sha256"
 
       - uses: actions/upload-artifact@v7
         with:

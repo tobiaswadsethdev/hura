@@ -104,11 +104,12 @@ jobs:
       - run: moon ci
 
   # The client half has to compile for Windows, because the desktop app runs
-  # there and hura-core is underneath it -- one `use std::os::unix::fs` costs
-  # seconds to catch here and a tagged release anywhere else. And the desktop
-  # crate itself, because `tauri-build` there needs things nothing on Linux
-  # asks for: `icons/icon.ico` was missing for two increments and only this
-  # could notice.
+  # there and hura-core is underneath it, and so does hurad, which runs there
+  # too. One `use std::os::unix::fs` costs seconds to catch here and a tagged
+  # release anywhere else. And the desktop crate itself, because
+  # `tauri-build` there needs things nothing on Linux asks for:
+  # `icons/icon.ico` was missing for two increments and only this could
+  # notice.
   windows:
     name: windows
     needs: plan

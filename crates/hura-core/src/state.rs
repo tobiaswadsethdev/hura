@@ -15,33 +15,14 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// `$XDG_STATE_HOME/hura`, or `~/.local/state/hura`.
-#[cfg(unix)]
-pub fn dir() -> PathBuf {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("state")))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("hura")
-}
-
-/// `%LOCALAPPDATA%\hura`.
+/// `$XDG_STATE_HOME/hura`, else `~/.local/state/hura`; on Windows
+/// `%LOCALAPPDATA%\hura`. See [`crate::dirs`].
 ///
-/// Windows has no server in it, since the sandbox runtime and the Docker daemon
-/// it would reach are on the Linux side, so the only thing that lands here is
-/// the desktop application's list of paired servers. `LocalAppData` rather
-/// than `AppData\Roaming` for the reason the module exists: roaming is the half
-/// of a profile that follows a user to another machine, and a pairing token is
-/// a login to one particular host.
-#[cfg(windows)]
+/// `LocalAppData` rather than `AppData\Roaming` on Windows for the reason the
+/// module exists: roaming is the half of a profile that follows a user to
+/// another machine, and a pairing token is a login to one particular host.
 pub fn dir() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join("AppData").join("Local"))
-        })
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("hura")
+    crate::dirs::state()
 }
 
 /// Create a directory that only its owner may read.
