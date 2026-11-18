@@ -225,6 +225,25 @@ pub trait Backend {
         self.tmux()
     }
 
+    /// What a new tmux session runs, appended to every `new-session`: nothing,
+    /// which is tmux's own default shell, except where that would not run the
+    /// POSIX lines hura types into a pane. psmux on Windows starts PowerShell,
+    /// so a worktree session there says Git Bash. Starts with a space when it
+    /// is not empty.
+    fn tmux_shell(&self) -> String {
+        String::new()
+    }
+
+    /// The tmux command, after [`Self::tmux`], that attaches this terminal to
+    /// the session called `name` and to nothing else.
+    ///
+    /// `-d` detaches any other client, so the window takes this one's size;
+    /// `=` makes the name exact, since a shell's is the agent's plus a suffix.
+    /// psmux refuses `-d`, and lets a window follow its latest client anyway.
+    fn tmux_attach(&self, name: &str) -> String {
+        format!("attach -d -t ={}", crate::seed::sh_quote(name))
+    }
+
     /// The prefix the shells beside the agent are named with.
     fn shell_prefix(&self, session: &Session) -> String;
 

@@ -492,6 +492,13 @@ mod tests {
             .expect("connected within five seconds")
             .unwrap();
         listener.accept().await.unwrap();
+
+        // Stopped before the runtime goes. On Windows a child's output is
+        // read on a blocking thread, which the runtime waits for as it shuts
+        // down, and a forward still running would never let that read end.
+        drop(lease);
+        stop_now(&session.sandbox, port);
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     /// Against a real sandbox: one with something listening, reached

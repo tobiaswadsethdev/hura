@@ -1495,10 +1495,10 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
     // with no agent, so this exec's environment is every pane's.
     format!(
         "{no_proxy}\n{resume}{bin} has-session -t ={tmux} 2>/dev/null \
-         || {new} new-session -d -s {tmux} -c {repo}; \
+         || {new} new-session -d -s {tmux} -c {repo}{shell}; \
          {bin} set -t ={tmux}: status off 2>/dev/null; \
          {bin} set -t ={tmux}: mouse on 2>/dev/null; \
-         {bin} attach -d -t ={tmux}; \
+         {bin} {attach}; \
          {bin} resize-window -t {tmux} -x {cols} -y {rows} 2>/dev/null; \
          {bin} set -w -t {tmux} window-size latest 2>/dev/null; \
          true",
@@ -1506,6 +1506,8 @@ pub fn attach_script(backend: &dyn Backend, session: &Session, tmux: &str) -> St
         new = backend.tmux_new(),
         tmux = seed::sh_quote(tmux),
         repo = seed::sh_quote(&backend.paths(session).repo),
+        shell = backend.tmux_shell(),
+        attach = backend.tmux_attach(tmux),
     )
 }
 
@@ -1672,11 +1674,12 @@ pub fn new_shell(backend: &dyn Backend, session: &Session) -> Result<String, Str
 /// exec's environment is every pane's. See [`seed::LOOPBACK_NO_PROXY`].
 fn new_shell_script(backend: &dyn Backend, session: &Session, name: &str) -> String {
     format!(
-        "{no_proxy}\n{bin} new-session -d -s {name} -c {repo}",
+        "{no_proxy}\n{bin} new-session -d -s {name} -c {repo}{shell}",
         no_proxy = seed::LOOPBACK_NO_PROXY,
         bin = backend.tmux_new(),
         name = seed::sh_quote(name),
         repo = seed::sh_quote(&backend.paths(session).repo),
+        shell = backend.tmux_shell(),
     )
 }
 

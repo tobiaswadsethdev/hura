@@ -39,7 +39,7 @@ moon's cache (`.moon/cache`, ignored by git) rather than run again.
 | --- | --- | --- |
 | `sbx-client`, `hura-core`, `hura-proto`, `hura-client` | `crates/` | `fmt`, `clippy`, `test`; and `check-windows` for the three the desktop app links |
 | `hurad` | `hurad/daemon` | `fmt`, `clippy`, `test`, `build` (release), `check-windows` |
-| `sandbox-image` | `hurad/images` | `test`: the chat host |
+| `sandbox-image` | `hurad/images` | `test`: the chat host; `check-windows`, the same on Windows |
 | `hura-cloud` | `services/cloud` | `fmt`, `clippy`, `test`, `image` |
 | `relay` | `services/relay` | `typecheck`, `test`, `dev` |
 | `desktop` | `apps/desktop` | `types`, `bindings`, `tauri-versions`, `check-windows`, `dev`, `build` |

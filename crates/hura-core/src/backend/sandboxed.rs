@@ -44,6 +44,9 @@ pub struct Settings {
     pub cpus: Option<u32>,
     pub memory: Option<String>,
     pub credentials: Vec<Credential>,
+    /// Whether this server makes worktree sessions, and so is of use with no
+    /// sandbox runtime installed at all. See [`Sandboxed::live`].
+    pub worktrees: bool,
 }
 
 impl Settings {
@@ -52,6 +55,7 @@ impl Settings {
             cpus: cfg.sandbox_cpus,
             memory: cfg.sandbox_memory.clone(),
             credentials: cfg.credentials().to_vec(),
+            worktrees: cfg.worktrees,
         }
     }
 }
@@ -454,9 +458,24 @@ impl Backend for Sandboxed {
     }
 
     fn live(&self, cached: Vec<Session>) -> Result<store::Reconciliation> {
-        let live: Vec<store::Live> = self
-            .client
-            .list()?
+        let listed = match self.client.list() {
+            Ok(listed) => listed,
+            // No runtime installed at all, on a server that makes worktree
+            // sessions and has no sandbox ones: there is nothing here to
+            // reconcile, and refusing would hide the worktrees with it. A
+            // Windows machine without the Windows Hypervisor Platform is one.
+            // With sandboxes cached it is still an error, since a runtime gone
+            // missing is no proof that they have.
+            Err(SbxError::Spawn { ref source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound
+                    && cached.is_empty()
+                    && self.settings.worktrees =>
+            {
+                Vec::new()
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let live: Vec<store::Live> = listed
             .iter()
             .filter_map(|sb| {
                 let owner = session::session_of(&sb.name)?;
@@ -566,6 +585,31 @@ impl Backend for Sandboxed {
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
+
+    /// A worktree server with no sandbox runtime installed lists its
+    /// worktrees rather than failing on the runtime, and only then.
+    #[test]
+    fn a_worktree_server_with_no_runtime_installed_lists_nothing() {
+        let missing = || -> Box<dyn Sbx> {
+            Box::new(sbx_client::CliClient::new().with_bin("hura-test-no-such-sbx"))
+        };
+        let worktrees = Settings {
+            worktrees: true,
+            ..Settings::default()
+        };
+        let on = Sandboxed::new(missing(), worktrees.clone());
+        assert!(on.live(Vec::new()).unwrap().sessions.is_empty());
+        // A server that makes no worktrees still says the runtime is missing,
+        assert!(
+            Sandboxed::new(missing(), Settings::default())
+                .live(Vec::new())
+                .is_err()
+        );
+        // and so does one with sandbox sessions cached, whose sandboxes may
+        // well still be there.
+        let cached = vec![Session::new("x".into(), "r".into(), "t".into())];
+        assert!(on.live(cached).is_err());
+    }
 
     use sbx_client::{
         CustomSecret, HttpTarget, PolicyLog, Port, QueryMatch, Result as SbxResult, Sandbox,
