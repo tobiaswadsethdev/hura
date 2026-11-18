@@ -483,22 +483,135 @@ async fn port_channel(
     out: mpsc::Sender<ServerFrame>,
     mut input: mpsc::Receiver<ToChannel>,
 ) {
-    let mut answered = false;
+    let mut seen = Seen::default();
+    let mut https = None;
     let reason = match crate::forward::acquire(&session, port, host).await {
         Err(reason) => Some(reason),
-        Ok(lease) => pipe(id, &lease, &out, &mut input, &mut answered).await,
+        Ok(lease) => {
+            let reason = pipe(id, &lease, &out, &mut input, &mut seen).await;
+            if seen.unanswered
+                && let Some(location) = https_location(&seen.head)
+                && speaks_tls(lease.connect()).await
+            {
+                https = Some(location);
+            }
+            reason
+        }
     };
     // Closing the client's connection says nothing to a browser but "the
     // network connection was lost", so one that has had no answer is told why
-    // in words it shows.
-    if let Some(why) = reason.as_deref().filter(|_| !answered) {
+    // in words it shows -- or, when what it asked in plain HTTP is a server
+    // that only speaks TLS, sent there.
+    let answer = match (&https, reason.as_deref()) {
+        (Some(location), _) => Some(redirect(location)),
+        (None, Some(why)) if !seen.answered => Some(unreachable(port, why)),
+        _ => None,
+    };
+    if let Some(answer) = answer {
         let frame = ServerFrame::Output {
             id,
-            data: bytes::encode(&unreachable(port, why)),
+            data: bytes::encode(&answer),
         };
         let _ = out.send(frame).await;
     }
     let _ = out.send(ServerFrame::Closed { id, reason }).await;
+}
+
+/// What a port channel's connection did, for what to say when it ends.
+#[derive(Default)]
+struct Seen {
+    /// The start of what the client sent, enough for a request line and its
+    /// `Host`.
+    head: Vec<u8>,
+    /// Whether the service sent anything back.
+    answered: bool,
+    /// Whether the service closed with the client's question unanswered.
+    unanswered: bool,
+}
+
+/// How much of a request is kept to read its line and `Host` from.
+const HEAD: usize = 8 * 1024;
+
+/// Where a plain HTTP request would be over TLS: `https://`, its `Host`, its
+/// path. `None` for anything that is not an HTTP request in origin form.
+fn https_location(head: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(head);
+    let mut lines = text.split("\r\n");
+    let mut line = lines.next()?.split(' ');
+    let (method, target, version) = (line.next()?, line.next()?, line.next()?);
+    if !version.starts_with("HTTP/1.") || !method.bytes().all(|b| b.is_ascii_uppercase()) {
+        return None;
+    }
+    if !target.starts_with('/') || !target.bytes().all(|b| b.is_ascii_graphic()) {
+        return None;
+    }
+    let host = lines
+        .take_while(|l| !l.is_empty())
+        .find_map(|l| {
+            let (name, value) = l.split_once(':')?;
+            name.eq_ignore_ascii_case("host").then(|| value.trim())
+        })
+        .filter(|h| {
+            !h.is_empty()
+                && h.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b".-:[]".contains(&b))
+        })?;
+    Some(format!("https://{host}{target}"))
+}
+
+/// Whether the service answers a TLS `ClientHello` as TLS does: with a
+/// handshake record, or an alert. A dev server set up for HTTPS -- webpack's
+/// `server: 'https'` -- closes a plain HTTP request without a word, which is
+/// all a browser opening `http://` would ever see of it.
+async fn speaks_tls(
+    connect: impl std::future::Future<Output = std::io::Result<tokio::net::TcpStream>>,
+) -> bool {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let Some(hello) = client_hello() else {
+        return false;
+    };
+    let probe = async {
+        let mut stream = connect.await.ok()?;
+        stream.write_all(&hello).await.ok()?;
+        let mut first = [0u8; 1];
+        stream.read_exact(&mut first).await.ok()?;
+        Some(first[0])
+    };
+    matches!(
+        tokio::time::timeout(Duration::from_secs(3), probe).await,
+        Ok(Some(0x16 | 0x15))
+    )
+}
+
+/// A real `ClientHello`, from rustls. Nothing after it is read past the
+/// first byte, so no certificate is ever looked at.
+fn client_hello() -> Option<Vec<u8>> {
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .ok()?
+        .with_root_certificates(rustls::RootCertStore::empty())
+        .with_no_client_auth();
+    let name = rustls::pki_types::ServerName::try_from("localhost").ok()?;
+    let mut conn = rustls::ClientConnection::new(std::sync::Arc::new(config), name).ok()?;
+    let mut hello = Vec::new();
+    conn.write_tls(&mut hello).ok()?;
+    Some(hello)
+}
+
+/// The answer sending a plain HTTP request to the same place over TLS.
+/// Temporary, so a browser asks again next time rather than remembering a
+/// server that may serve plain HTTP tomorrow.
+fn redirect(location: &str) -> Vec<u8> {
+    let body = format!("This server speaks HTTPS: {location}\n");
+    format!(
+        "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\n\
+         Content-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\n\
+         Connection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
 }
 
 /// The answer to a connection that could not be carried to the service.
@@ -517,7 +630,7 @@ async fn pipe(
     lease: &crate::forward::Lease,
     out: &mpsc::Sender<ServerFrame>,
     input: &mut mpsc::Receiver<ToChannel>,
-    answered: &mut bool,
+    seen: &mut Seen,
 ) -> Option<String> {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -535,6 +648,8 @@ async fn pipe(
             message = input.recv() => match message {
                 Some(ToChannel::Input(raw)) => {
                     asked = true;
+                    let room = HEAD.saturating_sub(seen.head.len());
+                    seen.head.extend_from_slice(&raw[..raw.len().min(room)]);
                     if let Err(e) = to_service.write_all(&raw).await {
                         return Some(e.to_string());
                     }
@@ -547,12 +662,13 @@ async fn pipe(
                 // The relay in the sandbox accepts and then closes when it
                 // cannot reach the port, so an end with a question unanswered
                 // is that, not a service that had nothing to say.
-                Ok(0) if asked && !*answered => {
+                Ok(0) if asked && !seen.answered => {
+                    seen.unanswered = true;
                     return Some("nothing answered on it; is the server still running?".into());
                 }
                 Ok(0) => return None,
                 Ok(n) => {
-                    *answered = true;
+                    seen.answered = true;
                     let frame = ServerFrame::Output { id, data: bytes::encode(&buf[..n]) };
                     if out.send(frame).await.is_err() {
                         return None;
@@ -935,5 +1051,79 @@ mod tests {
             "{head}"
         );
         assert!(body.contains("port 8080") && body.contains("connection refused"));
+    }
+
+    #[test]
+    fn a_plain_request_is_sent_to_the_same_place_over_tls() {
+        let head =
+            b"GET /app/index.html?x=1 HTTP/1.1\r\nhost: localhost:9001\r\nAccept: */*\r\n\r\n";
+        assert_eq!(
+            https_location(head).as_deref(),
+            Some("https://localhost:9001/app/index.html?x=1")
+        );
+        let raw = String::from_utf8(redirect("https://localhost:9001/")).unwrap();
+        assert!(raw.starts_with("HTTP/1.1 307 "), "{raw}");
+        assert!(
+            raw.contains("\r\nLocation: https://localhost:9001/\r\n"),
+            "{raw}"
+        );
+    }
+
+    #[test]
+    fn only_an_http_request_with_a_sane_host_is_redirected() {
+        for head in [
+            &b"\x16\x03\x01\x00"[..],
+            b"SSH-2.0-OpenSSH_9.6\r\n",
+            b"GET / HTTP/1.1\r\n\r\n",
+            b"GET http://elsewhere/ HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            b"GET / HTTP/1.1\r\nHost: evil.example/\r\n\r\n",
+            b"GET / HTTP/1.1\r\n\r\nHost: localhost:1\r\n",
+        ] {
+            assert_eq!(
+                https_location(head),
+                None,
+                "{}",
+                String::from_utf8_lossy(head)
+            );
+        }
+    }
+
+    /// Against a real TLS server, and against one that closes a connection
+    /// it does not understand, as a plain HTTP server given a `ClientHello`
+    /// may.
+    #[tokio::test]
+    async fn a_tls_server_is_told_from_one_that_is_not() {
+        use std::io::Read as _;
+
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let config = rustls::ServerConfig::builder_with_provider(std::sync::Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![cert.cert.der().clone()],
+            rustls::pki_types::PrivateKeyDer::Pkcs8(cert.signing_key.serialize_der().into()),
+        )
+        .unwrap();
+        let config = std::sync::Arc::new(config);
+        let tls = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let tls_port = tls.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut sock, _) = tls.accept().unwrap();
+            let mut conn = rustls::ServerConnection::new(config).unwrap();
+            let _ = conn.complete_io(&mut sock);
+        });
+        let plain = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let plain_port = plain.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut sock, _) = plain.accept().unwrap();
+            let _ = sock.read(&mut [0u8; 64]);
+        });
+
+        let at = |port| tokio::net::TcpStream::connect(("127.0.0.1", port));
+        assert!(speaks_tls(at(tls_port)).await);
+        assert!(!speaks_tls(at(plain_port)).await);
     }
 }
