@@ -156,9 +156,23 @@ public final class Server: Identifiable {
     /// The client, for a screen that asks something of this server once.
     public var api: ServerClient { client }
 
-    /// A project's worktrees, newest first.
+    /// A project's worktrees, in the order they were put in.
     public func worktrees(in project: Project) -> [Session] {
-        sessions.filter { $0.project == project.name }.sorted { $0.createdAt > $1.createdAt }
+        sessions.filter { $0.project == project.name }.sorted(by: Self.byPlace)
+    }
+
+    /// The order worktrees are drawn in, the same as the desktop's: the ones
+    /// nobody has placed first, newest first, since a worktree just started
+    /// is the one you are about to look for; then the placed ones, in the
+    /// order they were put. The order lives on the server, so it is the same
+    /// on every device.
+    static func byPlace(_ a: Session, _ b: Session) -> Bool {
+        switch (a.rank, b.rank) {
+        case let (x?, y?) where x != y: x < y
+        case (nil, _?): true
+        case (_?, nil): false
+        default: a.createdAt != b.createdAt ? a.createdAt > b.createdAt : a.name < b.name
+        }
     }
 
     /// Sessions waiting to start in a project, in the order they will.
@@ -195,7 +209,7 @@ public final class Server: Identifiable {
     public var unfiled: [Session] {
         let known = Set(projects.map(\.name))
         return sessions.filter { $0.project.map { !known.contains($0) } ?? true }
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted(by: Self.byPlace)
     }
 
     public func newProject(from repo: LocalRepo) async throws {
@@ -205,6 +219,33 @@ public final class Server: Identifiable {
 
     public func forgetProject(_ name: String) async throws {
         projects = try await client.forgetProject(name)
+    }
+
+    /// Puts the projects in this order. Shown at once rather than after the
+    /// round trip, so a dragged row stays where it was dropped; a refusal
+    /// puts back what the server has.
+    public func reorderProjects(_ names: [String]) async throws {
+        projects.sort { (names.firstIndex(of: $0.name) ?? .max) < (names.firstIndex(of: $1.name) ?? .max) }
+        do {
+            projects = try await client.reorderProjects(names)
+        } catch {
+            await refresh()
+            throw error
+        }
+    }
+
+    /// Puts these worktrees, one project's, in this order. Shown at once, as
+    /// `reorderProjects` is.
+    public func reorderSessions(_ names: [String]) async throws {
+        for i in listed.indices {
+            if let rank = names.firstIndex(of: listed[i].name) { listed[i].rank = rank }
+        }
+        do {
+            listed = try await client.reorderSessions(names)
+        } catch {
+            await refresh()
+            throw error
+        }
     }
 
     /// Starts a session and answers with its name, once the list has it.

@@ -1088,6 +1088,30 @@ export default function App() {
                 .then(setSessions)
                 .catch((e) => setError(messageOf(e)));
             }}
+            // Drawn in the new order at once, rather than after the round
+            // trip: a row that springs back for a moment and then lands where
+            // it was dropped reads as a drop that failed. The answer, or the
+            // next refresh after a refusal, settles it either way.
+            onReorderProjects={(names) => {
+              if (!server) return;
+              setProjects((all) =>
+                [...all].sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name)),
+              );
+              api
+                .reorderProjects(server, names)
+                .then(setProjects)
+                .catch((e) => setError(messageOf(e)));
+            }}
+            onReorderWorktrees={(names) => {
+              if (!server) return;
+              setSessions((all) =>
+                all.map((s) => (names.includes(s.name) ? { ...s, rank: names.indexOf(s.name) } : s)),
+              );
+              api
+                .reorderSessions(server, names)
+                .then(setSessions)
+                .catch((e) => setError(messageOf(e)));
+            }}
             queueLimit={queue?.limit ?? 0}
             messages={queue?.messages ?? []}
             onUnqueue={(w) => {

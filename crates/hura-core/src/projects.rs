@@ -57,7 +57,8 @@ fn default_path() -> PathBuf {
     crate::store::Store::default_path().with_file_name("projects.json")
 }
 
-/// Every project, oldest first.
+/// Every project, in the order they were put in: oldest first until someone
+/// moves one, which [`reorder`] keeps by writing the file in the new order.
 pub fn list() -> Vec<Project> {
     list_at(&default_path())
 }
@@ -125,6 +126,26 @@ pub fn remove(name: &str) -> Result<Vec<Project>, String> {
 pub fn remove_at(path: &Path, name: &str) -> Result<Vec<Project>, String> {
     let mut all = list_at(path);
     all.retain(|p| p.name != name);
+    write(path, &all)?;
+    Ok(all)
+}
+
+/// Put the projects in the order given. Any the client did not name -- one
+/// made on another machine since its list was fetched -- keep their places
+/// relative to each other after the named ones, and a name with no project is
+/// passed over: neither is worth refusing a drag over.
+pub fn reorder(names: &[String]) -> Result<Vec<Project>, String> {
+    reorder_at(&default_path(), names)
+}
+
+pub fn reorder_at(path: &Path, names: &[String]) -> Result<Vec<Project>, String> {
+    let mut all = list_at(path);
+    all.sort_by_key(|p| {
+        names
+            .iter()
+            .position(|n| *n == p.name)
+            .unwrap_or(usize::MAX)
+    });
     write(path, &all)?;
     Ok(all)
 }
@@ -205,6 +226,20 @@ mod tests {
         let store = scratch("noorigin");
         assert!(add_at(&store, draft("/a/thing", "")).is_err());
         assert!(list_at(&store).is_empty());
+    }
+
+    /// The order is the file's, so it is every client's; one the client did
+    /// not know of stays behind the ones it moved, and a stale name is ignored.
+    #[test]
+    fn reordering_writes_the_projects_in_the_order_given() {
+        let store = scratch("reorder");
+        add_at(&store, draft("/a/one", "https://h/o/one.git")).unwrap();
+        add_at(&store, draft("/b/two", "https://h/o/two.git")).unwrap();
+        add_at(&store, draft("/c/three", "https://h/o/three.git")).unwrap();
+        let names = |all: &[Project]| all.iter().map(|p| p.name.clone()).collect::<Vec<_>>();
+        let all = reorder_at(&store, &["three".into(), "gone".into(), "one".into()]).unwrap();
+        assert_eq!(names(&all), ["three", "one", "two"]);
+        assert_eq!(names(&list_at(&store)), ["three", "one", "two"]);
     }
 
     #[test]

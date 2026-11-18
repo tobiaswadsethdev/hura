@@ -73,6 +73,10 @@ struct ServerView: View {
     @State private var screen: ServerScreen?
     @State private var openPull: PullRequestSummary?
     @State private var error: String?
+    /// Whether the list is being put in order: every worktree gets a handle
+    /// to drag it by, and the projects are listed at the top to be dragged
+    /// the same way, since a section has nothing to hold.
+    @State private var editMode: EditMode = .inactive
 
     var body: some View {
         List {
@@ -90,10 +94,21 @@ struct ServerView: View {
                         .foregroundStyle(.orange)
                 }
             }
+            if editMode.isEditing, server.projects.count > 1 {
+                Section("Projects") {
+                    ForEach(server.projects) { Text($0.name) }
+                        .onMove { from, to in
+                            var names = server.projects.map(\.name)
+                            names.move(fromOffsets: from, toOffset: to)
+                            act { try await server.reorderProjects(names) }
+                        }
+                }
+            }
             ForEach(server.projects) { project in
                 Section {
                     let worktrees = server.worktrees(in: project)
                     ForEach(worktrees) { row($0) }
+                        .onMove { reorder(worktrees, from: $0, to: $1) }
                     ForEach(server.waiting(in: project)) { waitingRow($0) }
                     Button {
                         creatingIn = project
@@ -107,7 +122,9 @@ struct ServerView: View {
             }
             if !server.unfiled.isEmpty || !server.waitingUnfiled.isEmpty {
                 Section(server.projects.isEmpty ? "Sessions" : "Not in a project") {
-                    ForEach(server.unfiled) { row($0) }
+                    let unfiled = server.unfiled
+                    ForEach(unfiled) { row($0) }
+                        .onMove { reorder(unfiled, from: $0, to: $1) }
                     ForEach(server.waitingUnfiled) { waitingRow($0) }
                 }
             }
@@ -124,34 +141,16 @@ struct ServerView: View {
                 }
             }
         }
+        .environment(\.editMode, $editMode)
         .navigationTitle(server.record.name)
         .refreshable { await server.refresh() }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button { addingProject = true } label: { Label("New Project", glyph: .newProject) }
-                    if !server.projects.isEmpty {
-                        Menu {
-                            ForEach(server.projects) { p in
-                                Button(p.name) { creatingIn = p }
-                            }
-                        } label: {
-                            Label("New Worktree", glyph: .branch)
-                        }
-                    }
-                } label: {
-                    Label("Add", systemImage: "plus")
+            if editMode.isEditing {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { withAnimation { editMode = .inactive } }
                 }
-                .disabled(server.state != .online)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Integrations", glyph: .integrations) { screen = .integrations }
-                    Button("Settings", glyph: .settings) { screen = .settings }
-                    Button("About", glyph: .info) { screen = .about }
-                } label: {
-                    Label("Server", systemImage: "ellipsis.circle")
-                }
+            } else {
+                toolbarItems
             }
         }
         .navigationDestination(item: $screen) { screen in
@@ -190,6 +189,50 @@ struct ServerView: View {
         } message: {
             Text(server.deleteFailure ?? "")
         }
+    }
+
+    /// Adding things, and the server's own screens. Away while the list is
+    /// being put in order, when the one thing to do is say it is done.
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button { addingProject = true } label: { Label("New Project", glyph: .newProject) }
+                if !server.projects.isEmpty {
+                    Menu {
+                        ForEach(server.projects) { p in
+                            Button(p.name) { creatingIn = p }
+                        }
+                    } label: {
+                        Label("New Worktree", glyph: .branch)
+                    }
+                }
+            } label: {
+                Label("Add", systemImage: "plus")
+            }
+            .disabled(server.state != .online)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button("Integrations", glyph: .integrations) { screen = .integrations }
+                Button("Settings", glyph: .settings) { screen = .settings }
+                Button("About", glyph: .info) { screen = .about }
+                Divider()
+                Button("Reorder", systemImage: "arrow.up.arrow.down") {
+                    withAnimation { editMode = .active }
+                }
+                .disabled(server.state != .online)
+            } label: {
+                Label("Server", systemImage: "ellipsis.circle")
+            }
+        }
+    }
+
+    /// One group's worktrees after a drag, sent as the order to keep.
+    private func reorder(_ rows: [Session], from: IndexSet, to: Int) {
+        var names = rows.map(\.name)
+        names.move(fromOffsets: from, toOffset: to)
+        act { try await server.reorderSessions(names) }
     }
 
     private func row(_ s: Session) -> some View {

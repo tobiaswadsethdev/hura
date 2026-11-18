@@ -293,6 +293,15 @@ fn retitle(server: String, name: String, title: String) -> Result<Vec<Session>, 
     expect_reply!(reply, Reply::Ls { sessions, .. } => sessions, "a session list")
 }
 
+/// Put the sessions of one project in this order. Answers with the list.
+#[tauri::command(async)]
+fn reorder_sessions(server: String, names: Vec<String>) -> Result<Vec<Session>, Failed> {
+    let reply = remote(&server)?
+        .call(Request::ReorderSessions { names })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Ls { sessions, .. } => sessions, "a session list")
+}
+
 #[tauri::command(async)]
 fn poll(server: String, name: String) -> Result<Poll, Failed> {
     let reply = remote(&server)?
@@ -694,6 +703,14 @@ fn new_project(server: String, project: NewProject) -> Result<Vec<Project>, Fail
 fn forget_project(server: String, name: String) -> Result<Vec<Project>, Failed> {
     let reply = remote(&server)?
         .call(Request::ForgetProject { name })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Projects { projects } => projects, "a project list")
+}
+
+#[tauri::command(async)]
+fn reorder_projects(server: String, names: Vec<String>) -> Result<Vec<Project>, Failed> {
+    let reply = remote(&server)?
+        .call(Request::ReorderProjects { names })
         .map_err(to_message)?;
     expect_reply!(reply, Reply::Projects { projects } => projects, "a project list")
 }
@@ -1846,6 +1863,7 @@ fn main() {
             sessions,
             destroy,
             retitle,
+            reorder_sessions,
             poll,
             policy,
             events,
@@ -1880,6 +1898,7 @@ fn main() {
             projects,
             new_project,
             forget_project,
+            reorder_projects,
             repos,
             inspect,
             new_options,

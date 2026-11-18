@@ -79,6 +79,11 @@ public struct ServerClient: Sendable {
         try await call("forget-project", Named(name: name), as: ProjectsReply.self).projects
     }
 
+    /// Puts the projects in this order, by name; answers with every project.
+    public func reorderProjects(_ names: [String]) async throws -> [Project] {
+        try await call("reorder-projects", Names(names: names), as: ProjectsReply.self).projects
+    }
+
     /// The checkouts on the server's disk.
     public func repos() async throws -> Listing {
         try await call("repos", Nothing(), as: Listing.self)
@@ -114,6 +119,12 @@ public struct ServerClient: Sendable {
     /// the list.
     public func retitle(_ name: String, title: String) async throws -> [Session] {
         try await call("retitle", Retitle(name: name, title: title), as: Sessions.self).sessions
+    }
+
+    /// Puts one project's worktrees in this order, by name. Answers with the
+    /// list.
+    public func reorderSessions(_ names: [String]) async throws -> [Session] {
+        try await call("reorder-sessions", Names(names: names), as: Sessions.self).sessions
     }
 
     // MARK: Beside the agent
@@ -362,6 +373,9 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public var name: String
     /// What it is called where a person reads it; nil shows the name.
     public var title: String?
+    /// Where it goes among its project's worktrees, lower first; nil for one
+    /// nobody has placed. See `Server.byPlace`.
+    public var rank: Int?
     /// `creating`, `seeding`, `ready`, `running`, `waiting`, `idle`, `failed`
     /// or `dead`.
     public var state: String
@@ -408,7 +422,7 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
     public var isLive: Bool { !["creating", "seeding", "failed", "dead"].contains(state) }
 
     enum CodingKeys: String, CodingKey {
-        case name, title, state, task, interface, project, repo, failure, toolchains, providers, policy, sandbox, agent, skills, mcp,
+        case name, title, rank, state, task, interface, project, repo, failure, toolchains, providers, policy, sandbox, agent, skills, mcp,
              ticket, pull, backend, workdir, tmux
         case workBranch = "work_branch"
         case baseBranch = "base_branch"
@@ -419,8 +433,9 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
                 project: String? = nil, repo: String = "", baseBranch: String? = nil, createdAt: Int64 = 0,
                 failure: String? = nil, toolchains: [String] = [], providers: [String] = [], policy: String? = nil,
                 sandbox: String = "", backend: String = "sandbox", workdir: String? = nil, title: String? = nil,
-                tmux: String = "agent") {
+                tmux: String = "agent", rank: Int? = nil) {
         self.title = title
+        self.rank = rank
         self.backend = backend
         self.workdir = workdir
         self.tmux = tmux
@@ -447,6 +462,7 @@ public struct Session: Decodable, Equatable, Identifiable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
         title = try c.decodeIfPresent(String.self, forKey: .title)
+        rank = try c.decodeIfPresent(Int.self, forKey: .rank)
         state = try c.decode(String.self, forKey: .state)
         workBranch = try c.decodeIfPresent(String.self, forKey: .workBranch) ?? ""
         task = try c.decodeIfPresent(String.self, forKey: .task) ?? ""
@@ -508,6 +524,10 @@ public struct Poll: Decodable, Equatable, Sendable {
         /// `v4` or `v6`.
         public var host: String
     }
+}
+
+struct Names: Encodable {
+    let names: [String]
 }
 
 struct Retitle: Encodable {

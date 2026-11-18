@@ -146,6 +146,9 @@ export const api = {
   /// Rename a session. A blank title takes it away, and the slug shows.
   retitle: (server: string, name: string, title: string) =>
     invoke<Session[]>("retitle", { server, name, title }),
+  /// Put one project's sessions in this order. Answers with the list.
+  reorderSessions: (server: string, names: string[]) =>
+    invoke<Session[]>("reorder_sessions", { server, names }),
   poll: (server: string, name: string) => invoke<Poll>("poll", { server, name }),
   policy: (server: string, name: string) => invoke<PolicyView>("policy", { server, name }),
   events: (server: string, name: string) => invoke<FeedEvent[]>("events", { server, name }),
@@ -238,6 +241,8 @@ export const api = {
     invoke<Project[]>("new_project", { server, project }),
   forgetProject: (server: string, name: string) =>
     invoke<Project[]>("forget_project", { server, name }),
+  reorderProjects: (server: string, names: string[]) =>
+    invoke<Project[]>("reorder_projects", { server, names }),
 
   // The create flow. `repos` and `inspect` answer about the *server's* disk:
   // a checkout is only a way of naming a remote, but which checkouts exist is a

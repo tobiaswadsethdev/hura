@@ -397,6 +397,13 @@ def answer(req):
     op, name = req.get("op"), req.get("name")
     if op == "ls": return {"reply": "ls", "sessions": sessions, "adopted": [], "dead": [], "warnings": []}
     if op == "projects": return {"reply": "projects", "projects": projects}
+    if op == "reorder-projects":
+        projects.sort(key=lambda p: req["names"].index(p["name"]) if p["name"] in req["names"] else len(projects))
+        return {"reply": "projects", "projects": projects}
+    if op == "reorder-sessions":
+        for s in sessions:
+            if s["name"] in req["names"]: s["rank"] = req["names"].index(s["name"])
+        return answer({"op": "ls"})
     if op == "queue": return {"reply": "queue", **queue}
     if op == "poll": return {"reply": "poll", **poll(name)}
     if op == "shells": return {"reply": "shells", "shells": []}

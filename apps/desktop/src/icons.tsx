@@ -119,6 +119,8 @@ import {
   Unplug,
   X,
   TextSelect,
+  MoveUp as MoveUpGlyph,
+  MoveDown as MoveDownGlyph,
 } from "lucide-react";
 
 import {
@@ -243,6 +245,9 @@ export const Pending = CircleDashed;
 // The sidebar on the right, folded to its rail and opened again.
 export const Fold = PanelRightClose;
 export const Unfold = PanelRightOpen;
+/// Moving a project or a worktree one place along the sidebar.
+export const MoveUp = MoveUpGlyph;
+export const MoveDown = MoveDownGlyph;
 /// Editing a line in place: a tracker's filter.
 export const Edit = Pencil;
 /// A ticket's comments, beside how many there are.
