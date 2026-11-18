@@ -367,12 +367,19 @@ impl Backend for Sandboxed {
         self.client.detach(&session.sandbox)?;
         for (c, grant) in &chosen {
             for secret in &grant.secrets {
-                self.client.add_secret(secret).map_err(|e| {
+                let refused = |e: String| {
                     Error::Local(format!(
                         "the `{}` credential could not be given to the sandbox: {e}",
                         c.name
                     ))
-                })?;
+                };
+                let secret = sbx_client::SecretSpec {
+                    source: crate::credentials::for_this_host(&secret.source).map_err(refused)?,
+                    ..secret.clone()
+                };
+                self.client
+                    .add_secret(&secret)
+                    .map_err(|e| refused(e.to_string()))?;
             }
         }
         Ok(())

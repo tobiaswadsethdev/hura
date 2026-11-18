@@ -473,6 +473,60 @@ impl Credential {
     }
 }
 
+/// A secret's source as the runtime on this machine will run it.
+///
+/// Every command here is POSIX shell: a user's own, and the wrappers put around
+/// one. The runtime runs a command with the host's shell, which on Windows is
+/// `cmd` (measured, sbx v0.54.0: a probe's `echo` wrote the rest of its line
+/// out and the value came back empty). So on Windows each command is written to
+/// a script in the state directory, and the runtime is given Git Bash and that
+/// script, two quoted paths that `cmd` reads as they are, where a command in
+/// `cmd`'s quoting would need escaping that POSIX quoting cannot survive. The
+/// script is named for its contents, so one command is one file however many
+/// sessions are given it. Elsewhere, and for a reference, the source as it is.
+pub fn for_this_host(source: &SecretSource) -> Result<SecretSource, String> {
+    if !cfg!(windows) || !matches!(source, SecretSource::Command(_)) {
+        return Ok(source.clone());
+    }
+    let bash = crate::host::posix_shell().ok_or(
+        "a credential's command is POSIX shell, and on Windows it is run by Git for \
+         Windows' bash, which is not installed",
+    )?;
+    through_git_bash(
+        source,
+        &bash,
+        &crate::state::dir().join("credential-commands"),
+    )
+}
+
+/// [`for_this_host`]'s Windows half, with the shell and the directory handed
+/// in so it can be tested anywhere.
+fn through_git_bash(
+    source: &SecretSource,
+    bash: &std::path::Path,
+    dir: &std::path::Path,
+) -> Result<SecretSource, String> {
+    let SecretSource::Command(command) = source else {
+        return Ok(source.clone());
+    };
+    crate::state::private_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let script = dir.join(format!("{:016x}.sh", {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        command.hash(&mut h);
+        h.finish()
+    }));
+    if std::fs::read_to_string(&script).ok().as_deref() != Some(command.as_str()) {
+        crate::state::write_private(&script, command)
+            .map_err(|e| format!("{}: {e}", script.display()))?;
+    }
+    Ok(SecretSource::Command(format!(
+        "\"{}\" \"{}\"",
+        crate::host::script_path(bash),
+        crate::host::script_path(&script)
+    )))
+}
+
 /// A password's source, made to store `base64(":" + password)`: what an
 /// `Authorization: Basic` header carries for a token with an empty user,
 /// which is how Azure DevOps takes a PAT and an Entra token alike.
@@ -583,6 +637,35 @@ pub(crate) fn random_hex() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// On Windows the runtime runs a command with `cmd`, so it is given Git
+    /// Bash and a script holding the command, as two quoted paths.
+    #[test]
+    fn a_command_reaches_cmd_as_git_bash_and_a_script() {
+        let dir = std::env::temp_dir().join(format!("hura-cred-cmd-{}", random_hex()));
+        let bash = std::path::Path::new("C:/Program Files/Git/bin/bash.exe");
+        let command = "printf '%s' \"$(tr -d '\\r\\n' < C:/tokens/claude)\" | base64 -w0";
+        let SecretSource::Command(given) =
+            through_git_bash(&SecretSource::Command(command.into()), bash, &dir).unwrap()
+        else {
+            panic!("a command stays a command")
+        };
+        assert!(
+            given.starts_with("\"C:/Program Files/Git/bin/bash.exe\" \""),
+            "{given}"
+        );
+        let script = given.rsplit('"').nth(1).unwrap();
+        assert!(script.ends_with(".sh"), "{given}");
+        assert!(!given.contains('|'), "nothing for `cmd` to read: {given}");
+        assert_eq!(std::fs::read_to_string(script).unwrap(), command);
+        // The same command is the same file.
+        let again = through_git_bash(&SecretSource::Command(command.into()), bash, &dir).unwrap();
+        assert_eq!(again, SecretSource::Command(given));
+        // A reference is the runtime's to resolve, and is left alone.
+        let r = SecretSource::Ref("op://vault/item/field".into());
+        assert_eq!(through_git_bash(&r, bash, &dir).unwrap(), r);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Placeholders numbered in the order they are drawn.
     fn counter() -> impl FnMut() -> String {

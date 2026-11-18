@@ -222,6 +222,22 @@ tokens in `%LOCALAPPDATA%\hura` (where the desktop application keeps its
 paired servers too). Run in the background, it is a scheduled task:
 [server.md](server.md#running-it-on-windows-under-task-scheduler).
 
+**A credential's `command` is POSIX shell on Windows too.** The runtime would
+run it with `cmd`, so `hurad` writes each one to a script under
+`%LOCALAPPDATA%\hura\credential-commands` and has the runtime run that with
+Git Bash, which is why Git for Windows is on the list above. Write paths with
+`/`, and the token file recipe above works as it is:
+
+```toml
+[credentials.claude]
+kind = "claude-code-oauth"
+command = "tr -d '\r\n' < C:/Users/me/.config/hura/tokens/claude"
+```
+
+A preview publishes its relay on a loopback port. Docker Sandboxes v0.54.0 on
+Windows could not pick one itself, so when it says so `hurad` picks a free one
+and names it.
+
 **A server in WSL on the same machine** listens on the same port, 17671, and
 WSL's mirrored networking shares ports with Windows, so only one of the two
 can have it. Give the other `--port`.

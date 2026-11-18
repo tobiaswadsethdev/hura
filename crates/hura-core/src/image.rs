@@ -137,13 +137,15 @@ pub fn loaded(tag: &str) -> bool {
 
 /// Whether a runtime template is this tag at this Docker id.
 ///
-/// The runtime names a local image `docker.io/library/NAME` and shortens its id
-/// to twelve characters, the start of Docker's hex.
+/// The runtime names a local image `docker.io/library/NAME`. Up to v0.50 it
+/// shortened the id to twelve characters, the start of Docker's hex; v0.54
+/// prints it whole, `sha256:` and all.
 fn same_image(t: &sbx_client::Template, tag: &str, docker_id: &str) -> bool {
     let (repo, label) = tag.split_once(':').unwrap_or((tag, "latest"));
     let hex = docker_id.strip_prefix("sha256:").unwrap_or(docker_id);
+    let theirs = t.id.strip_prefix("sha256:").unwrap_or(&t.id);
     let named = t.repository == repo || t.repository.ends_with(&format!("/{repo}"));
-    named && t.tag == label && !t.id.is_empty() && hex.starts_with(&t.id)
+    named && t.tag == label && !theirs.is_empty() && hex.starts_with(theirs)
 }
 
 /// Copy a built image into the sandbox runtime's store.
@@ -1205,6 +1207,18 @@ mod tests {
         assert!(!same_image(&t, "hura-sandbox:rust", built));
         assert!(!same_image(
             &t,
+            "hura-sandbox:latest",
+            "sha256:0000000000009f6a3b5d0e2c1a7b8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a"
+        ));
+
+        // v0.54 prints the whole id. Measured on Windows.
+        let whole = sbx_client::Template {
+            id: built.into(),
+            ..t.clone()
+        };
+        assert!(same_image(&whole, "hura-sandbox:latest", built));
+        assert!(!same_image(
+            &whole,
             "hura-sandbox:latest",
             "sha256:0000000000009f6a3b5d0e2c1a7b8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a"
         ));

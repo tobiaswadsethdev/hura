@@ -107,6 +107,18 @@ fn git_bash(
     from_git.chain(defaults).find(|bash| exists(bash))
 }
 
+/// A path as a script on this machine writes it: as it is on Unix, and with
+/// `/` on Windows, which Git Bash, `cmd` and every Windows program all read,
+/// where a `\` is an escape to one and not to the others.
+pub fn script_path(path: &std::path::Path) -> String {
+    let shown = path.display().to_string();
+    if cfg!(windows) {
+        shown.replace('\\', "/")
+    } else {
+        shown
+    }
+}
+
 /// The POSIX shell as a command, for a test that runs a script the way it
 /// will be run: Git Bash on Windows, so those tests mean something there too.
 #[cfg(test)]

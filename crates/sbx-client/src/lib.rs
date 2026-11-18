@@ -785,6 +785,16 @@ impl CliClient {
         })
     }
 
+    /// `sbx ports NAME --publish SPEC`, and the port it says it published.
+    fn publish_spec(&self, name: &str, sandbox_port: u16, spec: &str) -> Result<Port> {
+        let args = strings(&["ports", name, "--publish", spec]);
+        let out = self.run_checked(&args, Some(name))?;
+        published(&out.stdout, sandbox_port).ok_or_else(|| Error::Unexpected {
+            args: args.join(" "),
+            said: out.stdout.trim().to_string(),
+        })
+    }
+
     /// A listing, in either version's shape; see [`listing`].
     fn list_of<T: serde::de::DeserializeOwned>(
         &self,
@@ -1035,13 +1045,32 @@ impl Sbx for CliClient {
         self.json(&strings(&["ports", name, "--json"]), Some(name))
     }
 
+    /// Publish on a host port the runtime picks, or, where it cannot pick one,
+    /// on one this machine does.
+    ///
+    /// On Windows (v0.54.0) the runtime refuses every port it would choose
+    /// with "could not allocate a host port", while publishing on a port it is
+    /// told succeeds. Measured. A port the system hands out on loopback is
+    /// then given to it outright: free when asked, which is as much as the
+    /// runtime's own pick could promise.
     fn publish(&self, name: &str, sandbox_port: u16) -> Result<Port> {
-        let args = strings(&["ports", name, "--publish", &sandbox_port.to_string()]);
-        let out = self.run_checked(&args, Some(name))?;
-        published(&out.stdout, sandbox_port).ok_or_else(|| Error::Unexpected {
-            args: args.join(" "),
-            said: out.stdout.trim().to_string(),
-        })
+        match self.publish_spec(name, sandbox_port, &sandbox_port.to_string()) {
+            Err(e) if e.to_string().contains("could not allocate a host port") => {
+                let free = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                    .and_then(|l| l.local_addr())
+                    .map_err(|source| Error::Spawn {
+                        bin: "a free loopback port".to_string(),
+                        source,
+                    })?
+                    .port();
+                self.publish_spec(
+                    name,
+                    sandbox_port,
+                    &format!("127.0.0.1:{free}:{sandbox_port}"),
+                )
+            }
+            other => other,
+        }
     }
 
     fn unpublish(&self, name: &str, port: &Port) -> Result<()> {
