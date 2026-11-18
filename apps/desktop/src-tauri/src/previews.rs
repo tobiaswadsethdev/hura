@@ -483,6 +483,8 @@ mod tests {
     /// HURA_LIVE_SESSION=<session> HURA_LIVE_PORT=8000 \
     ///   cargo test -- --ignored a_preview
     /// ```
+    ///
+    /// `HURA_LIVE_HOST=v6` targets `::1`, as the pane does for a server on `::`.
     #[test]
     #[ignore = "needs a paired server and a live session with a port open"]
     fn a_preview_carries_concurrent_connections() {
@@ -528,7 +530,11 @@ mod tests {
             server: "live".into(),
             session: session.clone(),
             port,
-            host: Loopback::V4,
+            host: if std::env::var("HURA_LIVE_HOST").as_deref() == Ok("v6") {
+                Loopback::V6
+            } else {
+                Loopback::V4
+            },
             live: live.clone(),
         };
         {

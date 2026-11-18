@@ -181,7 +181,13 @@ public final class PreviewHub {
                         tunnels[id]?.conn.send(content: bytes, completion: .contentProcessed { _ in })
                     }
                 case "closed":
-                    close(id, tellServer: false)
+                    // After what was sent before it: a server that could not
+                    // reach the port says why in its last output, and
+                    // cancelling at once would drop that unread.
+                    tunnels[id]?.conn.send(content: nil, contentContext: .finalMessage, isComplete: true,
+                                           completion: .contentProcessed { [weak self] _ in
+                        MainActor.assumeIsolated { self?.close(id, tellServer: false) }
+                    })
                 default:
                     continue
                 }
