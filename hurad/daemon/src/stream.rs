@@ -483,11 +483,33 @@ async fn port_channel(
     out: mpsc::Sender<ServerFrame>,
     mut input: mpsc::Receiver<ToChannel>,
 ) {
+    let mut answered = false;
     let reason = match crate::forward::acquire(&session, port, host).await {
         Err(reason) => Some(reason),
-        Ok(lease) => pipe(id, &lease, &out, &mut input).await,
+        Ok(lease) => pipe(id, &lease, &out, &mut input, &mut answered).await,
     };
+    // Closing the client's connection says nothing to a browser but "the
+    // network connection was lost", so one that has had no answer is told why
+    // in words it shows.
+    if let Some(why) = reason.as_deref().filter(|_| !answered) {
+        let frame = ServerFrame::Output {
+            id,
+            data: bytes::encode(&unreachable(port, why)),
+        };
+        let _ = out.send(frame).await;
+    }
     let _ = out.send(ServerFrame::Closed { id, reason }).await;
+}
+
+/// The answer to a connection that could not be carried to the service.
+fn unreachable(port: u16, why: &str) -> Vec<u8> {
+    let body = format!("hura could not reach port {port} in the sandbox: {why}\n");
+    format!(
+        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\n\
+         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
 }
 
 async fn pipe(
@@ -495,6 +517,7 @@ async fn pipe(
     lease: &crate::forward::Lease,
     out: &mpsc::Sender<ServerFrame>,
     input: &mut mpsc::Receiver<ToChannel>,
+    answered: &mut bool,
 ) -> Option<String> {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -505,11 +528,13 @@ async fn pipe(
     let _ = stream.set_nodelay(true);
     let (mut from_service, mut to_service) = stream.into_split();
     let mut buf = vec![0u8; 32 * 1024];
+    let mut asked = false;
 
     loop {
         tokio::select! {
             message = input.recv() => match message {
                 Some(ToChannel::Input(raw)) => {
+                    asked = true;
                     if let Err(e) = to_service.write_all(&raw).await {
                         return Some(e.to_string());
                     }
@@ -519,8 +544,15 @@ async fn pipe(
                 None => return None,
             },
             read = from_service.read(&mut buf) => match read {
+                // The relay in the sandbox accepts and then closes when it
+                // cannot reach the port, so an end with a question unanswered
+                // is that, not a service that had nothing to say.
+                Ok(0) if asked && !*answered => {
+                    return Some("nothing answered on it; is the server still running?".into());
+                }
                 Ok(0) => return None,
                 Ok(n) => {
+                    *answered = true;
                     let frame = ServerFrame::Output { id, data: bytes::encode(&buf[..n]) };
                     if out.send(frame).await.is_err() {
                         return None;
@@ -889,5 +921,19 @@ mod tests {
         assert_eq!(DETACH, b"\x02d");
         assert_eq!(DETACH[0], 0x02, "Ctrl-b");
         assert_eq!(DETACH[1], b'd');
+    }
+
+    /// What a browser shows when a preview cannot reach its port: a whole
+    /// response, whose length is the body's, saying why.
+    #[test]
+    fn an_unreachable_port_is_answered_in_words() {
+        let raw = String::from_utf8(unreachable(8080, "connection refused")).unwrap();
+        let (head, body) = raw.split_once("\r\n\r\n").unwrap();
+        assert!(head.starts_with("HTTP/1.1 502 "), "{head}");
+        assert!(
+            head.contains(&format!("Content-Length: {}", body.len())),
+            "{head}"
+        );
+        assert!(body.contains("port 8080") && body.contains("connection refused"));
     }
 }

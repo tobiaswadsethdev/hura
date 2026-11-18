@@ -30,13 +30,14 @@ use sbx_client::Sbx as _;
 /// Start the relay and serve until told to stop.
 pub fn run(sandbox: &str, port: u16, host: &str) -> Result<(), String> {
     let client = client();
-    let target = match host {
-        "127.0.0.1" => format!("TCP:127.0.0.1:{port}"),
-        "::1" => format!("TCP6:[::1]:{port}"),
+    let v4 = format!("TCP:127.0.0.1:{port}");
+    let (target, fallback) = match host {
+        "127.0.0.1" => (v4, String::new()),
+        "::1" => (format!("TCP6:[::1]:{port}"), v4),
         other => return Err(format!("`{other}` is not a loopback address")),
     };
     let started = client
-        .exec(sandbox, &["sh", "-c", &SCRIPT, "sh", &target])
+        .exec(sandbox, &["sh", "-c", &SCRIPT, "sh", &target, &fallback])
         .map_err(|e| e.to_string())?;
     if !started.ok() {
         return Err(format!(
@@ -84,7 +85,18 @@ pub fn announce(local: u16, host: &str, port: u16, sandbox: &str) -> String {
 /// Starts `socat` on the first free relay port, detached from the exec that
 /// starts it, and prints the port and its pid. A port is free when a `socat`
 /// on it is still running a moment later: one that could not bind has exited.
+///
+/// A target on `::1` is carried to `127.0.0.1` instead when the sandbox's
+/// loopback has no `::1`, which is how a Linux container usually comes: a dev
+/// server bound to `::` is listed as IPv6, and answers on both, but a `socat`
+/// dialling `::1` there fails, and closes every connection it is handed
+/// without a word. Measured with webpack on `::` and IPv6 off on `lo`: the
+/// browser said "the network connection was lost". Nothing can be bound to
+/// `::1` alone when it does not exist, so the socket is `::` and dual-stack.
 const START: &str = r#"target="$1"
+if [ -n "$2" ] && ! grep -q '^0\{31\}1 .* lo$' /proc/net/if_inet6 2>/dev/null; then
+  target="$2"
+fi
 for r in $(seq FIRST LAST); do
   setsid socat TCP-LISTEN:"$r",bind=0.0.0.0,fork,reuseaddr "$target" </dev/null >/dev/null 2>&1 &
   pid=$!
@@ -143,5 +155,34 @@ mod tests {
     fn the_start_script_walks_the_relay_range() {
         assert!(SCRIPT.contains("seq 47700 47799"), "{}", *SCRIPT);
         assert!(!SCRIPT.contains("FIRST"));
+    }
+
+    /// The fallback's test of `/proc/net/if_inet6`, against what a sandbox
+    /// printed with IPv6 on `lo` and with it off.
+    #[test]
+    fn a_loopback_without_ipv6_is_told_apart() {
+        let check = SCRIPT
+            .lines()
+            .find(|l| l.contains("if_inet6"))
+            .unwrap()
+            .replace("/proc/net/if_inet6", "\"$3\"");
+        let script = format!("{check}\n  echo fallback\nelse\n  echo kept\nfi");
+        let eth0 = "fe800000000000002c936ffffe905689 02 40 20 80     eth0\n";
+        let lo = "00000000000000000000000000000001 01 80 10 80       lo\n";
+        let decide = |table: &str| {
+            let dir = std::env::temp_dir().join(format!("hura-relay-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = dir.join(format!("if_inet6-{}", table.len()));
+            std::fs::write(&file, table).unwrap();
+            let out = std::process::Command::new("sh")
+                .args(["-c", &script, "sh", "t", "f"])
+                .arg(&file)
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        assert_eq!(decide(&format!("{eth0}{lo}")), "kept");
+        assert_eq!(decide(eth0), "fallback");
+        assert_eq!(decide(""), "fallback");
     }
 }
