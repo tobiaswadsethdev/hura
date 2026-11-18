@@ -67,7 +67,9 @@ pub fn parse(text: &str) -> Vec<Listening> {
         let Ok(port) = u16::from_str_radix(port, 16) else {
             continue;
         };
-        if RELAY_PORTS.contains(&port) {
+        // The relays carrying previews out, and the chat host: plumbing of
+        // the session's own, not something to preview.
+        if RELAY_PORTS.contains(&port) || port == crate::chat::PORT {
             continue;
         }
         let Some(host) = reachable(addr) else {
@@ -348,13 +350,16 @@ fn plumbing(command: &str) -> bool {
     ) || command == "sleep infinity"
 }
 
-/// The agent and its tmux, and the sandbox's own Docker Engine. A `node`
-/// running Claude Code is named for the script rather than the interpreter, so
-/// every word is looked at.
+/// The agent and its tmux, the chat host, and the sandbox's own Docker Engine.
+/// A `node` running Claude Code or `hura-agent` is named for the script rather
+/// than the interpreter, so every word is looked at.
 fn protected(command: &str) -> bool {
     command.split_whitespace().any(|w| {
         let base = w.rsplit('/').next().unwrap_or(w);
-        matches!(base, "claude" | "tmux" | "dockerd" | "containerd") || base.starts_with("tmux:")
+        matches!(
+            base,
+            "claude" | "tmux" | "hura-agent" | "dockerd" | "containerd"
+        ) || base.starts_with("tmux:")
     })
 }
 
@@ -465,6 +470,29 @@ mod tests {
             .map(|p| (p.pid, p.protected))
             .collect();
         assert_eq!(protected, vec![(30, true), (31, false), (32, true)]);
+    }
+
+    /// The chat host listens on a loopback port of its own, and is the
+    /// session's plumbing: neither a row in the pane nor something to kill.
+    #[test]
+    fn the_chat_host_is_not_a_port_and_cannot_be_killed() {
+        let host = format!("0100007F:{:04X}", crate::chat::PORT);
+        let found = parse_sandbox(&format!(
+            "{LISTEN_MARKER}\n{host} 7\n0100007F:1F40 8\n{FDS_MARKER}\n{}",
+            procs(
+                "50 1 998 node /usr/local/bin/hura-agent serve --port 47681 \n\
+                 71 1 998 python3 -m http.server 8000 \n"
+            )
+        ));
+        let ports: Vec<_> = found.listening.iter().map(|l| l.port).collect();
+        assert_eq!(ports, vec![8000]);
+        let protected: Vec<_> = found
+            .processes
+            .iter()
+            .map(|p| (p.pid, p.protected))
+            .collect();
+        assert_eq!(protected, vec![(50, true), (71, false)]);
+        assert!(parse(&host).is_empty(), "nor on the status poll");
     }
 
     #[test]

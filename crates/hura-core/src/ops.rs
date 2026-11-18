@@ -2041,12 +2041,7 @@ fn parse_poll(stdout: &str, now: u64) -> Poll {
         // screen of nothing but colour changes is a blank screen.
         pane: (!plain.trim().is_empty()).then_some(pane_part.trim_end().to_string()),
         usage: crate::usage::parse(usage_part).filter(|u| !u.is_empty()),
-        // The chat host listens on a loopback port as well, and it is not
-        // something to preview.
-        ports: crate::ports::parse(ports_part)
-            .into_iter()
-            .filter(|l| l.port != crate::chat::PORT)
-            .collect(),
+        ports: crate::ports::parse(ports_part),
     }
 }
 
