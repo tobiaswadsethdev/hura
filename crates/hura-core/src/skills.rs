@@ -36,7 +36,6 @@
 //! it was handed.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -80,7 +79,12 @@ impl Skill {
             return Err(Error::Empty);
         }
 
-        let path = if entry.contains('/') || entry.starts_with('~') {
+        // A path when it has a separator in it, the host's own included, so
+        // `C:\skills\audit` on Windows is not taken for a skill's name.
+        let path = if entry.contains('/')
+            || entry.contains(std::path::MAIN_SEPARATOR)
+            || entry.starts_with('~')
+        {
             expand_tilde(Path::new(entry))
         } else {
             host_skills_dir().join(entry)
@@ -125,19 +129,15 @@ impl Skill {
 
 /// Where the server keeps the skills a client has uploaded.
 ///
-/// `$XDG_DATA_HOME/hura/skills`, beside the worktrees: data rather than state,
+/// `skills` in hura's data directory ([`crate::dirs::data`]), beside the
+/// worktrees: data rather than state,
 /// because it is the copy of something whose original is on another machine and
 /// a server that lost it would hand every new session fewer skills without
 /// saying so. Deliberately *not* the server user's own `~/.claude/skills`,
 /// which is theirs -- writing an uploaded skill in there would change what the
 /// agent they run themselves knows how to do.
 pub fn library_dir() -> PathBuf {
-    std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share")))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("hura")
-        .join("skills")
+    crate::dirs::data().join("skills")
 }
 
 /// Where this host keeps its skills: `$CLAUDE_CONFIG_DIR/skills`, else
@@ -146,7 +146,7 @@ pub fn host_skills_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR") {
         return PathBuf::from(dir).join("skills");
     }
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
+    let home = crate::dirs::home().unwrap_or_else(|| PathBuf::from("."));
     home.join(".claude").join("skills")
 }
 
@@ -174,11 +174,9 @@ pub fn pack(skills: &[Skill]) -> (String, Vec<String>) {
                 script.push_str(&format!(
                     "rm -rf {dest}\n\
                      printf '%s' {b64} | base64 -d | tar -xzf - -C {dir}\n",
-                    dest = crate::seed::sh_quote(
-                        &Path::new(SANDBOX_SKILLS_DIR)
-                            .join(&skill.name)
-                            .to_string_lossy()
-                    ),
+                    // A path in the sandbox, which is Linux whatever this is:
+                    // joined with `/`, never the host's separator.
+                    dest = crate::seed::sh_quote(&format!("{SANDBOX_SKILLS_DIR}/{}", skill.name)),
                     b64 = crate::seed::sh_quote(&b64),
                     dir = crate::seed::sh_quote(SANDBOX_SKILLS_DIR),
                 ));
@@ -210,7 +208,7 @@ pub fn payload(source: &Path) -> Result<String, Error> {
         .file_name()
         .ok_or_else(|| Error::NoName(source.display().to_string()))?;
 
-    let out = Command::new("tar")
+    let out = crate::host::command(crate::host::system_tool("tar"))
         .arg("-czhf")
         .arg("-")
         .arg("-C")
@@ -273,17 +271,7 @@ pub fn base64(bytes: &[u8]) -> String {
 
 /// `~` and `~/...`, as [`crate::config`] expands them for `repo_roots`.
 fn expand_tilde(path: &Path) -> PathBuf {
-    let Some(rest) = path.to_str().and_then(|s| s.strip_prefix('~')) else {
-        return path.to_path_buf();
-    };
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return path.to_path_buf();
-    };
-    match rest.strip_prefix('/') {
-        Some(tail) => home.join(tail),
-        None if rest.is_empty() => home,
-        None => path.to_path_buf(),
-    }
+    crate::dirs::expand_tilde(path)
 }
 
 /// One skill on its way from a client to the server's library.
@@ -550,7 +538,7 @@ fn unpack(into: &Path, tar_b64: &str) -> Result<(), String> {
     let bytes = crate::files::decode_base64(tar_b64.trim())
         .ok_or_else(|| "the upload was not valid base64".to_string())?;
 
-    let mut child = Command::new("tar")
+    let mut child = crate::host::command(crate::host::system_tool("tar"))
         .arg("-xzf")
         .arg("-")
         .arg("-C")
@@ -756,8 +744,8 @@ mod tests {
     fn base64_round_trips_through_a_real_decoder() {
         let bytes: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
         let encoded = base64(&bytes);
-        let out = Command::new("base64")
-            .arg("-d")
+        let out = crate::host::sh()
+            .args(["-c", "base64 -d"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -794,7 +782,7 @@ mod tests {
 
     #[test]
     fn tilde_is_expanded() {
-        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        let Some(home) = crate::dirs::home() else {
             return;
         };
         let s = Skill::parse("~/work/skills/audit").unwrap();
@@ -850,13 +838,23 @@ mod tests {
             .find(|l| l.starts_with("printf "))
             .expect("a printf line");
         let b64 = line.split('\'').nth(3).expect("the payload");
-        let out = Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "printf '%s' {} | base64 -d | tar -tzf -",
-                crate::seed::sh_quote(b64)
-            ))
-            .output()
+        // On stdin rather than in the script: Git Bash cuts an argument off
+        // at about 8 KiB, measured, and a payload is longer than that.
+        let out = crate::host::sh()
+            .args(["-c", "base64 -d | tar -tzf -"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write as _;
+                child
+                    .stdin
+                    .take()
+                    .expect("stdin")
+                    .write_all(b64.as_bytes())?;
+                child.wait_with_output()
+            })
             .expect("sh");
         let listing = String::from_utf8_lossy(&out.stdout);
         for wanted in [
@@ -864,7 +862,11 @@ mod tests {
             "ship/scripts/run.sh",
             "ship/references/notes.md",
         ] {
-            assert!(listing.contains(wanted), "{wanted} missing from {listing}");
+            assert!(
+                listing.contains(wanted),
+                "{wanted} missing from {listing}; the shell said: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
         let _ = fs::remove_dir_all(root);
     }

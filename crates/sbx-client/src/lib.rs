@@ -629,22 +629,49 @@ impl Default for CliClient {
 /// `PATH` first, then where its own installer puts it. The second matters more
 /// than it looks: a systemd user service starts with a `PATH` of
 /// `/usr/local/bin:/usr/bin`, and the tarball installs to `~/.docker/sbx/bin`.
+/// On Windows the per-user MSI installs to
+/// `%LOCALAPPDATA%\DockerSandboxes\bin` and the machine-wide one to
+/// `%ProgramFiles%\DockerSandboxes\bin`; a scheduled task's `PATH` may have
+/// neither, since the installer adds them to a `PATH` read at logon.
 pub fn locate() -> PathBuf {
+    let exe = format!("sbx{}", std::env::consts::EXE_SUFFIX);
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
-            let candidate = dir.join("sbx");
+            let candidate = dir.join(&exe);
             if candidate.is_file() {
                 return candidate;
             }
         }
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let candidate = Path::new(&home).join(".docker/sbx/bin/sbx");
-        if candidate.is_file() {
-            return candidate;
+    for candidate in installed_at(&|name| std::env::var_os(name)) {
+        if candidate.join(&exe).is_file() {
+            return candidate.join(&exe);
         }
     }
-    PathBuf::from("sbx")
+    PathBuf::from(exe)
+}
+
+/// The directories the runtime's own installers put the CLI in, for this
+/// platform.
+fn installed_at(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    let dir = |var: &str, rel: &[&str]| {
+        env(var)
+            .filter(|v| !v.is_empty())
+            .map(|v| rel.iter().fold(PathBuf::from(v), |p, r| p.join(r)))
+    };
+    if cfg!(windows) {
+        [
+            dir("LOCALAPPDATA", &["DockerSandboxes", "bin"]),
+            dir("ProgramFiles", &["DockerSandboxes", "bin"]),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    } else {
+        dir("HOME", &[".docker", "sbx", "bin"])
+            .into_iter()
+            .collect()
+    }
 }
 
 /// The variables the CLI reads its state directories from.
@@ -684,6 +711,15 @@ impl CliClient {
             cmd.env_remove(var);
         }
         cmd.args(args);
+        // No console window per call on Windows, which a server with no console
+        // of its own would otherwise flash up for every `sbx` it runs.
+        // `CREATE_NO_WINDOW`; the crate stands alone, so the flag is spelled
+        // out rather than shared with `hura_core::host`.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+            cmd.creation_flags(0x0800_0000);
+        }
         cmd
     }
 
@@ -746,6 +782,16 @@ impl CliClient {
         serde_json::from_str(&out.stdout).map_err(|source| Error::Parse {
             args: args.join(" "),
             source,
+        })
+    }
+
+    /// `sbx ports NAME --publish SPEC`, and the port it says it published.
+    fn publish_spec(&self, name: &str, sandbox_port: u16, spec: &str) -> Result<Port> {
+        let args = strings(&["ports", name, "--publish", spec]);
+        let out = self.run_checked(&args, Some(name))?;
+        published(&out.stdout, sandbox_port).ok_or_else(|| Error::Unexpected {
+            args: args.join(" "),
+            said: out.stdout.trim().to_string(),
         })
     }
 
@@ -999,13 +1045,32 @@ impl Sbx for CliClient {
         self.json(&strings(&["ports", name, "--json"]), Some(name))
     }
 
+    /// Publish on a host port the runtime picks, or, where it cannot pick one,
+    /// on one this machine does.
+    ///
+    /// On Windows (v0.54.0) the runtime refuses every port it would choose
+    /// with "could not allocate a host port", while publishing on a port it is
+    /// told succeeds. Measured. A port the system hands out on loopback is
+    /// then given to it outright: free when asked, which is as much as the
+    /// runtime's own pick could promise.
     fn publish(&self, name: &str, sandbox_port: u16) -> Result<Port> {
-        let args = strings(&["ports", name, "--publish", &sandbox_port.to_string()]);
-        let out = self.run_checked(&args, Some(name))?;
-        published(&out.stdout, sandbox_port).ok_or_else(|| Error::Unexpected {
-            args: args.join(" "),
-            said: out.stdout.trim().to_string(),
-        })
+        match self.publish_spec(name, sandbox_port, &sandbox_port.to_string()) {
+            Err(e) if e.to_string().contains("could not allocate a host port") => {
+                let free = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+                    .and_then(|l| l.local_addr())
+                    .map_err(|source| Error::Spawn {
+                        bin: "a free loopback port".to_string(),
+                        source,
+                    })?
+                    .port();
+                self.publish_spec(
+                    name,
+                    sandbox_port,
+                    &format!("127.0.0.1:{free}:{sandbox_port}"),
+                )
+            }
+            other => other,
+        }
     }
 
     fn unpublish(&self, name: &str, port: &Port) -> Result<()> {
@@ -1054,6 +1119,36 @@ impl Sbx for CliClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_installers_directories_are_where_the_cli_is_looked_for() {
+        let env = |name: &str| {
+            [
+                ("HOME", "/home/u"),
+                ("LOCALAPPDATA", r"C:\Users\u\AppData\Local"),
+                ("ProgramFiles", r"C:\Program Files"),
+            ]
+            .iter()
+            .find(|(k, _)| *k == name)
+            .map(|(_, v)| std::ffi::OsString::from(v))
+        };
+        let dirs = installed_at(&env);
+        if cfg!(windows) {
+            assert_eq!(
+                dirs,
+                [
+                    PathBuf::from(r"C:\Users\u\AppData\Local")
+                        .join("DockerSandboxes")
+                        .join("bin"),
+                    PathBuf::from(r"C:\Program Files")
+                        .join("DockerSandboxes")
+                        .join("bin"),
+                ]
+            );
+        } else {
+            assert_eq!(dirs, [PathBuf::from("/home/u/.docker/sbx/bin")]);
+        }
+    }
 
     fn fixture(name: &str) -> String {
         std::fs::read_to_string(format!(

@@ -47,7 +47,6 @@
 //! `install.sh` moves it across.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::image::is_older;
 
@@ -71,13 +70,15 @@ pub fn current() -> &'static str {
 ///
 /// `None` on a platform no release is built for. Linux on both
 /// architectures, as musl builds that run on any distribution without asking
-/// about its libc, and Apple silicon, where a server runs worktree sessions
-/// for the work a Linux VM cannot do.
+/// about its libc; Apple silicon, where a server runs worktree sessions for
+/// the work a Linux VM cannot do; and Windows on x86-64, the one architecture
+/// the sandbox runtime is built for there.
 fn target_for(os: &str, arch: &str) -> Option<&'static str> {
     match (os, arch) {
         ("linux", "x86_64") => Some("x86_64-unknown-linux-musl"),
         ("linux", "aarch64") => Some("aarch64-unknown-linux-musl"),
         ("macos", "aarch64") => Some("aarch64-apple-darwin"),
+        ("windows", "x86_64") => Some("x86_64-pc-windows-msvc"),
         _ => None,
     }
 }
@@ -99,6 +100,11 @@ const SUMS: &str = "SHA256SUMS";
 
 /// The one binary a release carries, and the one this replaces.
 const BIN: &str = "hurad";
+
+/// `.exe` on Windows, where a file runs by its extension, and nothing
+/// elsewhere. Every file this module may run gets it: the binary in an
+/// archive, a staged release, and the copy a swap goes through.
+const EXE: &str = std::env::consts::EXE_SUFFIX;
 
 /// A published release, as much of one as this needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,7 +194,7 @@ fn release_from(api: ApiRelease) -> Option<Release> {
 /// GET a URL through `curl`, with timeouts short enough that no caller is left
 /// waiting on a network that is not answering.
 fn fetch(url: &str) -> Option<String> {
-    let out = Command::new("curl")
+    let out = crate::host::command(crate::host::system_tool("curl"))
         .args([
             "-fsSL",
             "--connect-timeout",
@@ -297,7 +303,7 @@ pub fn install(tag: Option<&str>, force: bool) -> Result<Outcome, String> {
     let at = std::env::current_exe().map_err(|e| format!("cannot find the running binary: {e}"))?;
     let scratch = Scratch::new()?;
     let fresh = fetch_verified(scratch.path(), &release)?;
-    swap(&fresh, &at)?;
+    swap(&fresh, &at, Some(current()))?;
     Ok(Outcome::Updated {
         from: current().to_string(),
         to: release.version.clone(),
@@ -318,7 +324,7 @@ pub const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 
 /// a rename across filesystems fails with `EXDEV`. A dotfile, so it does not
 /// appear in a `PATH` completion as a second command.
 fn staged_at(at: &Path) -> PathBuf {
-    at.with_file_name(format!(".{BIN}-staged"))
+    at.with_file_name(format!(".{BIN}-staged{EXE}"))
 }
 
 /// Fetch the newest release and leave it beside the running binary, replacing
@@ -353,7 +359,7 @@ pub fn stage() -> Result<Option<String>, String> {
     let fresh = fetch_verified(scratch.path(), &release)?;
     // Through the same copy-then-rename as an install, so a torn write cannot
     // leave a half-file that the next start would try to run.
-    swap(&fresh, &staged)?;
+    swap(&fresh, &staged, None)?;
     Ok(Some(release.version))
 }
 
@@ -372,6 +378,8 @@ pub fn stage() -> Result<Option<String>, String> {
 /// gets, which is the whole point of staging rather than installing.
 pub fn apply_staged() -> Option<PathBuf> {
     let at = std::env::current_exe().ok()?;
+    #[cfg(windows)]
+    sweep_aside(&at);
     apply_staged_at(&at, current())
 }
 
@@ -417,7 +425,7 @@ fn apply_staged_at(at: &Path, running: &str) -> Option<PathBuf> {
         return None;
     }
 
-    if let Err(e) = swap(&staged, at) {
+    if let Err(e) = swap(&staged, at, Some(running)) {
         // Not fatal, and deliberately not loud: the binary that is running is
         // fine, and a server that refuses to start because it could not update
         // itself would be a worse failure than the one it is reporting.
@@ -442,7 +450,7 @@ fn version_of(bin: &Path) -> Option<String> {
     // than taken to mean the binary will not run.
     let mut busy = 0;
     let out = loop {
-        match Command::new(bin).arg("--version").output() {
+        match crate::host::command(bin).arg("--version").output() {
             Ok(out) => break out,
             Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && busy < 50 => {
                 busy += 1;
@@ -530,7 +538,7 @@ fn fetch_verified(dir: &Path, release: &Release) -> Result<PathBuf, String> {
         ));
     }
 
-    let status = Command::new("tar")
+    let status = crate::host::command(crate::host::system_tool("tar"))
         .args(["-xzf"])
         .arg(&tarball)
         .arg("-C")
@@ -540,7 +548,7 @@ fn fetch_verified(dir: &Path, release: &Release) -> Result<PathBuf, String> {
     if !status.success() {
         return Err(format!("could not unpack {name}"));
     }
-    let fresh = dir.join(BIN);
+    let fresh = dir.join(format!("{BIN}{EXE}"));
     if !fresh.is_file() {
         return Err(format!("{name} does not contain an `{BIN}` binary"));
     }
@@ -568,9 +576,13 @@ fn fetch_verified(dir: &Path, release: &Release) -> Result<PathBuf, String> {
 /// replacement is a single atomic operation, so a torn write cannot leave a
 /// half-written `hura` on the path -- and Linux is happy to rename over a binary
 /// that is currently executing, which is what makes this possible at all.
-fn swap(fresh: &Path, at: &Path) -> Result<(), String> {
+///
+/// `running` is the version of the binary at `at` when the caller knows it,
+/// which it does whenever `at` is the binary it is itself running: Windows
+/// names the old one after it as it moves it aside ([`replace`]).
+fn swap(fresh: &Path, at: &Path, running: Option<&str>) -> Result<(), String> {
     let dir = at.parent().unwrap_or(Path::new("."));
-    let staged = dir.join(format!(".{BIN}-update-{}", std::process::id()));
+    let staged = dir.join(format!(".{BIN}-update-{}{EXE}", std::process::id()));
     std::fs::copy(fresh, &staged).map_err(|e| {
         let _ = std::fs::remove_file(&staged);
         format!(
@@ -579,10 +591,90 @@ fn swap(fresh: &Path, at: &Path) -> Result<(), String> {
         )
     })?;
     make_executable(&staged)?;
-    std::fs::rename(&staged, at).map_err(|e| {
+    replace(&staged, at, running).map_err(|e| {
         let _ = std::fs::remove_file(&staged);
         format!("cannot replace {}: {e}", at.display())
     })
+}
+
+/// Rename `new` over `at`, which Unix allows while `at` is running.
+#[cfg(not(windows))]
+fn replace(new: &Path, at: &Path, _running: Option<&str>) -> std::io::Result<()> {
+    std::fs::rename(new, at)
+}
+
+/// Rename `new` over `at`, moving a running `at` out of the way first.
+///
+/// Windows refuses to replace an `.exe` that is running, but lets it be
+/// renamed, and the process goes on running from the new name. So the one in
+/// the way moves aside to a name that says which version it is,
+/// [`aside_at`], which is how a server that outlived an update still finds
+/// its own binary ([`running_binary`]); and the next start sweeps it up once
+/// nothing is running it ([`sweep_aside`]).
+///
+/// The version comes from the caller and is never asked of `at`: running `at`
+/// to ask is starting the very binary being replaced, which applies the same
+/// staged update at its own start, which asks again. Measured: a chain of
+/// processes, one per second, until they were killed.
+#[cfg(windows)]
+fn replace(new: &Path, at: &Path, running: Option<&str>) -> std::io::Result<()> {
+    match std::fs::rename(new, at) {
+        Ok(()) => return Ok(()),
+        Err(e) if !at.is_file() => return Err(e),
+        Err(_) => {}
+    }
+    let version = running.unwrap_or("unknown");
+    let mut aside = aside_at(at, version);
+    if aside.exists() && std::fs::remove_file(&aside).is_err() {
+        // The same version, still running from there: a name of its own.
+        aside = at.with_file_name(format!(".{BIN}-v{version}-old-{}{EXE}", std::process::id()));
+    }
+    std::fs::rename(at, &aside)?;
+    std::fs::rename(new, at).inspect_err(|_| {
+        let _ = std::fs::rename(&aside, at);
+    })
+}
+
+/// Where [`replace`] moves a running binary of `version` that was in the way.
+#[cfg(windows)]
+fn aside_at(at: &Path, version: &str) -> PathBuf {
+    at.with_file_name(format!(".{BIN}-v{version}-old{EXE}"))
+}
+
+/// Delete the binaries [`replace`] moved aside that nothing runs any more.
+/// One still running cannot be deleted, which is the test.
+#[cfg(windows)]
+fn sweep_aside(at: &Path) {
+    let Some(dir) = at.parent() else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(&format!(".{BIN}-v")) && name.contains("-old") && name.ends_with(EXE) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The file this process is running, to start it again as a helper of the
+/// same version, such as `hurad relay`.
+///
+/// On Unix that is where it started. On Windows an update moves a running
+/// binary aside instead of replacing it ([`replace`]), so after one the path
+/// this process started from is a newer release, and the file it is running
+/// is beside it under [`aside_at`]'s name.
+pub fn running_binary() -> std::io::Result<PathBuf> {
+    let at = std::env::current_exe()?;
+    #[cfg(windows)]
+    {
+        let aside = aside_at(&at, current());
+        if aside.is_file() {
+            return Ok(aside);
+        }
+    }
+    Ok(at)
 }
 
 #[cfg(unix)]
@@ -593,16 +685,14 @@ fn make_executable(path: &Path) -> Result<(), String> {
 }
 
 /// Nothing to do: Windows takes "executable" from the extension, not from a
-/// bit on the file. Reachable only because this crate compiles for Windows for
-/// the desktop application's sake -- there are no Windows releases of `hura` to
-/// download and no `hura update` there to download one.
+/// bit on the file, and every file this module runs is given one ([`EXE`]).
 #[cfg(windows)]
 fn make_executable(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
 fn download(url: &str, to: &Path) -> Result<(), String> {
-    let status = Command::new("curl")
+    let status = crate::host::command(crate::host::system_tool("curl"))
         .args(["-fsSL", "--connect-timeout", "3", "--max-time", "300", "-o"])
         .arg(to)
         .arg(url)
@@ -615,26 +705,15 @@ fn download(url: &str, to: &Path) -> Result<(), String> {
 }
 
 fn sha256(path: &Path) -> Result<String, String> {
-    // `shasum` where there is no `sha256sum`, which is an older macOS. The
-    // two print the same line.
-    let out = Command::new("sha256sum")
-        .arg(path)
-        .output()
-        .or_else(|_| {
-            Command::new("shasum")
-                .args(["-a", "256"])
-                .arg(path)
-                .output()
-        })
-        .map_err(|e| format!("sha256sum: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("could not hash {}", path.display()));
-    }
-    String::from_utf8_lossy(&out.stdout)
-        .split_whitespace()
-        .next()
-        .map(str::to_string)
-        .ok_or_else(|| "sha256sum said nothing".to_string())
+    use sha2::{Digest as _, Sha256};
+    // In-process rather than `sha256sum`, which Windows does not have and an
+    // older macOS calls `shasum`. An archive is a few megabytes, so it is read
+    // whole.
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// The hash `sums` publishes for `name`.
@@ -869,7 +948,7 @@ bbbb *hurad-v0.2.0-aarch64-unknown-linux-musl.tar.gz
         std::fs::write(&fresh, "new").unwrap();
         std::fs::write(&at, "old").unwrap();
 
-        swap(&fresh, &at).expect("swaps");
+        swap(&fresh, &at, None).expect("swaps");
 
         assert_eq!(std::fs::read_to_string(&at).unwrap(), "new");
         // Executable, or the update is an install that broke the tool.
@@ -913,7 +992,7 @@ bbbb *hurad-v0.2.0-aarch64-unknown-linux-musl.tar.gz
             return;
         }
 
-        let err = swap(&fresh, &at).expect_err("cannot write there");
+        let err = swap(&fresh, &at, None).expect_err("cannot write there");
         assert!(err.contains("fix:"), "no fix in: {err}");
         assert!(err.contains("sudo"), "the fix does not mention sudo: {err}");
         // The old binary is still the old binary, and still runnable.

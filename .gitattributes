@@ -1,0 +1,13 @@
+# Files the binaries embed with `include_str!`, which keeps line endings byte
+# for byte. A Windows checkout converting to CRLF would otherwise build a
+# `hurad.exe` that writes `#!/bin/sh\r` into every sandbox and every worktree
+# session's hooks, and a shebang with a carriage return names no interpreter.
+# Code written inside `.rs` files is safe without this: rustc reads CRLF in a
+# string literal as LF.
+hurad/images/** text eol=lf
+hurad/policies/** text eol=lf
+crates/hura-core/src/config.example.toml text eol=lf
+crates/hura-core/tests/panes/** text eol=lf
+hurad/daemon/src/push/push-crypto.json text eol=lf
+install.sh text eol=lf
+.github/workflows/*.yml text eol=lf

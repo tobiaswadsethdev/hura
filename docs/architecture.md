@@ -68,7 +68,7 @@ Inside that, the crates and an application:
 | `crates/sbx-client` | everything the rest of the tool knows about Docker Sandboxes, behind one trait, so a change in the CLI's surface lands in one file. Measured rather than read off its documentation; the module comment says what was measured. Sessions ran on OpenShell before this, through a crate of the same shape |
 | `crates/hura-core` | everything `hura` *does*: sessions, policy, events, seeding. No renderer may appear in it, which is what lets something other than a terminal sit on top |
 | `crates/hura-proto` | one definition of every message on the wire, so a server and a client cannot drift. Built on `hura-core`, because the types it carries are the core's own rather than a second set kept in step by hand |
-| `hurad/daemon` | the whole Linux side: the clap CLI, and the server behind TLS, one token check and `/rpc`. Async only where it has to be -- everything it calls is blocking and goes to `spawn_blocking`. `crates/hura` carried the CLI and a ratatui TUI beside it until v0.4.0, when two front ends onto one set of sessions stopped earning their keep |
+| `hurad/daemon` | the whole server side, on Linux, macOS and Windows: the clap CLI, and the server behind TLS, one token check and `/rpc`. Async only where it has to be -- everything it calls is blocking and goes to `spawn_blocking`. `crates/hura` carried the CLI and a ratatui TUI beside it until v0.4.0, when two front ends onto one set of sessions stopped earning their keep |
 | `crates/hura-client` | the client half: paired servers, and one certificate-pinned connection to each. Its own crate because the CLI and the desktop application both need it, and a webview cannot pin a certificate for itself |
 | `hurad/images`, `hurad/policies` | the sandbox image the server builds and the policy templates it ships, compiled into `hura-core` |
 | `services/cloud` | the hura cloud service: accounts, devices and the trackers they keep, which the apps read through it, on Postgres. See [cloud.md](cloud.md) |
@@ -115,6 +115,8 @@ Everything is in `hura-core` unless the second column says otherwise.
 | `comments.rs` | review comments on a diff, kept per session until they go to the agent as one message; a pull request's reviewers' comments sent the same way, each once |
 | `config.rs` | `~/.config/hura/config.toml`, and which default wins |
 | `doctor.rs` | the preflight checks, each carrying its fix |
+| `dirs.rs` | where config, state and data live on each platform, and the home directory |
+| `host.rs` | starting programs on this machine the same way everywhere: no console windows on Windows, its own `tar` and `curl`, and Git Bash as the POSIX shell there |
 | `update.rs` | fetching, verifying and replacing the `hurad` binary itself |
 | `ansi.rs` | one tokenizer for captured screens, into style types of its own, shared by everything that shows them and the matcher that reads them |
 | `pane.rs` | the markup the text panes share, so styling stays in one place |

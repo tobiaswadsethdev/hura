@@ -119,18 +119,15 @@ impl Worktree {
         )
     }
 
-    /// `$XDG_DATA_HOME/hura/worktrees`, or `~/.local/share/hura/worktrees`.
+    /// `worktrees` in hura's data directory: `$XDG_DATA_HOME/hura/worktrees`,
+    /// `~/.local/share/hura/worktrees`, or under `%LOCALAPPDATA%\hura\data` on
+    /// Windows. See [`crate::dirs`].
     ///
     /// Data rather than state: a worktree is work, with commits in it that may
     /// not have been pushed anywhere. State is what a machine can regenerate,
     /// and this is the one directory here that it cannot.
     pub fn default_root() -> PathBuf {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| home().map(|h| h.join(".local").join("share")))
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("hura")
-            .join("worktrees")
+        crate::dirs::data().join("worktrees")
     }
 
     /// The directory this session's working copy is in, whether or not it
@@ -318,7 +315,7 @@ fi
 }
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    crate::dirs::home()
 }
 
 /// The server's `PATH`, plus where the tools a worktree agent needs are put

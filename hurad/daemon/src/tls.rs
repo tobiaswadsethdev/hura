@@ -125,12 +125,9 @@ pub fn default_sans(extra: &[String]) -> Vec<String> {
         "127.0.0.1".to_string(),
         "::1".to_string(),
     ];
-    if let Ok(hostname) = std::fs::read_to_string("/etc/hostname") {
-        let hostname = hostname.trim();
-        if !hostname.is_empty() {
-            sans.push(hostname.to_string());
-            sans.push(format!("{hostname}.local"));
-        }
+    if let Some(hostname) = hostname() {
+        sans.push(format!("{hostname}.local"));
+        sans.push(hostname);
     }
     for addr in local_addresses() {
         sans.push(addr.to_string());
@@ -141,15 +138,33 @@ pub fn default_sans(extra: &[String]) -> Vec<String> {
     sans
 }
 
+/// This machine's name: `/etc/hostname` on Linux, `%COMPUTERNAME%` on
+/// Windows, lower-cased there because Windows keeps it in capitals and a name
+/// is matched without regard to case anyway.
+fn hostname() -> Option<String> {
+    std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .or_else(|| {
+            std::env::var("COMPUTERNAME")
+                .ok()
+                .map(|h| h.trim().to_ascii_lowercase())
+                .filter(|h| !h.is_empty())
+        })
+}
+
 /// The addresses of this machine's interfaces.
 ///
 /// Read from `/proc/net/fib_trie`, which needs no dependency and no syscall
-/// wrapper. Best effort by design: a missing address costs a name in the
-/// certificate, which `--san` can put back, and is not worth failing a start
-/// over.
+/// wrapper. Where there is no `/proc`, Windows and macOS, the address this
+/// machine would send from instead, which is the one a LAN client dials:
+/// connecting a UDP socket picks it and sends nothing. Best effort by design:
+/// a missing address costs a name in the certificate, which `--san` can put
+/// back, and is not worth failing a start over.
 fn local_addresses() -> Vec<IpAddr> {
     let Ok(text) = std::fs::read_to_string("/proc/net/fib_trie") else {
-        return Vec::new();
+        return outbound_address().into_iter().collect();
     };
     let mut out = Vec::new();
     let mut lines = text.lines().peekable();
@@ -171,6 +186,15 @@ fn local_addresses() -> Vec<IpAddr> {
     out.sort();
     out.dedup();
     out
+}
+
+/// The address a packet to the internet would leave from, if there is a
+/// route to one. A documentation address, so nothing is ever sent to it.
+fn outbound_address() -> Option<IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("192.0.2.1:9").ok()?;
+    let ip = socket.local_addr().ok()?.ip();
+    (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
 }
 
 #[cfg(test)]
@@ -224,7 +248,10 @@ mod tests {
         std::fs::remove_dir_all(&b).unwrap();
     }
 
+    /// The Unix half of the promise. On Windows the key inherits the ACL of
+    /// the profile directory it is in; see `state::private_dir`.
     #[test]
+    #[cfg(unix)]
     fn the_key_is_not_world_readable() {
         use std::os::unix::fs::PermissionsExt;
         let dir = scratch("mode");

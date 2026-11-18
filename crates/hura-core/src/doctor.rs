@@ -4,7 +4,6 @@
 //! on Arch/WSL2, so each check carries the fix rather than just a verdict.
 
 use std::net::{TcpStream, ToSocketAddrs};
-use std::process::Command;
 use std::time::Duration;
 
 use crate::backend::Backend;
@@ -69,7 +68,10 @@ impl Check {
 
 /// Run `argv` and return trimmed stdout if it exits zero.
 fn probe(argv: &[&str]) -> Option<String> {
-    let out = Command::new(argv[0]).args(&argv[1..]).output().ok()?;
+    let out = crate::host::command(argv[0])
+        .args(&argv[1..])
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -656,8 +658,23 @@ pub fn run(backend: &dyn Backend, config: &Result<Config, config::Error>) -> Vec
     let sbx = sbx_client(config);
     checks.extend(check_sbx_diagnose(&sbx));
     checks.push(check_sbx_policy(&sbx));
-    checks.push(check_sbx_daemon_unit());
-    checks.extend([check_docker(), check_tmux(), check_linger(), check_image()]);
+    // systemd's, so Linux's. On a Mac launchd starts the daemon, and on Windows
+    // it is started per user by the CLI itself; there `sbx diagnose` above and
+    // the backend's health are what say it is answering.
+    if cfg!(target_os = "linux") {
+        checks.push(check_sbx_daemon_unit());
+    }
+    checks.push(check_docker());
+    // `hurad attach` on Unix runs the session through a host tmux pane. On
+    // Windows nothing does: a worktree session's multiplexer is checked with
+    // the rest of what worktrees need, and only when they are on.
+    if cfg!(unix) {
+        checks.push(check_tmux());
+    }
+    if cfg!(target_os = "linux") {
+        checks.push(check_linger());
+    }
+    checks.push(check_image());
     checks.extend(check_template());
     checks.extend(check_toolchains());
     // Only when the file names some, since the check is about the file being
@@ -730,7 +747,16 @@ fn check_azure(credentials: &[crate::credentials::Credential]) -> Vec<Check> {
         })
         .map(|(c, az, resources)| {
             let first = &resources[0].resource;
-            let out = Command::new("sh")
+            // Through the same shell the runtime gives a credential's command,
+            // which on Windows is Git Bash rather than none at all.
+            let Some(shell) = crate::host::posix_shell() else {
+                return Check::fail(
+                    "azure",
+                    format!("`{}`: no POSIX shell to ask {az} through", c.name),
+                    "install Git for Windows",
+                );
+            };
+            let out = crate::host::command(shell)
                 .arg("-c")
                 .arg(format!(
                     "{az} account get-access-token --resource {} --query expiresOn -o tsv",

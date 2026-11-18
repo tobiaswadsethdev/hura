@@ -984,6 +984,24 @@ fn pty_worker(
     let Ok(mut writer) = pair.master.take_writer() else {
         return;
     };
+    let master = std::sync::Arc::new(std::sync::Mutex::new(Some(pair.master)));
+
+    // Waited on from the start, so the tab can close when the command ends.
+    // On Unix the reader sees end of file then and nothing more is needed. A
+    // Windows pseudo-console keeps its output open until it is closed itself,
+    // so there the reader would block until the client left; closing it once
+    // the child has exited is what ends the read.
+    let waiting = {
+        #[cfg(windows)]
+        let master = master.clone();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            #[cfg(windows)]
+            if let Ok(mut master) = master.lock() {
+                master.take();
+            }
+        })
+    };
 
     let reading = std::thread::spawn(move || {
         let mut buf = vec![0u8; 8192];
@@ -1006,12 +1024,16 @@ fn pty_worker(
             // The client's window, as a real terminal's size change. tmux
             // resizes from it the way it would for any client.
             ToChannel::Resize { cols, rows } => {
-                let _ = pair.master.resize(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                });
+                if let Ok(master) = master.lock()
+                    && let Some(master) = master.as_ref()
+                {
+                    let _ = master.resize(PtySize {
+                        rows,
+                        cols,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    });
+                }
             }
             ToChannel::Chat(_) => {}
         }
@@ -1020,8 +1042,10 @@ fn pty_worker(
     // The caller has gone. Hanging up the pty is what tells the child, and the
     // detach it was sent first is what lets it leave tmux cleanly.
     drop(writer);
-    drop(pair.master);
-    let _ = child.wait();
+    if let Ok(mut master) = master.lock() {
+        master.take();
+    }
+    let _ = waiting.join();
     let _ = reading.join();
 }
 

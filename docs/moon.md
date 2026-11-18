@@ -38,7 +38,7 @@ moon's cache (`.moon/cache`, ignored by git) rather than run again.
 | project | path | tasks |
 | --- | --- | --- |
 | `sbx-client`, `hura-core`, `hura-proto`, `hura-client` | `crates/` | `fmt`, `clippy`, `test`; and `check-windows` for the three the desktop app links |
-| `hurad` | `hurad/daemon` | `fmt`, `clippy`, `test`, `build` (release) |
+| `hurad` | `hurad/daemon` | `fmt`, `clippy`, `test`, `build` (release), `check-windows` |
 | `sandbox-image` | `hurad/images` | `test`: the chat host |
 | `hura-cloud` | `services/cloud` | `fmt`, `clippy`, `test`, `image` |
 | `relay` | `services/relay` | `typecheck`, `test`, `dev` |

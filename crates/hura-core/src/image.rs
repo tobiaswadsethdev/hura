@@ -40,7 +40,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use sbx_client::Sbx as _;
 
@@ -109,7 +109,7 @@ pub fn exists_tag(tag: &str) -> bool {
 
 /// The id Docker gives a built image, as `sha256:` and the hex.
 fn docker_id(tag: &str) -> Option<String> {
-    let out = Command::new("docker")
+    let out = crate::host::command("docker")
         .args(["image", "inspect", tag, "--format", "{{.Id}}"])
         .stderr(Stdio::null())
         .output()
@@ -137,13 +137,15 @@ pub fn loaded(tag: &str) -> bool {
 
 /// Whether a runtime template is this tag at this Docker id.
 ///
-/// The runtime names a local image `docker.io/library/NAME` and shortens its id
-/// to twelve characters, the start of Docker's hex.
+/// The runtime names a local image `docker.io/library/NAME`. Up to v0.50 it
+/// shortened the id to twelve characters, the start of Docker's hex; v0.54
+/// prints it whole, `sha256:` and all.
 fn same_image(t: &sbx_client::Template, tag: &str, docker_id: &str) -> bool {
     let (repo, label) = tag.split_once(':').unwrap_or((tag, "latest"));
     let hex = docker_id.strip_prefix("sha256:").unwrap_or(docker_id);
+    let theirs = t.id.strip_prefix("sha256:").unwrap_or(&t.id);
     let named = t.repository == repo || t.repository.ends_with(&format!("/{repo}"));
-    named && t.tag == label && !t.id.is_empty() && hex.starts_with(&t.id)
+    named && t.tag == label && !theirs.is_empty() && hex.starts_with(theirs)
 }
 
 /// Copy a built image into the sandbox runtime's store.
@@ -158,7 +160,7 @@ pub fn load(tag: &str) -> Result<(), String> {
         tag.replace([':', '/'], "-")
     ));
     println!("loading {tag} into the sandbox runtime ...");
-    let saved = Command::new("docker")
+    let saved = crate::host::command("docker")
         .args(["save", "-o"])
         .arg(&archive)
         .arg(tag)
@@ -285,7 +287,7 @@ fn build_argv(dir: &Path, claude: Option<&str>) -> Vec<String> {
 }
 
 fn run_build(dir: &Path, claude: Option<&str>) -> Result<(), String> {
-    let status = Command::new("docker")
+    let status = crate::host::command("docker")
         .args(build_argv(dir, claude))
         .status()
         .map_err(|e| crate::plain::spawn("docker", &e))?;
@@ -346,7 +348,7 @@ fn variant_build_argv(dir: &Path, tag: &str) -> Vec<String> {
 }
 
 fn run_variant_build(dir: &Path, tag: &str) -> Result<(), String> {
-    let status = Command::new("docker")
+    let status = crate::host::command("docker")
         .args(variant_build_argv(dir, tag))
         .status()
         .map_err(|e| crate::plain::spawn("docker", &e))?;
@@ -366,7 +368,7 @@ fn run_variant_build(dir: &Path, tag: &str) -> Result<(), String> {
 /// An empty vector for the base image, which carries no manifest: that is the
 /// honest answer, not a failure.
 pub fn toolchains_in(tag: &str) -> Vec<(String, String)> {
-    let out = Command::new("docker")
+    let out = crate::host::command("docker")
         .args([
             "run",
             "--rm",
@@ -391,7 +393,7 @@ pub fn toolchains_in(tag: &str) -> Vec<(String, String)> {
 
 /// Variant tags that exist, newest first, as docker reports them.
 pub fn variants() -> Vec<String> {
-    let out = Command::new("docker")
+    let out = crate::host::command("docker")
         .args([
             "image",
             "ls",
@@ -436,7 +438,7 @@ pub fn stale_variants() -> Vec<String> {
 
 /// When an image was built, as docker reports it.
 fn created(tag: &str) -> Option<String> {
-    let out = Command::new("docker")
+    let out = crate::host::command("docker")
         .args(["image", "inspect", tag, "--format", "{{.Created}}"])
         .output()
         .ok()?;
@@ -454,7 +456,7 @@ fn created(tag: &str) -> Option<String> {
 /// silently never leaves `ready`. Checking for the script turns that into
 /// something `hura doctor` can say out loud.
 pub fn reports_status() -> bool {
-    Command::new("docker")
+    crate::host::command("docker")
         .args([
             "run",
             "--rm",
@@ -486,7 +488,7 @@ const CLAUDE_RELEASES: &str = "https://downloads.claude.ai/claude-code-releases"
 /// do than wait -- `None` means "could not ask", and no caller may read that as
 /// "up to date".
 pub fn latest_claude_version() -> Option<String> {
-    let out = Command::new("curl")
+    let out = crate::host::command(crate::host::system_tool("curl"))
         .args(["-fsSL", "--connect-timeout", "3", "--max-time", "10"])
         .arg(format!("{CLAUDE_RELEASES}/latest"))
         .output()
@@ -509,7 +511,7 @@ pub fn latest_claude_version() -> Option<String> {
 /// A container start, so it is only worth doing where the answer is the point --
 /// `hura doctor` -- and never on a path a session waits on.
 pub fn claude_version() -> Option<String> {
-    let out = Command::new("docker")
+    let out = crate::host::command("docker")
         .args(["run", "--rm", "--entrypoint", "claude", IMAGE, "--version"])
         .output()
         .ok()?;
@@ -575,7 +577,7 @@ fn has_label(tag: &str, label_name: &str) -> bool {
 /// the image does not have, which no caller takes for anything it wants.
 fn label(tag: &str, label: &str) -> Option<String> {
     let format = format!("{{{{index .Config.Labels \"{label}\"}}}}");
-    let out = Command::new("docker")
+    let out = crate::host::command("docker")
         .args(["image", "inspect", "--format", &format, tag])
         .output()
         .ok()?;
@@ -706,7 +708,7 @@ fn pull_image(tag: &str, registry: &str) -> Result<(), String> {
     let remote = published(tag, registry);
     println!("pulling {remote} ...");
     let docker = |args: &[&str]| {
-        Command::new("docker")
+        crate::host::command("docker")
             .args(args)
             .status()
             .map_err(|e| crate::plain::spawn("docker", &e))
@@ -721,7 +723,7 @@ fn pull_image(tag: &str, registry: &str) -> Result<(), String> {
     if !tagged.success() {
         return Err(format!("docker tag {remote} {tag} exited with {tagged}"));
     }
-    let _ = Command::new("docker")
+    let _ = crate::host::command("docker")
         .args(["image", "rm", &remote])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -1205,6 +1207,18 @@ mod tests {
         assert!(!same_image(&t, "hura-sandbox:rust", built));
         assert!(!same_image(
             &t,
+            "hura-sandbox:latest",
+            "sha256:0000000000009f6a3b5d0e2c1a7b8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a"
+        ));
+
+        // v0.54 prints the whole id. Measured on Windows.
+        let whole = sbx_client::Template {
+            id: built.into(),
+            ..t.clone()
+        };
+        assert!(same_image(&whole, "hura-sandbox:latest", built));
+        assert!(!same_image(
+            &whole,
             "hura-sandbox:latest",
             "sha256:0000000000009f6a3b5d0e2c1a7b8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a"
         ));

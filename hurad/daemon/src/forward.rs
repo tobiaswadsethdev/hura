@@ -54,6 +54,11 @@ const START: Duration = Duration::from_secs(20);
 /// The shell waits on the forward rather than on the reader, so a forward that
 /// dies on its own is a process that has exited, which is what [`acquire`]
 /// checks for.
+///
+/// Unix only. Windows has no `sh` to run it and needs none: the forward is put
+/// in a Job Object that ends it when this process does ([`crate::job`]), and
+/// is stopped by its stdin closing, which `hurad relay` waits for there.
+#[cfg(unix)]
 const GUARD: &str = r#"exec 3<&0
 "$@" 3<&- & c=$!
 ( read -r _ <&3; kill "$c" 2>/dev/null ) & r=$!
@@ -182,6 +187,44 @@ pub async fn acquire(session: &Session, port: u16, host: Loopback) -> Result<Lea
     })
 }
 
+/// Start a forward's command under [`GUARD`].
+#[cfg(unix)]
+fn spawn(argv: &[String]) -> std::io::Result<Child> {
+    Command::new("sh")
+        .arg("-c")
+        .arg(GUARD)
+        .arg("sh")
+        .args(argv)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+}
+
+/// Start a forward's command itself, in the job that ends it with this
+/// process, with its stdin held here: closing that is how it is stopped.
+#[cfg(windows)]
+fn spawn(argv: &[String]) -> std::io::Result<Child> {
+    let (program, args) = argv
+        .split_first()
+        .ok_or_else(|| std::io::Error::other("the forward has no command"))?;
+    let child = Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .creation_flags(hura_core::host::CREATE_NO_WINDOW)
+        .spawn()?;
+    if let Some(handle) = child.raw_handle()
+        && let Err(e) = crate::job::adopt(handle)
+    {
+        eprintln!("hurad: a forward may outlive this server: {e}");
+    }
+    Ok(child)
+}
+
 async fn start(session: &Session, port: u16, host: Loopback) -> Result<Running, String> {
     let argv = {
         let backends = crate::rpc::backends();
@@ -190,17 +233,7 @@ async fn start(session: &Session, port: u16, host: Loopback) -> Result<Running, 
             .forward_argv(session, port, host)
             .map_err(|e| e.to_string())?
     };
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(GUARD)
-        .arg("sh")
-        .args(&argv)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("could not start a forward: {e}"))?;
+    let mut child = spawn(&argv).map_err(|e| format!("could not start a forward: {e}"))?;
     let lifeline = child.stdin.take();
 
     // The address arrives on one of the two streams and the CLI has moved its
@@ -315,15 +348,29 @@ pub fn stop_now(sandbox: &str, port: u16) {
         // A forward still starting holds its slot for a second or so.
         for _ in 0..50 {
             if let Ok(mut guard) = slot.try_lock() {
-                if let Some(mut running) = guard.take() {
-                    drop(running.lifeline.take());
-                    let _ = running.child.start_kill();
+                if let Some(running) = guard.take() {
+                    end_now(running);
                 }
                 break;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
     }
+}
+
+/// End a forward at once. On Unix the guard is killed and its reader, which
+/// is a process of its own, still stops the relay properly. On Windows the
+/// relay is the process, and killing it would leave its `socat` running in
+/// the sandbox, so it is asked to stop through its stdin as [`stop`] does,
+/// on the runtime this handler was called from.
+fn end_now(mut running: Running) {
+    #[cfg(windows)]
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn(stop(running));
+        return;
+    }
+    drop(running.lifeline.take());
+    let _ = running.child.start_kill();
 }
 
 /// End a forward: close the pipe, which is what the guard waits for, and

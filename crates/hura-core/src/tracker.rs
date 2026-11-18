@@ -1451,7 +1451,7 @@ fn run_curl(
     body: Option<(&str, &str, &str)>,
 ) -> Result<(u16, Vec<u8>), String> {
     use std::io::Write as _;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let mut config = String::new();
     config.push_str(&format!("url = {}\n", quote(url)));
@@ -1488,21 +1488,15 @@ fn run_curl(
         }
     }
 
-    let mut command = Command::new("curl");
+    // Without a console window: a GUI process that spawns a console program
+    // gets one for it, flashing up every time the tickets are read.
+    let mut command = crate::host::command(crate::host::system_tool("curl"));
     command
         .arg("-K")
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // A GUI process that spawns a console program gets a console window for it,
-    // flashing up every time the tickets are read. `CREATE_NO_WINDOW` is the
-    // flag that says not to.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt as _;
-        command.creation_flags(0x0800_0000);
-    }
     let mut child = command
         .spawn()
         .map_err(|e| crate::plain::spawn("curl", &e))?;

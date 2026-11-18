@@ -13,7 +13,11 @@
 
 mod attach;
 mod auth;
+#[cfg(windows)]
+mod console;
 mod forward;
+#[cfg(windows)]
+mod job;
 mod push;
 mod qr;
 mod relay;
@@ -457,14 +461,47 @@ fn main() -> ExitCode {
     let relay = std::env::args_os().nth(1).is_some_and(|a| a == "relay");
     let applied = if relay { None } else { update::apply_staged() };
     if let Some(at) = applied {
-        use std::os::unix::process::CommandExt;
-        let err = std::process::Command::new(&at)
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let err = std::process::Command::new(&at)
+                .args(std::env::args_os().skip(1))
+                .exec();
+            eprintln!(
+                "hurad: updated to {}, but could not restart: {err}",
+                at.display()
+            );
+        }
+        // Windows has no `exec`. The new binary runs as a child on this
+        // console, and this process waits for it and leaves with its code.
+        // The child is put in the job that ends with this process, because
+        // this is the process whatever started it watches: a scheduled task
+        // stopped, or a `taskkill`, ends this one, and a server left running
+        // beneath it would hold the port the next start needs. Measured.
+        #[cfg(windows)]
+        match std::process::Command::new(&at)
             .args(std::env::args_os().skip(1))
-            .exec();
-        eprintln!(
-            "hurad: updated to {}, but could not restart: {err}",
-            at.display()
-        );
+            .spawn()
+            .and_then(|mut child| {
+                use std::os::windows::io::AsRawHandle as _;
+                if let Err(e) = job::adopt(child.as_raw_handle()) {
+                    eprintln!("hurad: the updated server may outlive this one: {e}");
+                }
+                child.wait()
+            }) {
+            Ok(status) => {
+                return ExitCode::from(
+                    status
+                        .code()
+                        .and_then(|c| u8::try_from(c).ok())
+                        .unwrap_or(1),
+                );
+            }
+            Err(err) => eprintln!(
+                "hurad: updated to {}, but could not restart: {err}",
+                at.display()
+            ),
+        }
     }
 
     let cli = Cli::parse();
@@ -1139,13 +1176,16 @@ fn cmd_update(check: bool, tag: Option<&str>, force: bool) -> Fallible {
         update::Outcome::Updated { from, to, at } => {
             println!("hurad {from} -> {to}  ({})", at.display());
             // Replacing the file does not replace the process: Linux keeps a
-            // running server on the old inode until something restarts it, and
+            // running server on the old inode until something restarts it (and
+            // Windows on the file it was moved aside to), and
             // one still answering the previous version is exactly the confusion
             // this line exists to prevent.
             println!(
                 "  restart it to pick this up: {}",
                 if cfg!(target_os = "macos") {
                     "launchctl kickstart -k gui/$(id -u)/dev.hura.hurad"
+                } else if cfg!(windows) {
+                    "Stop-ScheduledTask hurad; Start-ScheduledTask hurad"
                 } else {
                     "systemctl --user restart hurad"
                 }
@@ -1659,6 +1699,12 @@ fn list_skills() -> Fallible {
 fn serve(opts: Serve) -> Fallible {
     let dir = state::dir();
     state::private_dir(&dir)?;
+    // Started by a scheduled task, with a console window of its own: let go of
+    // it, and write to a log instead. See `console.rs`.
+    #[cfg(windows)]
+    if console::put_away(&dir.join("hurad.log")) {
+        println!("hurad {} serving without a console", update::current());
+    }
 
     let identity = tls::ensure(&dir, &tls::default_sans(&opts.sans))?;
     let tokens = Tokens::load()?;

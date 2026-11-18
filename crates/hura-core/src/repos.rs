@@ -15,7 +15,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// A git repository found on disk.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -180,7 +179,7 @@ fn dedupe_roots(roots: Vec<Root>) -> Vec<Root> {
 }
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    crate::dirs::home()
 }
 
 /// Every repository under `roots`, depth-limited per root.
@@ -390,7 +389,7 @@ pub struct Facts {
 /// picked, which is why this may cost subprocesses.
 pub fn inspect(path: &Path, branch: Option<&str>) -> Facts {
     let git = |args: &[&str]| -> Option<String> {
-        let out = Command::new("git")
+        let out = crate::host::command("git")
             .arg("-C")
             .arg(path)
             .args(args)

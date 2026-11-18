@@ -261,6 +261,9 @@ fn live_status(s: &Status) -> store::Status {
 /// still names it, so the relay is also the same version as the server that
 /// reads what it says. It is this process's pid and not `self`, because the
 /// guard shell is the process that resolves it.
+///
+/// Elsewhere it is [`crate::update::running_binary`], which on Windows follows
+/// a binary an update moved aside, for the same reason.
 fn this_program() -> std::io::Result<std::path::PathBuf> {
     #[cfg(target_os = "linux")]
     {
@@ -269,7 +272,7 @@ fn this_program() -> std::io::Result<std::path::PathBuf> {
             return Ok(link);
         }
     }
-    std::env::current_exe()
+    crate::update::running_binary()
 }
 
 impl Backend for Sandboxed {
@@ -364,12 +367,19 @@ impl Backend for Sandboxed {
         self.client.detach(&session.sandbox)?;
         for (c, grant) in &chosen {
             for secret in &grant.secrets {
-                self.client.add_secret(secret).map_err(|e| {
+                let refused = |e: String| {
                     Error::Local(format!(
                         "the `{}` credential could not be given to the sandbox: {e}",
                         c.name
                     ))
-                })?;
+                };
+                let secret = sbx_client::SecretSpec {
+                    source: crate::credentials::for_this_host(&secret.source).map_err(refused)?,
+                    ..secret.clone()
+                };
+                self.client
+                    .add_secret(&secret)
+                    .map_err(|e| refused(e.to_string()))?;
             }
         }
         Ok(())
@@ -529,14 +539,23 @@ impl Backend for Sandboxed {
                         "{} is installed but its daemon is not running",
                         v.client.version
                     ),
-                    "systemctl --user enable --now sbx-daemon, or `sbx daemon start -d`",
+                    if cfg!(target_os = "linux") {
+                        "systemctl --user enable --now sbx-daemon, or `sbx daemon start -d`"
+                    } else {
+                        "`sbx daemon start -d`"
+                    },
                 ),
             },
             Err(SbxError::Spawn { .. }) => Check::fail(
                 "sbx",
                 "Docker Sandboxes is not installed",
-                "install the release tarball from https://github.com/docker/sbx-releases \
-                 (its install.sh puts sbx in ~/.docker/sbx/bin), then `sbx login`",
+                if cfg!(windows) {
+                    "`winget install Docker.sbx` (it needs the Windows Hypervisor Platform \
+                     feature), then `sbx login`"
+                } else {
+                    "install the release tarball from https://github.com/docker/sbx-releases \
+                     (its install.sh puts sbx in ~/.docker/sbx/bin), then `sbx login`"
+                },
             ),
             Err(e) => Check::fail("sbx", e.to_string(), "sbx diagnose"),
         }
@@ -898,7 +917,7 @@ mod tests {
         if std::env::var_os(COPY).is_some() {
             std::fs::remove_file(std::env::current_exe().unwrap()).unwrap();
             let me = this_program().unwrap();
-            let out = std::process::Command::new("sh")
+            let out = crate::host::sh()
                 .args(["-c", r#""$@" --list"#, "sh"])
                 .arg(&me)
                 .output()
