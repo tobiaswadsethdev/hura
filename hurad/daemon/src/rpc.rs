@@ -243,6 +243,10 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             Ok(projects) => Reply::Projects { projects }.into(),
             Err(e) => Failure::failed(e).into(),
         },
+        Request::ReorderProjects { names } => match projects::reorder(&names) {
+            Ok(projects) => Reply::Projects { projects }.into(),
+            Err(e) => Failure::failed(e).into(),
+        },
         Request::Repos => repo_list(),
         Request::Inspect { path, branch } => inspect(backends, &path, branch.as_deref()),
         Request::NewOptions => match config::Config::load() {
@@ -286,6 +290,10 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
         },
         Request::Retitle { name, title } => match ops::retitle(&name, &title) {
             Ok(_) => ls(backends),
+            Err(e) => Failure::failed(e).into(),
+        },
+        Request::ReorderSessions { names } => match ops::reorder(&names) {
+            Ok(()) => ls(backends),
             Err(e) => Failure::failed(e).into(),
         },
 

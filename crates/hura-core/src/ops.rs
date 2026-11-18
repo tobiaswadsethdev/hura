@@ -1931,6 +1931,26 @@ pub fn retitle(name: &str, title: &str) -> Result<Session, String> {
     .map_err(|e| format!("could not update the session cache: {e}"))?
 }
 
+/// Put sessions in the order given: the first named comes first. Sent by a
+/// client for every session in the group something was dragged within, which
+/// is the only group whose order changed.
+///
+/// A name with no record is passed over rather than refused: the list a
+/// client dragged in may be a refresh old, and a session destroyed since has
+/// no place left to keep.
+pub fn reorder(names: &[String]) -> Result<(), String> {
+    store::update(|store| {
+        for (rank, name) in names.iter().enumerate() {
+            if let Some(record) = store.get(name) {
+                let mut record = record.clone();
+                record.rank = Some(rank as u32);
+                store.upsert(record);
+            }
+        }
+    })
+    .map_err(|e| format!("could not update the session cache: {e}"))
+}
+
 /// The script [`poll`] runs. Separate so its shape can be asserted on.
 ///
 /// The repository work is confined to a subshell: a session whose clone has not

@@ -106,6 +106,20 @@ struct WorkspaceTests {
         #expect(Set(server.unfiled.map(\.name)) == ["stray", "cli"])
     }
 
+    /// Placed worktrees keep the order they were put in; one nobody has
+    /// placed yet, like a worktree just started, comes above them.
+    @Test @MainActor func worktreesAreDrawnInTheOrderTheyWerePut() async throws {
+        let server = Server(record: ServerRecord(serverID: "h_aaaabbbbccccdddd", name: "studio", host: "box", port: "1",
+                                                 fingerprint: String(repeating: "ab", count: 32), token: "t"))
+        server.load(projects: [Project(name: "hura", repo: "r", path: "/p")],
+                    sessions: [Session(name: "first", state: "idle", project: "hura", createdAt: 1, rank: 1),
+                               Session(name: "second", state: "idle", project: "hura", createdAt: 2, rank: 0),
+                               Session(name: "fresh", state: "idle", project: "hura", createdAt: 3)])
+        #expect(server.worktrees(in: server.projects[0]).map(\.name) == ["fresh", "second", "first"])
+        let decoded = try JSONDecoder().decode(Session.self, from: Data(#"{"name":"a","state":"idle","rank":4}"#.utf8))
+        #expect(decoded.rank == 4)
+    }
+
     @Test @MainActor func aDeleteHidesTheSessionAtOnceAndBringsItBackIfItFails() async throws {
         // Nothing listens on 127.0.0.1:1, so the delete itself fails.
         let server = Server(record: ServerRecord(serverID: "h_aaaabbbbccccdddd", name: "studio", host: "127.0.0.1", port: "1",

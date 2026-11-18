@@ -171,6 +171,9 @@ pub enum Request {
     /// Forget one. The worktrees in it are left alone -- a sandbox is a real
     /// thing with an agent in it, and removing one is `rm`'s job.
     ForgetProject { name: String },
+    /// Put the projects in this order, by name. Answers with
+    /// [`Reply::Projects`], in it.
+    ReorderProjects { names: Vec<String> },
     /// Git repositories on the server's disk, for starting a session from one.
     ///
     /// The server's and not the client's: the checkout is only a way of *naming*
@@ -368,6 +371,12 @@ pub enum Request {
     ///
     /// Answered with the list, for the reason [`Request::Destroy`] is.
     Retitle { name: String, title: String },
+    /// Put these sessions in this order, by name: every session in the one
+    /// project something was moved within. Each keeps its place as its
+    /// `rank`, so every client draws the same order.
+    ///
+    /// Answered with the list, for the reason [`Request::Destroy`] is.
+    ReorderSessions { names: Vec<String> },
 
     /// What the server holds on a session's behalf: the MCP catalog and what
     /// each managed container is doing, the secret *names* it has, and the
@@ -450,6 +459,8 @@ impl Request {
             | Request::Projects
             | Request::NewProject(_)
             | Request::ForgetProject { .. }
+            | Request::ReorderProjects { .. }
+            | Request::ReorderSessions { .. }
             | Request::Integrations
             | Request::Mcp { .. }
             | Request::Secret { .. }

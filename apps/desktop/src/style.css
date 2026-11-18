@@ -695,6 +695,29 @@ html.mac .sidebar { border-right-color: var(--edge); }
    for it. */
 .quiet-icon.danger:hover { color: var(--bad); }
 
+/* Where a dragged project or worktree will land: a line in the accent at the
+   edge of the one it is over, as Finder's sidebar draws it. On the edge rather
+   than in a gap that opens, so nothing under the pointer moves while it is
+   being aimed. */
+.tree .group { position: relative; }
+.tree [data-drop]::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
+.tree [data-drop="before"]::after { top: -1px; }
+.tree [data-drop="after"]::after { bottom: -1px; }
+/* A project's, in the middle of the gap between it and its neighbour. */
+.tree .group[data-drop="before"]::after { top: -6px; }
+.tree .group[data-drop="after"]::after { bottom: -6px; }
+.group-head[draggable="true"] { cursor: default; }
+
 /* An empty project: one row, lined up with the state column of the rows it
    stands in for. */
 .group-body > .empty.row { padding-left: 20px; }

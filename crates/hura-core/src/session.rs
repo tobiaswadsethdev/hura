@@ -449,6 +449,17 @@ pub struct Session {
     /// see [`Session::label`].
     #[serde(default)]
     pub title: Option<String>,
+    /// Where this session goes among the others in its project, when someone
+    /// has put it there: lower first. Set by [`crate::ops::reorder`] for every
+    /// session in the group it was dragged within, and compared only inside
+    /// one, so the numbers mean nothing across projects.
+    ///
+    /// `None` for a session nobody has placed, which a client puts above the
+    /// placed ones, newest first: a worktree just started is the one you are
+    /// about to look for. On the record, and not in each client, so the order
+    /// set on one machine is the order on every other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rank: Option<u32>,
     /// Where this session runs. See [`Kind`]; a record without it is a
     /// sandbox, which every session was until the server could say otherwise.
     #[serde(default)]
@@ -598,6 +609,7 @@ impl Session {
             work_branch: format!("{DEFAULT_BRANCH_PREFIX}/{name}"),
             name,
             title: None,
+            rank: None,
             repo,
             project: None,
             base_branch: None,

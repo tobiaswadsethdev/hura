@@ -21,6 +21,10 @@
 // so the list is scannable without being read, and anything that is not
 // needed on every row -- the context meter, the files not yet added -- appears
 // only when it says something.
+//
+// The order is whoever's using it: projects and the worktrees in each can be
+// dragged into place, or moved a step from the menu or with Option and an
+// arrow. The order is kept on the server, so the phone shows the same one.
 
 import { useState } from "react";
 
@@ -43,6 +47,8 @@ import {
   Copy,
   Edit,
   Forget,
+  MoveDown,
+  MoveUp,
   Plus,
   Ports,
   PullRequest,
@@ -71,7 +77,7 @@ export function group(projects: Project[], sessions: Session[], queued: QueuedSe
     project,
     label: project.name,
     hint: project.repo,
-    worktrees: sessions.filter((s) => s.project === project.name),
+    worktrees: sessions.filter((s) => s.project === project.name).sort(byPlace),
     waiting: queued.filter((q) => q.new.project === project.name),
   }));
 
@@ -87,11 +93,101 @@ export function group(projects: Project[], sessions: Session[], queued: QueuedSe
       project: null,
       label: shortRepo(repo),
       hint: repo,
-      worktrees: loose.filter((s) => s.repo === repo),
+      worktrees: loose.filter((s) => s.repo === repo).sort(byPlace),
       waiting: looseQueued.filter((q) => q.new.repo === repo),
     });
   }
   return groups;
+}
+
+/// The order a group's worktrees are drawn in, the same as the phone's: the
+/// ones nobody has placed first, newest first, since a worktree just started
+/// is the one you are about to look for; then the placed ones, in the order
+/// they were put.
+export function byPlace(a: Session, b: Session): number {
+  const ra = a.rank ?? null;
+  const rb = b.rank ?? null;
+  if (ra !== rb) {
+    if (ra === null) return -1;
+    if (rb === null) return 1;
+    return ra - rb;
+  }
+  return b.created_at - a.created_at || a.name.localeCompare(b.name);
+}
+
+/// `names` with `name` moved to sit before or after `target`.
+function placed(names: string[], name: string, target: string, after: boolean): string[] {
+  const rest = names.filter((n) => n !== name);
+  rest.splice(rest.indexOf(target) + (after ? 1 : 0), 0, name);
+  return rest;
+}
+
+/// `names` with `name` moved one place up or down, or null at the end it is
+/// already at.
+function stepped(names: string[], name: string, by: -1 | 1): string[] | null {
+  const i = names.indexOf(name);
+  const j = i + by;
+  if (i < 0 || j < 0 || j >= names.length) return null;
+  const next = [...names];
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}
+
+/// What is being dragged: a project among the projects, or a worktree among
+/// the others in its group. Never across groups -- a worktree belongs to the
+/// project it was started in, and dropping it on another would not move it.
+type Drag = { group: string; name: string };
+
+/// The handlers that make an element something to drag, a place to drop, or
+/// both, for one list of names. `group` is the list's identity: a drag is
+/// only taken by targets in the list it started from.
+function useSortable() {
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const [drop, setDrop] = useState<{ name: string; after: boolean } | null>(null);
+  const end = () => {
+    setDrag(null);
+    setDrop(null);
+  };
+  const ours = (group: string, name: string) => drag?.group === group && drag.name !== name;
+  const half = (e: React.DragEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return e.clientY > r.top + r.height / 2;
+  };
+  return {
+    source: (group: string, name: string) => ({
+      draggable: true,
+      onDragStart: (e: React.DragEvent<HTMLElement>) => {
+        // Set, or WebKit starts no drag at all; the name is also what a drop
+        // anywhere else would say.
+        e.dataTransfer.setData("text/plain", name);
+        e.dataTransfer.effectAllowed = "move";
+        // So a worktree's drag does not also pick up its project.
+        e.stopPropagation();
+        setDrag({ group, name });
+      },
+      onDragEnd: end,
+    }),
+    target: (group: string, name: string, names: string[], commit: (names: string[]) => void) => ({
+      "data-drop":
+        drop?.name === name && ours(group, name) ? (drop.after ? "after" : "before") : undefined,
+      onDragOver: (e: React.DragEvent<HTMLElement>) => {
+        if (drag?.group !== group) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "move";
+        const after = half(e);
+        if (drop?.name !== name || drop.after !== after) setDrop({ name, after });
+      },
+      onDrop: (e: React.DragEvent<HTMLElement>) => {
+        if (drag?.group !== group) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const next = ours(group, name) ? placed(names, drag.name, name, half(e)) : names;
+        end();
+        if (next.join("\n") !== names.join("\n")) commit(next);
+      },
+    }),
+  };
 }
 
 /// `https://github.com/o/thing.git` -> `o/thing`. Enough to tell two apart
@@ -120,6 +216,8 @@ export function Tree({
   onForget,
   onDestroy,
   onRename,
+  onReorderProjects,
+  onReorderWorktrees,
   queueLimit,
   messages,
   onUnqueue,
@@ -148,6 +246,10 @@ export function Tree({
   onDestroy: (session: Session) => void;
   /// Give a worktree a new title. Blank takes it away, and the slug shows.
   onRename: (session: Session, title: string) => void;
+  /// Put the projects in this order, by name.
+  onReorderProjects: (names: string[]) => void;
+  /// Put the worktrees of one group in this order, by name.
+  onReorderWorktrees: (names: string[]) => void;
   /// How many sessions the server's queue lets run at once.
   queueLimit: number;
   /// Every message waiting on the server to be said to a session: a row with
@@ -163,6 +265,14 @@ export function Tree({
   // just appeared is usually that you asked for it.
   const [shut, setShut] = useState<ReadonlySet<string>>(new Set());
   const menu = useContextMenu();
+  const sortable = useSortable();
+  // Only projects move: a by-repository group is where worktrees with no
+  // project end up, below them all, and has nowhere to be kept.
+  const projectNames = groups.flatMap((g) => (g.project ? [g.project.name] : []));
+  const moveProject = (name: string, by: -1 | 1) => {
+    const next = stepped(projectNames, name, by);
+    if (next) onReorderProjects(next);
+  };
   const toggle = (key: string) =>
     setShut((all) => {
       const next = new Set(all);
@@ -176,8 +286,15 @@ export function Tree({
         {groups.map((g) => {
           const key = keyOf(g);
           const open = !shut.has(key);
+          const project = g.project?.name;
+          const at = project ? projectNames.indexOf(project) : -1;
+          const names = g.worktrees.map((s) => s.name);
           return (
-            <section key={key} className="group">
+            <section
+              key={key}
+              className="group"
+              {...(project ? sortable.target("projects", project, projectNames, onReorderProjects) : {})}
+            >
               {/* The toggle and the actions are siblings rather than nested: a
                   button inside a button is not markup a browser will honour, and
                   the alternative -- a div with a click handler -- gives up the
@@ -187,6 +304,7 @@ export function Tree({
                   reason to be pointing at a project and it has no other door. */}
               <header
                 className="group-head"
+                {...(project ? sortable.source("projects", project) : {})}
                 {...menu(() => [
                   ...(g.project
                     ? [
@@ -199,8 +317,21 @@ export function Tree({
                       ]
                     : []),
                   { label: "Copy Repository URL", icon: Copy, hint: g.hint, run: () => copy(g.hint) },
-                  ...(g.project
+                  ...(project
                     ? [
+                        "separator" as const,
+                        {
+                          label: "Move Up",
+                          icon: MoveUp,
+                          disabled: at === 0,
+                          run: () => moveProject(project, -1),
+                        },
+                        {
+                          label: "Move Down",
+                          icon: MoveDown,
+                          disabled: at === projectNames.length - 1,
+                          run: () => moveProject(project, 1),
+                        },
                         "separator" as const,
                         {
                           label: "Forget Project",
@@ -218,6 +349,12 @@ export function Tree({
                   aria-expanded={open}
                   title={g.hint}
                   onClick={() => toggle(key)}
+                  onKeyDown={(e) => {
+                    const by = moveKey(e);
+                    if (!project || !by) return;
+                    e.preventDefault();
+                    moveProject(project, by);
+                  }}
                 >
                   <Chevron open={open} className="group-twist" />
                   <span className={`group-label${g.project ? "" : " loose"}`}>{g.label}</span>
@@ -271,9 +408,19 @@ export function Tree({
                   {g.worktrees.length === 0 && g.waiting.length === 0 ? (
                     <Empty size="row" icon={Branch} />
                   ) : (
-                    g.worktrees.map((s) => (
+                    g.worktrees.map((s, i) => (
                       <Worktree
                         key={s.name}
+                        sortable={{
+                          ...sortable.source(key, s.name),
+                          ...sortable.target(key, s.name, names, onReorderWorktrees),
+                        }}
+                        first={i === 0}
+                        last={i === names.length - 1}
+                        onMove={(by) => {
+                          const next = stepped(names, s.name, by);
+                          if (next) onReorderWorktrees(next);
+                        }}
                         session={s}
                         stat={polls[s.name]?.stat ?? null}
                         branch={polls[s.name]?.branch ?? s.work_branch}
@@ -309,6 +456,13 @@ export function Tree({
   );
 }
 
+/// Option and an arrow, which is how a Mac moves a thing in a list a place:
+/// -1 for up, 1 for down, null for any other key.
+function moveKey(e: React.KeyboardEvent): -1 | 1 | null {
+  if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return null;
+  return e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : null;
+}
+
 /// How full the context is, as a ring, once it is nearly full: near the top
 /// the agent compacts and forgets, and a ring says so without being read.
 /// Below that it is not drawn at all -- a small ring on every row read as
@@ -340,6 +494,10 @@ function Context({ usage }: { usage: Usage }) {
 }
 
 function Worktree({
+  sortable,
+  first,
+  last,
+  onMove,
   session: s,
   stat,
   branch,
@@ -353,6 +511,12 @@ function Worktree({
   onDestroy,
   onRename,
 }: {
+  /// What makes the row draggable among its group's, and a place to drop.
+  sortable: React.HTMLAttributes<HTMLDivElement>;
+  /// Whether it is at either end of its group, where it cannot move further.
+  first: boolean;
+  last: boolean;
+  onMove: (by: -1 | 1) => void;
   session: Session;
   stat: DiffStat | null;
   /// The branch the working copy is on as of the last poll, which the record
@@ -383,8 +547,13 @@ function Worktree({
     // row is an X you stop seeing, and this one ends an agent.
     <div
       className={`worktree-row${on ? " on" : ""}`}
+      // Not while renaming, or a drag to select the name's text moves the row.
+      {...(renaming ? {} : sortable)}
       {...menu(() => [
         { label: "Rename…", icon: Edit, run: () => setRenaming(true) },
+        "separator",
+        { label: "Move Up", icon: MoveUp, disabled: first, run: () => onMove(-1) },
+        { label: "Move Down", icon: MoveDown, disabled: last, run: () => onMove(1) },
         "separator",
         { label: "Copy Name", icon: Copy, hint: s.name, run: () => copy(s.name) },
         { label: "Copy Branch", icon: Branch, hint: branch, run: () => copy(branch) },
@@ -416,6 +585,12 @@ function Worktree({
       // things is being shown, not a control that is held down.
       aria-current={on ? "page" : undefined}
       onClick={() => onSelect(s.name)}
+      onKeyDown={(e) => {
+        const by = moveKey(e);
+        if (!by) return;
+        e.preventDefault();
+        onMove(by);
+      }}
     >
       <span className="wt-state">
         <StateDot state={s.state} />

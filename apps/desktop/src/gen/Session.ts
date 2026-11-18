@@ -26,6 +26,18 @@ name: string,
  */
 title: string | null, 
 /**
+ * Where this session goes among the others in its project, when someone
+ * has put it there: lower first. Set by [`crate::ops::reorder`] for every
+ * session in the group it was dragged within, and compared only inside
+ * one, so the numbers mean nothing across projects.
+ *
+ * `None` for a session nobody has placed, which a client puts above the
+ * placed ones, newest first: a worktree just started is the one you are
+ * about to look for. On the record, and not in each client, so the order
+ * set on one machine is the order on every other.
+ */
+rank?: number | null, 
+/**
  * Where this session runs. See [`Kind`]; a record without it is a
  * sandbox, which every session was until the server could say otherwise.
  */
