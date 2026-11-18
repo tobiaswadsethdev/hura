@@ -416,16 +416,9 @@ fn tool(name: &str) -> String {
         .map_or_else(|| name.to_string(), |p| slash(&p))
 }
 
-/// A path as a script on this machine writes it: as it is on Unix, and with
-/// `/` on Windows, which Git Bash and every Windows program both read, where
-/// a `\` is an escape to one and not the other.
+/// A path as a script here writes it: see [`host::script_path`].
 fn slash(path: &Path) -> String {
-    let shown = path.display().to_string();
-    if cfg!(windows) {
-        shown.replace('\\', "/")
-    } else {
-        shown
-    }
+    host::script_path(path)
 }
 
 /// The longest script given to Git Bash as an argument. Measured: it cuts
