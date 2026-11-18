@@ -341,19 +341,26 @@ body { user-select: none; }
 :where(textarea):not(:where(.monaco-editor, .xterm) *) { resize: vertical; }
 :where(input, textarea)::placeholder { color: var(--dimmer); }
 
-/* A field with the focus: the accent border and the ring around it, the way
-   AppKit draws a focused text field. One look for every field in the window.
+/* A field with the focus: the accent border, and nothing around it. One look
+   for every field in the window, and for everything drawn as one -- a select,
+   a chip of the new-session form.
 
-   As a box-shadow, not as the outline every other control takes above. A text
-   field matches `:focus-visible` on a click as well as on a tab, so the outline
-   was drawn on every field clicked into. Where it was not overridden it sat
-   three pixels outside a bevel, and the commit message drew a second ring of
-   its own a pixel clear of its border. This rule's `:focus` keeps it level
-   with the outline rule on specificity, and coming after it wins. */
-:where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"]), textarea):not(:where(.monaco-editor, .xterm) *):focus {
+   No ring. A text field matches `:focus-visible` on a click as well as on a
+   tab, so whatever it draws is drawn every time a field is clicked into, and
+   a three-pixel halo round the field you are typing in -- the task box, the
+   moment a dialog opens -- was the loudest thing on the form for no news: the
+   caret already says where the keys go. The border says it as well, and from
+   the keyboard too. The ring above stays for buttons and the like, which a
+   click does not leave looking focused.
+
+   Unlike the base above, this one has weight, on purpose: nearly every field
+   is drawn by a rule naming it -- `.dialog input`, `.commit textarea` -- and
+   each of those sets a border that would win over a weightless focus colour.
+   The halo was the only sign of focus they had, which is how that went unseen.
+   A field marked invalid keeps the colour that says so. */
+:is(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="color"]), textarea):not(:where(.monaco-editor, .xterm) *, [aria-invalid="true"]):focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
 }
 /* A tick box takes the accent too, rather than the engine's own blue. */
 :root { accent-color: var(--accent); }
@@ -2183,8 +2190,9 @@ main { position: relative; }
   transition: border-color 120ms, color 120ms;
 }
 .select-trigger:hover:not(:disabled) { border-color: var(--line-strong); color: var(--text); }
-.select-trigger[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
-.select-trigger:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+/* Open or focused, it is drawn as a focused field is: the accent border. */
+.select-trigger[aria-expanded="true"] { border-color: var(--accent); }
+.select-trigger:focus-visible { outline: none; border-color: var(--accent); }
 .select-trigger:disabled { color: var(--dimmer); cursor: default; }
 .select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .select-chevron { flex: none; color: var(--dim); width: 12px; height: 12px; }
@@ -2372,7 +2380,7 @@ main { position: relative; }
    repository URL in a monospace face reads as a terminal that wandered into a
    form. The few that hold code (a JQL filter, a markdown body) set the mono
    face themselves. A focused field is drawn by the rule for every field, near
-   the top; a select is a button, and takes the ring only from the keyboard. */
+   the top; a select is drawn as one, with the accent border open or focused. */
 :is(.dialog, .screen) textarea { resize: vertical; }
 
 :is(.dialog, .screen-inner) > label { display: grid; grid-template-columns: 78px 1fr; gap: 10px; align-items: start; margin: 10px 0; }
@@ -3406,8 +3414,14 @@ img.zoomable { cursor: zoom-in; }
 .new-session .dialog-head .in { color: var(--dimmer); font-weight: 400; }
 .new-session .head-mark { color: var(--dim); }
 .new-session .origin { margin: 0 0 12px 21px; font-family: var(--font-mono); font-size: 11px; color: var(--dimmer); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.new-session .unsandboxed-note { display: flex; gap: 6px; align-items: flex-start; margin: 0 0 12px 0; padding: 8px 10px; border: 1px solid var(--warn); border-radius: 6px; font-size: 12px; color: var(--text); }
-.new-session .unsandboxed-note svg { flex: none; margin-top: 1px; color: var(--warn); }
+/* Under the chips, one box of one height whatever is in it: the four rows of
+   pills, the worktree's warning, or the wait for the server. Each of those
+   once had its own height, and the footer moved whenever one became another.
+   Four rows is the sandbox's form; more than fits scrolls inside it. */
+.new-details { height: 114px; margin-top: 14px; overflow-y: auto; }
+.new-details > .empty { height: 100%; padding: 0; justify-content: center; }
+.new-session .unsandboxed-note { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 9px 12px; border: 1px solid var(--warn); border-radius: var(--r-sm); font-size: 12px; line-height: 1.5; color: var(--text); }
+.new-session .unsandboxed-note svg { flex: none; margin-top: 2px; color: var(--warn); }
 .wt-unsandboxed { display: inline-flex; color: var(--warn); }
 .new-session .from-ticket { display: flex; align-items: center; gap: 6px; margin: -4px 0 10px 21px; font-size: 12px; }
 .new-session .from-ticket .lucide { color: var(--dim); }
@@ -3423,7 +3437,7 @@ img.zoomable { cursor: zoom-in; }
   min-height: 92px;
 }
 
-.chips { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-top: 8px; }
+.chips { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
 .chip-field {
   display: flex;
   align-items: center;
@@ -3437,7 +3451,12 @@ img.zoomable { cursor: zoom-in; }
   color: var(--dim);
   cursor: text;
 }
-.chip-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+/* The chip is the field, glyph and all, so the chip takes the focus border --
+   and keeps it while its list is open. The list is drawn on the body, so the
+   focus leaves the chip for it, and the trigger used to take the ring for that
+   while instead: a ring round the whole chip on the click, round the value
+   alone while the list was open, and round the chip again after a pick. */
+.chip-field:focus-within, .chip-field:has([aria-expanded="true"]) { border-color: var(--accent); }
 .chip-field > .lucide { flex: none; }
 .dialog .chip-field :is(input, .select-trigger) {
   flex: 1;
@@ -3445,14 +3464,17 @@ img.zoomable { cursor: zoom-in; }
   height: 100%;
   border: none;
   background: none;
+  box-shadow: none;
   padding: 0 8px 0 0;
 }
 .dialog .chip-field .select-trigger { cursor: pointer; }
-/* The chip takes the ring, as the chat's box does, so what is inside it takes
-   none: a ring around the field inside the ring around the chip was two. */
-.dialog .chip-field :is(input, .select-trigger):is(:focus, :focus-visible) { box-shadow: none; }
+/* A chip with nothing to choose: the worktree's "No policy", said in the dim
+   of a disabled control, with no chevron offering a list. */
+.chip-field:has(.select-trigger:disabled) { color: var(--dimmer); cursor: default; }
+.dialog .chip-field .select-trigger:disabled { color: inherit; cursor: default; }
+.chip-field .select-trigger:disabled .select-chevron { visibility: hidden; }
 
-.pick-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.pick-rows { display: flex; flex-direction: column; gap: 6px; }
 .pick-row { display: flex; align-items: flex-start; gap: 10px; }
 .pick-mark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--dim); cursor: help; }
 .pills { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-height: 24px; }
@@ -3473,17 +3495,33 @@ img.zoomable { cursor: zoom-in; }
   transition: background-color 150ms, color 150ms, border-color 150ms;
 }
 .pill:hover { color: var(--text); border-color: var(--hover-line); }
-.pill.on { background: color-mix(in srgb, var(--accent) 24%, transparent); border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--text); padding-left: 7px; }
+.pill.on { background: color-mix(in srgb, var(--accent) 24%, transparent); border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--text); }
 .pill .lucide { width: 12px; height: 12px; }
+/* A toggle leads with its glyph, a plus or a tick, the same width either way. */
+.pill[aria-pressed] { padding-left: 7px; }
+.pill .pill-add { color: var(--dimmer); }
+.pill:hover .pill-add { color: inherit; }
 /* Shown, not chosen: no border to press. */
 .pill.fixed { cursor: default; border-color: transparent; background: var(--surface-2); color: var(--dim); }
 .pill.fixed:hover { color: var(--dim); }
 .pill.fixed .local { color: var(--dimmer); }
 
-.new-session-foot { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* Its height set rather than taken from what is in it, which differs: the
+   time to start at is a field, a pixel taller than the button beside it. */
+.new-session-foot { display: flex; align-items: center; gap: 10px; height: 43px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* The footer's spare room, which takes the push to the right: a warning about
+   the checkout or an error, on one line. What comes and goes here comes and
+   goes in room that was already there. */
+.foot-status { flex: 1; min-width: 0; display: flex; }
+.foot-status > .error { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drift { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--warn); cursor: help; }
 .drift .lucide { flex: none; }
-.new-session-foot .keys { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--dimmer); padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; }
+.drift > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.new-session-foot .start-at { flex: none; width: 176px; }
+/* As wide as its widest label, so Start, Queue, Schedule and Starting… leave
+   the keys beside it where they were. */
+.new-session-foot .go { width: 112px; }
+.new-session-foot .keys { font-family: var(--font-mono); font-size: 10.5px; color: var(--dimmer); padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; }
 .pill:focus-visible, .update-badge:focus-visible, .app > header .mark:focus-visible { outline: 3px solid var(--ring); outline-offset: 0; }
 
 /* ------------------------------------------------------------------------- */
@@ -4121,9 +4159,6 @@ p.chat-quiet { margin: 0; font-size: 12px; }
   line-height: 1.5;
   resize: none;
 }
-/* The box above shows the focus, so the text area inside it takes no ring
-   (the rule for every field would give it one). */
-.chat-box textarea:focus { box-shadow: none; }
 /* What is typed, coloured: drawn under a textarea whose own text is made
    clear while there is something to colour. Both are set alike to the last
    property that moves a glyph, so the caret sits on the character drawn. */
@@ -4173,7 +4208,7 @@ p.chat-quiet { margin: 0; font-size: 12px; }
 }
 .select-trigger.chat-select:hover:not(:disabled),
 .select-trigger.chat-select[aria-expanded="true"] { background: var(--hover); border-color: transparent; color: var(--text); }
-.select-trigger.chat-select:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.select-trigger.chat-select:focus-visible { border-color: var(--accent); }
 .chat-facts {
   display: inline-flex;
   gap: 10px;

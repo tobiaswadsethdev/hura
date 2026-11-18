@@ -97,20 +97,20 @@ export function NewWorktreeDialog({
   return (
     <div className="scrim" onMouseDown={onClose}>
       <div className="dialog new" onMouseDown={(e) => e.stopPropagation()}>
-        {error && <p className="error">{error}</p>}
-        {!options && !error && <Waiting />}
-        {options && (
-          <Form
-            server={server}
-            project={project}
-            from={from ?? null}
-            fromPull={fromPull ?? null}
-            options={options}
-            onClose={onClose}
-            onCreated={onCreated}
-            onQueued={onQueued}
-          />
-        )}
+        {/* The form from the first frame, with the server's half filled in when
+            it comes: a spinner in its place was a dialog that changed size the
+            moment the options arrived. */}
+        <Form
+          server={server}
+          project={project}
+          from={from ?? null}
+          fromPull={fromPull ?? null}
+          options={options}
+          loadError={error}
+          onClose={onClose}
+          onCreated={onCreated}
+          onQueued={onQueued}
+        />
       </div>
     </div>
   );
@@ -123,6 +123,7 @@ function Form({
   from,
   fromPull,
   options,
+  loadError,
   onClose,
   onCreated,
   onQueued,
@@ -131,7 +132,9 @@ function Form({
   project: Project;
   from: Task | null;
   fromPull: { pull: PullRequest; mode: PullStart } | null;
-  options: NewOptions;
+  /// Null until the server has answered; the server's choices wait for it.
+  options: NewOptions | null;
+  loadError: string | null;
   onClose: () => void;
   onCreated: (name: string) => void;
   onQueued: (queue: QueueView) => void;
@@ -156,11 +159,13 @@ function Form({
   // base is the branch it merges into, so the diff pane measures the whole of
   // it and not only what the agent adds.
   const [branch] = useState(from?.branch ?? fromPull?.pull.branch ?? "");
-  const [base, setBase] = useState(fromPull?.pull.base ?? options.default_base ?? "");
-  const [policy, setPolicy] = useState(options.default_policy);
+  const [base, setBase] = useState(fromPull?.pull.base ?? "");
+  // The server's defaults, once it has said them. Its choices are disabled
+  // until then, so nothing here can have been changed before they land.
+  const [policy, setPolicy] = useState("");
   const [toolchains, setToolchains] = useState<string[]>([]);
-  const [providers, setProviders] = useState<string[]>(options.default_providers);
-  const [agentInterface, setAgentInterface] = useState<Interface>(options.default_interface);
+  const [providers, setProviders] = useState<string[]>([]);
+  const [agentInterface, setAgentInterface] = useState<Interface>("chat");
   // A sandbox unless this server allows otherwise and you say so.
   const [worktree, setWorktree] = useState(false);
   const [facts, setFacts] = useState<Facts | null>(null);
@@ -175,6 +180,29 @@ function Form({
   // Rust side of the bridge: `~/.claude/skills` is here, and a webview cannot
   // see it.
   const [mine, setMine] = useState<string[]>([]);
+  // What the checkout said, which outranks the config file's defaults for the
+  // base and the credentials -- and may come back before or after them.
+  const [picked, setPicked] = useState<Picked | null>(null);
+
+  useEffect(() => {
+    if (!options) return;
+    setPolicy(options.default_policy);
+    setAgentInterface(options.default_interface);
+  }, [options]);
+
+  // The base and the credentials, from whichever of the two answers says the
+  // most. The checkout's branch beats the config's default, which is only for
+  // a detached HEAD; a branch never pushed is blanked, since a clone of it
+  // would fail; a pull request's base is not the checkout's to decide. The
+  // checkout's credentials replace the config's defaults when it names any.
+  useEffect(() => {
+    if (!options) return;
+    if (!fromPull) {
+      if (picked && !picked.facts.base_on_remote) setBase("");
+      else setBase(picked?.branch || options.default_base || "");
+    }
+    setProviders(picked && picked.providers.length > 0 ? picked.providers : options.default_providers);
+  }, [options, picked, fromPull]);
 
   useEffect(() => {
     let live = true;
@@ -198,16 +226,8 @@ function Form({
         if (!live) return;
         setFacts(picked.facts);
         setToolchains(picked.facts.toolchains);
-        // A pull request's base is not the checkout's to decide.
-        if (picked.branch && !fromPull) setBase(picked.branch);
-        // Empty when the config file names providers, since an explicit list
-        // replaces the rule rather than adding to it -- so the defaults already
-        // in state stand.
-        if (picked.providers.length > 0) setProviders(picked.providers);
-        // A branch that has never been pushed cannot be cloned from, so the
-        // remote's default is used instead of handing the sandbox a clone that
-        // is going to fail.
-        if (!picked.facts.base_on_remote && !fromPull) setBase("");
+        // The base and the credentials are settled above, with the options.
+        setPicked(picked);
       })
       .catch((e) => live && setError(messageOf(e)));
     return () => {
@@ -276,14 +296,14 @@ function Form({
 
   // Skills this machine pushes, beside the ones the server already has. One
   // list, because to the agent they are one list.
-  const skills = [...new Set([...options.skills, ...mine])];
+  const skills = [...new Set([...(options?.skills ?? []), ...mine])];
 
   return (
     <div
       className="new-session"
       onKeyDown={(e) => {
         // The textarea owns Enter, so the shortcut has to be a chord.
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !busy) {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !busy && options) {
           e.preventDefault();
           void submit();
         }
@@ -380,55 +400,65 @@ function Form({
             ]}
           />
         </label>
-        {when === "at" && (
-          <label className="chip-field" title="Starts at, on this machine's clock">
-            <Scheduled />
-            <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
-          </label>
-        )}
         <label className="chip-field" title="How you talk to the agent">
           <Agent />
           <Select
             value={agentInterface}
             onChange={(v) => setAgentInterface(v as Interface)}
             aria-label="Agent"
+            disabled={!options}
             options={[
               { value: "chat", label: "Chat", hint: "Drawn by this window" },
               { value: "terminal", label: "Terminal", hint: "Claude Code's own, in tmux" },
             ]}
           />
         </label>
-        {options.worktrees && (
-          <label className="chip-field" title="Where the agent runs">
-            {worktree ? <Unsandboxed /> : <Sandbox />}
-            <Select
-              value={worktree ? "worktree" : "sandbox"}
-              onChange={(v) => setWorktree(v === "worktree")}
-              aria-label="Where"
-              options={[
-                { value: "sandbox", label: "Sandbox", hint: "Its own VM, under a policy" },
-                { value: "worktree", label: "Worktree", hint: "On the server, as you" },
-              ]}
-            />
-          </label>
-        )}
-        {!worktree && (
-          <label className="chip-field" title="Network policy">
-            <Policy />
-            <Select
-              value={policy}
-              onChange={setPolicy}
-              aria-label="Policy"
-              options={options.policies.map((p) => ({ value: p.spec, label: p.spec, hint: p.summary }))}
-            />
-          </label>
-        )}
+        {/* Always the six chips, so the form is one shape whatever is chosen
+            and whatever the server allows. A server that does not offer
+            worktrees shows the sandbox as the only answer, and a worktree
+            shows that it has no policy, rather than either chip going. */}
+        <label
+          className="chip-field"
+          title={options && !options.worktrees ? "Where the agent runs: this server's config allows only sandboxes" : "Where the agent runs"}
+        >
+          {worktree ? <Unsandboxed /> : <Sandbox />}
+          <Select
+            value={worktree ? "worktree" : "sandbox"}
+            onChange={(v) => setWorktree(v === "worktree")}
+            aria-label="Where"
+            disabled={!options?.worktrees}
+            options={[
+              { value: "sandbox", label: "Sandbox", hint: "Its own VM, under a policy" },
+              { value: "worktree", label: "Worktree", hint: "On the server, as you" },
+            ]}
+          />
+        </label>
+        <label
+          className="chip-field"
+          title={worktree ? "No network policy: a worktree runs on the server as you" : "Network policy"}
+        >
+          <Policy />
+          <Select
+            value={policy}
+            onChange={setPolicy}
+            aria-label="Policy"
+            disabled={!options || worktree}
+            shown={worktree ? "No policy" : options ? undefined : "Policy"}
+            options={(options?.policies ?? []).map((p) => ({ value: p.spec, label: p.spec, hint: p.summary }))}
+          />
+        </label>
       </div>
+
+      {/* One fixed box for whatever goes under the chips -- the pills, the
+          worktree's warning, the wait for the server -- so none of them moves
+          the footer. Rows past its height scroll inside it. */}
+      <div className="new-details">
+      {!options && <Waiting />}
 
       {/* Said where the choice is made, because nothing afterwards stops it:
           the agent is a process of the server user's, with their files, their
           credentials and the whole network. */}
-      {worktree && (
+      {options && worktree && (
         <p className="unsandboxed-note">
           <Unsandboxed />
           A git worktree of {project.path} on the server. The agent runs there as the server's
@@ -437,7 +467,7 @@ function Form({
         </p>
       )}
 
-      {!worktree && (
+      {options && !worktree && (
       <div className="pick-rows">
         <PickRow icon={Toolchain} label="Toolchains">
           {options.toolchains.map((t) => (
@@ -506,15 +536,34 @@ function Form({
         </PickRow>
       </div>
       )}
-
-      {error && <p className="error">{error}</p>}
+      </div>
 
       <footer className="new-session-foot">
-        {facts && <Drift facts={facts} />}
+        {/* A line, in the footer's spare room: an error inserted above it
+            pushed the footer down, so it says itself here, cut short if need
+            be and whole in the tooltip. What it replaces is only a warning. */}
+        <span className="foot-status">
+          {(error ?? loadError) ? (
+            <span className="error" title={error ?? loadError ?? undefined}>
+              {error ?? loadError}
+            </span>
+          ) : (
+            facts && <Drift facts={facts} />
+          )}
+        </span>
+        {/* Beside the button it is the time for, in room the footer already
+            has. As a chip among the others it added a row to the form, and
+            moved everything under it, every time the choice changed. */}
+        {when === "at" && (
+          <label className="chip-field start-at" title="Starts at, on this machine's clock">
+            <Scheduled />
+            <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
+          </label>
+        )}
         <span className="keys" title="Start with the keyboard">
           ctrl ↵
         </span>
-        <button className="go" disabled={busy} onClick={() => void submit()}>
+        <button className="go" disabled={busy || !options} onClick={() => void submit()}>
           {busy ? <Busy className="turning" /> : when === "now" ? <Start /> : when === "queue" ? <Queued /> : <Scheduled />}
           {busy ? (when === "now" ? "Starting…" : "Adding…") : when === "now" ? "Start" : when === "queue" ? "Queue" : "Schedule"}
         </button>
@@ -625,9 +674,10 @@ function Drift({ facts }: { facts: Facts }) {
   if (!facts.base_on_remote) bits.push("branch not on remote");
   if (bits.length === 0) return null;
   return (
-    <span className="drift" title="The sandbox clones the remote, so this stays behind on the server's checkout">
+    // The line may be cut short in the footer, so the tooltip says it whole.
+    <span className="drift" title={`${bits.join(", ")}: the sandbox clones the remote, so this stays behind on the server's checkout`}>
       <Heads />
-      {bits.join(" · ")}
+      <span>{bits.join(" · ")}</span>
     </span>
   );
 }
