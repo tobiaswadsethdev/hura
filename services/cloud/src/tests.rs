@@ -1229,6 +1229,7 @@ async fn a_subscription_moves_the_account_to_the_paid_plan_and_back() {
         form.contains("customer_email=payer%40example.com"),
         "{form}"
     );
+    assert!(form.contains("allow_promotion_codes=true"), "{form}");
 
     // Not signed by Stripe: nothing changes.
     let created = subscription_event(
