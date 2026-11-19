@@ -132,6 +132,9 @@ pub async fn checkout(State(state): State<Shared>, signed: Signed) -> Result<Jso
         ("line_items[0][quantity]", "1".into()),
         ("client_reference_id", account.clone()),
         ("subscription_data[metadata][account]", account),
+        // A field for a promotion code on Stripe's page: a coupon is given
+        // out as one, made from it in the dashboard.
+        ("allow_promotion_codes", "true".into()),
         ("success_url", format!("{}/billing/done", state.url)),
         (
             "cancel_url",
