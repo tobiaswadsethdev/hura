@@ -1,0 +1,132 @@
+{
+  "rules": [
+    {
+      "id": "default-fs-read-allow-all",
+      "name": "default-fs-read-allow-all",
+      "policy_id": "local-policy",
+      "scope": "global",
+      "applies_to": "all",
+      "resource_type": "filesystem:read",
+      "decision": "allow",
+      "resources": [
+        "**"
+      ],
+      "origin": "local",
+      "layer": "local",
+      "status": "active",
+      "editable": false,
+      "provenance": {
+        "created_via": "default"
+      },
+      "actions": [
+        "fs:mount:read"
+      ]
+    },
+    {
+      "id": "default-fs-write-allow-all",
+      "name": "default-fs-write-allow-all",
+      "policy_id": "local-policy",
+      "scope": "global",
+      "applies_to": "all",
+      "resource_type": "filesystem:write",
+      "decision": "allow",
+      "resources": [
+        "**"
+      ],
+      "origin": "local",
+      "layer": "local",
+      "status": "active",
+      "editable": false,
+      "provenance": {
+        "created_via": "default"
+      },
+      "actions": [
+        "fs:mount:read",
+        "fs:mount:write"
+      ]
+    },
+    {
+      "id": "1fd2cf0e-2e6d-4208-a16b-ccbf4744c98b",
+      "name": "1fd2cf0e-2e6d-4208-a16b-ccbf4744c98b",
+      "policy_id": "64aed666-22a4-4cb5-808d-73dc88afe8f8",
+      "scope": "sandbox:hura-probe54",
+      "applies_to": "sandbox:hura-probe54",
+      "resource_type": "network",
+      "decision": "allow",
+      "resources": [
+        "example.com:443"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-probe54",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "net:connect:tcp"
+      ]
+    },
+    {
+      "id": "324e1f65-fba5-4292-bea1-ae865fc2ee83",
+      "name": "324e1f65-fba5-4292-bea1-ae865fc2ee83",
+      "policy_id": "64aed666-22a4-4cb5-808d-73dc88afe8f8",
+      "scope": "sandbox:hura-probe54",
+      "applies_to": "sandbox:hura-probe54",
+      "resource_type": "http",
+      "decision": "allow",
+      "resources": [
+        "example.edu:443"
+      ],
+      "origin": "scoped",
+      "layer": "local",
+      "status": "active",
+      "editable": true,
+      "sandbox_id": "hura-probe54",
+      "provenance": {
+        "created_via": "added"
+      },
+      "actions": [
+        "http:request:head"
+      ],
+      "methods": [
+        "HEAD"
+      ],
+      "http_targets": [
+        {
+          "host": "example.edu:443",
+          "path": "/",
+          "query": [
+            {
+              "name": "hura-watch",
+              "value_pattern": "0123456789abcdef"
+            }
+          ],
+          "query_match": "subset"
+        }
+      ]
+    },
+    {
+      "id": "default-deny-all",
+      "name": "default-deny-all",
+      "policy_name": "default-deny-all",
+      "scope": "global",
+      "applies_to": "all",
+      "resource_type": "network",
+      "decision": "deny",
+      "resources": [
+        "**"
+      ],
+      "origin": "local",
+      "layer": "local",
+      "status": "active",
+      "reason": "Implicit fallback when no applicable policy decides the request.",
+      "editable": false,
+      "actions": [
+        "net:connect:tcp",
+        "net:connect:udp"
+      ]
+    }
+  ]
+}

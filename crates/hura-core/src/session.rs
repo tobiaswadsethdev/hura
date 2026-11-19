@@ -42,7 +42,7 @@ pub const TMUX_SESSION: &str = "agent";
 pub const DEFAULT_BRANCH_PREFIX: &str = "hura";
 
 /// Container image hura runs sandboxes from: Docker's `shell-docker` sandbox
-/// template plus tmux, Claude Code and hura's own scripts.
+/// image plus tmux, Claude Code and hura's own scripts.
 pub const IMAGE: &str = "hura-sandbox:latest";
 /// The repository half of [`IMAGE`], which the toolchain variants share.
 ///

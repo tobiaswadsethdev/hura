@@ -94,8 +94,8 @@ fn slots() -> &'static Mutex<HashMap<Key, Slot>> {
 /// A connection's claim on a forward. The forward stays up while one exists.
 pub struct Lease {
     local: u16,
-    /// Whether [`Lease::connect`] goes through `lo` by name. Only a sandbox's
-    /// is a port the runtime published; see [`connect`].
+    /// Whether [`Lease::connect`] may go through `lo` by name. Only a
+    /// sandbox's is a port the runtime published; see [`connect`].
     through_lo: bool,
     slot: Slot,
 }
@@ -126,30 +126,55 @@ impl Drop for Lease {
 
 /// A connection to a forward's local port.
 ///
-/// A sandbox's is made through `lo` by name on Linux. Docker Sandboxes v0.50.1
-/// binds a published port to that device as well as to `127.0.0.1`, and WSL's
-/// mirrored networking routes `127.0.0.1` by way of an interface of its own,
+/// Left to the routing table first, and for a sandbox's, when that is refused,
+/// made again through `lo` by name. Docker Sandboxes v0.50.1 binds a published
+/// port to that device as well as to `127.0.0.1`, and WSL's mirrored
+/// networking routes `127.0.0.1` by way of an interface of its own,
 /// `loopback0`, so a connection left to the routing table arrives on the other
 /// device and is refused: os error 111 on every session's chat. Measured on
 /// WSL, where binding the connecting socket to `lo` gets through, as an
 /// ordinary user.
 ///
-/// A worktree session's is left to the routing table, because there the port
-/// is the agent's own listener, bound to `127.0.0.1` and no device. On WSL its
-/// answer is routed back by way of `loopback0` too, so a socket held to `lo`
-/// never hears it: the connect hangs until the kernel gives up, two minutes
-/// on, and the chat never shows. Measured on WSL against a worktree session's
-/// chat host. Everywhere else loopback traffic takes `lo` either way.
+/// Only then, because a listener bound to `127.0.0.1` and no device is the
+/// other way round. On WSL its answer is routed back by way of `loopback0`
+/// too, so a socket held to `lo` never hears it: the connect hangs until the
+/// kernel gives up, two minutes on, and the chat never shows. A worktree
+/// session's chat host is such a listener, and so, since v0.53, is every port
+/// the runtime publishes. Measured on WSL against both. Everywhere else
+/// loopback traffic takes `lo` either way, and the first attempt is the one.
 pub async fn connect(local: u16, through_lo: bool) -> std::io::Result<tokio::net::TcpStream> {
+    let plain = connect_via(local, false).await;
+    #[cfg(target_os = "linux")]
+    if through_lo
+        && let Err(e) = &plain
+        && e.kind() == std::io::ErrorKind::ConnectionRefused
+    {
+        // Bounded, so a port nothing is behind any more is the refusal it
+        // was rather than the two-minute hang above.
+        return tokio::time::timeout(LO_ATTEMPT, connect_via(local, true))
+            .await
+            .unwrap_or(plain);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = through_lo;
+    plain
+}
+
+/// How long the second attempt, through `lo`, may take. It answers at once
+/// where it is the way in.
+#[cfg(target_os = "linux")]
+const LO_ATTEMPT: Duration = Duration::from_secs(3);
+
+async fn connect_via(local: u16, lo: bool) -> std::io::Result<tokio::net::TcpStream> {
     let socket = tokio::net::TcpSocket::new_v4()?;
     // A kernel older than 5.7 refuses this to an unprivileged process. There
     // the routing table decides, as it did before this existed.
     #[cfg(target_os = "linux")]
-    if through_lo {
+    if lo {
         let _ = socket.bind_device(Some(b"lo"));
     }
     #[cfg(not(target_os = "linux"))]
-    let _ = through_lo;
+    let _ = lo;
     socket
         .connect((std::net::Ipv4Addr::LOCALHOST, local).into())
         .await
@@ -468,6 +493,39 @@ mod tests {
         // rather than an accept that never returns.
         connect(port, true).await.unwrap();
         listener.accept().await.unwrap();
+    }
+
+    /// A port the runtime published since v0.53 is bound to `127.0.0.1` and
+    /// no device, and a sandbox's forward reaches it. On WSL with mirrored
+    /// networking a connection held to `lo` hangs here, which is what every
+    /// session's chat did on v0.54 before the plain attempt went first.
+    #[tokio::test]
+    async fn a_sandbox_port_bound_to_no_device_is_reached() {
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::time::timeout(Duration::from_secs(5), connect(port, true))
+            .await
+            .expect("connected within five seconds")
+            .unwrap();
+        listener.accept().await.unwrap();
+    }
+
+    /// A sandbox's forward to a port nothing listens on is refused, and soon:
+    /// the second attempt, through `lo`, is bounded, since on WSL it would
+    /// otherwise hang for two minutes.
+    #[tokio::test]
+    async fn a_sandbox_port_nothing_listens_on_is_refused_soon() {
+        let port = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let said = tokio::time::timeout(Duration::from_secs(10), connect(port, true))
+            .await
+            .expect("an answer within ten seconds");
+        assert!(said.is_err());
     }
 
     /// A worktree session's forward reaches a listener on `127.0.0.1` bound

@@ -276,8 +276,13 @@ fn build_base() -> Result<(), String> {
 
 /// The `docker build` argv. Split out so the build-arg wiring is testable
 /// without running docker.
+///
+/// `--pull`, because Docker rebuilds the base, `sbx/shell-docker-image`, as
+/// its contents need fixing, and without it a build keeps whichever one this
+/// machine pulled first. A variant's base is this image, which is only here,
+/// so only this build asks.
 fn build_argv(dir: &Path, claude: Option<&str>) -> Vec<String> {
-    let mut argv = vec!["build".to_string(), "-t".to_string(), IMAGE.to_string()];
+    let mut argv = ["build", "--pull", "-t", IMAGE].map(String::from).to_vec();
     if let Some(version) = claude {
         argv.push("--build-arg".to_string());
         argv.push(format!("CLAUDE_VERSION={version}"));
@@ -788,7 +793,7 @@ mod tests {
     #[test]
     fn embedded_dockerfile_installs_tmux() {
         assert!(DOCKERFILE.contains("tmux"));
-        assert!(DOCKERFILE.contains("FROM docker/sandbox-templates:shell-docker"));
+        assert!(DOCKERFILE.contains("FROM sbx/shell-docker-image:latest"));
         assert!(
             DOCKERFILE.trim_end().ends_with("USER agent"),
             "must drop back to the agent user"
@@ -1019,6 +1024,7 @@ mod tests {
             "{argv:?}"
         );
         assert_eq!(argv.last().unwrap(), "/tmp/ctx", "the context comes last");
+        assert!(argv.iter().any(|a| a == "--pull"), "a fresh base: {argv:?}");
 
         // And nothing invented when the release service could not be reached.
         let argv = build_argv(dir, None);

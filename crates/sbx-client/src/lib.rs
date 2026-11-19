@@ -36,6 +36,21 @@
 //! * a host is read request by request only once an allow narrowed to paths
 //!   names it; a deny narrowed to paths does not do it, so until then every
 //!   connection to it is refused before anything is said
+//!
+//! And against v0.54.0, which every call here still works on:
+//!
+//! * `ports` is deprecated for `port ls`, `port publish` and `port unpublish`,
+//!   which print what it printed and which v0.50.1 refuses as `unknown
+//!   command: sbx port`, so the new spelling goes first and the old one is
+//!   the fallback (see `CliClient::port`)
+//! * a sandbox's `policy ls` lists the runtime's fallback for what no rule
+//!   decides as a global deny of `**`, which before v0.51 only the unscoped
+//!   listing did (see [`Rule::is_fallback`])
+//! * `template ls` prints an image id whole, `sha256:` and all
+//! * a published port is bound to `127.0.0.1` with no device; v0.50.1 bound it
+//!   to `lo`, which is the reason for the fallback in `hurad`'s forwards
+//! * deprecation and update notices go to stderr, so stdout is still only the
+//!   answer
 
 use std::ffi::OsStr;
 use std::io::Write as _;
@@ -342,6 +357,18 @@ impl Rule {
     pub fn is_network(&self) -> bool {
         self.resource_type == "network" || self.resource_type == "http"
     }
+
+    /// The runtime's answer for what no rule decides, rather than a rule
+    /// anybody made.
+    ///
+    /// Listed as a global deny of `**`, but it does not act like one: an
+    /// allow overrides it, where a real deny outranks every allow. Read as a
+    /// deny it would say every host is refused. Since v0.51 a sandbox's own
+    /// listing has it too, with `editable` false and the reason "Implicit
+    /// fallback when no applicable policy decides the request."
+    pub fn is_fallback(&self) -> bool {
+        self.id == "default-deny-all"
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -418,7 +445,7 @@ pub struct PolicyLog {
     pub allowed_hosts: Vec<LogEntry>,
 }
 
-/// A published port, from `sbx ports NAME --json`.
+/// A published port, from `sbx port ls NAME --json`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Port {
     pub host_ip: String,
@@ -517,8 +544,9 @@ impl SecretSpec {
 /// An image in the sandbox runtime's own store, from `sbx template ls --json`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Template {
-    /// The image id, shortened to twelve characters, which is the prefix of
-    /// the id Docker reports for the same image.
+    /// The image id: shortened to twelve characters, the prefix of the id
+    /// Docker reports for the same image, up to v0.50, and since then whole,
+    /// `sha256:` and all.
     pub id: String,
     pub repository: String,
     pub tag: String,
@@ -785,12 +813,35 @@ impl CliClient {
         })
     }
 
-    /// `sbx ports NAME --publish SPEC`, and the port it says it published.
+    /// `sbx port SUB NAME [SPEC]`, or where there is no `port`, before
+    /// v0.54.0, `sbx ports NAME` with the same request as a flag. `ls` has
+    /// none, and `publish` and `unpublish` are spelt as their own flags.
+    fn port(&self, sub: &str, name: &str, spec: Option<&str>) -> Result<ExecOutput> {
+        let mut args = strings(&["port", sub, name]);
+        args.extend(spec.map(str::to_string));
+        if sub == "ls" {
+            args.push("--json".into());
+        }
+        let out = self.run(&args, None)?;
+        if out.ok() {
+            return Ok(out);
+        }
+        if !legacy_ports(&out) {
+            return Err(refusal(&args, Some(name), &out));
+        }
+        let mut legacy = strings(&["ports", name]);
+        match spec {
+            Some(spec) => legacy.extend([format!("--{sub}"), spec.to_string()]),
+            None => legacy.push("--json".into()),
+        }
+        self.run_checked(&legacy, Some(name))
+    }
+
+    /// `sbx port publish NAME SPEC`, and the port it says it published.
     fn publish_spec(&self, name: &str, sandbox_port: u16, spec: &str) -> Result<Port> {
-        let args = strings(&["ports", name, "--publish", spec]);
-        let out = self.run_checked(&args, Some(name))?;
+        let out = self.port("publish", name, Some(spec))?;
         published(&out.stdout, sandbox_port).ok_or_else(|| Error::Unexpected {
-            args: args.join(" "),
+            args: format!("port publish {name} {spec}"),
             said: out.stdout.trim().to_string(),
         })
     }
@@ -833,6 +884,12 @@ fn refusal(args: &[String], subject: Option<&str>, out: &ExecOutput) -> Error {
         code: out.exit_code,
         stderr: said,
     }
+}
+
+/// Whether a CLI refused `port` for not knowing it, which is what one older
+/// than v0.54.0 says: `error: sbx: unknown command: sbx port` from v0.50.1.
+fn legacy_ports(out: &ExecOutput) -> bool {
+    !out.ok() && out.stdout.is_empty() && out.stderr.contains("unknown command")
 }
 
 /// One line of `sbx diagnose --json`.
@@ -1042,7 +1099,11 @@ impl Sbx for CliClient {
     }
 
     fn ports(&self, name: &str) -> Result<Vec<Port>> {
-        self.json(&strings(&["ports", name, "--json"]), Some(name))
+        let out = self.port("ls", name, None)?;
+        serde_json::from_str(&out.stdout).map_err(|source| Error::Parse {
+            args: format!("port ls {name} --json"),
+            source,
+        })
     }
 
     /// Publish on a host port the runtime picks, or, where it cannot pick one,
@@ -1078,7 +1139,7 @@ impl Sbx for CliClient {
             "{}:{}:{}/{}",
             port.host_ip, port.host_port, port.sandbox_port, port.protocol
         );
-        self.run_checked(&strings(&["ports", name, "--unpublish", &spec]), Some(name))?;
+        self.port("unpublish", name, Some(&spec))?;
         Ok(())
     }
 
@@ -1160,7 +1221,7 @@ mod tests {
 
     #[test]
     fn reads_the_sandbox_listing() {
-        for (file, n) in [("ls.json", 2), ("v0.50/ls.json", 1)] {
+        for (file, n) in [("ls.json", 2), ("v0.50/ls.json", 1), ("v0.54/ls.json", 2)] {
             let all: Vec<RawSandbox> = listing(&fixture(file), "sandboxes").unwrap();
             let all: Vec<Sandbox> = all.into_iter().map(Sandbox::from).collect();
             assert_eq!(all.len(), n, "{file}");
@@ -1202,6 +1263,29 @@ mod tests {
             .expect("a global rule");
         assert!(!global.is_scoped() && !global.is_network());
         assert!(!listing.rules.iter().any(|r| r.id == "default-deny-all"));
+
+        // Since v0.51 the fallback is in a sandbox's listing too, as a global
+        // deny of everything that is not one.
+        let listing: RuleListing = serde_json::from_str(&fixture("v0.54/policy-ls.json")).unwrap();
+        let fallback: Vec<&Rule> = listing.rules.iter().filter(|r| r.is_fallback()).collect();
+        assert_eq!(fallback.len(), 1);
+        assert!(!fallback[0].is_scoped() && fallback[0].is_network());
+        assert_eq!(fallback[0].decision, Decision::Deny);
+        assert_eq!(fallback[0].resources, ["**"]);
+        let watch = listing
+            .rules
+            .iter()
+            .find(|r| r.resource_type == "http")
+            .expect("the watch");
+        assert!(watch.is_scoped() && !watch.is_fallback());
+        assert_eq!(watch.http_targets[0].query[0].name, "hura-watch");
+        assert!(
+            listing
+                .rules
+                .iter()
+                .filter(|r| r.is_scoped())
+                .all(|r| r.decision == Decision::Allow)
+        );
     }
 
     #[test]
@@ -1232,6 +1316,23 @@ mod tests {
                 .iter()
                 .any(|e| e.host == "example.com:443")
         );
+
+        // v0.54 calls an allowed connection `forward-bypass`.
+        let log: PolicyLog = serde_json::from_str(&fixture("v0.54/policy-log.json")).unwrap();
+        let refused = log
+            .blocked_hosts
+            .iter()
+            .find(|e| e.host == "github.com:443")
+            .unwrap();
+        assert_eq!(refused.vm_name, "hura-probe54");
+        assert_eq!(refused.count_since, 1);
+        assert!(refused.reason.as_deref().unwrap().contains("default deny"));
+        let allowed = log
+            .allowed_hosts
+            .iter()
+            .find(|e| e.host == "example.com:443")
+            .unwrap();
+        assert_eq!(allowed.proxy_type, "forward-bypass");
     }
 
     #[test]
@@ -1242,6 +1343,17 @@ mod tests {
         assert!(titles.contains(&"cli.github.com:443"), "{titles:?}");
         assert!(all.iter().all(|a| a.sandbox_name == "hura-pathprobe"));
         assert!(all.iter().all(|a| a.created_at.starts_with("2026-")));
+        let all: Vec<Approval> = listing(&fixture("v0.54/approvals.json"), "approvals").unwrap();
+        let titles: Vec<&str> = all.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            [
+                "github.com:443",
+                "GET example.edu:443/same",
+                "POST example.edu:443/other"
+            ]
+        );
+        assert!(all.iter().all(|a| a.sandbox_name == "hura-probe54"));
         let none: Vec<Approval> = listing("null", "approvals").unwrap();
         assert!(none.is_empty());
     }
@@ -1267,6 +1379,47 @@ mod tests {
         assert_eq!(version.server.unwrap().state, "running");
         let version: Version = serde_json::from_str(&fixture("v0.50/version.json")).unwrap();
         assert_eq!(version.client.version, "v0.50.1");
+
+        let ports: Vec<Port> = serde_json::from_str(&fixture("v0.54/port-ls.json")).unwrap();
+        assert_eq!(
+            ports,
+            [Port {
+                host_ip: "127.0.0.1".into(),
+                host_port: 54175,
+                sandbox_port: 8080,
+                protocol: "tcp4".into(),
+            }]
+        );
+        let templates: Vec<Template> =
+            listing(&fixture("v0.54/template-ls.json"), "images").unwrap();
+        assert!(templates.iter().any(|t| t.tag == "node-rust"));
+        assert!(templates.iter().all(|t| t.id.starts_with("sha256:")));
+        let version: Version = serde_json::from_str(&fixture("v0.54/version.json")).unwrap();
+        assert_eq!(version.client.version, "v0.54.0");
+        assert_eq!(version.server.unwrap().version, "v0.54.0");
+    }
+
+    /// `port` is tried first and `ports` only after a CLI that has no `port`
+    /// says so; anything else it says about a port is its answer.
+    #[test]
+    fn only_a_cli_without_port_is_asked_with_ports() {
+        let old = ExecOutput {
+            stdout: String::new(),
+            stderr: "error: sbx: unknown command: sbx port\n  try: sbx --help\n".into(),
+            exit_code: 1,
+        };
+        assert!(legacy_ports(&old));
+        let gone = ExecOutput {
+            stderr: "error: sandbox 'hura-nope' not found\n  try: sbx ls\n".into(),
+            ..old.clone()
+        };
+        assert!(!legacy_ports(&gone));
+        let fine = ExecOutput {
+            stdout: "Published 127.0.0.1:54177 -> 9090/tcp4\n".into(),
+            stderr: String::new(),
+            exit_code: 0,
+        };
+        assert!(!legacy_ports(&fine));
     }
 
     #[test]

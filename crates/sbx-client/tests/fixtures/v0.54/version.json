@@ -1,0 +1,12 @@
+{
+  "client": {
+    "version": "v0.54.0",
+    "revision": "4bec4a5ce093466e54b034146965b143d065dc09"
+  },
+  "server": {
+    "state": "running",
+    "version": "v0.54.0",
+    "revision": "4bec4a5ce093466e54b034146965b143d065dc09",
+    "api_version": "0.52.0"
+  }
+}

@@ -2,24 +2,28 @@
 #
 # hura sandbox image.
 #
-# Docker's `shell-docker` sandbox template has git, node, python, uv, gh, socat
+# Docker's `shell-docker` sandbox image has git, node, python, uv, gh, socat
 # and its own Docker Engine, which is the reason to be on it: an agent can build
 # and run containers inside its sandbox. It has no agent and no tmux. hura runs
 # each agent inside an in-sandbox tmux session so the agent survives losing its
 # connection, and so its output can be scraped with capture-pane without
 # depending on anything on the host.
 #
-# The template's labels carry over to this image, and one of them
+# Its labels carry over to this image, and one of them
 # (`com.docker.sandboxes.start-docker`) is what makes the runtime start that
 # engine, so the base has to stay a `FROM` rather than a copy of its contents.
 #
-# The workload runs as the template's `agent` user, with HOME at /home/agent.
+# It was `docker/sandbox-templates:shell-docker` up to Docker Sandboxes v0.51,
+# which stopped refreshing that and publishes the same image, Ubuntu 26.04 with
+# the same tools, user and labels, as `sbx/shell-docker-image`.
+#
+# The workload runs as the image's `agent` user, with HOME at /home/agent.
 # Everything hura itself puts in a session stays under /sandbox, which is made
 # here and given to `agent`.
 #
 # Build:  hurad image build   (or: docker build -t hura-base:latest hurad/images/hura-base,
 #         then load it into the sandbox runtime with `sbx template load`)
-FROM docker/sandbox-templates:shell-docker
+FROM sbx/shell-docker-image:latest
 
 USER root
 

@@ -1,0 +1,65 @@
+[
+  {
+    "id": "sha256:b178ca62ec2e79af2a044e3ec321bdb72188690e1c15d573ea5524b397554d3d",
+    "repository": "docker.io/docker/sandbox-templates",
+    "tag": "shell-docker",
+    "digest": "sha256:b178ca62ec2e79af2a044e3ec321bdb72188690e1c15d573ea5524b397554d3d",
+    "flavor": "shell-docker",
+    "created_at": "2026-10-21T14:08:46Z",
+    "size": 711958542
+  },
+  {
+    "id": "sha256:15b6799124875c8dd24eb6a33eb56ad44d8961813f9b0d8b97e4f29919a19f4c",
+    "repository": "docker.io/library/hura-sandbox",
+    "tag": "dotnet-node",
+    "digest": "sha256:15b6799124875c8dd24eb6a33eb56ad44d8961813f9b0d8b97e4f29919a19f4c",
+    "flavor": "shell-docker",
+    "created_at": "2026-11-17T11:53:01Z",
+    "size": 1169045781
+  },
+  {
+    "id": "sha256:f13096e1f21123b0b4a616e7b3891422f965327273af6159da85c5ec8657c654",
+    "repository": "docker.io/library/hura-sandbox",
+    "tag": "dotnet-node-playwright",
+    "digest": "sha256:f13096e1f21123b0b4a616e7b3891422f965327273af6159da85c5ec8657c654",
+    "flavor": "shell-docker",
+    "created_at": "2026-11-17T11:54:35Z",
+    "size": 1238149811
+  },
+  {
+    "id": "sha256:875093be9adb7bcdaf5468e4257c04f641da7508da0f82096dcfaf421e82404d",
+    "repository": "docker.io/library/hura-sandbox",
+    "tag": "latest",
+    "digest": "sha256:875093be9adb7bcdaf5468e4257c04f641da7508da0f82096dcfaf421e82404d",
+    "flavor": "shell-docker",
+    "created_at": "2026-11-17T11:51:52Z",
+    "size": 893681016
+  },
+  {
+    "id": "sha256:11c28224a230d80dfe451f288cbbdd86c4bfc26ef45151eb234853bb22e0521d",
+    "repository": "docker.io/library/hura-sandbox",
+    "tag": "node",
+    "digest": "sha256:11c28224a230d80dfe451f288cbbdd86c4bfc26ef45151eb234853bb22e0521d",
+    "flavor": "shell-docker",
+    "created_at": "2026-11-17T11:52:47Z",
+    "size": 958590181
+  },
+  {
+    "id": "sha256:7b3507bf063b53ce6ae761a63c9ead53a8e32a945bdf7aeff0b0c65e0f75a47e",
+    "repository": "docker.io/library/hura-sandbox",
+    "tag": "node-rust",
+    "digest": "sha256:7b3507bf063b53ce6ae761a63c9ead53a8e32a945bdf7aeff0b0c65e0f75a47e",
+    "flavor": "shell-docker",
+    "created_at": "2026-11-17T11:56:29Z",
+    "size": 1184711722
+  },
+  {
+    "id": "sha256:b178ca62ec2e79af2a044e3ec321bdb72188690e1c15d573ea5524b397554d3d",
+    "repository": "docker.io/library/sandbox-kit-assembled",
+    "tag": "e558e6bab9e67e96",
+    "digest": "sha256:b178ca62ec2e79af2a044e3ec321bdb72188690e1c15d573ea5524b397554d3d",
+    "flavor": "shell-docker",
+    "created_at": "2026-10-21T14:08:46Z",
+    "size": 711958542
+  }
+]

@@ -7,14 +7,22 @@
 //! cargo test -p sbx-client -- --ignored --test-threads=1
 //! ```
 //!
-//! The image is the runtime's own `shell-docker` template, so nothing has to
-//! be built first.
+//! The image is Docker's own `shell-docker` image, the one hura's is built on,
+//! so nothing has to be built first. Since v0.51 the runtime no longer fetches
+//! it by itself, so it is loaded once, the way `hurad image build` loads
+//! hura's:
+//!
+//! ```sh
+//! docker pull sbx/shell-docker-image
+//! docker save -o /tmp/shell-docker.tar sbx/shell-docker-image
+//! sbx template load /tmp/shell-docker.tar
+//! ```
 
 use sbx_client::{
     CliClient, CreateOpts, Decision, Error, RuleSpec, Sbx, SecretSource, SecretSpec, Status,
 };
 
-const TEMPLATE: &str = "docker/sandbox-templates:shell-docker";
+const TEMPLATE: &str = "docker.io/sbx/shell-docker-image:latest";
 
 fn client() -> CliClient {
     CliClient::new()
