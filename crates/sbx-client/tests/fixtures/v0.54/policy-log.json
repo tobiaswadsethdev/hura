@@ -1,0 +1,34 @@
+{
+  "allowed": [
+    {
+      "sandbox_id": "hura-probe54",
+      "host": "example.com:443",
+      "proxy_type": "forward-bypass",
+      "count": 1,
+      "first_seen": "2026-11-19T08:15:11.734547611+01:00",
+      "last_seen": "2026-11-19T08:15:11.734547611+01:00"
+    }
+  ],
+  "blocked": [
+    {
+      "sandbox_id": "hura-probe54",
+      "host": "example.edu:443",
+      "proxy_type": "forward",
+      "rule": "HTTP request (query redacted)",
+      "reason": "No matching allow rule (default deny)",
+      "count": 2,
+      "first_seen": "2026-11-19T08:15:11.865725963+01:00",
+      "last_seen": "2026-11-19T08:15:11.878671985+01:00"
+    },
+    {
+      "sandbox_id": "hura-probe54",
+      "host": "github.com:443",
+      "proxy_type": "forward",
+      "rule": "no applicable policies for op(action=net:connect:tcp, resource=net:domain:github.com:443)",
+      "reason": "No matching allow rule (default deny)",
+      "count": 1,
+      "first_seen": "2026-11-19T08:15:11.772456421+01:00",
+      "last_seen": "2026-11-19T08:15:11.772456421+01:00"
+    }
+  ]
+}

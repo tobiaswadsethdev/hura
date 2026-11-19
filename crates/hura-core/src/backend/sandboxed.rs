@@ -228,6 +228,22 @@ impl Sandboxed {
     }
 }
 
+/// The network rules in force on a sandbox, as the policy pane reads them.
+///
+/// Without the runtime's fallback, which a sandbox's listing has carried since
+/// v0.51 as a global deny of `**`: the pane takes a deny of a whole host to
+/// outrank every allow, so with it there every host would read as refused.
+/// What it stands for, that nothing gets out unless a rule allows it, is what
+/// `hurad doctor` checks the runtime for.
+fn session_rules(rules: &[Rule]) -> Vec<policy::Rule> {
+    rules
+        .iter()
+        .filter(|r| r.is_network() && !r.is_fallback())
+        .filter(|r| r.status.is_empty() || r.status == "active")
+        .map(rule_of)
+        .collect()
+}
+
 /// A runtime rule as the policy pane reads it.
 fn rule_of(r: &Rule) -> policy::Rule {
     policy::Rule {
@@ -497,13 +513,7 @@ impl Backend for Sandboxed {
     }
 
     fn rules(&self, session: &Session) -> Result<Vec<policy::Rule>> {
-        Ok(self
-            .client
-            .rules(&session.sandbox)?
-            .iter()
-            .filter(|r| r.is_network() && (r.status.is_empty() || r.status == "active"))
-            .map(rule_of)
-            .collect())
+        Ok(session_rules(&self.client.rules(&session.sandbox)?))
     }
 
     fn add_rules(&self, session: &Session, rules: &[RuleSpec]) -> Result<()> {
@@ -782,6 +792,33 @@ mod tests {
             interface: crate::chat::Interface::Terminal,
             worktree: false,
         }
+    }
+
+    /// What v0.54 lists for a sandbox, its fallback included, reads as what
+    /// the sandbox may reach: the host it allows is open, and the fallback is
+    /// not a deny of everything.
+    #[test]
+    fn the_runtimes_fallback_is_not_read_as_a_deny_of_everything() {
+        #[derive(serde::Deserialize)]
+        struct Listing {
+            rules: Vec<Rule>,
+        }
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../sbx-client/tests/fixtures/v0.54/policy-ls.json"
+        );
+        let listing: Listing =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(listing.rules.iter().any(Rule::is_fallback));
+
+        let rules = session_rules(&listing.rules);
+        assert!(rules.iter().all(|r| !r.global), "{rules:?}");
+        let view = policy::View::of(rules, None, &endpoints::Lists::default());
+        assert!(view.opens("example.com:443"));
+        assert!(!view.denies("example.com:443"));
+        assert!(!view.opens("github.com:443"));
+        assert!(!view.denies("github.com:443"));
+        assert_eq!(view.watching.len(), 1);
     }
 
     /// A withdrawal takes the endpoint out of the rules naming it and keeps

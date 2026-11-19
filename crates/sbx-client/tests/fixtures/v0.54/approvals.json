@@ -1,0 +1,53 @@
+[
+  {
+    "created_at": "2026-11-19T08:15:11.772371368+01:00",
+    "detail": "Protocol: TCP\nResource type: domain\nno matching allow rule (default deny)",
+    "id": "network:P-5RiT-8w2GVqrIUIiBXrhkhVv6o5n_nMTL7TV0C0y4",
+    "options": [
+      {
+        "id": "allow",
+        "label": "Allow"
+      },
+      {
+        "id": "dismiss",
+        "label": "Dismiss"
+      }
+    ],
+    "sandbox_name": "hura-probe54",
+    "title": "github.com:443"
+  },
+  {
+    "created_at": "2026-11-19T08:15:11.865697018+01:00",
+    "detail": "Protocol: HTTP\nMethod: GET\nTarget scope: example.edu:443\nPath: /same\nno matching allow rule (default deny)",
+    "id": "network:6OupSDlrXr1HNDoAE2aLuEjWjLKqpANCDWE3LgcCwkg",
+    "options": [
+      {
+        "id": "allow",
+        "label": "Allow"
+      },
+      {
+        "id": "dismiss",
+        "label": "Dismiss"
+      }
+    ],
+    "sandbox_name": "hura-probe54",
+    "title": "GET example.edu:443/same"
+  },
+  {
+    "created_at": "2026-11-19T08:15:11.878635655+01:00",
+    "detail": "Protocol: HTTP\nMethod: POST\nTarget scope: example.edu:443\nPath: /other\nno matching allow rule (default deny)",
+    "id": "network:mGTTpn68WHsynOivGjXpjPvZ8iZLMfz4K6Fo7sIUmBs",
+    "options": [
+      {
+        "id": "allow",
+        "label": "Allow"
+      },
+      {
+        "id": "dismiss",
+        "label": "Dismiss"
+      }
+    ],
+    "sandbox_name": "hura-probe54",
+    "title": "POST example.edu:443/other"
+  }
+]

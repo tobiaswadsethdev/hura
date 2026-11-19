@@ -26,7 +26,7 @@ available through nested virtualization; nothing here is portable to macOS.
 | | |
 | --- | --- |
 | KVM | `/dev/kvm` usable by your user. On WSL2 it is there when nested virtualization is, which Windows 11 has on by default |
-| [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) | `sbx` v0.47 or newer, signed in. Each session is one of its sandboxes |
+| [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) | `sbx` v0.47 or newer, signed in; measured last against v0.54. Each session is one of its sandboxes |
 | Docker | server 29.x, reachable by your user. It builds the sandbox image, which the sandbox runtime cannot |
 | tmux | on the host, for `hurad attach` |
 | Rust | 1.89 or newer, only to build `hurad` yourself (edition 2024, let-chains, `File::lock`) |
@@ -36,8 +36,8 @@ health, its policy and whether systemd lingering is enabled, and says what to do
 about whatever is missing:
 
 ```
-[  ok  ] sbx          v0.47.0 (daemon v0.47.0)
-[  ok  ] sbx checks   13 passed
+[  ok  ] sbx          v0.54.0 (daemon v0.54.0)
+[  ok  ] sbx checks   20 passed
 [  ok  ] sbx policy   deny-all: only what a session's rules allow gets out
 [  ok  ] sbx daemon   sbx-daemon.service
 [  ok  ] docker       server 29.7.2

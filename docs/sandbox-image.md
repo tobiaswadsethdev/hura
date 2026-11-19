@@ -5,11 +5,14 @@ working whether or not anything is attached to it.
 
 ## What it is built on
 
-`hura-sandbox:latest` is `FROM docker/sandbox-templates:shell-docker`, Docker's
-template for a sandbox with a shell in it: Ubuntu with git, node, python, uv, gh
-and socat, and a Docker Engine of its own. The workload runs as the template's
-`agent` user (UID 1000, `HOME=/home/agent`), who has `sudo`. The boundary is the
-microVM around the sandbox, not the file permissions inside it.
+`hura-sandbox:latest` is `FROM sbx/shell-docker-image`, Docker's image for a
+sandbox with a shell in it: Ubuntu with git, node, python, uv, gh and socat, and
+a Docker Engine of its own. The workload runs as the image's `agent` user (UID
+1000, `HOME=/home/agent`), who has `sudo`. The boundary is the microVM around
+the sandbox, not the file permissions inside it. Up to Docker Sandboxes v0.51
+the same image was `docker/sandbox-templates:shell-docker`, which Docker no
+longer refreshes. `hurad image build` builds with `--pull`, so a rebuild picks
+up Docker's latest build of it.
 
 hura adds tmux, Claude Code at a pinned version, `hura-status` and `hura-usage`,
 `hura-agent` with the Agent SDK beside it, a stand-in `az`, fonts, and Claude Code's settings in
@@ -20,10 +23,10 @@ it replaces was 5.2 GB. It is called `hura-sandbox` rather than the old
 `hura-base` so that an image built for OpenShell cannot be taken for it, though
 its recipe is still in `hurad/images/hura-base/`.
 
-It has to stay a `FROM`. The template's labels carry over to the image, and two
+It has to stay a `FROM`. The base's labels carry over to the image, and two
 of them, `com.docker.sandboxes.flavor=shell-docker` and
 `com.docker.sandboxes.start-docker=true`, are what make the runtime start the
-Docker Engine inside it. A copy of the template's contents would lose them.
+Docker Engine inside it. A copy of the base's contents would lose them.
 
 The sandbox runtime cannot build an image, so `hurad image build` builds it with
 Docker and then hands it over: `docker save` into `sbx template load`, since a
