@@ -6,16 +6,22 @@
 //! OAuth app's webhooks per person and site (five at most), lets them say
 //! only a little JQL (no `currentUser()`, no saved filter) and sends all of
 //! an app's to one address. So each asks for every issue and comment event
-//! on the site, with an empty filter, and a delivery is matched here: to its
+//! on the site, and a delivery is matched here: to its
 //! accounts by the webhook IDs it names, and to what is theirs by its issue
 //! being assigned to or reported by whoever connected, or having been in
 //! their last read (a filter's, too). Anything else is left to the timer,
 //! which still finds a new issue that only a filter would show.
 //!
+//! **Every project, by name.** Jira refuses an empty filter (`empty jql
+//! search not supported`), whatever its documentation says, so the filter is
+//! `project in (…)` with every project the connection can see. A webhook's
+//! filter cannot be changed, so when the projects do, it is made again.
+//!
 //! **Renewed every day**, as part of the account's read: Jira stops sending
 //! a webhook thirty days after it was made or last renewed, and one that is
-//! gone (deleted, or expired while nobody was reading) is made again.
-//! Removing the tracker removes it. A connection made before hura asked for
+//! gone (deleted, or expired while nobody was reading) is made again, as is
+//! one whose projects are no longer the site's: a project added since is
+//! left to the timer until then. Removing the tracker removes it. A connection made before hura asked for
 //! `manage:jira-webhook` cannot make one, and its row says to connect again.
 //!
 //! Only a tracker connected through Atlassian has one: an API token cannot
@@ -143,19 +149,34 @@ async fn look(
         Ok(listed) => listed,
         Err(e) => return Ok(Err(e)),
     };
-    let row: Option<(String, i64)> = sqlx::query_as(
-        "select cloud_id, webhook_id from jira_hooks where account_id = $1 and tracker = $2",
+    let jql = match projects(state, &base, token).await {
+        Ok(keys) if keys.is_empty() => {
+            return Ok(Err(Failed(
+                0,
+                "the connection sees no projects on the site".into(),
+            )));
+        }
+        Ok(keys) => filter(&keys),
+        Err(e) => return Ok(Err(e)),
+    };
+    let row: Option<(String, i64, Option<String>)> = sqlx::query_as(
+        "select cloud_id, webhook_id, jql from jira_hooks where account_id = $1 and tracker = $2",
     )
     .bind(account)
     .bind(name)
     .fetch_optional(&state.db)
     .await?;
     // On another site, the tracker was connected to this one since: that
-    // one's is left to expire.
+    // one's is left to expire. One asking for other projects than the site
+    // has now goes, with the leftovers below.
     let ours = row
         .as_ref()
-        .filter(|(site, id)| site == cloud_id && listed.iter().any(|(l, _)| l == id))
-        .map(|(_, id)| *id);
+        .filter(|(site, id, made)| {
+            site == cloud_id
+                && made.as_deref() == Some(jql.as_str())
+                && listed.iter().any(|(l, _)| l == id)
+        })
+        .map(|(_, id, _)| *id);
 
     // Left behind by a look that did not finish, or a row that went with
     // its tracker: each counts towards the five. One another hura account
@@ -211,7 +232,7 @@ async fn look(
         None => {
             let body = json!({
                 "url": to,
-                "webhooks": [{ "jqlFilter": "", "events": EVENTS }],
+                "webhooks": [{ "jqlFilter": jql, "events": EVENTS }],
             });
             let made =
                 match call(state, "POST", &format!("{base}/webhook"), token, Some(body)).await {
@@ -236,11 +257,12 @@ async fn look(
         }
     };
     let kept = sqlx::query(
-        "insert into jira_hooks (account_id, tracker, cloud_id, webhook_id, jira_account, expires_at)
+        "insert into jira_hooks (account_id, tracker, cloud_id, webhook_id, jira_account, expires_at, jql)
          values ($1, $2, $3, $4, $5,
-                 coalesce(to_timestamp($6::bigint / 1000.0), now() + interval '30 days'))
+                 coalesce(to_timestamp($6::bigint / 1000.0), now() + interval '30 days'), $8)
          on conflict (account_id, tracker) do update
-             set cloud_id = $3, webhook_id = $4, jira_account = $5, expires_at = excluded.expires_at
+             set cloud_id = $3, webhook_id = $4, jira_account = $5, expires_at = excluded.expires_at,
+                 jql = $8
              where jira_hooks.webhook_id = $4 or $7",
     )
     .bind(account)
@@ -252,6 +274,7 @@ async fn look(
     // A new one replaces the row only when the row's is gone from Jira;
     // otherwise another look made one meanwhile, and this one goes.
     .bind(row.is_some() && ours.is_none())
+    .bind(&jql)
     .execute(&state.db)
     .await?;
     if kept.rows_affected() == 0 {
@@ -290,6 +313,38 @@ async fn listed(
             return Ok(out);
         }
     }
+}
+
+/// The key of every project the token can see, in order.
+async fn projects(
+    state: &Shared,
+    base: &str,
+    token: &str,
+) -> std::result::Result<Vec<String>, Failed> {
+    let mut out = Vec::new();
+    loop {
+        let url = format!("{base}/project/search?startAt={}&maxResults=100", out.len());
+        let page = call(state, "GET", &url, token, None).await?;
+        let values = page["values"].as_array().cloned().unwrap_or_default();
+        out.extend(
+            values
+                .iter()
+                .filter_map(|p| Some(p["key"].as_str()?.to_string())),
+        );
+        if values.is_empty() || page["isLast"].as_bool() != Some(false) {
+            out.sort();
+            out.dedup();
+            return Ok(out);
+        }
+    }
+}
+
+/// A webhook's filter for every one of `keys`: as much of the site as a
+/// filter Jira takes can ask for. A project key is letters, digits and
+/// underscores, so quoting it is enough.
+fn filter(keys: &[String]) -> String {
+    let quoted: Vec<String> = keys.iter().map(|k| format!("{k:?}")).collect();
+    format!("project in ({})", quoted.join(", "))
 }
 
 /// Take a tracker's webhook off its site, as it is removed. One that cannot
@@ -358,6 +413,12 @@ pub(crate) fn concerns(delivery: &Value, me: &str, seen: impl Fn(&str) -> bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_filter_names_every_project() {
+        let keys = ["ACME".to_string(), "OPS".to_string()];
+        assert_eq!(filter(&keys), r#"project in ("ACME", "OPS")"#);
+    }
 
     #[test]
     fn a_delivery_concerns_whoever_the_issue_is_or_was_assigned_to() {

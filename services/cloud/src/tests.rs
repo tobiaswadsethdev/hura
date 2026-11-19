@@ -2311,7 +2311,22 @@ async fn a_connected_jira_site_gets_a_webhook_and_its_deliveries_make_yours_due(
         200,
         r#"{"webhookRegistrationResult":[{"createdWebhookId":1000}]}"#,
     );
+    // Made again once the site has another project.
+    web.on(
+        &format!("POST {api}/webhook"),
+        200,
+        r#"{"webhookRegistrationResult":[{"createdWebhookId":1001}]}"#,
+    );
     web.on(&format!("DELETE {api}/webhook"), 202, "");
+    // The site's projects at connecting and the next look; then one more.
+    let acme = r#"{"isLast":true,"values":[{"key":"ACME"}]}"#;
+    web.on(&format!("GET {api}/project/search"), 200, acme);
+    web.on(&format!("GET {api}/project/search"), 200, acme);
+    web.on(
+        &format!("GET {api}/project/search"),
+        200,
+        r#"{"isLast":true,"values":[{"key":"OPS"},{"key":"ACME"}]}"#,
+    );
 
     let state = t.connect(at, "jira").await;
     t.finish(
@@ -2324,8 +2339,8 @@ async fn a_connected_jira_site_gets_a_webhook_and_its_deliveries_make_yours_due(
     let made: Value = serde_json::from_str(made[0].as_deref().unwrap()).unwrap();
     assert_eq!(made["url"], "https://cloud.example/v1/webhooks/jira");
     assert_eq!(
-        made["webhooks"][0]["jqlFilter"], "",
-        "every issue: matched here"
+        made["webhooks"][0]["jqlFilter"], r#"project in ("ACME")"#,
+        "every project, since Jira refuses an empty filter: matched here"
     );
     let removed = web.sent(&format!("DELETE {api}/webhook"));
     assert_eq!(
@@ -2491,6 +2506,30 @@ async fn a_connected_jira_site_gets_a_webhook_and_its_deliveries_make_yours_due(
     assert_eq!(pass.due, 1);
     assert!(due().await, "a filter holds it");
 
+    // The site has another project: a webhook's filter cannot change, so
+    // the old one goes and one naming both is made.
+    sqlx::query("update trackers set webhooks_checked_at = now() - interval '2 days'")
+        .execute(&t.state.db)
+        .await
+        .unwrap();
+    crate::jira_hooks::refresh_due(&t.state, account)
+        .await
+        .unwrap();
+    let made = web.sent(&format!("POST {api}/webhook"));
+    assert_eq!(made.len(), 2);
+    let made: Value = serde_json::from_str(made[1].as_deref().unwrap()).unwrap();
+    assert_eq!(
+        made["webhooks"][0]["jqlFilter"],
+        r#"project in ("ACME", "OPS")"#
+    );
+    assert_eq!(
+        web.sent(&format!("DELETE {api}/webhook"))
+            .last()
+            .cloned()
+            .flatten(),
+        Some(r#"{"webhookIds":[1000]}"#.to_string())
+    );
+
     // Gone with its tracker, off the site too.
     let (status, _) = t
         .call(Method::DELETE, "/v1/trackers/jira", Some(at), None)
@@ -2501,7 +2540,7 @@ async fn a_connected_jira_site_gets_a_webhook_and_its_deliveries_make_yours_due(
             .last()
             .cloned()
             .flatten(),
-        Some(r#"{"webhookIds":[1000]}"#.to_string())
+        Some(r#"{"webhookIds":[1001]}"#.to_string())
     );
     let left: i64 = sqlx::query_scalar("select count(*) from jira_hooks")
         .fetch_one(&t.state.db)
