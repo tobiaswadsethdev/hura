@@ -2,6 +2,7 @@
 import type { Comment } from "./Comment";
 import type { Dir } from "./Dir";
 import type { Event } from "./Event";
+import type { Fetched } from "./Fetched";
 import type { FileDiff } from "./FileDiff";
 import type { FileText } from "./FileText";
 import type { Integrations } from "./Integrations";
@@ -37,4 +38,4 @@ agent: boolean, } | { "reply": "chats", chats: Array<string>,
 /**
  * The conversation just opened, when that is what was asked for.
  */
-opened: string | null, } | { "reply": "ports" } & PortsView | { "reply": "files" } & Dir | { "reply": "file" } & FileText | { "reply": "git", said: string, status: Status, } | { "reply": "git-diff" } & FileDiff | { "reply": "told", message: string, } | { "reply": "projects", projects: Array<Project>, } | { "reply": "repos" } & Listing | { "reply": "inspect" } & Picked | { "reply": "new-options" } & NewOptions | { "reply": "created", name: string, } | { "reply": "integrations" } & Integrations | { "reply": "settings" } & SettingsView | { "reply": "push" } & PushView | { "reply": "queue" } & QueueView;
+opened: string | null, } | { "reply": "ports" } & PortsView | { "reply": "files" } & Dir | { "reply": "file" } & FileText | { "reply": "download" } & Fetched | { "reply": "git", said: string, status: Status, } | { "reply": "git-diff" } & FileDiff | { "reply": "told", message: string, } | { "reply": "projects", projects: Array<Project>, } | { "reply": "repos" } & Listing | { "reply": "inspect" } & Picked | { "reply": "new-options" } & NewOptions | { "reply": "created", name: string, } | { "reply": "integrations" } & Integrations | { "reply": "settings" } & SettingsView | { "reply": "push" } & PushView | { "reply": "queue" } & QueueView;

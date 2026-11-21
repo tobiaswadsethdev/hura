@@ -13,15 +13,19 @@
 // drawn again -- after the git pane, or another worktree -- so it comes back
 // as it was and is read again behind that, rather than starting from a
 // spinner at the root and closed all the way down.
+//
+// Under it, a way to download what the tree cannot reach: a file the agent
+// put in `/tmp`, or anywhere else outside the working copy, by its path.
 
 import { useCallback, useEffect, useState } from "react";
 
 import { api, messageOf } from "./api";
 import { keyFor, Remembered } from "./cache";
 import { copy, useContextMenu } from "./ContextMenu";
+import { download } from "./Download";
 import type { Entry } from "./gen/Entry";
 import { Empty, Waiting } from "./Empty";
-import { Chevron, Copy, FileIcon, Folder, NoFiles } from "./icons";
+import { Chevron, Copy, Download, FileIcon, Folder, NoFiles } from "./icons";
 
 /// Directories as last read, by worktree and path.
 const listings = new Remembered<Entry[]>(500);
@@ -58,7 +62,51 @@ export function FileTree({
     // pixels of the tree.
     <div className="files">
       <Level server={server} name={name} path="" depth={0} open={open} toggle={toggle} onOpen={onOpen} />
+      <DownloadPath server={server} name={name} />
     </div>
+  );
+}
+
+/// A path typed or pasted in, file or folder, anywhere in the sandbox: for
+/// what the agent made outside the working copy and never named in the
+/// conversation, where it would have been a link.
+function DownloadPath({ server, name }: { server: string; name: string }) {
+  const [path, setPath] = useState<string | null>(null);
+  if (path === null) {
+    return (
+      <button className="entry download-path" onClick={() => setPath("")}>
+        <span className="twist" />
+        <Download aria-hidden />
+        <span className="label">Download a path…</span>
+      </button>
+    );
+  }
+  return (
+    <form
+      className="download-path-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!path.trim()) return;
+        void download(server, name, path.trim());
+        setPath(null);
+      }}
+    >
+      <input
+        autoFocus
+        value={path}
+        placeholder="/tmp/report.md"
+        aria-label="Path in the sandbox, file or folder"
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        onChange={(e) => setPath(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && setPath(null)}
+        onBlur={() => !path.trim() && setPath(null)}
+      />
+      <button type="submit" disabled={!path.trim()}>
+        Download
+      </button>
+    </form>
   );
 }
 
@@ -137,6 +185,11 @@ function Level({
                 {
                   label: e.dir ? (isOpen ? "Collapse" : "Expand") : "Open",
                   run: () => activate(e.dir, full),
+                },
+                {
+                  label: e.dir ? "Download as Zip" : "Download",
+                  icon: Download,
+                  run: () => void download(server, name, full),
                 },
                 "separator",
                 { label: "Copy Path", icon: Copy, hint: full, run: () => copy(full) },

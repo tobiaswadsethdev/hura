@@ -24,6 +24,7 @@ import "monaco-editor/basic-languages/monaco.contribution";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 
 import { api, messageOf } from "../api";
+import { download } from "../Download";
 import { Empty, Waiting } from "../Empty";
 import { NotText } from "../icons";
 import { palette } from "../palette";
@@ -132,7 +133,9 @@ export function FilePane({
     return (
       <div className="file picture">
         <img src={`data:${file.image.mime};base64,${file.image.data}`} alt={path} />
-        <p className="notice">{size(file.bytes)}</p>
+        <p className="notice">
+          {size(file.bytes)} · <Save server={server} name={name} path={path} />
+        </p>
       </div>
     );
   }
@@ -140,18 +143,33 @@ export function FilePane({
   // sentence: what is worth saying is that there is nothing to show and how
   // big the thing being withheld is.
   if (file.binary) {
-    return <Empty icon={NotText} note={`Binary file, ${file.bytes} bytes`} />;
+    return (
+      <Empty icon={NotText} note={`Binary file, ${size(file.bytes)}`}>
+        <Save server={server} name={name} path={path} />
+      </Empty>
+    );
   }
 
   return (
     <div className="file">
       {file.truncated && (
         <p className="notice">
-          Showing the first part of {path}; it is {file.bytes} bytes
+          Showing the first part of {path}; it is {size(file.bytes)} ·{" "}
+          <Save server={server} name={name} path={path} />
         </p>
       )}
       <div className="monaco" ref={host} />
     </div>
+  );
+}
+
+/// The whole file, out of the sandbox and into Downloads: what a viewer
+/// cannot show, or shows only the start of.
+function Save({ server, name, path }: { server: string; name: string; path: string }) {
+  return (
+    <button className="file-download" onClick={() => void download(server, name, path)}>
+      Download
+    </button>
   );
 }
 

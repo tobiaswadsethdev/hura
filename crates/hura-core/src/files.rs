@@ -15,6 +15,22 @@
 //! outside the working copy, and while the sandbox is the isolation boundary
 //! rather than this code, a file browser that will fetch anything on the
 //! filesystem is not what this claims to be.
+//!
+//! [`fetch`] is the exception, on purpose. It is for taking a file *out* --
+//! a screenshot the agent took, a report it wrote -- and those land wherever
+//! the tool that made them chose, `/tmp` as often as the working copy. So it
+//! takes an absolute path as well as a relative one. That is no wider than
+//! what the same client already has: a terminal into the sandbox, where `cat`
+//! reads anything. For a worktree session that is the server's own
+//! filesystem, as the server's user -- which its terminal reaches just the
+//! same. It still only reads.
+//!
+//! A folder comes out as a zip of everything under it but `.git`, made on the
+//! server from what the sandbox sends (see [`crate::zip`]). The sandbox sends
+//! each file as a line of base64 rather than as bytes behind a length: the
+//! agent may still be writing one, and a file that grew between being
+//! measured and being read would shift every byte after it into the wrong
+//! file.
 
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +78,29 @@ const CAP: u64 = 512 * 1024;
 /// at all, so one is read to the end; past this it is a file to fetch some
 /// other way, not one to look at on a phone.
 const IMAGE_CAP: u64 = 16 * 1024 * 1024;
+
+/// How big a file [`fetch`] hands over. Base64 in a JSON reply, through an
+/// exec's stdout, so the whole of it is held in memory three times on the way;
+/// past this it is a job for `docker cp`, not a button.
+const FETCH_CAP: u64 = 32 * 1024 * 1024;
+
+/// How many files a folder [`fetch`] takes. Every one is a few processes in
+/// the sandbox, and a reply has to come back before the client gives up
+/// waiting; a folder with more than this in it is a `node_modules`, not a set
+/// of screenshots.
+const FETCH_FILES: u64 = 1000;
+
+/// A file, whole, for a client to save on its own machine.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fetched {
+    /// The file's own name, for the copy a client saves.
+    pub name: String,
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub bytes: u64,
+    /// Base64.
+    pub data: String,
+}
 
 /// An image, whole, for a viewer to draw.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -291,6 +330,131 @@ pub fn read(backend: &dyn Backend, session: &Session, path: &str) -> Result<File
     })
 }
 
+/// Where a path [`fetch`] is given points in the sandbox: an absolute one is
+/// taken as it is, and a relative one is under the working copy, the way the
+/// tree names it.
+fn locate(root: &str, path: &str) -> Result<String, String> {
+    let path = path.trim();
+    if path.starts_with('/') {
+        let rel = clean(path).map_err(|_| "that path has a `..` in it".to_string())?;
+        if rel.is_empty() {
+            return Err("that is the whole sandbox, not a file".into());
+        }
+        Ok(format!("/{rel}"))
+    } else {
+        let rel = clean(path)?;
+        if rel.is_empty() {
+            return Err("that is the repository, not a file".into());
+        }
+        Ok(absolute(root, &rel))
+    }
+}
+
+/// One file, whole, from anywhere in the sandbox, for a client to save; or a
+/// folder, as a zip of the files in it.
+pub fn fetch(backend: &dyn Backend, session: &Session, path: &str) -> Result<Fetched, String> {
+    let full = locate(&backend.paths(session).repo, path)?;
+    // Every refusal is decided in the sandbox, in the one exec, and said on
+    // stdout with an exit code of its own -- the size as well, so a file or a
+    // folder too big to send is not read just to find that out.
+    //
+    // A folder is walked twice: once to count and add up, and once to send.
+    // `.git` is left out, and so is a name with a newline in it, which would
+    // split into two lines of what is sent.
+    let script = format!(
+        "p={path}\n\
+         [ -e \"$p\" ] || {{ echo missing; exit 3; }}\n\
+         if [ -d \"$p\" ]; then\n\
+         cd \"$p\" || exit 1\n\
+         walk() {{ find . \\( -name .git -o -name '*\n*' \\) -prune -o -type f -print; }}\n\
+         walk | {{\n\
+         t=0; c=0\n\
+         while IFS= read -r f; do\n\
+         n=$(wc -c < \"$f\" | tr -d ' ') || continue\n\
+         t=$((t + n)); c=$((c + 1))\n\
+         [ \"$t\" -le {FETCH_CAP} ] || {{ echo \"$t\"; exit 6; }}\n\
+         [ \"$c\" -le {FETCH_FILES} ] || {{ echo \"$c\"; exit 7; }}\n\
+         done\n\
+         [ \"$c\" -gt 0 ] || {{ echo empty; exit 8; }}\n\
+         }} || exit $?\n\
+         echo folder\n\
+         walk | while IFS= read -r f; do\n\
+         [ -f \"$f\" ] || continue\n\
+         printf '%s\\n' \"${{f#./}}\"; base64 < \"$f\" | tr -d '\\n'; echo\n\
+         done\n\
+         exit 0\n\
+         fi\n\
+         [ -f \"$p\" ] || {{ echo special; exit 5; }}\n\
+         n=$(wc -c < \"$p\" | tr -d ' ') || exit 1\n\
+         [ \"$n\" -le {FETCH_CAP} ] || {{ echo \"$n\"; exit 6; }}\n\
+         echo \"$n\"; base64 < \"$p\" | tr -d '\\n'",
+        path = sh_quote(&full),
+    );
+    let out = backend
+        .exec(session, &["sh", "-c", &script])
+        .map_err(|e| e.to_string())?;
+    let said = || out.trimmed().parse::<u64>().unwrap_or(0);
+    match out.exit_code {
+        0 => {}
+        3 => return Err("that is not there any more".into()),
+        5 => return Err("that is not a regular file".into()),
+        6 => {
+            return Err(format!(
+                "that comes to {} MiB; a download takes up to {} MiB",
+                said() >> 20,
+                FETCH_CAP >> 20
+            ));
+        }
+        7 => {
+            return Err(format!(
+                "that folder has more than {FETCH_FILES} files in it; a download takes up to {FETCH_FILES}"
+            ));
+        }
+        8 => return Err("that folder has no files in it".into()),
+        _ => return Err(gone_or(&out.stderr, "that is not there any more")),
+    }
+    let name = full.rsplit('/').next().unwrap_or_default().to_string();
+    let mut lines = out.trimmed().split('\n');
+    let first = lines.next().unwrap_or("").trim();
+    if first == "folder" {
+        return folder(&name, lines);
+    }
+    let bytes: u64 = first
+        .parse()
+        .map_err(|_| "the sandbox did not say how big that file is")?;
+    Ok(Fetched {
+        name,
+        bytes,
+        data: lines.next().unwrap_or("").trim().to_string(),
+    })
+}
+
+/// A folder's files, as the sandbox sent them -- a path, then its bytes in
+/// base64, and again -- packed into a zip under the folder's own name, so it
+/// unpacks to a folder rather than into whatever directory it is opened in.
+fn folder<'a>(name: &str, mut lines: impl Iterator<Item = &'a str>) -> Result<Fetched, String> {
+    let mut members = Vec::new();
+    while let Some(path) = lines.next() {
+        if path.is_empty() {
+            continue;
+        }
+        // Absent is an empty file that came last, whose empty line went with
+        // the output's trailing whitespace.
+        let data = decode_base64(lines.next().unwrap_or("").trim())
+            .ok_or("the folder came back malformed")?;
+        members.push(crate::zip::Member {
+            path: format!("{name}/{path}"),
+            data,
+        });
+    }
+    let zip = crate::zip::write(&members, std::time::SystemTime::now());
+    Ok(Fetched {
+        name: format!("{name}.zip"),
+        bytes: zip.len() as u64,
+        data: encode_base64(&zip),
+    })
+}
+
 /// A file read to the end, base64, for an image bigger than the first read.
 fn whole(backend: &dyn Backend, session: &Session, path: &str) -> Result<String, String> {
     let script = format!(
@@ -306,13 +470,25 @@ fn whole(backend: &dyn Backend, session: &Session, path: &str) -> Result<String,
     Ok(out.trimmed().to_string())
 }
 
+const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
 /// Base64, without a dependency for it.
 ///
-/// The encoder is the sandbox's `base64`; this is the other half. Sixty lines
-/// of crate for one function that has to exist anyway on the client side of the
-/// terminal channel is not a trade worth making twice.
+/// The encoder is usually the sandbox's `base64`, and this is the other half.
+/// Sixty lines of crate for one function that has to exist anyway on the
+/// client side of the terminal channel is not a trade worth making twice.
 pub(crate) fn decode_base64(s: &str) -> Option<Vec<u8>> {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    // By table rather than by searching the alphabet: a folder taken out is
+    // tens of megabytes of this.
+    const VALUE: [u8; 256] = {
+        let mut table = [0xFF; 256];
+        let mut i = 0;
+        while i < 64 {
+            table[ALPHABET[i] as usize] = i as u8;
+            i += 1;
+        }
+        table
+    };
     let mut out = Vec::with_capacity(s.len() / 4 * 3);
     let mut buf: u32 = 0;
     let mut bits = 0u32;
@@ -320,7 +496,10 @@ pub(crate) fn decode_base64(s: &str) -> Option<Vec<u8>> {
         if c == b'=' || c.is_ascii_whitespace() {
             continue;
         }
-        let v = ALPHABET.iter().position(|&a| a == c)? as u32;
+        let v = match VALUE[c as usize] {
+            0xFF => return None,
+            v => v as u32,
+        };
         buf = (buf << 6) | v;
         bits += 6;
         if bits >= 8 {
@@ -329,6 +508,28 @@ pub(crate) fn decode_base64(s: &str) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+/// The encoding half, for what the server makes itself rather than reads out
+/// of the sandbox: a folder's zip. Standard, with padding.
+pub(crate) fn encode_base64(raw: &[u8]) -> String {
+    let mut out = String::with_capacity(raw.len().div_ceil(3) * 4);
+    for chunk in raw.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -358,6 +559,23 @@ mod tests {
         assert_eq!(absolute("/srv/worktrees/x", "a"), "/srv/worktrees/x/a");
     }
 
+    /// An absolute path is anywhere in the sandbox, a relative one is in the
+    /// working copy, and neither may be a directory's root or climb out.
+    #[test]
+    fn a_fetch_reads_absolute_paths_as_they_are() {
+        let root = "/sandbox/repo";
+        assert_eq!(locate(root, "/tmp/shot.png").unwrap(), "/tmp/shot.png");
+        assert_eq!(locate(root, "//tmp/./a.md").unwrap(), "/tmp/a.md");
+        assert_eq!(
+            locate(root, "docs/a.md").unwrap(),
+            "/sandbox/repo/docs/a.md"
+        );
+        assert!(locate(root, "/").is_err());
+        assert!(locate(root, "").is_err());
+        assert!(locate(root, "../x").is_err());
+        assert!(locate(root, "/tmp/../etc/x").is_err());
+    }
+
     /// By the bytes, not the name: a `.png` that is really text is text.
     #[test]
     fn images_are_told_by_their_first_bytes() {
@@ -381,5 +599,15 @@ mod tests {
         assert_eq!(decode_base64("/w==").unwrap(), vec![0xff]);
         assert_eq!(decode_base64("").unwrap(), Vec::<u8>::new());
         assert!(decode_base64("not base64!").is_none());
+    }
+
+    #[test]
+    fn base64_encodes_what_it_decodes() {
+        assert_eq!(encode_base64(b"hello\n"), "aGVsbG8K");
+        assert_eq!(encode_base64(&[0xff]), "/w==");
+        assert_eq!(encode_base64(b"ab"), "YWI=");
+        assert_eq!(encode_base64(b""), "");
+        let raw: Vec<u8> = (0..=255u8).cycle().take(1001).collect();
+        assert_eq!(decode_base64(&encode_base64(&raw)).unwrap(), raw);
     }
 }

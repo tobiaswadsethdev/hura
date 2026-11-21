@@ -1028,6 +1028,45 @@ html.mac .sidebar { border-right-color: var(--edge); }
   max-width: calc(100% - 32px); max-height: calc(100% - 64px); object-fit: contain;
   background: repeating-conic-gradient(var(--checker) 0 25%, var(--checker-2) 0 50%) 0 0 / 16px 16px;
 }
+/* Taking the whole file out of the sandbox, where the viewer shows only some
+   of it or none: a word in the sentence about it, not a button beside it. */
+.file-download {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* How a download went, at the foot of the window, until it is done or
+   dismissed. See `Download.tsx`. */
+.download-status {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(480px, calc(100vw - 32px));
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.3);
+  cursor: pointer;
+}
+.download-status .lucide { flex: none; color: var(--dim); }
+.download-status span { overflow-wrap: anywhere; }
+.download-status.failed { color: var(--bad); }
+.download-status.failed .lucide { color: var(--bad); }
 
 /* ------------------------------------------------------------------------- */
 /* the splitters: the draggable edge of each sidebar                         */
@@ -1445,6 +1484,34 @@ main { position: relative; }
   transition: background-color 120ms;
 }
 .files .entry:hover { background: var(--hover); }
+/* Under the tree, apart from it: not an entry in it, so dim, and a gap above. */
+.files .download-path { margin-top: 8px; color: var(--dim); }
+.files .download-path .lucide { flex: none; }
+.download-path-form { display: flex; gap: 6px; margin-top: 8px; padding: 0 6px; }
+.download-path-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.download-path-form input:focus { outline: none; border-color: var(--accent); }
+.download-path-form button {
+  padding: 3px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.download-path-form button:hover:not(:disabled) { background: var(--selected); }
+.download-path-form button:disabled { color: var(--dimmer); cursor: default; }
 .files .entry.dir .label { color: var(--text); }
 .files .twist { width: 14px; color: var(--dimmer); flex: none; display: inline-flex; }
 .files .label {
@@ -2824,6 +2891,11 @@ img.zoomable { cursor: zoom-in; }
 .doc li.check > div { flex: 1; min-width: 0; }
 .doc a { color: var(--text); text-decoration: underline; text-decoration-color: var(--dimmer); text-underline-offset: 2px; }
 .doc a:hover { text-decoration-color: var(--text); }
+/* A path the agent named, which opens a menu to download it: the code's own
+   look, with the link's underline to say it does something. */
+.doc .doc-path { padding: 0; border: none; background: none; font: inherit; cursor: pointer; }
+.doc .doc-path code { text-decoration: underline dotted var(--dimmer); text-underline-offset: 2px; }
+.doc .doc-path:hover code { text-decoration-color: var(--text); }
 .doc code {
   padding: 0 4px;
   border-radius: 4px;
@@ -3877,6 +3949,12 @@ img.zoomable { cursor: zoom-in; }
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+/* The files a tool call made, under its answer, each a button that takes it
+   out of the sandbox. The sent-file chip's shape, so a file is one picture. */
+.chat-downloads { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+button.chat-file { border: none; color: var(--text); cursor: pointer; transition: background-color 150ms; }
+button.chat-file:hover { background: var(--selected); }
+button.chat-file .lucide { flex: none; color: var(--dim); }
 
 .chat-thinking button,
 .chat-tool-head,

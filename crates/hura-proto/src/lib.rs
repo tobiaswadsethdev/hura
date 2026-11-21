@@ -30,7 +30,7 @@ use hura_core::chat::ChatDecision;
 use hura_core::comments::{Comment, NewComment, PullRemark};
 use hura_core::endpoints::Route;
 use hura_core::events::Event;
-use hura_core::files::{Dir, FileText};
+use hura_core::files::{Dir, Fetched, FileText};
 use hura_core::git::{Against, FileDiff, Status as GitStatus};
 use hura_core::integrations::View as IntegrationsView;
 use hura_core::ops::{NewOptions, NewSession, Picked, Poll, Refreshed};
@@ -214,6 +214,11 @@ pub enum Request {
     Files { name: String, path: String },
     /// One file of it, capped and read-only. The agent owns the working copy.
     File { name: String, path: String },
+    /// One file, whole, to save on the client's machine: a screenshot or a
+    /// report the agent made, or a folder of them as a zip. Relative to the
+    /// repository root, or absolute anywhere in the sandbox, since that is
+    /// where such things land.
+    Download { name: String, path: String },
     /// The shells open beside a worktree's agent, by tmux session name, and
     /// whether the agent is still running beside them.
     ///
@@ -490,6 +495,7 @@ impl Request {
             | Request::Git { name, .. }
             | Request::Files { name, .. }
             | Request::File { name, .. }
+            | Request::Download { name, .. }
             | Request::Shells { name }
             | Request::NewShell { name }
             | Request::KillShell { name, .. }
@@ -594,6 +600,7 @@ pub enum Reply {
     Ports(hura_core::ports::PortsView),
     Files(Dir),
     File(FileText),
+    Download(Fetched),
     /// The status after whatever was asked for, and what git said while doing
     /// it. Both, because a push that succeeded still has output worth reading
     /// and a status alone would not say the push had happened at all.
