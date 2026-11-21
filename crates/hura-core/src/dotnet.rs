@@ -9,12 +9,14 @@
 //! not satisfy is given that exact SDK as well, in a layer on top of the
 //! variant (see [`crate::image::ensure`]).
 //!
-//! Read from the local checkouts of the session's remote, the way
-//! [`crate::toolchain::detect`] reads its markers, and with the same caveat:
-//! the sandbox clones `origin`, and a pin changed but not pushed is read here
-//! all the same. In that direction the cost is an SDK nothing uses.
+//! Read from the commit the sandbox will clone, through a local checkout of the
+//! session's remote, fetched first: see [`pins_for`]. A checkout's working copy
+//! is what the sandbox does *not* get, and one that had fallen behind its remote
+//! once pinned an SDK the remote had already moved on from, so every session
+//! was missing the one its clone named.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 use crate::repos;
 use crate::toolchain;
@@ -191,17 +193,31 @@ pub fn pins(root: &Path) -> Vec<Pin> {
     found
 }
 
-/// The pins of every checkout on this machine whose `origin` is `remote`.
+/// The pins of the commit a sandbox on `remote` will clone: the tip of
+/// `branch` there, or of the remote's default branch when it is `None`.
 ///
-/// Every one rather than the first, because a repository checked out twice is
-/// usually two branches of it, and either may be what the session is for.
-pub fn pins_for(remote: &str, roots: &[repos::Root]) -> Vec<Pin> {
-    let mut found: Vec<Pin> = Vec::new();
+/// Read through a checkout on this machine whose `origin` is `remote`, after
+/// fetching that one branch into it, the same fetch a worktree session makes
+/// before it branches: a remote-tracking ref moves, and no branch of the
+/// person's own does. Without the fetch the answer is whatever the checkout
+/// last pulled, and with it the answer is the clone's.
+///
+/// Only when no checkout can name that commit (offline and never fetched, or a
+/// checkout with no `origin/HEAD` to say which branch is the default) are the
+/// working copies read instead, every one of them, since a repository checked
+/// out twice is usually two branches of it and either may be what the session
+/// is for. That is right whenever they are current, and it is the best there
+/// is when they are not.
+pub fn pins_for(remote: &str, branch: Option<&str>, roots: &[repos::Root]) -> Vec<Pin> {
     let checkouts: Vec<PathBuf> = repos::discover_in(roots)
         .into_iter()
         .filter(|r| r.origin.as_deref().is_some_and(|o| same_remote(o, remote)))
         .map(|r| r.path)
         .collect();
+    if let Some(found) = checkouts.iter().find_map(|c| pins_on_remote(c, branch)) {
+        return found;
+    }
+    let mut found: Vec<Pin> = Vec::new();
     for checkout in checkouts {
         for pin in pins(&checkout) {
             if !found.contains(&pin) {
@@ -210,6 +226,66 @@ pub fn pins_for(remote: &str, roots: &[repos::Root]) -> Vec<Pin> {
         }
     }
     found
+}
+
+/// The pins at the tip of `branch` on `checkout`'s `origin`, or of its default
+/// branch, read from the commit after fetching it. `None` when the checkout
+/// cannot name that commit, fetched or not.
+///
+/// The fetch is best effort: offline, the remote-tracking ref as last fetched
+/// is still a better guess at the remote than the working copy. Never a prompt,
+/// since nobody is watching it, and named in full rather than left to the
+/// configured refspec, so a single-branch clone fetches the branch all the same.
+fn pins_on_remote(checkout: &Path, branch: Option<&str>) -> Option<Vec<Pin>> {
+    let git = |args: &[&str]| -> Option<String> {
+        let out = crate::host::command("git")
+            .arg("-C")
+            .arg(checkout)
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(Stdio::null())
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    };
+    let branch = match branch {
+        Some(b) => b.to_string(),
+        None => git(&["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])?
+            .trim()
+            .strip_prefix("refs/remotes/origin/")?
+            .to_string(),
+    };
+    let tracking = format!("refs/remotes/origin/{branch}");
+    let _ = git(&[
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "origin",
+        &format!("+refs/heads/{branch}:{tracking}"),
+    ]);
+    let commit = git(&[
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        &format!("{tracking}^{{commit}}"),
+    ])?;
+    let commit = commit.trim();
+    let listing = git(&["ls-tree", "-r", "-z", "--name-only", commit])?;
+    let mut found: Vec<Pin> = Vec::new();
+    let pinned = listing
+        .split('\0')
+        .filter(|path| path.rsplit('/').next() == Some("global.json") && toolchain::in_reach(path));
+    for path in pinned {
+        let pin = git(&["show", &format!("{commit}:{path}")])
+            .as_deref()
+            .and_then(parse);
+        if let Some(pin) = pin.filter(|p| !found.contains(p)) {
+            found.push(pin);
+        }
+    }
+    Some(found)
 }
 
 /// Whether two remote URLs name one repository: alike once the scheme, any
@@ -424,6 +500,110 @@ mod tests {
         got.sort();
         assert_eq!(got, ["10.0.202", "10.0.401"]);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A checkout that has fallen behind its remote reads the remote's pin, the
+    /// one the sandbox's clone will have, and is not moved to do it. Run against
+    /// real git, because what a clone gets is git's answer and not this
+    /// module's.
+    #[test]
+    fn a_checkout_behind_its_remote_reads_the_pin_the_clone_will_have() {
+        let tmp = std::env::temp_dir().join(format!("hura-remote-pins-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let git = |cwd: &Path, args: &[&str]| -> String {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+                .args(["-c", "commit.gpgsign=false"])
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .expect("git");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let write = |dir: &Path, rel: &str, version: &str| {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                path,
+                format!(r#"{{"sdk": {{"version": "{version}", "rollForward": "disable"}}}}"#),
+            )
+            .unwrap();
+        };
+        let versions = |pins: Vec<Pin>| {
+            let mut got: Vec<String> = pins.into_iter().map(|p| p.version).collect();
+            got.sort();
+            got
+        };
+
+        // The remote, and somebody else's repository pushing to it.
+        let remote = tmp.join("remote.git");
+        let url = remote.to_string_lossy().into_owned();
+        git(&tmp, &["init", "-q", "--bare", "-b", "main", &url]);
+        let upstream = tmp.join("upstream");
+        std::fs::create_dir_all(&upstream).unwrap();
+        git(&upstream, &["init", "-q", "-b", "main"]);
+        git(&upstream, &["remote", "add", "origin", &url]);
+        write(&upstream, "global.json", "10.0.403");
+        write(&upstream, "Charts/global.json", "10.0.202");
+        git(&upstream, &["add", "."]);
+        git(&upstream, &["commit", "-q", "-m", "pin"]);
+        git(&upstream, &["push", "-q", "origin", "main"]);
+
+        // The checkout on this machine, cloned then and not pulled since.
+        let dev = tmp.join("dev");
+        std::fs::create_dir_all(&dev).unwrap();
+        git(&dev, &["clone", "-q", &url, "Service"]);
+        let checkout = dev.join("Service");
+        let main_before = git(&checkout, &["rev-parse", "main"]);
+        let roots = [repos::Root {
+            path: dev.clone(),
+            depth: 1,
+        }];
+
+        // The remote moves on, and grows a branch with a pin of its own.
+        write(&upstream, "global.json", "10.0.404");
+        git(&upstream, &["commit", "-q", "-am", "newer sdk"]);
+        git(&upstream, &["push", "-q", "origin", "main"]);
+        git(&upstream, &["switch", "-q", "-c", "release/9"]);
+        write(&upstream, "global.json", "9.0.300");
+        git(&upstream, &["commit", "-q", "-am", "the older line"]);
+        git(&upstream, &["push", "-q", "origin", "release/9"]);
+
+        // The default branch, named or not, is the remote's newest.
+        assert_eq!(
+            versions(pins_for(&url, None, &roots)),
+            ["10.0.202", "10.0.404"]
+        );
+        assert_eq!(
+            versions(pins_for(&url, Some("main"), &roots)),
+            ["10.0.202", "10.0.404"]
+        );
+        // A base the checkout has never seen is fetched too.
+        assert_eq!(
+            versions(pins_for(&url, Some("release/9"), &roots)),
+            ["10.0.202", "9.0.300"]
+        );
+        // A branch the remote does not have leaves only the working copy.
+        assert_eq!(
+            versions(pins_for(&url, Some("gone"), &roots)),
+            ["10.0.202", "10.0.403"]
+        );
+
+        // Nothing of the person's own moved: their branch, and the file they
+        // see, are where they left them.
+        assert_eq!(git(&checkout, &["rev-parse", "main"]), main_before);
+        assert!(
+            std::fs::read_to_string(checkout.join("global.json"))
+                .unwrap()
+                .contains("10.0.403")
+        );
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 
     #[test]

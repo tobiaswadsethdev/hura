@@ -369,6 +369,22 @@ pub(crate) fn walk(root: &Path, mut visit: impl FnMut(&Path, &str)) {
     }
 }
 
+/// Whether [`walk`] would visit `path`, a file's path from a checkout's root
+/// with `/` between its parts: in the root or under it no deeper than `walk`
+/// goes, and in no directory it skips.
+///
+/// The same rule for a listing of a commit's tree, which is what
+/// [`crate::dotnet::pins_for`] reads when it can, and which has no directories
+/// to descend.
+pub(crate) fn in_reach(path: &str) -> bool {
+    let mut dirs: Vec<&str> = path.split('/').collect();
+    dirs.pop();
+    dirs.len() <= DETECT_DEPTH
+        && dirs
+            .iter()
+            .all(|d| !d.starts_with('.') && !SKIP_DIRS.contains(d))
+}
+
 /// Whether a file name satisfies a marker: an exact name, or `*.ext`.
 fn matches(marker: &str, name: &str) -> bool {
     match marker.strip_prefix("*") {
@@ -660,6 +676,19 @@ mod tests {
             "case matters on Linux"
         );
         assert!(!matches("Cargo.toml", "Cargo.toml.orig"));
+    }
+
+    /// A path in a commit's tree is in reach exactly when `walk` would have
+    /// visited the same file on disk.
+    #[test]
+    fn a_path_in_a_tree_is_in_reach_where_walk_would_go() {
+        assert!(in_reach("global.json"));
+        assert!(in_reach("Charts/global.json"));
+        // A hidden file is visited; only hidden directories are skipped.
+        assert!(in_reach(".env"));
+        assert!(!in_reach("a/b/global.json"));
+        assert!(!in_reach("node_modules/global.json"));
+        assert!(!in_reach(".github/global.json"));
     }
 
     /// A toolchain with no registry cannot fetch a dependency, which is most of
