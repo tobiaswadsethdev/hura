@@ -181,6 +181,7 @@ struct WorktreeView: View {
                     .environment(\.readPicture) { [server, name] path in
                         try? await server.api.file(name, path: path).image
                     }
+                    .downloads(server: server, name: name)
             }
         case let .terminal(tmux):
             if let t = terminals[tmux ?? ""] { TerminalScreen(channel: t) }

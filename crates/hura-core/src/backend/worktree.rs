@@ -1142,6 +1142,85 @@ mod tests {
         tmp
     }
 
+    /// A download runs the same script a sandbox would, through a real shell:
+    /// a file by either kind of path comes back whole, and each refusal comes
+    /// back as its own sentence rather than as the shell's.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_is_fetched_whole_by_either_path() {
+        let tmp = scratch("download");
+        let b = backend(&tmp);
+        let repo = tmp.join("repo");
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        let raw: Vec<u8> = (0..=255u8).cycle().take(70_000).collect();
+        std::fs::write(repo.join("docs/shot.png"), &raw).unwrap();
+        std::fs::write(tmp.join("report.md"), "# done\n").unwrap();
+        let s = session("alpha", &repo);
+
+        let got = crate::files::fetch(&b, &s, "docs/shot.png").unwrap();
+        assert_eq!(got.name, "shot.png");
+        assert_eq!(got.bytes, raw.len() as u64);
+        assert_eq!(crate::files::decode_base64(&got.data).unwrap(), raw);
+
+        let abs = format!("{}/report.md", tmp.display());
+        let got = crate::files::fetch(&b, &s, &abs).unwrap();
+        assert_eq!(crate::files::decode_base64(&got.data).unwrap(), b"# done\n");
+
+        let err = crate::files::fetch(&b, &s, "docs/gone.png").unwrap_err();
+        assert!(err.contains("not there"), "{err}");
+        let err = crate::files::fetch(&b, &s, "/dev/null").unwrap_err();
+        assert!(err.contains("regular"), "{err}");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A folder comes back as a zip of it, `.git` left out, that the system's
+    /// own `unzip` unpacks to the same files under the folder's name.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_is_fetched_as_a_zip() {
+        let tmp = scratch("download-folder");
+        let b = backend(&tmp);
+        let shots = tmp.join("repo/shots");
+        std::fs::create_dir_all(shots.join("deep/.git")).unwrap();
+        let png: Vec<u8> = (0..=255u8).cycle().take(40_000).collect();
+        std::fs::write(shots.join("a.png"), &png).unwrap();
+        std::fs::write(shots.join("deep/notes with space.md"), "# hej\n").unwrap();
+        std::fs::write(shots.join("deep/.git/HEAD"), "ref\n").unwrap();
+        std::fs::write(shots.join("zz-empty"), "").unwrap();
+        let s = session("alpha", &tmp.join("repo"));
+
+        let got = crate::files::fetch(&b, &s, "shots").unwrap();
+        assert_eq!(got.name, "shots.zip");
+        let zip = crate::files::decode_base64(&got.data).unwrap();
+        assert_eq!(zip.len() as u64, got.bytes);
+        let out = tmp.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("x.zip"), &zip).unwrap();
+        let unzip = std::process::Command::new("unzip")
+            .args(["-q", "x.zip"])
+            .current_dir(&out)
+            .output();
+        if let Ok(unzip) = unzip {
+            assert!(
+                unzip.status.success(),
+                "{}",
+                String::from_utf8_lossy(&unzip.stderr)
+            );
+            assert_eq!(std::fs::read(out.join("shots/a.png")).unwrap(), png);
+            assert_eq!(
+                std::fs::read(out.join("shots/deep/notes with space.md")).unwrap(),
+                b"# hej\n"
+            );
+            assert_eq!(std::fs::read(out.join("shots/zz-empty")).unwrap(), b"");
+            assert!(!out.join("shots/deep/.git").exists());
+        }
+
+        std::fs::create_dir_all(tmp.join("repo/nothing")).unwrap();
+        let err = crate::files::fetch(&b, &s, "nothing").unwrap_err();
+        assert!(err.contains("no files"), "{err}");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     /// One tmux server holds every worktree session on the machine, so a
     /// shared name would be two sessions attaching to one agent.
     #[test]

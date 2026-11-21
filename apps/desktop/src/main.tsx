@@ -4,6 +4,7 @@ import { LucideProvider } from "lucide-react";
 
 import App from "./App";
 import { MenuProvider } from "./ContextMenu";
+import { Downloads } from "./Download";
 import { routeLinks } from "./open";
 import { markUntrustedMetrics } from "./charSize";
 import { ICON_SIZE, ICON_STROKE } from "./icons";
@@ -51,6 +52,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <LucideProvider size={ICON_SIZE} strokeWidth={ICON_STROKE} absoluteStrokeWidth>
       <MenuProvider>
         <App />
+        <Downloads />
       </MenuProvider>
     </LucideProvider>
   </React.StrictMode>,

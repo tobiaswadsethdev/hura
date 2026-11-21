@@ -484,6 +484,59 @@ fn file(server: String, name: String, path: String) -> Result<FileText, Failed> 
     expect_reply!(reply, Reply::File(text) => text, "a file")
 }
 
+/// A file out of a worktree's sandbox, saved in the Downloads folder and shown
+/// there: where it was saved. Here rather than in the webview so the bytes go
+/// straight from the reply to the disk, and never through the bridge twice.
+#[tauri::command(async)]
+fn download(
+    app: tauri::AppHandle,
+    server: String,
+    name: String,
+    path: String,
+) -> Result<String, Failed> {
+    use tauri::Manager as _;
+    use tauri_plugin_opener::OpenerExt as _;
+    let reply = remote(&server)?
+        .call(Request::Download { name, path })
+        .map_err(to_message)?;
+    let fetched = expect_reply!(reply, Reply::Download(f) => f, "a file")?;
+    let raw = hura_proto::stream::bytes::decode(&fetched.data)
+        .ok_or_else(|| failed("the file came back malformed"))?;
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|_| failed("this computer has no Downloads folder to save it in"))?;
+    let saved = unclaimed(&dir, &fetched.name);
+    std::fs::write(&saved, raw).map_err(|e| {
+        failed(format!(
+            "could not save {}: {}",
+            saved.display(),
+            hura_core::plain::io(&e)
+        ))
+    })?;
+    // Shown rather than opened: a script or a page the agent wrote is not
+    // something to run with a double click nobody made.
+    app.opener().reveal_item_in_dir(&saved).ok();
+    Ok(saved.display().to_string())
+}
+
+/// A name in `dir` nothing has yet, the way a browser picks one: `shot.png`,
+/// then `shot (1).png`. Never over a file already there.
+fn unclaimed(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let name = if name.is_empty() { "download" } else { name };
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    let mut path = dir.join(name);
+    let mut n = 1;
+    while path.exists() {
+        path = dir.join(format!("{stem} ({n}){ext}"));
+        n += 1;
+    }
+    path
+}
+
 /// A worktree's shells, and whether its agent is running beside them. The
 /// webview's shape for `Reply::Shells`.
 #[derive(Serialize)]
@@ -1879,6 +1932,7 @@ fn main() {
             git_diff,
             files,
             file,
+            download,
             shells,
             new_shell,
             new_agent,

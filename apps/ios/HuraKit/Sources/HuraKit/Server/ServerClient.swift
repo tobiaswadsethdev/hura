@@ -195,6 +195,14 @@ public struct ServerClient: Sendable {
         return try await call("file", Body(name: name, path: path), as: FileText.self)
     }
 
+    /// A file, whole, to keep: relative to the working copy, or absolute
+    /// anywhere in the sandbox, which is where a screenshot lands.
+    public func download(_ name: String, path: String) async throws -> Fetched {
+        struct Body: Encodable { var name: String; var path: String }
+        // Up to 32 MiB, over a phone's connection: longer than a question takes.
+        return try await call("download", Body(name: name, path: path), as: Fetched.self, timeout: .seconds(180))
+    }
+
     public func gitStatus(_ name: String) async throws -> GitAnswer {
         try await call("git-status", Named(name: name), as: GitAnswer.self)
     }
@@ -320,15 +328,16 @@ public struct ServerClient: Sendable {
     }
 
     /// `op` with the fields of `body` beside it.
-    func call<B: Encodable, T: Decodable>(_ op: String, _ body: B, as: T.Type) async throws -> T {
-        try await post(JSONEncoder().encode(Op(op: op, body: body)), as: T.self)
+    func call<B: Encodable, T: Decodable>(_ op: String, _ body: B, as: T.Type,
+                                          timeout: Duration = .seconds(30)) async throws -> T {
+        try await post(JSONEncoder().encode(Op(op: op, body: body)), as: T.self, timeout: timeout)
     }
 
-    private func post<T: Decodable>(_ body: Data, as: T.Type) async throws -> T {
+    private func post<T: Decodable>(_ body: Data, as: T.Type, timeout: Duration = .seconds(30)) async throws -> T {
         let r = try await PinnedHTTP.request(
             host: record.host, port: record.port, pin: record.fingerprint, method: "POST", path: "/rpc",
             headers: [("Authorization", "Bearer \(record.token)"), ("Content-Type", "application/json")],
-            body: body, timeout: .seconds(30))
+            body: body, timeout: timeout)
         if r.status == 401 { throw ServerError.unauthorized }
         guard r.status == 200 else { throw ServerError.http(r.status) }
         let envelope: Envelope<T>

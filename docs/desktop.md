@@ -973,6 +973,28 @@ one a reply names in Markdown when it is a file in the working copy, read the
 same way. A URL is never loaded: the window fetches nothing from the network on
 an agent's say-so, and an image elsewhere stays its alt text.
 
+**Taking a file out.** A screenshot the agent took or a report it wrote is no
+use locked in the sandbox, so any file can be downloaded whole, up to 32 MiB,
+or a folder as a zip -- up to 32 MiB and a thousand files, `.git` left out --
+into this computer's Downloads folder and shown there in Finder or Explorer --
+no dialog, the way a browser does it. From the tree's menu on a file or a
+folder; from the
+file's tab when it is binary or only partly shown; and from the conversation,
+since those files land wherever the agent's tools chose, `/tmp` as often as the
+working copy. A tool call that wrote or saved files lists them under its answer
+(a screenshot a browser tool saved, a file `Write` made) and its header's menu
+offers every one it names; a path in a reply written as code --
+`/tmp/report.md`, or a folder's, `/tmp/shots/` -- opens a menu to download it.
+The zip is put together on the server, stored rather than compressed: what
+comes out is mostly screenshots, which are compressed already. And for what the
+agent made and never named -- a script that wrote into `/tmp` and said
+nothing -- **Download a path…** under the tree takes any path in the sandbox,
+typed or pasted. That one request takes an
+absolute path as well as a relative one, and still only reads. A line at the
+foot of the window says it is downloading, then where it went or why it could
+not. On the phone the same file goes to the share sheet instead: Save to
+Files, Photos, AirDrop.
+
 ### Monaco, and the worker that is not optional
 
 The viewer is Monaco, and it renders correctly in WebKitGTK -- measured before

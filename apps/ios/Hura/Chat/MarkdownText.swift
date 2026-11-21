@@ -1,3 +1,4 @@
+import HuraKit
 import SwiftUI
 
 /// Claude's replies as Markdown: paragraphs, lists and inline styling through
@@ -5,13 +6,14 @@ import SwiftUI
 /// views.
 struct MarkdownText: View {
     let text: String
+    @Environment(\.download) private var download
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(Self.segments(text).enumerated()), id: \.offset) { _, segment in
                 switch segment {
                 case let .prose(p):
-                    Text(Self.attributed(p))
+                    Text(download == nil ? Self.attributed(p) : Self.linkingPaths(Self.attributed(p)))
                         .fixedSize(horizontal: false, vertical: true)
                 case let .heading(level, h):
                     Text(Self.attributed(h))
@@ -27,6 +29,31 @@ struct MarkdownText: View {
             }
         }
         .textSelection(.enabled)
+        .environment(\.openURL, OpenURLAction { url in
+            guard url.scheme == Self.downloadScheme, let download else { return .systemAction }
+            download(url.path)
+            return .handled
+        })
+    }
+
+    /// The scheme of a link that downloads a path rather than opening a page.
+    nonisolated static let downloadScheme = "hura-download"
+
+    /// Code that is nothing but an absolute path, a file's or a folder's, as a
+    /// link that takes it out of the sandbox: that is how an agent says where
+    /// it put something -- `/tmp/report.md` -- and where someone looks for it.
+    nonisolated static func linkingPaths(_ text: AttributedString) -> AttributedString {
+        var text = text
+        let code = text.runs.filter { $0.inlinePresentationIntent?.contains(.code) == true }.map(\.range)
+        for range in code {
+            let path = String(text[range].characters)
+            guard Fetched.isPath(path) else { continue }
+            var url = URLComponents()
+            url.scheme = downloadScheme
+            url.path = path
+            text[range].link = url.url
+        }
+        return text
     }
 
     enum Segment: Equatable {

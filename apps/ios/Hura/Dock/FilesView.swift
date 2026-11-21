@@ -34,14 +34,17 @@ struct DirView: View {
                         Label(e.name, glyph: e.dir ? .folder : icon(e.name))
                     }
                     .contextMenu {
+                        DownloadButton(path: full, folder: e.dir)
                         Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = full }
                     }
                 }
+                if path.isEmpty { DownloadPathRow() }
             }
             .listStyle(.plain)
         }
         .refreshable { await load() }
         .task { await load() }
+        .downloads(server: server, name: name)
     }
 
     private func sorted(_ entries: [Dir.Entry]) -> [Dir.Entry] {
@@ -109,6 +112,9 @@ struct FileView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
+                    // The whole file, which is the only way to have what
+                    // this shows a part of, or nothing of.
+                    DownloadButton(path: path)
                     Toggle("Wrap Lines", isOn: $wrap)
                     Button("Copy Path", systemImage: "doc.on.doc") { UIPasteboard.general.string = path }
                     if let file, !file.binary {
@@ -122,6 +128,7 @@ struct FileView: View {
         .task {
             do { file = try await server.api.file(name, path: path) } catch { self.error = error.userMessage }
         }
+        .downloads(server: server, name: name)
     }
 }
 

@@ -182,6 +182,10 @@ export const api = {
     invoke<Dir>("files", { server, name, path }),
   file: (server: string, name: string, path: string) =>
     invoke<FileText>("file", { server, name, path }),
+  /// A file out of the sandbox, whole, into the Downloads folder: where it was
+  /// saved. Relative to the working copy, or absolute anywhere in the sandbox.
+  download: (server: string, name: string, path: string) =>
+    invoke<string>("download", { server, name, path }),
 
   // Git. Every mutation answers with what git said *and* the status
   // afterwards, re-read rather than assumed: the agent is editing while this

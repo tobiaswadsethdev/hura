@@ -58,6 +58,7 @@ import {
   CircleX,
   CircleDashed,
   CloudDownload,
+  Download as DownloadGlyph,
   CloudUpload,
   ClipboardPaste,
   Copy as CopyGlyph,
@@ -275,6 +276,8 @@ export const Send = ArrowUp;
 /// A file sent with a message, once it is in the message. The composer's
 /// button that picks one is a `Plus` in a disc, as on the phone.
 export const Attach = Paperclip;
+/// A file taken out of the sandbox, into this computer's Downloads folder.
+export const Download = DownloadGlyph;
 /// A message the sandbox has, and one Claude Code has taken into a turn: the
 /// receipts a messenger uses, because they are the ones already understood.
 export const Delivered = Check;

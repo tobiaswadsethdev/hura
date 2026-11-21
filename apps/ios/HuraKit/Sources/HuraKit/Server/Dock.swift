@@ -31,6 +31,53 @@ public struct FileText: Decodable, Equatable, Sendable {
     public var image: Picture?
 }
 
+/// A file, whole, out of the sandbox to keep on the phone: a screenshot the
+/// agent took, a report it wrote -- or a folder of them, as a zip the server
+/// made (`files::Fetched`).
+public struct Fetched: Decodable, Equatable, Sendable {
+    /// The file's own name.
+    public var name: String
+    public var bytes: Int
+    /// Base64.
+    public var data: String
+
+    /// Written to a folder of its own under `dir`, under its own name, for a
+    /// share sheet to hand on: the name is what Files and AirDrop show, so it
+    /// cannot be a temporary one.
+    public func save(in dir: URL) throws -> URL {
+        guard let raw = Data(base64Encoded: data) else { throw ServerError.malformed("the file came back malformed") }
+        let folder = dir.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent(name.isEmpty ? "download" : name)
+        try raw.write(to: url)
+        return url
+    }
+
+    /// The absolute paths to files in some text, in the order they first
+    /// appear, as the desktop's `pathsIn` finds them: what an agent names when
+    /// it says where it put something. A file is told by an extension:
+    /// `/usr/bin` named in passing in a command's output is not one to save.
+    public static func paths(in text: String) -> [String] {
+        let pattern = #"(?:^|[\s"'`(=:\[])((?:/[\w.@+~-]+)+\.[A-Za-z0-9]{1,8})(?=\.?(?:$|[\s"'`),;:\]]))"#
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return [] }
+        let ns = text as NSString
+        var found: [String] = []
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let p = ns.substring(with: m.range(at: 1))
+            if !p.contains("/.."), !found.contains(p) { found.append(p) }
+            if found.count == 8 { break }
+        }
+        return found
+    }
+
+    /// Whether some code is nothing but an absolute path, a file's or a
+    /// folder's: looser than `paths(in:)`, since it is asked only of what the
+    /// agent set apart as code, which is where it names the folder it used.
+    public static func isPath(_ text: String) -> Bool {
+        text.range(of: #"^(/[\w.@+~-]+)+/?$"#, options: .regularExpression) != nil && !text.contains("/..")
+    }
+}
+
 /// An image, whole: a file of the working copy, or one a tool answered with.
 public struct Picture: Codable, Equatable, Hashable, Sendable {
     /// `image/png` and the like.

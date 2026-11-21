@@ -135,6 +135,11 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 .map(Reply::File)
                 .map_err(Failure::failed)
         }),
+        Request::Download { name, path } => with_session(&name, |s| {
+            files::fetch(backends.for_session(s), s, &path)
+                .map(Reply::Download)
+                .map_err(Failure::failed)
+        }),
         Request::Shells { name } => with_session(&name, |s| shells(backends.for_session(s), s)),
         Request::NewShell { name } => with_session(&name, |s| {
             ops::new_shell(backends.for_session(s), s).map_err(Failure::failed)?;

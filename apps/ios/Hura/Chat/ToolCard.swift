@@ -9,6 +9,7 @@ struct ToolCard: View {
     let working: Bool
     @State private var expanded: Bool?
     @State private var showAll = false
+    @Environment(\.download) private var download
 
     private var label: ToolLabel { .of(call, cwd: cwd) }
     private var isOpen: Bool { expanded ?? opensItself }
@@ -40,6 +41,15 @@ struct ToolCard: View {
                 .padding(.vertical, 9)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                if let download {
+                    ForEach(files, id: \.self) { f in
+                        Button("Download \((f as NSString).lastPathComponent)", systemImage: "square.and.arrow.down") {
+                            download(f)
+                        }
+                    }
+                }
+            }
             if isOpen {
                 Divider().opacity(0.4)
                 detail
@@ -50,6 +60,21 @@ struct ToolCard: View {
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(borderColor, lineWidth: 1))
     }
+
+    /// The files the call names, by absolute path: what it wrote, and what its
+    /// answer says it saved -- a browser tool's screenshot, most often, which
+    /// lands in `/tmp` and is named nowhere else. As the desktop's `filesOf`.
+    private var files: [String] {
+        guard let result = call.result, !call.failed else { return [] }
+        let named = ["file_path", "notebook_path", "filename"].compactMap { call.input[$0]?.string }
+            .filter { $0.hasPrefix("/") }
+        var seen = Set<String>()
+        return (named + Fetched.paths(in: result.text ?? "")).filter { seen.insert($0).inserted }
+    }
+
+    /// Calls whose files are the agent's own working rather than the point of
+    /// them: still in the menu, but not a row of buttons under every read.
+    private static let keeps: Set<String> = ["Read", "Edit", "MultiEdit", "Grep", "Glob"]
 
     private var borderColor: Color {
         call.failed && !call.stopped ? .red.opacity(0.5) : .primary.opacity(0.08)
@@ -124,6 +149,22 @@ struct ToolCard: View {
             }
             ForEach(Array((call.result?.pictures ?? []).enumerated()), id: \.offset) { _, p in
                 PictureView(picture: p)
+            }
+            if let download, !Self.keeps.contains(call.name), !files.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(files, id: \.self) { f in
+                            Button { download(f) } label: {
+                                Label((f as NSString).lastPathComponent, systemImage: "square.and.arrow.down")
+                                    .font(.footnote.monospaced())
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.primary.opacity(0.08), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
             }
             if call.inputTruncated {
                 Text("Input cut to 16 KiB per field.").font(.caption2).foregroundStyle(.secondary)

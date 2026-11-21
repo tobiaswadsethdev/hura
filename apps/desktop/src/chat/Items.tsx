@@ -15,9 +15,11 @@
 
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { useContextMenu } from "../ContextMenu";
+import { baseName, Downloader, downloadItems, pathsIn } from "../Download";
 import { Fold, scrollParent, slide } from "../Fold";
 import type { ChatFile } from "../gen/ChatFile";
-import { Attach, Chosen, Close, Delivered, Read, Twisty, Working } from "../icons";
+import { Attach, Chosen, Close, Delivered, Download, Read, Twisty, Working } from "../icons";
 import { Markdown } from "../Markdown";
 import { leadingCommand } from "./commands";
 import { since, Ticking, useNow } from "./elapsed";
@@ -310,7 +312,25 @@ function opensItself(call: ToolCall): boolean {
   return false;
 }
 
+/// The files a tool call names, by absolute path: what it wrote, and what its
+/// answer says it saved -- a browser tool's screenshot, most often, which
+/// lands in `/tmp` and is named nowhere else.
+export function filesOf(call: ToolCall): string[] {
+  const named = [call.input.file_path, call.input.notebook_path, call.input.filename].filter(
+    (p): p is string => typeof p === "string" && p.startsWith("/"),
+  );
+  return [...new Set([...named, ...pathsIn(call.result?.text ?? "")])];
+}
+
+/// Calls whose files are the point of them, offered under the answer as well
+/// as in the menu. A file read, edited or searched is the agent's own working;
+/// it can still be had from the menu, but a row of them would be noise.
+const KEEPS = new Set(["Read", "Edit", "MultiEdit", "Grep", "Glob"]);
+
 export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
+  const fetch = useContext(Downloader);
+  const menu = useContextMenu();
+  const files = fetch && call.result && !call.result.isError ? filesOf(call) : [];
   const [open, setOpen] = useState<boolean | null>(null);
   const shown = open ?? opensItself(call);
   const { verb, subject } = describe(call.name, call.input);
@@ -328,7 +348,12 @@ export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
   const now = useNow(ticking);
   return (
     <div className={`chat-tool ${state}`}>
-      <button className="chat-tool-head" aria-expanded={shown} onClick={() => setOpen(!shown)}>
+      <button
+        className="chat-tool-head"
+        aria-expanded={shown}
+        onClick={() => setOpen(!shown)}
+        {...menu(() => downloadItems(files, fetch))}
+      >
         <Twisty open={shown} />
         {/* One group, so the two faces share a baseline: centring them as
             separate boxes sets the sans verb and the mono subject at
@@ -357,6 +382,16 @@ export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
           {call.result?.images.map((p, i) => (
             <Zoomable key={i} className="chat-image" src={`data:${p.mime};base64,${p.data}`} alt="" />
           ))}
+          {fetch && files.length > 0 && !KEEPS.has(call.name) && (
+            <div className="chat-downloads">
+              {files.map((f) => (
+                <button key={f} className="chat-file" title={`Download ${f}`} onClick={() => fetch(f)}>
+                  <Download aria-hidden />
+                  {baseName(f)}
+                </button>
+              ))}
+            </div>
+          )}
           {call.answer && !call.answer.allow && call.answer.message && (
             <p className="chat-quiet">You said: {call.answer.message}</p>
           )}

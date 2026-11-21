@@ -15,6 +15,9 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { api } from "./api";
+import { copy, useButtonMenu } from "./ContextMenu";
+import { Downloader, downloadItems, isPath } from "./Download";
+import { Copy } from "./icons";
 import type { Picture } from "./gen/Picture";
 import { Zoomable } from "./Picture";
 
@@ -73,6 +76,29 @@ function Img({ src, alt }: { src?: string; alt?: string }) {
   return <Zoomable className="doc-img" src={`data:${picture.mime};base64,${picture.data}`} alt={alt ?? path ?? ""} />;
 }
 
+/// Code that is nothing but an absolute path, in a conversation:
+/// a menu that downloads it, since that is how an agent says where it put
+/// something -- `/tmp/report.md` -- and the place someone looks for it.
+function Code({ className, children }: { className?: string; children?: React.ReactNode }) {
+  const fetch = useContext(Downloader);
+  const menu = useButtonMenu();
+  const text = typeof children === "string" ? children.trim() : "";
+  const path = fetch && !className && isPath(text) ? text : null;
+  if (!path) return <code className={className}>{children}</code>;
+  return (
+    <button
+      className="doc-path"
+      title="Download or copy this path"
+      onClick={menu(() => [
+        ...downloadItems([path], fetch),
+        { label: "Copy Path", icon: Copy, run: () => copy(path) },
+      ])}
+    >
+      <code>{children}</code>
+    </button>
+  );
+}
+
 const OPENABLE = /^(https?:|mailto:)/i;
 
 const components: Components = {
@@ -90,6 +116,7 @@ const components: Components = {
   h2: ({ children }) => <h4>{children}</h4>,
   h3: ({ children }) => <h5>{children}</h5>,
   pre: ({ children }) => <pre className="doc-code">{children}</pre>,
+  code: ({ className, children }) => <Code className={className}>{children}</Code>,
   table: ({ children }) => (
     <div className="doc-table">
       <table>{children}</table>

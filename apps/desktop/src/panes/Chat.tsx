@@ -34,6 +34,7 @@ import { epochOf, localInput } from "../NewWorktree";
 import { startsAt } from "../Tree";
 import type { QueuedMessage } from "../gen/QueuedMessage";
 import { keyFor, Remembered } from "../cache";
+import { download, Downloader } from "../Download";
 import { Markdown, Pictures, type ReadPicture } from "../Markdown";
 import type { PartialMessage } from "../sdk";
 import { Select } from "../Select";
@@ -850,6 +851,8 @@ export function ChatPane({
     () => (path) => api.file(server, name, path).then((f) => f.image ?? undefined),
     [server, name],
   );
+  // A file a tool call or a reply names, out of this session's sandbox.
+  const fetchFile = useCallback((path: string) => void download(server, name, path), [server, name]);
 
   useEffect(() => {
     let live = true;
@@ -1033,10 +1036,12 @@ export function ChatPane({
                   ) : view.state ? (
                     <Empty icon={ChatGlyph} />
                   ) : null)}
+                <Downloader.Provider value={fetchFile}>
                 <Pictures.Provider value={readPicture}>
                   <Items items={items} receipts={receipts} />
                   <Writing live={view.live} entries={view.entries} />
                 </Pictures.Provider>
+                </Downloader.Provider>
                 {/* Under whatever is being written, for the whole turn, so a reply
                     that has paused between two tool calls still says it is not
                     finished. The word only while there is nothing else to look at. */}
@@ -1079,9 +1084,11 @@ export function ChatPane({
         </Unpin.Provider>
       </OpenAgent.Provider>
       {followed && (
+        <Downloader.Provider value={fetchFile}>
         <Pictures.Provider value={readPicture}>
           <AgentPanel agent={followed} progress={view.tasks.get(followed.id)} onClose={() => setFollowing(null)} />
         </Pictures.Provider>
+        </Downloader.Provider>
       )}
       </Ticking.Provider>
     </div>

@@ -127,3 +127,38 @@ struct DockWireTests {
         #expect(watched.watching == [Watching(id: "w1", host: "example.com:443")])
     }
 }
+
+/// Taking a file out of a sandbox: the paths an agent names, found as the
+/// desktop's `pathsIn` finds them, and the copy the share sheet is handed.
+struct FetchedTests {
+    @Test(arguments: [
+        ("Saved it to /tmp/playwright-mcp-output/1732/page-2026.png.", ["/tmp/playwright-mcp-output/1732/page-2026.png"]),
+        ("see `/sandbox/repo/docs/report.md`, done", ["/sandbox/repo/docs/report.md"]),
+        ("(/root/x.tar.gz) and /root/x.tar.gz again", ["/root/x.tar.gz"]),
+        ("https://example.com/a.png", []),
+        ("path: /home/agent/out (a folder)", []),
+        ("/tmp/../etc/passwd.txt", []),
+    ])
+    func pathsAreTheAbsoluteFilesNamed(text: String, paths: [String]) {
+        #expect(Fetched.paths(in: text) == paths)
+    }
+
+    @Test(arguments: [
+        ("/tmp/shots/", true), ("/tmp/shots", true), ("/tmp/report.md", true),
+        ("/", false), ("npm test", false), ("/tmp/../etc", false), ("tmp/shots", false),
+    ])
+    func codeIsAPathWhenItIsNothingElse(text: String, path: Bool) {
+        #expect(Fetched.isPath(text) == path)
+    }
+
+    @Test func aFileIsSavedUnderItsOwnName() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try Fetched(name: "shot.png", bytes: 6, data: "aGVsbG8K").save(in: dir)
+        #expect(url.lastPathComponent == "shot.png")
+        #expect(try Data(contentsOf: url) == Data("hello\n".utf8))
+        // A second of the same name does not overwrite the first.
+        let again = try Fetched(name: "shot.png", bytes: 6, data: "aGVsbG8K").save(in: dir)
+        #expect(again != url)
+    }
+}
