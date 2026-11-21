@@ -643,8 +643,10 @@ fn lacking(need: &Need, tag: &str) -> Option<&'static str> {
 }
 
 /// [`ensure`] for a session about to be created, which is how both front ends
-/// call it. A worktree needs no image at all, and the pins are read from the
-/// checkouts of the draft's remote only when it asked for dotnet.
+/// call it. A worktree needs no image at all, and the pins are read only when
+/// the draft asked for dotnet, from the branch its clone will be on: a pull
+/// request's own, or the base it starts from, as the seeder's clone and switch
+/// do.
 pub fn ensure_session(
     draft: &crate::ops::Draft,
     cfg: &crate::config::Config,
@@ -654,7 +656,12 @@ pub fn ensure_session(
     }
     let pins = if draft.toolchains.iter().any(|t| t.name == "dotnet") {
         let roots = crate::repos::roots(cfg.repo_roots.as_deref());
-        crate::dotnet::pins_for(&draft.repo, &roots)
+        let branch = if draft.pull.is_some() {
+            draft.branch.as_deref()
+        } else {
+            draft.base.as_deref()
+        };
+        crate::dotnet::pins_for(&draft.repo, branch, &roots)
     } else {
         Vec::new()
     };

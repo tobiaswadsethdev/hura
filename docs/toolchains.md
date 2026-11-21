@@ -64,8 +64,8 @@ A `global.json` can pin the SDK a repository builds with, and with
 `"rollForward": "disable"` it accepts that exact version and no other: on an
 image whose SDK is one patch newer, every `dotnet` command in the repository
 fails, `dotnet --version` included. So a session asking for `dotnet` reads the
-`global.json` files of the checkout it names (its root and one level down, the
-same places the create form looks for project files), and when the SDKs in the
+`global.json` files its clone will have (its root and one level down, the same
+places the create form looks for project files), and when the SDKs in the
 image do not satisfy a pin, the exact version pinned is added to the variant as
 one more layer before the sandbox is made:
 
@@ -79,9 +79,20 @@ side and the `dotnet` host picks the one each repository asks for. An SDK added
 this way stays in the variant for every later session, until the variant is
 pulled or built again; the next session needing it adds it back.
 
-The checkout is found by its `origin`: every repository under the configured
-roots whose remote is the session's is read. That is the local working copy, so
-a pin changed but not yet pushed is read the same as one that has been.
+The sandbox clones the remote, so the pin that counts is the remote's: the tip
+of the base branch, or of the pull request's branch for a session started from
+one. hura reads it through a checkout of the same remote under the configured
+roots, after fetching that branch into it, the same fetch a worktree session
+makes before branching. Only a remote-tracking ref moves; your branches and
+working copy stay where you left them. A checkout that has fallen behind its
+remote therefore no longer pins an SDK the remote has moved on from, which it
+used to: a local copy still on 10.0.403 kept every session one SDK short of the
+10.0.404 its clone asked for.
+
+When no checkout can name that commit (offline and never fetched, or a
+checkout with no `origin/HEAD` to say which branch is the default), the working
+copies are read instead. A pin changed locally but not yet pushed is not in the
+clone, and is not read.
 
 ## One image per set of toolchains
 
