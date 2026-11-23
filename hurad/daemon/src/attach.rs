@@ -12,7 +12,8 @@ use std::process::Command;
 
 use hura_core::backend::Backends;
 use hura_core::ops;
-use hura_core::session::Session;
+use hura_core::session::{Kind, Session};
+use sbx_client::NO_TELEMETRY;
 
 /// Hand the terminal to the agent, and take it back afterwards.
 ///
@@ -46,7 +47,15 @@ pub fn interactively(
     // Not `.output()` and never killed: the child exits on its own when the
     // person detaches. Killing an `exec --tty` wedged the exec path under
     // OpenShell; the runtime survives it, but detaching is still the gentler.
-    Command::new(&argv[0]).args(&argv[1..]).status()
+    let mut command = Command::new(&argv[0]);
+    command.args(&argv[1..]);
+    // Else the exec holds the prompt for the CLI's analytics wait after
+    // detaching (see `NO_TELEMETRY`). Not for a worktree, whose attach can
+    // start a tmux server that every later shell would inherit it from.
+    if session.backend == Kind::Sandbox {
+        command.env(NO_TELEMETRY.0, NO_TELEMETRY.1);
+    }
+    command.status()
 }
 
 /// Raw mode for as long as it is alive.
