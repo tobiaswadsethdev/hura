@@ -970,6 +970,12 @@ fn pty_worker(
     // needs to know it is talking to something. `ops::attach_script` sets the
     // locale inside; this is the outside half.
     command.env("TERM", "xterm-256color");
+    // Else the tab stays open through the CLI's analytics wait after the
+    // exec ends (see `NO_TELEMETRY`). Not for a worktree, whose attach can
+    // start a tmux server that every later shell would inherit it from.
+    if session.backend == hura_core::session::Kind::Sandbox {
+        command.env(sbx_client::NO_TELEMETRY.0, sbx_client::NO_TELEMETRY.1);
+    }
 
     let Ok(mut child) = pair.slave.spawn_command(command) else {
         return;

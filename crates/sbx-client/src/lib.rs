@@ -51,6 +51,10 @@
 //!   to `lo`, which is the reason for the fallback in `hurad`'s forwards
 //! * deprecation and update notices go to stderr, so stdout is still only the
 //!   answer
+//! * a call prints its answer at once, then waits on the CLI's analytics
+//!   queue before it exits. Fast while the queue is empty, but hura's own
+//!   calls filled it, and then each one took about 14 s, which is why every
+//!   call says [`NO_TELEMETRY`]
 
 use std::ffi::OsStr;
 use std::io::Write as _;
@@ -597,7 +601,8 @@ pub trait Sbx {
     /// argument.
     fn exec_stdin(&self, name: &str, argv: &[&str], input: &[u8]) -> Result<ExecOutput>;
 
-    /// The argv for an interactive exec that owns a terminal. Built, not run.
+    /// The argv for an interactive exec that owns a terminal. Built, not run,
+    /// so whoever runs it sets [`NO_TELEMETRY`].
     fn interactive_argv(&self, name: &str, argv: &[&str]) -> Vec<String>;
 
     fn remove(&self, name: &str) -> Result<()>;
@@ -715,6 +720,18 @@ const STATE_VARS: [&str; 4] = [
     "XDG_DATA_HOME",
 ];
 
+/// Set on every call, and on every interactive exec hura spawns from
+/// [`Sbx::interactive_argv`].
+///
+/// From v0.54 the CLI prints its answer and then waits on its analytics queue
+/// before it exits. Every call adds to that queue, and a server runs the CLI
+/// several times a second, so on one machine it held about 2,500 events and
+/// each call took about 14 s to return: `ls` answered in 0.07 s and exited at
+/// 14.2 s. That was every poll, every exec and every forward, and a chat's
+/// forward gave up at its 20 s limit. With this set the same `ls` returned in
+/// 0.07 s, and once nothing more was added the queue drained.
+pub const NO_TELEMETRY: (&str, &str) = ("SBX_NO_TELEMETRY", "1");
+
 impl CliClient {
     pub fn new() -> Self {
         Self::default()
@@ -738,6 +755,7 @@ impl CliClient {
         for var in STATE_VARS {
             cmd.env_remove(var);
         }
+        cmd.env(NO_TELEMETRY.0, NO_TELEMETRY.1);
         cmd.args(args);
         // No console window per call on Windows, which a server with no console
         // of its own would otherwise flash up for every `sbx` it runs.
@@ -1577,6 +1595,24 @@ mod tests {
                 .interactive_argv("hura-a", &["tmux", "attach"])
                 .join(" "),
             "/opt/sbx exec --interactive --tty hura-a tmux attach"
+        );
+    }
+
+    /// The CLI's analytics wait cost every call about 14 s on v0.54 once the
+    /// queue had filled, so a call without this is one that times out
+    /// somewhere else (see [`NO_TELEMETRY`]).
+    #[test]
+    fn every_call_turns_the_clis_analytics_off() {
+        let cmd = CliClient::new().with_bin("/opt/sbx").command(["ls"]);
+        let envs: Vec<_> = cmd.get_envs().collect();
+        assert!(
+            envs.contains(&(OsStr::new("SBX_NO_TELEMETRY"), Some(OsStr::new("1")))),
+            "{envs:?}"
+        );
+        // Still removed alongside it, not replaced by it.
+        assert!(
+            envs.contains(&(OsStr::new("XDG_STATE_HOME"), None)),
+            "{envs:?}"
         );
     }
 }
