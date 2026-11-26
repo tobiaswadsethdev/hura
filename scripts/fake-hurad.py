@@ -28,7 +28,7 @@ app against it (for the iPhone, see `pairFromLaunchArguments` in
 apps/ios/Hura/HuraApp.swift). The Files pane is this checkout. Python's
 standard library and openssl only.
 """
-import base64, fcntl, hashlib, json, os, pty, ssl, struct, subprocess, sys, tempfile, termios, threading, time
+import base64, fcntl, hashlib, json, os, pty, socket, ssl, struct, subprocess, sys, tempfile, termios, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 18555
@@ -75,27 +75,47 @@ sessions.sort(key=lambda s: s["name"] != first)
 # What is waiting: a session queued for room and one scheduled for later,
 # and messages for three of the sessions above -- one for after its turn, and
 # the rest at times -- so each list shows a row's mark in every form.
-def queued(id, name, project, task, at=None):
+def queued(id, name, project, task, at=None, repeat=None, runs=0, last=None):
     new = {"project": project, "name": name, "title": None, "repo": REPOS[project], "task": task, "base": None,
            "branch": None, "policy": "feature-work", "providers": ["claude"], "toolchains": ["node"], "start": True,
            "ticket": None, "pull": None, "interface": "chat", "worktree": False}
-    return {"id": id, "new": new, "at": at, "added": now - 600, "started": False, "failed": None}
+    return {"id": id, "new": new, "at": at, "added": now - 600, "started": False, "failed": None,
+            "repeat": repeat, "runs": runs, "last": last}
 
-def message(id, session, text, at=None):
-    return {"id": id, "session": session, "text": text, "at": at, "added": now - 300}
+def next_time(repeat, after):
+    """When a repeating one next comes round, on this machine's clock."""
+    import datetime as dt
+    if repeat["type"] == "interval":
+        return after + repeat["minutes"] * 60
+    base = dt.datetime.fromtimestamp(after)
+    for ahead in range(8):
+        day = (base + dt.timedelta(days=ahead)).replace(hour=repeat["hour"], minute=repeat["minute"], second=0, microsecond=0)
+        if (not repeat["weekdays"] or (day.isoweekday() % 7) in repeat["weekdays"]) and day.timestamp() > after:
+            return int(day.timestamp())
+    return None
+
+def message(id, session, text, at=None, repeat=None, runs=0):
+    return {"id": id, "session": session, "text": text, "at": at, "added": now - 300, "repeat": repeat, "runs": runs}
 
 queue = {
     "sessions": [
         queued(1, "release-notes", "hura", "Draft the release notes for the next hurad"),
-        queued(2, "nightly-deps", "storefront", "Update dependencies and run the suite", at=now + 6 * 3600),
+        queued(2, "nightly-deps", "storefront", "Update dependencies and run the suite",
+               at=next_time({"type": "fixed_time", "hour": 2, "minute": 0, "weekdays": [1, 2, 3, 4, 5]}, now),
+               repeat={"type": "fixed_time", "hour": 2, "minute": 0, "weekdays": [1, 2, 3, 4, 5]},
+               runs=3, last="nightly-deps-3"),
     ],
     "messages": [
         message(3, "docs-search", "Now add a keyboard shortcut to open the search"),
-        message(4, "relay-tls", "Check the rotation held overnight", at=now + 3 * 3600),
+        message(4, "relay-tls", "Check the rotation held overnight",
+                at=next_time({"type": "fixed_time", "hour": 9, "minute": 0, "weekdays": []}, now),
+                repeat={"type": "fixed_time", "hour": 9, "minute": 0, "weekdays": []}, runs=4),
         message(5, "relay-tls", "Then open a pull request", at=now + 4 * 3600),
         message(6, "price-rounding", "Re-run the checkout tests against staging", at=now + 86400 * 2),
     ],
     "limit": 2,
+    # This machine's offset: a server that can repeat a worktree says it.
+    "utc_offset": int(time.localtime().tm_gmtoff),
 }
 
 def report(state, detail=None, prompt=None, ask=None):
@@ -139,6 +159,11 @@ def tool(tid, name, **input):
 def result(tid, text, error=False):
     return {"kind": "sdk", "msg": {"type": "user", "parent_tool_use_id": None,
                                    "message": {"content": [{"type": "tool_result", "tool_use_id": tid, "content": text, "is_error": error}]}}}
+
+def system(subtype, **fields):
+    """A Claude Code system event, as the transcript keeps it: a background
+    task starting or ending."""
+    return {"kind": "sdk", "msg": {"type": "system", "subtype": subtype, **fields}}
 
 def done(seconds, cost):
     return {"kind": "sdk", "msg": {"type": "result", "subtype": "success", "is_error": False,
@@ -185,6 +210,21 @@ conversations = {
         tool("t3", "Bash", command="npm run docs:build", description="Build the docs with the index"),
         result("t3", "vitepress v2.0.4\n✓ building client + server bundles...\n✓ rendering pages...\n"
                      "✓ indexed 142 pages, 1,206 sections (318 KB, 41 KB gzipped)\nbuild complete in 6.82s."),
+        tool("t3b", "Bash", command="npm run docs:dev -- --port 5173", description="Serve the docs with search",
+             run_in_background=True),
+        result("t3b", "Command running in background with ID: b7k2x9. "
+                      "Output is being written to: /tmp/claude-1000/tasks/b7k2x9.output"),
+        system("task_started", task_id="b7k2x9", tool_use_id="t3b", task_type="local_bash",
+               description="Serve the docs with search"),
+        tool("t3c", "Bash", command="npx lychee docs --offline", description="Check the docs' links",
+             run_in_background=True),
+        result("t3c", "Command running in background with ID: b4m1q8. "
+                      "Output is being written to: /tmp/claude-1000/tasks/b4m1q8.output"),
+        system("task_started", task_id="b4m1q8", tool_use_id="t3c", task_type="local_bash",
+               description="Check the docs' links"),
+        system("task_notification", task_id="b4m1q8", status="completed",
+               summary="Checked 1,206 links in 142 pages: none broken.",
+               output_file="/tmp/claude-1000/tasks/b4m1q8.output"),
         say("m2", "The index builds with the site: 142 pages in 41 KB gzipped, fetched the first time someone presses ⌘K."),
         done(286, 2.10),
         prompt("Rank a match in a heading above one in the text, and show which section it's in.", "u2"),
@@ -245,8 +285,24 @@ ASKS = {
 MODELS = [{"value": v, "display_name": d, "description": "", "resolved": None, "efforts": ["low", "medium", "high"]}
           for v, d in [("opus", "Opus 5.5"), ("sonnet", "Sonnet 5.5"), ("haiku", "Haiku 5.5")]]
 
-def chat_frames(name, cid):
-    events = conversations.get(name, [])
+# A few of Claude Code's own, and a skill, for the composer's `/` menu.
+SLASH_COMMANDS = [{"name": n, "description": d, "argument_hint": h, "aliases": a} for n, d, h, a in [
+    ("compact", "Clear the conversation but keep a summary of it in context", "<instructions>", []),
+    ("context", "Show what is using the context window", "", []),
+    ("review", "Review a pull request", "<number>", []),
+    ("security-review", "Review the pending changes on this branch for security issues", "", []),
+    ("usage", "Show the session's cost and the account's limits", "", ["cost"]),
+    ("frontend-design", "Guidance for intentional visual design (skill)", "", []),
+]]
+
+# The conversations opened beside each session's first, by session. A new one
+# (a side chat, or one forked from an earlier message) starts empty here.
+CHATS = {}
+# What a shell was opened to run (a project's script), by session and shell.
+SHELL_RUNS = {}
+
+def chat_frames(name, cid, conv=None):
+    events = conversations.get(name, []) if conv in (None, "agent") else []
     start = (now - 1800) * 1000
     entries = [{"seq": i + 1, "at": start + i * 45000, "ev": ev} for i, ev in enumerate(events)]
     pending = ASKS.get(name, [])
@@ -254,7 +310,8 @@ def chat_frames(name, cid):
     activity = "waiting" if pending else ("running" if status["state"] == "running" else "idle")
     state = {"activity": activity, "pending": pending, "mode": "default",
              "model": "sonnet" if name == "price-rounding" else "opus", "effort": "high", "models": MODELS,
-             "commands": [], "status": None, "cost_usd": use and use["cost_usd"],
+             "commands": [c["name"] for c in SLASH_COMMANDS], "slash_commands": SLASH_COMMANDS,
+             "status": None, "cost_usd": use and use["cost_usd"],
              "context_percentage": use and use["context_used_percentage"],
              "context_size": use and use["context_size"], "started": True, "files": True, "receipts": True}
     return [{"is": "chat", "id": cid, "frame": {"t": "replay", "seq": len(entries), "entries": entries}},
@@ -346,10 +403,64 @@ def read_repo(path):
         return ""
 
 SKIP = {".git", "target", "node_modules", "dist", ".DS_Store"}
+# The shells opened beside each session's agent, by session.
+SHELLS = {}
+
+# What the background commands above have written, for the panel that
+# follows one. The dev server's log grows by a line every few seconds.
+STARTED = time.time()
+def tail_file(path):
+    if path.endswith("b7k2x9.output"):
+        lines = ["", "  \x1b[32mvitepress\x1b[0m v2.0.4", "",
+                 "  \x1b[32m➜\x1b[0m  Local:   \x1b[36mhttp://localhost:5173/\x1b[0m",
+                 "  \x1b[2m➜  Network: use --host to expose\x1b[0m", ""]
+        pages = ["search.md", "guide/policy.md", "guide/events.md", "reference/hurad.md", "index.md"]
+        for i in range(int((time.time() - STARTED) // 3) + 2):
+            t = time.strftime("%H:%M:%S", time.localtime(STARTED + i * 3))
+            lines.append(f"\x1b[2m{t}\x1b[0m \x1b[36m[vitepress]\x1b[0m page reload docs/{pages[i % len(pages)]}")
+        text = "\n".join(lines) + "\n"
+    elif path.endswith("b4m1q8.output"):
+        text = ("🔍 1206 Total (in 2s) ✅ 1198 OK 🚫 0 Errors 👻 8 Excluded\n"
+                "\n8 links excluded (external, --offline)\n")
+    else:
+        return None
+    return {"path": path, "bytes": len(text.encode()), "text": text, "cut": False}
+
+def find_files(query, limit):
+    """The composer's `@`: this checkout's files by name, ranked as
+    `hura_core::files::rank` ranks them (the name, then the path, then the
+    letters in order; shorter first)."""
+    out = subprocess.run(["git", "-C", REPO_ROOT, "-c", "core.quotePath=off", "ls-files", "--cached", "--others",
+                          "--exclude-standard"], capture_output=True, text=True).stdout.split("\n")
+    paths = [p for p in out if p]
+    dirs = sorted({p[:i + 1] for p in paths for i in range(len(p)) if p[i] == "/"})
+    q = query.strip().lower().removeprefix("./")
+    def score(path):
+        if not q: return 0
+        low = path.lower(); name = low.rstrip("/").rsplit("/", 1)[-1]; stem = name.split(".")[0]
+        if name == q or stem == q: return 0
+        if name.startswith(q): return 1
+        if q in name: return 2
+        if q in low: return 3
+        rest = iter(low)
+        return 4 if all(c in rest for c in q) else None
+    ranked = sorted(((score(p), len(p), p) for p in paths + dirs if score(p) is not None))
+    limit = min(int(limit), 200)
+    return {"paths": [p for _, _, p in ranked[:limit]], "truncated": len(ranked) > limit}
+
+# A folder that is not in the checkout, with a file of each kind the file
+# icons tell apart: documents, media, and the languages with marks of their own.
+SAMPLES = ["AGENTS.md", "App.test.tsx", "CLAUDE.md", "Cargo.toml", "Main.java", "budget.xlsx", "data.csv", "demo.mp4", "fix.patch",
+           "guide.epub", "handbook.pdf", "layout.xml", "notes.docx", "photo.png", "roadmap.pptx", "run.ps1",
+           "server.go", "setup.py", "styles.css", "vitest.config.ts"]
+
 def files(path):
+    if path == "samples":
+        return {"path": path, "entries": [{"name": n, "dir": False} for n in sorted(SAMPLES, key=str.lower)]}
     full = os.path.join(REPO_ROOT, path)
     names = sorted(n for n in os.listdir(full) if n not in SKIP) if os.path.isdir(full) else []
     entries = [{"name": n, "dir": os.path.isdir(os.path.join(full, n))} for n in names]
+    if path == "": entries.append({"name": "samples", "dir": True})
     entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
     return {"path": path, "entries": entries}
 
@@ -405,15 +516,80 @@ def answer(req):
             if s["name"] in req["names"]: s["rank"] = req["names"].index(s["name"])
         return answer({"op": "ls"})
     if op == "queue": return {"reply": "queue", **queue}
+    if op == "queue-message":
+        repeat = req.get("repeat")
+        at = req.get("at") or (next_time(repeat, int(time.time())) if repeat else None)
+        ids = [q["id"] for k in ("sessions", "messages") for q in queue[k]]
+        queue["messages"].append(message(max(ids + [0]) + 1, req["name"], req["text"], at=at, repeat=repeat))
+        return {"reply": "queue", **queue}
+    if op == "set-project-defaults":
+        for p in projects:
+            if p["name"] == req["name"]:
+                p["defaults"] = {k: v for k, v in req.get("defaults", {}).items() if v not in (None, "", [])}
+        return {"reply": "projects", "projects": projects}
+    # What the new-worktree draft is filled from, and what it asks for.
+    if op == "new-options":
+        return {"reply": "new-options",
+                "policies": [{"spec": "feature-work", "summary": "The package registries and the forge"},
+                             {"spec": "locked-down", "summary": "Nothing but the forge"},
+                             {"spec": "research", "summary": "Anything over HTTPS, logged"}],
+                "toolchains": [{"name": "node", "summary": "Node.js 24 and npm"},
+                               {"name": "rust", "summary": "Rust stable and cargo"},
+                               {"name": "dotnet", "summary": ".NET 10 SDK"}],
+                "providers": [{"name": "claude", "kind": "anthropic"}, {"name": "github", "kind": "github"}],
+                "providers_error": None, "default_policy": "feature-work", "default_providers": ["claude"],
+                "default_base": "main", "skills": ["frontend-design"], "mcp": ["jira"],
+                "default_interface": "chat", "worktrees": True}
+    if op == "inspect":
+        return {"reply": "inspect", "facts": {"uncommitted": 2, "unpushed": 1, "base_on_remote": True,
+                "toolchains": ["node", "rust"]}, "branch": "main", "providers": []}
+    if op == "upload-skills":
+        return {"reply": "integrations", "mcp": [], "secrets": [], "skills": [], "configured_skills": []}
+    if op in ("create", "create-from-pull"):
+        name = req.get("name") or "-".join(req.get("task", "").lower().split()[:3]) or "new-worktree"
+        return {"reply": "created", "name": name}
+    if op == "enqueue":
+        new, repeat = req["new"], req.get("repeat")
+        new["name"] = new.get("name") or "-".join(new.get("task", "").lower().split()[:3]) or "queued"
+        at = req.get("at") or (next_time(repeat, int(time.time())) if repeat else None)
+        ids = [q["id"] for k in ("sessions", "messages") for q in queue[k]]
+        entry = queued(max(ids + [0]) + 1, new["name"], new["project"], new.get("task", ""), at=at, repeat=repeat)
+        entry["new"].update(new)
+        queue["sessions"].append(entry)
+        return {"reply": "queue", **queue}
+    if op == "unqueue":
+        for k in ("sessions", "messages"):
+            queue[k] = [q for q in queue[k] if q["id"] != req.get("id")]
+        return {"reply": "queue", **queue}
     if op == "poll": return {"reply": "poll", **poll(name)}
-    if op == "shells": return {"reply": "shells", "shells": []}
-    if op == "chats": return {"reply": "chats", "chats": ["agent"], "opened": None}
+    if op == "shells": return {"reply": "shells", "shells": SHELLS.get(name, []), "agent": True}
+    if op == "new-shell":
+        have = SHELLS.setdefault(name, [])
+        have.append(f"shell-{len(have) + 1}")
+        if req.get("run"): SHELL_RUNS[(name, have[-1])] = req["run"]
+        return {"reply": "shells", "shells": have, "agent": True}
+    if op == "kill-shell":
+        SHELLS[name] = [t for t in SHELLS.get(name, []) if t != req.get("tmux")]
+        return {"reply": "shells", "shells": SHELLS[name], "agent": True}
+    if op == "chats": return {"reply": "chats", "chats": CHATS.get(name, ["agent"]), "opened": None}
+    if op == "new-chat":
+        have = CHATS.setdefault(name, ["agent"])
+        opened = f"chat-{len(have) + 1}"
+        have.append(opened)
+        return {"reply": "chats", "chats": have, "opened": opened}
+    if op == "close-chat":
+        CHATS[name] = [c for c in CHATS.get(name, ["agent"]) if c != req.get("conv")]
+        return {"reply": "chats", "chats": CHATS[name], "opened": None}
     if op == "events": return {"reply": "events", "events": events}
     if op == "policy": return {"reply": "policy", **policy}
     if op == "git-status": return {"reply": "git", "said": "", "status": git_status}
     if op == "git": return {"reply": "git", "said": "Everything up-to-date", "status": git_status}
     if op == "git-diff": return {"reply": "git-diff", **git_diff(req["path"], req["against"])}
     if op == "files": return {"reply": "files", **files(req.get("path", ""))}
+    if op == "tail-file":
+        t = tail_file(req.get("path", ""))
+        return {"reply": "tail", **(t or {"path": req.get("path", ""), "bytes": 0, "text": "", "cut": False})}
+    if op == "find-files": return {"reply": "found", **find_files(req.get("query", ""), req.get("limit", 50))}
     if op == "file": return {"reply": "file", **file(req["path"])}
     if op == "comments": return {"reply": "comments", "comments": []}
     if op == "ports": return {"reply": "ports", **ports}
@@ -456,6 +632,21 @@ class H(BaseHTTPRequestHandler):
         lock = threading.Lock()
         send = lambda obj: (lock.acquire(), ws_send(self.wfile, obj), lock.release())
         ptys = {}
+        # Port channels: a preview's connections, each passed to this
+        # machine's port FAKE_PORT_OFFSET above the sandbox's (20000 by
+        # default, so 5173 is 25173), where a test page can be served.
+        socks = {}
+        def pump_sock(cid, sock):
+            while True:
+                try: out = sock.recv(65536)
+                except OSError: out = b""
+                if not out:
+                    socks.pop(cid, None)
+                    try: send({"is": "closed", "id": cid, "reason": None})
+                    except OSError: pass
+                    return
+                try: send({"is": "output", "id": cid, "data": base64.b64encode(out).decode()})
+                except OSError: return
         def pump(cid, fd):
             while True:
                 try: out = os.read(fd, 65536)
@@ -475,6 +666,14 @@ class H(BaseHTTPRequestHandler):
                 if req.get("do") == "input" and req.get("id") in ptys:
                     os.write(ptys[req["id"]][1], base64.b64decode(req["data"]))
                     continue
+                if req.get("do") == "input" and req.get("id") in socks:
+                    try: socks[req["id"]].sendall(base64.b64decode(req["data"]))
+                    except OSError: pass
+                    continue
+                if req.get("do") == "close" and req.get("id") in socks:
+                    try: socks.pop(req["id"]).shutdown(socket.SHUT_RDWR)
+                    except OSError: pass
+                    continue
                 if req.get("do") == "resize" and req.get("id") in ptys:
                     tty_size(ptys[req["id"]][1], req["cols"], req["rows"])
                     continue
@@ -487,13 +686,30 @@ class H(BaseHTTPRequestHandler):
                     send({"is": "opened", "id": cid})
                     threading.Thread(target=pump, args=(cid, fd), daemon=True).start()
                     continue
+                if kind == "port":
+                    target = ch.get("port", 0) + int(os.environ.get("FAKE_PORT_OFFSET", "20000"))
+                    try: sock = socket.create_connection(("127.0.0.1", target), timeout=2)
+                    except OSError as e:
+                        send({"is": "closed", "id": cid, "reason": f"nothing on {target} here: {e}"})
+                        continue
+                    sock.settimeout(None)
+                    socks[cid] = sock
+                    send({"is": "opened", "id": cid})
+                    threading.Thread(target=pump_sock, args=(cid, sock), daemon=True).start()
+                    continue
                 send({"is": "opened", "id": cid})
                 if kind == "chat":
-                    for frame in chat_frames(name, cid): send(frame)
+                    for frame in chat_frames(name, cid, ch.get("conv")): send(frame)
                 elif kind == "status":
                     send({"is": "status", "id": cid, "poll": poll(name)})
                 elif kind == "events":
                     send({"is": "events", "id": cid, "events": events})
+                elif kind == "terminal" and (name, ch.get("tmux")) in SHELL_RUNS:
+                    run = SHELL_RUNS[(name, ch.get("tmux"))]
+                    out = (f"\x1b[1;32m~/repo\x1b[0m $ {run}\r\n\r\n"
+                           "  \x1b[1;32mVITE\x1b[0m v7.1.3  ready in \x1b[1m412\x1b[0m ms\r\n\r\n"
+                           "  \x1b[32m➜\x1b[0m  \x1b[1mLocal\x1b[0m:   \x1b[36mhttp://localhost:5173/\x1b[0m\r\n")
+                    send({"is": "output", "id": cid, "data": base64.b64encode(out.encode()).decode()})
                 elif kind == "terminal":
                     send({"is": "output", "id": cid, "data": base64.b64encode(TERMINAL.encode()).decode()})
         except (ConnectionError, OSError):

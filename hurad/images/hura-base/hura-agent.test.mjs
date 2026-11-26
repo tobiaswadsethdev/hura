@@ -30,6 +30,7 @@ import {
   slashCommands,
   uploadName,
   usagePayload,
+  sessionOptions,
 } from "./hura-agent.mjs";
 
 /// A conversation as the aggregate functions see one.
@@ -523,4 +524,22 @@ test("the empty turn after a ! command's output goes in is not kept", () => {
   assert.ok(!silent({ ...result, num_turns: 1 }, quiet));
   assert.ok(!silent({ type: "result", num_turns: 0 }, quiet));
   assert.ok(silent({ type: "result", num_turns: 0, user_message_uuid: "q1" }, quiet));
+});
+
+test("a fork carries on the parent's session under its own id, cut where asked", () => {
+  assert.deepEqual(sessionOptions({ session: "a", resumable: false }), { sessionId: "a" });
+  assert.deepEqual(sessionOptions({ session: "a", resumable: true }), { resume: "a" });
+  assert.deepEqual(sessionOptions({ session: "b", resumable: false, fork: { session: "a", at: null } }), {
+    resume: "a",
+    forkSession: true,
+    sessionId: "b",
+  });
+  assert.deepEqual(sessionOptions({ session: "b", resumable: false, fork: { session: "a", at: "m1" } }), {
+    resume: "a",
+    forkSession: true,
+    sessionId: "b",
+    resumeSessionAt: "m1",
+  });
+  // Once it has run, it is its own session, resumed as any other.
+  assert.deepEqual(sessionOptions({ session: "b", resumable: true, fork: { session: "a", at: "m1" } }), { resume: "b" });
 });

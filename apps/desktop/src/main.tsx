@@ -9,9 +9,17 @@ import { routeLinks } from "./open";
 import { markUntrustedMetrics } from "./charSize";
 import { ICON_SIZE, ICON_STROKE } from "./icons";
 import { watchForUpdates } from "./Update";
+import { installTooltips } from "./tips";
 import { readPrefs } from "./prefs";
 import { applyAppearance, applyTerminalsDark } from "./theme";
+import { applyCustomTheme, applyDiffs, applyFonts, applyZoom } from "./look";
+import { applyKeys } from "./keys";
+// The window's face, bundled so it is the same one on every platform. See
+// `--font-ui` in style.css.
+import "@fontsource-variable/inter";
 import "./style.css";
+// After the stylesheet: see the note at the top of tailwind.css.
+import "./tailwind.css";
 
 // Before the first render: the correction is a stylesheet rule keyed on a class
 // on <html>, and adding it afterwards would paint the window wrong once.
@@ -23,13 +31,21 @@ import "./style.css";
 if (navigator.userAgent.includes("Mac")) document.documentElement.classList.add("mac");
 // The palette, for the same reason: chosen before anything is drawn, or a light
 // window opens dark for a frame. See `theme.ts`.
+// A theme taken in from VS Code is in its own light or dark.
 const initial = readPrefs();
-applyAppearance(initial.appearance);
+applyAppearance(initial.theme?.scheme ?? initial.appearance);
 applyTerminalsDark(initial.terminalsDark);
+applyCustomTheme(initial.theme);
+applyFonts({ ui: initial.uiFont, mono: initial.monoFont, codeSize: initial.codeSize });
+if (initial.zoom !== 1) applyZoom(initial.zoom);
+applyKeys(initial.keys);
+applyDiffs({ stacked: initial.diffStacked, hideWhitespace: initial.diffHideWhitespace });
 
 markUntrustedMetrics();
 routeLinks();
 watchForUpdates();
+// Every `title` drawn as T3 Code's tooltip: see `tips.ts`.
+installTooltips();
 
 // The webview takes dropped files itself (`dragDropEnabled: false`), so a chat
 // can read them. A file dropped anywhere that does not take one would open it

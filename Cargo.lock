@@ -1050,6 +1050,7 @@ dependencies = [
 name = "hura-core"
 version = "0.59.2"
 dependencies = [
+ "chrono",
  "sbx-client",
  "serde",
  "serde_json",

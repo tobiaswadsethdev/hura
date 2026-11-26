@@ -5,6 +5,7 @@ import type { Event } from "./Event";
 import type { Fetched } from "./Fetched";
 import type { FileDiff } from "./FileDiff";
 import type { FileText } from "./FileText";
+import type { FoundPaths } from "./FoundPaths";
 import type { Integrations } from "./Integrations";
 import type { Listing } from "./Listing";
 import type { NewOptions } from "./NewOptions";
@@ -17,6 +18,7 @@ import type { QueueView } from "./QueueView";
 import type { Session } from "./Session";
 import type { SettingsView } from "./SettingsView";
 import type { Status } from "./Status";
+import type { TailText } from "./TailText";
 import type { View } from "./View";
 
 /**
@@ -38,4 +40,4 @@ agent: boolean, } | { "reply": "chats", chats: Array<string>,
 /**
  * The conversation just opened, when that is what was asked for.
  */
-opened: string | null, } | { "reply": "ports" } & PortsView | { "reply": "files" } & Dir | { "reply": "file" } & FileText | { "reply": "download" } & Fetched | { "reply": "git", said: string, status: Status, } | { "reply": "git-diff" } & FileDiff | { "reply": "told", message: string, } | { "reply": "projects", projects: Array<Project>, } | { "reply": "repos" } & Listing | { "reply": "inspect" } & Picked | { "reply": "new-options" } & NewOptions | { "reply": "created", name: string, } | { "reply": "integrations" } & Integrations | { "reply": "settings" } & SettingsView | { "reply": "push" } & PushView | { "reply": "queue" } & QueueView;
+opened: string | null, } | { "reply": "ports" } & PortsView | { "reply": "files" } & Dir | { "reply": "found" } & FoundPaths | { "reply": "tail" } & TailText | { "reply": "file" } & FileText | { "reply": "download" } & Fetched | { "reply": "git", said: string, status: Status, } | { "reply": "git-diff" } & FileDiff | { "reply": "told", message: string, } | { "reply": "projects", projects: Array<Project>, } | { "reply": "repos" } & Listing | { "reply": "inspect" } & Picked | { "reply": "new-options" } & NewOptions | { "reply": "created", name: string, } | { "reply": "integrations" } & Integrations | { "reply": "settings" } & SettingsView | { "reply": "push" } & PushView | { "reply": "queue" } & QueueView;

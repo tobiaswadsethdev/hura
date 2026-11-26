@@ -17,9 +17,9 @@ import { StateDot } from "../icons";
 import { Markdown } from "../Markdown";
 import { describe, Diff, diffLines, relative } from "./Items";
 
-type Answer = (decision: ChatDecision) => void;
+export type Answer = (decision: ChatDecision) => void;
 
-const decided = (d: Partial<ChatDecision> & { allow: boolean }): ChatDecision => ({
+export const decided = (d: Partial<ChatDecision> & { allow: boolean }): ChatDecision => ({
   always: false,
   message: null,
   answers: null,

@@ -11,6 +11,13 @@ import * as monaco from "monaco-editor/editor/editor.api";
 
 import type { FileDiff } from "../gen/FileDiff";
 import { ensureTheme, languageOf, THEME } from "./File";
+import { codeFont, diffOptions } from "../look";
+
+/// The code face and size as chosen in Settings, when an editor is made.
+const fonts = () => {
+  const { family, size } = codeFont();
+  return { fontFamily: family, fontSize: size };
+};
 
 const COMMON = {
   theme: THEME,
@@ -19,7 +26,6 @@ const COMMON = {
   automaticLayout: true,
   minimap: { enabled: false },
   scrollBeyondLastLine: false,
-  fontSize: 13,
 } as const;
 
 export type Shown = {
@@ -43,7 +49,7 @@ export function showSides(
 
   if (added || removed) {
     const model = monaco.editor.createModel(added ? sides.modified : sides.original, language);
-    const editor = monaco.editor.create(element, { ...COMMON, model });
+    const editor = monaco.editor.create(element, { ...COMMON, ...fonts(), model });
     editor.createDecorationsCollection([
       {
         range: model.getFullModelRange(),
@@ -61,7 +67,9 @@ export function showSides(
 
   const editor = monaco.editor.createDiffEditor(element, {
     ...COMMON,
-    renderSideBySide: true,
+    ...fonts(),
+    // Side by side unless Settings says stacked; see `look.ts`.
+    ...diffOptions(),
     // The + and − beside the lines are drawn in an icon font, which on
     // Windows came out as boxes; the colours already say it.
     renderIndicators: false,

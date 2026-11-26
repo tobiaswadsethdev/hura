@@ -19,7 +19,25 @@ import { useContextMenu } from "../ContextMenu";
 import { baseName, Downloader, downloadItems, pathsIn } from "../Download";
 import { Fold, scrollParent, slide } from "../Fold";
 import type { ChatFile } from "../gen/ChatFile";
-import { Attach, Chosen, Close, Delivered, Download, Read, Twisty, Working } from "../icons";
+import {
+  Agent,
+  Attach,
+  Chosen,
+  Close,
+  Delivered,
+  Download,
+  Edit,
+  Ports,
+  Read,
+  ToolEdit,
+  ToolOther,
+  ToolRead,
+  ToolRun,
+  ToolSearch,
+  ToolTodo,
+  Twisty,
+  Working,
+} from "../icons";
 import { Markdown } from "../Markdown";
 import { leadingCommand } from "./commands";
 import { since, Ticking, useNow } from "./elapsed";
@@ -180,6 +198,11 @@ function said(call: ToolCall): Record<string, string> {
 /// its card. Unset where there is nowhere to open one.
 export const OpenAgent = createContext<((callId: string) => void) | null>(null);
 
+/// Edit one of your earlier messages: what the prompt's "Edit from here" calls,
+/// with its key and its words. Unset where there is no going back from
+/// (a side chat).
+export const EditPrompt = createContext<((key: string, text: string) => void) | null>(null);
+
 /// Whether a Skill call ran its skill as a subagent: one typed as a command,
 /// or one whose subagent's messages have started to arrive.
 function forkedCall(call: ToolCall): boolean {
@@ -227,6 +250,13 @@ function ToolBody({ call }: { call: ToolCall }) {
         <>
           <pre className="chat-command">{str(input.command)}</pre>
           {result && <Output text={result.text} error={result.isError} />}
+          {/* Left running: its output goes on being written after this card
+              has said all it will, so the way to it is the panel. */}
+          {input.run_in_background === true && openAgent && (
+            <button className="chat-follow" onClick={() => openAgent(call.id)}>
+              Follow its output beside the conversation
+            </button>
+          )}
         </>
       );
     case "Edit":
@@ -327,6 +357,18 @@ export function filesOf(call: ToolCall): string[] {
 /// it can still be had from the menu, but a row of them would be noise.
 const KEEPS = new Set(["Read", "Edit", "MultiEdit", "Grep", "Glob"]);
 
+/// The kind of thing a tool call did, as a glyph at the head of its row.
+function ToolIcon({ name }: { name: string }) {
+  if (name === "Read") return <ToolRead />;
+  if (["Edit", "MultiEdit", "Write", "NotebookEdit"].includes(name)) return <ToolEdit />;
+  if (name === "Bash" || name === "BashOutput" || name === "KillShell") return <ToolRun />;
+  if (name === "Grep" || name === "Glob") return <ToolSearch />;
+  if (name === "WebFetch" || name === "WebSearch") return <Ports />;
+  if (name === "Task" || name === "Agent") return <Agent />;
+  if (name === "TodoWrite") return <ToolTodo />;
+  return <ToolOther />;
+}
+
 export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
   const fetch = useContext(Downloader);
   const menu = useContextMenu();
@@ -354,7 +396,9 @@ export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
         onClick={() => setOpen(!shown)}
         {...menu(() => downloadItems(files, fetch))}
       >
-        <Twisty open={shown} />
+        <span className="tool-icon" aria-hidden>
+          <ToolIcon name={call.name} />
+        </span>
         {/* One group, so the two faces share a baseline: centring them as
             separate boxes sets the sans verb and the mono subject at
             different heights, because their metrics differ. */}
@@ -367,14 +411,15 @@ export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
         <span className="mark" aria-label={state}>
           {state === "running" && (
             <>
-              {/* Not for the moment most calls take, when it would only flicker. */}
+              {/* Not for the moment most calls take, when it would only flicker.
+                  No spinner: the label shines while it runs, as T3 Code's do. */}
               {ticking && now - call.at >= 5000 && <span className="elapsed">{since(now - call.at)}</span>}
-              <Working />
             </>
           )}
           {state === "failed" && <Close />}
           {(state === "declined" || state === "stopped") && <span className="declined">{state}</span>}
         </span>
+        <Twisty open={shown} />
       </button>
       <Fold open={shown}>
         <div className="chat-tool-body">
@@ -410,7 +455,9 @@ const ShellCard = memo(function ShellCard({ item }: { item: Extract<Item, { kind
   return (
     <div className={`chat-tool chat-shell ${state}`}>
       <button className="chat-tool-head" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <Twisty open={open} />
+        <span className="tool-icon" aria-hidden>
+          <ToolRun />
+        </span>
         <span className="what">
           <span className="verb">You ran</span>
           <span className="subject" title={item.command}>
@@ -418,12 +465,12 @@ const ShellCard = memo(function ShellCard({ item }: { item: Extract<Item, { kind
           </span>
         </span>
         <span className="mark" aria-label={state}>
-          {state === "running" && <Working />}
           {state === "stopped" && <span className="declined">stopped</span>}
           {state === "failed" && (
             <span className="exit">{item.code === null ? "did not finish" : `exit ${item.code}`}</span>
           )}
         </span>
+        <Twisty open={open} />
       </button>
       <Fold open={open && item.output !== null}>
         <div className="chat-tool-body">
@@ -525,14 +572,25 @@ const StepsCard = memo(function StepsCard({ item }: { item: Extract<Item, { kind
   const calls = item.items.flatMap((i) => (i.kind === "tool" ? [i.call] : []));
   const running = calls.some((c) => c.result === null && !(c.answer && !c.answer.allow));
   const failed = calls.filter((c) => c.result?.isError && !c.result.stopped).length;
+  // T3 Code's line for a turn's work: how long it took, or has taken so far,
+  // with what it came to one hover away. Where the transcript does not say
+  // when the turn began, what it came to instead.
+  const ticking = useContext(Ticking) && item.live;
+  const now = useNow(ticking);
+  const said = summarize(item.items);
+  const label =
+    item.live && item.from !== null
+      ? `Working for ${since(now - item.from)}`
+      : !item.live && item.took !== null
+        ? `Worked for ${since(item.took)}`
+        : said;
   return (
-    <div className={`chat-steps${running ? " running" : ""}`}>
-      <button className="chat-steps-head" aria-expanded={shown} onClick={() => setOpen(!shown)}>
+    <div className={`chat-steps${running ? " running" : ""}${shown ? " open" : ""}`}>
+      <button className="chat-steps-head" aria-expanded={shown} title={said} onClick={() => setOpen(!shown)}>
+        <span className="what">{label}</span>
         <Twisty open={shown} />
-        <span className="what">{summarize(item.items)}</span>
         <span className="mark">
           {failed > 0 && <span className="failed">{failed} failed</span>}
-          {running && <Working />}
         </span>
       </button>
       <Fold open={shown}>
@@ -767,13 +825,27 @@ function Receipt({ at, read, receipts }: { at: number; read: number | null; rece
 }
 
 export const ItemView = memo(function ItemView({ item, receipts = "off" }: { item: Item; receipts?: Receipts }) {
+  const edit = useContext(EditPrompt);
   switch (item.kind) {
     case "prompt":
       return (
         <>
           {item.files.length > 0 && <SentFiles files={item.files} />}
           {item.text && <Prompt text={item.text} />}
-          <Receipt at={item.at} read={item.read} receipts={receipts} />
+          {/* T3 Code's actions on a message, shown on hover beside its time. */}
+          <div className="chat-prompt-foot">
+            {edit && item.text && (
+              <button
+                className="chat-prompt-edit"
+                title="Say Something Else Here: a New Conversation from Just Before This Message"
+                onClick={() => edit(item.key, item.text)}
+              >
+                <Edit aria-hidden />
+                Edit from here
+              </button>
+            )}
+            <Receipt at={item.at} read={item.read} receipts={receipts} />
+          </div>
         </>
       );
     case "day":

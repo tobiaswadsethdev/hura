@@ -194,6 +194,22 @@ function size(bytes) {
 /// name, and then the one Claude Code marks as its own is the one `/name`
 /// runs, so that is the one kept. A name starting `__` is Claude Code's own
 /// plumbing (`__remote-workflow`), not something to type.
+/// Which Claude session a conversation's `query()` runs: its own, resumed once
+/// it has one on disk; a new one under its own id the first time; or, for a
+/// fork, the parent's (up to `at`) carried on under its own id.
+export function sessionOptions(record) {
+  if (record.resumable) return { resume: record.session };
+  if (record.fork) {
+    return {
+      resume: record.fork.session,
+      forkSession: true,
+      sessionId: record.session,
+      ...(record.fork.at && { resumeSessionAt: record.fork.at }),
+    };
+  }
+  return { sessionId: record.session };
+}
+
 export function slashCommands(list) {
   if (!Array.isArray(list)) return [];
   const byName = new Map();
@@ -646,10 +662,17 @@ export class Host {
     return [...this.conversations.keys()];
   }
 
-  open(name = nextName(this.names())) {
+  /// Open a conversation. With `fork`, it starts from another one's Claude
+  /// session rather than from nothing: everything said there is its context,
+  /// and that conversation goes on untouched. With `at` as well, only up to
+  /// that assistant message, which is how an earlier message is edited: a new
+  /// conversation from just before it.
+  open(name = nextName(this.names()), fork = null) {
     let c = this.conversations.get(name);
     if (c) return c;
-    c = new Conversation(this, { name, session: randomUUID(), resumable: false, created: Date.now() });
+    const parent = fork?.conv ? this.conversations.get(fork.conv) : null;
+    const from = parent?.record.resumable ? { session: parent.record.session, at: fork.at || null } : null;
+    c = new Conversation(this, { name, session: randomUUID(), resumable: false, created: Date.now(), ...(from && { fork: from }) });
     this.conversations.set(name, c);
     this.saveRegistry();
     log(`opened ${name}`);
@@ -875,8 +898,7 @@ class Conversation {
     if (this.mode) options.permissionMode = this.mode;
     if (this.model) options.model = this.model;
     if (this.effort) options.effort = this.effort;
-    if (this.record.resumable) options.resume = this.record.session;
-    else options.sessionId = this.record.session;
+    Object.assign(options, sessionOptions(this.record));
 
     const q = query({ prompt: this.inbox, options });
     this.query = q;
@@ -1383,7 +1405,9 @@ class Client {
       case "list":
         return this.#reply({ names: this.host.names() });
       case "new":
-        return this.#reply({ name: this.host.open().name });
+        return this.#reply({
+          name: this.host.open(undefined, req.fork ? { conv: String(req.fork), at: req.at ? String(req.at) : null } : null).name,
+        });
       case "close":
         this.host.close(req.conv);
         return this.#reply({});
@@ -1523,8 +1547,9 @@ async function main(argv) {
     case "list":
       console.log(JSON.stringify((await request({ op: "list" })).names));
       return;
+    // `hura-agent new [--fork NAME [--at UUID]]`: see `Host.open`.
     case "new":
-      console.log((await request({ op: "new" })).name);
+      console.log((await request({ op: "new", ...(args.fork && { fork: args.fork, at: args.at }) })).name);
       return;
     case "close":
       await request({ op: "close", conv: name });

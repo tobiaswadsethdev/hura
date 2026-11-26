@@ -130,6 +130,16 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 .map(Reply::Files)
                 .map_err(Failure::failed)
         }),
+        Request::FindFiles { name, query, limit } => with_session(&name, |s| {
+            files::find(backends.for_session(s), s, &query, limit as usize)
+                .map(Reply::Found)
+                .map_err(Failure::failed)
+        }),
+        Request::TailFile { name, path, bytes } => with_session(&name, |s| {
+            files::tail(backends.for_session(s), s, &path, u64::from(bytes))
+                .map(Reply::Tail)
+                .map_err(Failure::failed)
+        }),
         Request::File { name, path } => with_session(&name, |s| {
             files::read(backends.for_session(s), s, &path)
                 .map(Reply::File)
@@ -141,8 +151,8 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 .map_err(Failure::failed)
         }),
         Request::Shells { name } => with_session(&name, |s| shells(backends.for_session(s), s)),
-        Request::NewShell { name } => with_session(&name, |s| {
-            ops::new_shell(backends.for_session(s), s).map_err(Failure::failed)?;
+        Request::NewShell { name, run } => with_session(&name, |s| {
+            ops::new_shell(backends.for_session(s), s, run.as_deref()).map_err(Failure::failed)?;
             shells(backends.for_session(s), s)
         }),
         Request::Ports { name } => with_session(&name, |s| ports(backends.for_session(s), s)),
@@ -178,9 +188,10 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
                 })
                 .map_err(Failure::gateway)
         }),
-        Request::NewChat { name } => with_session(&name, |s| {
+        Request::NewChat { name, fork, at } => with_session(&name, |s| {
             let backend = backends.for_session(s);
-            let opened = chat::open(backend, s).map_err(Failure::failed)?;
+            let opened =
+                chat::open(backend, s, fork.as_deref(), at.as_deref()).map_err(Failure::failed)?;
             chat::list(backend, s)
                 .map(|chats| Reply::Chats {
                     chats,
@@ -252,6 +263,12 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             Ok(projects) => Reply::Projects { projects }.into(),
             Err(e) => Failure::failed(e).into(),
         },
+        Request::SetProjectDefaults { name, defaults } => {
+            match projects::set_defaults(&name, defaults) {
+                Ok(projects) => Reply::Projects { projects }.into(),
+                Err(e) => Failure::failed(e).into(),
+            }
+        }
         Request::Repos => repo_list(),
         Request::Inspect { path, branch } => inspect(backends, &path, branch.as_deref()),
         Request::NewOptions => match config::Config::load() {
@@ -260,14 +277,14 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
         },
         Request::Create(new) | Request::CreateFromPull(new) => create(*new),
         Request::Queue => queue_view(),
-        Request::Enqueue { new, at } => {
+        Request::Enqueue { new, at, repeat } => {
             let cfg = match config::Config::load() {
                 Ok(c) => c,
                 Err(e) => {
                     return Failure::failed(format!("could not read the config file: {e}")).into();
                 }
             };
-            match queue::add(*new, at, &cfg) {
+            match queue::add(*new, at, repeat, &cfg) {
                 Ok(_) => queue_view(),
                 Err(e) => Failure::failed(e).into(),
             }
@@ -280,7 +297,12 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             |q| q.start_now(id, queue::now()),
             "it has already started, or was never queued",
         ),
-        Request::QueueMessage { name, text, at } => match queue::say(&name, &text, at) {
+        Request::QueueMessage {
+            name,
+            text,
+            at,
+            repeat,
+        } => match queue::say(&name, &text, at, repeat) {
             Ok(_) => queue_view(),
             Err(e) => Failure::failed(e).into(),
         },

@@ -29,6 +29,7 @@ import { Empty, Waiting } from "../Empty";
 import { NotText } from "../icons";
 import { palette } from "../palette";
 import { onScheme, scheme } from "../theme";
+import { codeFont, diffOptions, onLook } from "../look";
 import type { FileText } from "../gen/FileText";
 
 (self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
@@ -76,6 +77,18 @@ onScheme(() => {
   define();
   monaco.editor.setTheme(THEME);
 });
+// And when a theme is taken in or the code font changes, which every editor
+// open takes too.
+onLook(() => {
+  if (!defined) return;
+  define();
+  monaco.editor.setTheme(THEME);
+  const { family, size } = codeFont();
+  for (const editor of [...monaco.editor.getEditors(), ...monaco.editor.getDiffEditors()]) {
+    editor.updateOptions({ fontFamily: family, fontSize: size });
+  }
+  for (const editor of monaco.editor.getDiffEditors()) editor.updateOptions(diffOptions());
+});
 
 export function FilePane({
   server,
@@ -119,7 +132,8 @@ export function FilePane({
       automaticLayout: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      fontSize: 13,
+      fontFamily: codeFont().family,
+      fontSize: codeFont().size,
     });
     return () => {
       editor.getModel()?.dispose();

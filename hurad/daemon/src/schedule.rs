@@ -130,7 +130,7 @@ fn tick(memory: &mut Memory) {
             Ok(()) => {
                 memory.told.insert(m.session.clone(), Instant::now());
                 let id = m.id;
-                if let Err(e) = queue::update(|q| q.remove(id)) {
+                if let Err(e) = queue::update(|q| q.said(id, queue::now())) {
                     eprintln!(
                         "hurad: {}: told, but could not take it off the queue: {e}",
                         m.session
@@ -171,7 +171,15 @@ fn look(backends: &hura_core::backend::Backends, s: &Session) -> Seen {
 /// its create has finished.
 fn launch(id: u64, store: &Store) {
     let taken = store.names();
+    // A repeating one is a template: a copy of it starts, under an id of its
+    // own, and the template waits for its next time.
+    let mut id = id;
     let marked = queue::update(|q| {
+        if q.sessions.iter().any(|s| s.id == id && s.repeat.is_some()) {
+            let (copy, new) = q.run_once(id, &taken, queue::now())?;
+            id = copy;
+            return Some(new);
+        }
         let others: Vec<String> = q
             .sessions
             .iter()

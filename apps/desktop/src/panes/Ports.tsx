@@ -38,7 +38,7 @@ import type { Listening } from "../gen/Listening";
 import type { Loopback } from "../gen/Loopback";
 import type { PortsView } from "../gen/PortsView";
 import type { Process } from "../gen/Process";
-import { Copy, Elsewhere, Forget, NoPorts, Ports, Stop } from "../icons";
+import { Copy, Elsewhere, Forget, NoPorts, Ports, PreviewHere, Stop } from "../icons";
 import { openExternal } from "../open";
 import { refreshPreviews, usePreviews } from "../previews";
 
@@ -60,10 +60,13 @@ export function PortsPane({
   server,
   name,
   listening,
+  onPreview,
 }: {
   server: string;
   name: string;
   listening: Listening[];
+  /// The port's page in a tab of the window, at this machine's end of it.
+  onPreview: (port: number, url: string) => void;
 }) {
   const [view, setView] = useState<PortsView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +109,11 @@ export function PortsPane({
     act(port, async () => {
       const preview = await api.previewOpen(server, name, port, host);
       openExternal(preview.url);
+    });
+  const here = (port: number, host: Loopback) =>
+    act(port, async () => {
+      const preview = await api.previewOpen(server, name, port, host);
+      onPreview(port, preview.url);
     });
   const stop = (port: number) => act(port, () => api.previewStop(server, name, port));
   const kill = (row: Row) =>
@@ -181,6 +189,14 @@ export function PortsPane({
                         : ""}
                   </span>
                   <span className="port-tools">
+                    <button
+                      className="quiet-icon"
+                      title="Preview in the Window"
+                      disabled={busy === row.port}
+                      onClick={() => void here(row.port, row.host)}
+                    >
+                      <PreviewHere />
+                    </button>
                     <button
                       className="quiet-icon"
                       title={row.preview ? "Open in Browser" : "Preview in Browser"}

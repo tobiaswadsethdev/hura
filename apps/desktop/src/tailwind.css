@@ -1,0 +1,122 @@
+/* Tailwind, for the components rebuilt in T3 Code's shape (see
+   docs/plans/t3-style-desktop.md). Its theme is T3 Code's token names mapped
+   onto the custom properties at the top of `style.css`, so a class string
+   ported from T3 Code (`bg-background text-muted-foreground border-border`)
+   draws in this window's palette, and old and new components share one.
+
+   **No preflight.** Tailwind's reset would restyle every component that has
+   not been rebuilt yet: headings, lists, buttons and images all lose their
+   margins and borders under it. Only the theme variables and the utilities
+   are imported, and the utilities are left outside any cascade layer, after
+   `style.css`, so a utility on a rebuilt component beats the zero-specificity
+   `:where()` base rules there, and nothing in `style.css` that names a class
+   is affected.
+
+   **An old class must not be named like a utility.** Tailwind writes `.fixed`
+   or `.block` for any file that says the word, and the rule lands on every
+   element with that class, rebuilt or not: `pill fixed` was `position: fixed`
+   until it was renamed `pill held`. Name old classes with a hyphen or a word
+   Tailwind does not have. */
+@layer theme, base;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css";
+
+@source not "../src-tauri";
+
+/* `dark:` and `light:` follow the window's palette, which `theme.ts` puts on
+   <html> as `data-theme`, rather than the system's. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
+
+@theme inline {
+  --font-sans: var(--font-ui);
+
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-ink);
+  --color-secondary: rgb(var(--fg) / 0.03);
+  --color-secondary-foreground: var(--text);
+  --color-muted: rgb(var(--fg) / 0.03);
+  --color-muted-foreground: var(--dim);
+  --color-accent: rgb(var(--fg) / 0.045);
+  --color-accent-foreground: var(--text);
+  --color-border: var(--line);
+  --color-input: var(--line-strong);
+  --color-ring: var(--accent);
+  --color-placeholder: var(--dim);
+  --color-secondary-label: var(--dim);
+  --color-icon-muted: var(--dim);
+  --color-code: var(--sunken);
+
+  --color-destructive: var(--stop);
+  --color-destructive-foreground: var(--bad);
+  --color-error: var(--stop);
+  --color-error-foreground: var(--bad);
+  --color-success: var(--ok);
+  --color-success-foreground: var(--ok);
+  --color-warning: var(--warn);
+  --color-warning-foreground: var(--attention);
+  --color-info: var(--working);
+  --color-info-foreground: var(--working);
+
+  --color-message: var(--surface-2);
+  --color-message-foreground: var(--text);
+  --color-message-action: var(--primary);
+  --color-message-action-foreground: var(--primary-ink);
+
+  --color-sidebar: var(--chrome);
+  --color-sidebar-foreground: var(--text);
+  --color-sidebar-border: var(--line);
+  --color-sidebar-muted-foreground: var(--dim);
+  --color-sidebar-row-hover: var(--row-hover);
+  --color-sidebar-row-active: var(--row-active);
+  --color-sidebar-row-selected: var(--row-selected);
+  --color-sidebar-secondary-label: var(--secondary-label);
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: calc(1 / 0.6875);
+  --text-3xs: 0.625rem;
+  --text-3xs--line-height: calc(0.875 / 0.625);
+
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* What T3 Code's primitives (src/ui) read besides the theme: the radius of a
+   control, and the muted foreground its contrast setting would adjust, which
+   this window does not have. */
+:root {
+  --control-radius: 8px;
+  --contrast-muted-foreground: var(--dim);
+}
+
+/* Tailwind's preflight, but only for what is rebuilt: everything under an
+   element marked `data-tw`, and the ported primitives (`data-slot`) wherever
+   they are, minus anything under `data-legacy` (an old component a rebuilt
+   one still wraps, such as the worktree list in the sidebar). Without it a
+   `<button>` keeps WebKit's own bevelled grey, which T3 Code's classes assume
+   is gone. In a layer, so a utility or any rule in `style.css` wins over it. */
+@layer base {
+  :where([data-tw], [data-tw] *, [data-slot], [data-slot] *):not(:where([data-legacy], [data-legacy] *)),
+  :where([data-tw], [data-tw] *, [data-slot], [data-slot] *):not(:where([data-legacy], [data-legacy] *))::before,
+  :where([data-tw], [data-tw] *, [data-slot], [data-slot] *):not(:where([data-legacy], [data-legacy] *))::after {
+    box-sizing: border-box;
+    border: 0 solid;
+    margin: 0;
+    padding: 0;
+  }
+  :where([data-tw] :is(button, input, select, textarea), button[data-slot]):not(:where([data-legacy] *)) {
+    appearance: none;
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    border-radius: 0;
+    background-color: transparent;
+    opacity: 1;
+  }
+  :where([data-tw] :is(ol, ul)):not(:where([data-legacy] *)) { list-style: none; }
+}

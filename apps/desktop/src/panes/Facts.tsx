@@ -34,7 +34,7 @@ export function Facts({ session, usage }: { session: Session; usage: Usage | nul
       <section className="facts-task">
         {session.task ? <p>{session.task}</p> : <p className="none">Started at a prompt, with no task</p>}
         {session.ticket && (
-          <a className="pill fixed ticket" href={session.ticket.url} title={session.ticket.url}>
+          <a className="pill held ticket" href={session.ticket.url} title={session.ticket.url}>
             <Tracker />
             {session.ticket.key}
           </a>
@@ -170,7 +170,7 @@ function Chips({
       ) : (
         <span className="fact-chips">
           {values.map((v, i) => (
-            <span key={v} className="pill fixed" title={titles?.[i]}>
+            <span key={v} className="pill held" title={titles?.[i]}>
               {v}
             </span>
           ))}

@@ -39,9 +39,11 @@ import { withUsableFontMetrics } from "../charSize";
 import { useContextMenu } from "../ContextMenu";
 import { Copy, Latest, Paste, SelectAll } from "../icons";
 import { openExternal } from "../open";
+import { messageOf } from "../api";
 import { palette } from "../palette";
 import { close, decodeBytes, encodeBytes, nextChannelId, open, terminal } from "../stream";
 import { onScheme, terminalScheme, type Scheme } from "../theme";
+import { codeFont, onLook, themeAnsi } from "../look";
 
 const MAC = navigator.userAgent.includes("Mac");
 const WINDOWS = /windows/i.test(navigator.userAgent);
@@ -227,6 +229,10 @@ export function TerminalPane({
   const menu = useContextMenu();
 
   useEffect(() => onScheme(() => setScheme(terminalScheme())), []);
+  // A theme taken in, or another face: counted, so the palette below is read
+  // again in the same light or dark.
+  const [looks, setLooks] = useState(0);
+  useEffect(() => onLook(() => setLooks((n) => n + 1)), []);
 
   useEffect(() => {
     const element = host.current;
@@ -239,12 +245,12 @@ export function TerminalPane({
       // Ends in `monospace` so there is always something the platform can
       // resolve: xterm sizes its grid by measuring one character in this font,
       // and a family it cannot resolve measures zero.
-      fontFamily: 'ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace',
-      fontSize: 13,
+      fontFamily: codeFont().family,
+      fontSize: codeFont().size,
       // Taken from style.css, because the emulator paints its own background
       // and would otherwise sit as a rectangle of some other colour inside the
       // pane. See `palette`.
-      theme: { ...palette(THEME, element), ...ANSI[scheme] },
+      theme: { ...palette(THEME, element), ...ANSI[scheme], ...themeAnsi(scheme) },
       minimumContrastRatio: CONTRAST[scheme],
       // The sandbox's tmux keeps the scrollback that matters; this is just what
       // the pane can scroll back through without asking for it again.
@@ -427,7 +433,7 @@ export function TerminalPane({
           xterm.writeln(`\r\n\x1b[33m-- ${frame.reason ?? "detached"} --\x1b[0m`);
           break;
       }
-    }).catch((e) => xterm.writeln(`\r\n\x1b[31m${String(e)}\x1b[0m`));
+    }).catch((e) => xterm.writeln(`\r\n\x1b[31m${messageOf(e)}\x1b[0m`));
 
     const typed = xterm.onData(send);
 
@@ -435,6 +441,15 @@ export function TerminalPane({
     // observer rather than a window listener, which would miss the split.
     const observer = new ResizeObserver(refit);
     observer.observe(element);
+    // Another face or size is another cell size, and so another grid in the
+    // same pane.
+    const unlook = onLook(() => {
+      const { family, size } = codeFont();
+      if (xterm.options.fontFamily === family && xterm.options.fontSize === size) return;
+      xterm.options.fontFamily = family;
+      xterm.options.fontSize = size;
+      requestAnimationFrame(refit);
+    });
     const resized = xterm.onResize(sendSize);
 
     return () => {
@@ -442,6 +457,7 @@ export function TerminalPane({
       handle.current = null;
       element.removeEventListener("paste", pasting, true);
       observer.disconnect();
+      unlook();
       typed.dispose();
       resized.dispose();
       parsed.dispose();
@@ -459,9 +475,9 @@ export function TerminalPane({
     const xterm = handle.current?.xterm;
     const element = host.current;
     if (!xterm || !element) return;
-    xterm.options.theme = { ...palette(THEME, element), ...ANSI[scheme] };
+    xterm.options.theme = { ...palette(THEME, element), ...ANSI[scheme], ...themeAnsi(scheme) };
     xterm.options.minimumContrastRatio = CONTRAST[scheme];
-  }, [scheme]);
+  }, [scheme, looks]);
 
   const menuProps = menu(() => {
     const h = handle.current;

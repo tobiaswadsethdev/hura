@@ -517,8 +517,43 @@ fn order(name: &str) -> (bool, u64, String) {
 /// Open another conversation, and answer with its name. Named by the host, for
 /// the reason the shells are named by the server: two windows asking at once
 /// would otherwise both pick `chat-2`.
-pub fn open(backend: &dyn Backend, session: &Session) -> Result<String, String> {
-    run(backend, session, &command(backend, session, "new"))
+///
+/// With `fork`, it starts from that conversation's context rather than from
+/// nothing (a side chat), and with `at` as well, only up to that assistant
+/// message (an earlier message edited). A host from before forks were a thing
+/// ignores both and opens a plain one.
+pub fn open(
+    backend: &dyn Backend,
+    session: &Session,
+    fork: Option<&str>,
+    at: Option<&str>,
+) -> Result<String, String> {
+    let mut args = String::from("new");
+    if let Some(fork) = fork {
+        // Checked before anything reaches a shell, as `close` checks: a name
+        // and an id are not trusted because a client sent them.
+        if !is_safe_word(fork) {
+            return Err(format!("`{fork}` is not a conversation to fork"));
+        }
+        args.push_str(&format!(" --fork {}", sh_quote(fork)));
+        if let Some(at) = at {
+            if !is_safe_word(at) {
+                return Err("that is not a message to fork at".into());
+            }
+            args.push_str(&format!(" --at {}", sh_quote(at)));
+        }
+    }
+    run(backend, session, &command(backend, session, &args))
+}
+
+/// Letters, digits, `-`, `_` and `.`: what a conversation's name and a
+/// message's uuid are made of.
+fn is_safe_word(word: &str) -> bool {
+    !word.is_empty()
+        && word.len() <= 128
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// End a conversation and forget its transcript.
@@ -605,6 +640,19 @@ pub fn tell(backend: &dyn Backend, session: &Session, message: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What a fork is named by reaches a shell, so only a name's or a uuid's
+    /// characters get there.
+    #[test]
+    fn a_fork_is_named_by_a_plain_word() {
+        assert!(is_safe_word("agent"));
+        assert!(is_safe_word("chat-2"));
+        assert!(is_safe_word("4b8f0c2e-91a7-4d1e-b3f5-7e2a9c6d0f11"));
+        assert!(!is_safe_word(""));
+        assert!(!is_safe_word("chat-2; rm -rf /"));
+        assert!(!is_safe_word("$(id)"));
+        assert!(!is_safe_word(&"a".repeat(129)));
+    }
     use crate::backend::testing::sandboxed;
 
     const HOST: &str = include_str!("../../../hurad/images/hura-base/hura-agent.mjs");

@@ -18,4 +18,11 @@ messages: Array<QueuedMessage>,
  * [`crate::config::Config::queue_limit`], filled in for a client and not
  * kept: the config file is where it is set.
  */
-limit: number, };
+limit: number, 
+/**
+ * The server's offset from UTC now, in seconds, filled in for a client
+ * and not kept: a repeating session's time of day is on the server's
+ * clock, and a client on another says so. Absent from a server that
+ * cannot repeat one, which is how a client knows.
+ */
+utc_offset?: number | null, };

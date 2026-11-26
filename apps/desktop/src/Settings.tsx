@@ -1,31 +1,23 @@
-// The settings screen: what a new session starts with, when this window
-// notifies you, and the trackers the sidebar of tickets and pull requests reads.
-// Signing in to hura cloud, which the trackers need, is the account screen's.
+// The settings' pages that are settings rather than screens of their own:
+// what a new worktree starts with on this server, what this window tells you
+// about, and the trackers. Drawn in T3 Code's rows inside the settings card
+// (`settings/SettingsModal.tsx`); the window's look and its keys are
+// `AppearanceSettings.tsx`'s.
 //
-// Two halves, and the split between them is the only structure this screen
-// has -- because it is the only structure that matters. **Who owns the answer.**
-// A branch prefix names the work branch of every session on the server,
-// including the ones `hura new` starts from a terminal, so it is a line in the
-// server's config file and this screen edits that file. Whether this machine
-// pings you when an agent waits is nobody's business but this window's, and two
-// people looking at the same server from two machines would otherwise fight
-// over one switch.
+// **Who owns the answer** is what splits them. A branch prefix names the work
+// branch of every worktree on the server, including the ones `hura new`
+// starts from a terminal, so it is a line in the server's config file and the
+// page for it edits that file. Whether this machine pings you when an agent
+// waits is nobody's business but this window's, and two people looking at the
+// same server from two machines would otherwise fight over one switch. Each
+// page says which it is, in the sentence over it.
 //
-// So the top half says which file it writes and the bottom half says the values
-// never leave the machine. A settings screen that mixed the two silently would
-// be one where muting a notification asked permission from a server, and where
-// changing a branch prefix appeared to work and then didn't for the CLI.
-//
-// **Written on save, not on keystroke.** Every other screen in this window acts
-// immediately, and this is the exception on purpose: a config file re-read by
-// every command is not somewhere to land a half-typed branch name, and the
-// server refuses a policy that is not a template -- an error per character
-// while somebody types `feature-work` is not a form, it is a fight. The window
-// half is immediate, because a checkbox has nothing to validate against.
-//
-// The sidebars' widths and the refresh interval used to be fields here too.
-// The widths are set by dragging a sidebar's edge (double-click resets it),
-// and the interval is fixed: four number boxes for things nobody changed.
+// **The server's are written on save, not on keystroke.** Every other page
+// acts immediately, and this is the exception on purpose: a config file
+// re-read by every command is not somewhere to land a half-typed branch name,
+// and the server refuses a policy that is not a template; an error per
+// character while somebody types `feature-work` is not a form, it is a fight.
+// Save is in the card's header, where T3 Code puts a page's own action.
 
 import { useEffect, useState } from "react";
 
@@ -36,48 +28,97 @@ import type { NamingKey } from "./gen/NamingKey";
 import type { NewOptions } from "./gen/NewOptions";
 import type { Settings } from "./gen/Settings";
 import type { SettingsView } from "./gen/SettingsView";
-import { Settings as SettingsGlyph } from "./icons";
-import type { Prefs } from "./prefs";
-import { Screen } from "./Screen";
 import { Pill } from "./Pill";
+import type { Prefs } from "./prefs";
 import { Select } from "./Select";
+import { SettingsPage, SettingsRow, SettingsSection } from "./settings/layout";
+import { SettingsActions } from "./settings/SettingsModal";
 import { TrackersSection } from "./Trackers";
-import { APPEARANCES } from "./theme";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Switch } from "./ui/switch";
 
-export function SettingsScreen({
-  server,
+/// What this window tells you about.
+export function GeneralPage({
   prefs,
   onPrefs,
-  at,
-  onTrackers,
   signedIn,
-  onSignIn,
-  onClose,
 }: {
-  server: string;
   prefs: Prefs;
   onPrefs: (change: Partial<Prefs>) => void;
-  /// Where to open it: at the trackers, when the sidebar sent you here to add
-  /// one.
-  at: "trackers" | null;
-  /// The trackers after a change, so the sidebar reads them again.
-  onTrackers: (trackers: ConfiguredTracker[]) => void;
-  /// Signed in to hura cloud or out, which is whether there are trackers.
-  /// `null` until the window has read the session.
+  /// Signed in to hura cloud: without it there are no trackers, so nothing
+  /// about them to be told.
   signedIn: boolean | null;
-  /// To the account screen, from the trackers section signed out.
-  onSignIn: () => void;
-  onClose: () => void;
 }) {
+  return (
+    <SettingsPage notice="Kept on this computer, for this window only.">
+      <SettingsSection title="Notifications">
+        <SettingsRow
+          title="When an agent needs me"
+          description="The system's notification when a worktree starts waiting on a question or a permission."
+          control={<Switch checked={prefs.notify} onCheckedChange={(on) => onPrefs({ notify: on })} />}
+        />
+        {signedIn && (
+          <SettingsRow
+            title="When my tickets or pull requests change"
+            description="A status moved, somebody else's comment, a ticket newly yours, a review asked of you, and your pull requests' checks and reviews. Checked every few minutes."
+            control={
+              <Switch checked={prefs.notifyTickets} onCheckedChange={(on) => onPrefs({ notifyTickets: on })} />
+            }
+          />
+        )}
+      </SettingsSection>
+      {signedIn && (
+        <SettingsSection title="Pull requests">
+          <SettingsRow
+            title="Send review comments to their agents"
+            description="What reviewers say on a pull request you opened goes to the worktree on its branch, as one message, while this window is open. Each comment once."
+            control={
+              <Switch
+                checked={prefs.pullCommentsToAgent}
+                onCheckedChange={(on) => onPrefs({ pullCommentsToAgent: on })}
+              />
+            }
+          />
+        </SettingsSection>
+      )}
+    </SettingsPage>
+  );
+}
+
+/// The trackers your tickets and pull requests are read from. Its own
+/// section still, drawn as a page.
+export function TrackersPage({
+  signedIn,
+  onSignIn,
+  onTrackers,
+}: {
+  signedIn: boolean | null;
+  onSignIn: () => void;
+  onTrackers: (trackers: ConfiguredTracker[]) => void;
+}) {
+  return (
+    <section className="screen in-settings" data-legacy>
+      <div className="screen-body">
+        <div className="screen-inner">
+          <TrackersSection key={String(signedIn)} signedIn={signedIn} onSignIn={onSignIn} focus={false} onChanged={onTrackers} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/// What a new worktree starts with on this server: its config file.
+export function SessionsPage({ server }: { server: string }) {
   const [view, setView] = useState<SettingsView | null>(null);
   /// What the choosers are filled from. The same request the create form makes,
   /// reused rather than a second one: the policies and the credential providers
-  /// this server has are one fact, and a settings screen listing a different
-  /// set to the form would be the server disagreeing with itself.
+  /// this server has are one fact, and a settings page listing a different set
+  /// to the form would be the server disagreeing with itself.
   const [options, setOptions] = useState<NewOptions | null>(null);
   /// The edited copy. `null` until the server has answered, so there is no
-  /// moment where this screen shows a blank field that means "not set" and is
-  /// really "not loaded".
+  /// moment where this shows a blank field that means "not set" and is really
+  /// "not loaded".
   const [draft, setDraft] = useState<Settings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -96,8 +137,8 @@ export function SettingsScreen({
       })
       .catch((e) => live && setError(messageOf(e)));
     // Not fatal on its own: the text fields work without it, and a runtime
-    // that cannot be reached is exactly when somebody wants to look at this
-    // screen. The two choosers say so where they would have been.
+    // that cannot be reached is exactly when somebody wants to look at this.
+    // The two choosers say so where they would have been.
     api.newOptions(server).then(
       (o) => live && setOptions(o),
       () => {},
@@ -107,18 +148,15 @@ export function SettingsScreen({
     };
   }, [server]);
 
-  /// One field of the draft.
   const edit = (change: Partial<Settings>) => {
     setSaved(false);
     setDraft((current) => (current ? { ...current, ...change } : current));
   };
 
-  /// Blank is not a value, it is the absence of one.
-  ///
-  /// The whole screen turns on this: an empty branch prefix field means "take
-  /// the key out of the file and go back to `hura`", not "name branches
-  /// `/foo`". The server normalises the same way, and this is here so the
-  /// placeholder a person sees and the value that gets sent agree.
+  /// Blank is not a value, it is the absence of one: an empty branch prefix
+  /// means "take the key out of the file and go back to `hura`", not "name
+  /// branches `/foo`". The server normalises the same way, and this is here so
+  /// the placeholder a person sees and the value that gets sent agree.
   const text = (value: string): string | null => (value.trim() === "" ? null : value);
 
   const save = async () => {
@@ -140,319 +178,230 @@ export function SettingsScreen({
     }
   };
 
-  /// Whether the draft still differs from the file.
-  ///
-  /// Worth computing rather than tracking a boolean, because a save answers
-  /// with the file re-read: a field cleared to blank comes back as an absent
-  /// key, `draft` is replaced by what came back, and this goes false on its own
-  /// without anything having to remember to reset it. Compared as JSON because
-  /// both sides are the same generated shape with the same key order -- `draft`
-  /// is a spread of `view.settings` -- so there is nothing to walk.
-  ///
-  /// This screen is the one in the window with a save button, so it is the one
-  /// that owes an answer to "did that take?". Not a prompt on close: a settings
-  /// screen that will not let go of the window is worse than a discarded edit
-  /// to a branch prefix.
+  /// Whether the draft still differs from the file. Computed rather than
+  /// tracked: a save answers with the file re-read, `draft` is replaced by
+  /// what came back, and this goes false on its own. Compared as JSON because
+  /// both sides are the same generated shape with the same key order.
   const dirty = view !== null && draft !== null && JSON.stringify(draft) !== JSON.stringify(view.settings);
 
   const providers = draft?.providers ?? [];
   const toggleProvider = (name: string) =>
-    edit({
-      providers: providers.includes(name)
-        ? providers.filter((p) => p !== name)
-        : [...providers, name],
-    });
+    edit({ providers: providers.includes(name) ? providers.filter((p) => p !== name) : [...providers, name] });
+  const fileBased = draft?.policy && !(options?.policies ?? []).some((p) => p.spec === draft.policy);
 
   return (
-    <Screen icon={SettingsGlyph} title="Settings" narrow onClose={onClose}>
-      {error && <p className="error">{error}</p>}
-      {!view && !error && <Waiting />}
-
-      {view && draft && (
-        <>
-          <section className="setting-group">
-            <h3>New sessions</h3>
-            <p className="hint">
-              Server defaults, shared with <code>hura new</code>. The create form can override them.
-            </p>
-
-            <label>
-              <span>Branch prefix</span>
-              <input
-                value={draft.branch_prefix ?? ""}
-                placeholder={view.default_branch_prefix}
-                spellCheck={false}
-                onChange={(e) => edit({ branch_prefix: text(e.target.value) })}
-              />
-            </label>
-            {/* The example, computed rather than described. `<prefix>/<name>`
-                is a sentence somebody has to decode; `tobias/add-auth` is
-                the branch they are about to have. */}
-            <p className="hint indent">
-              e.g.{" "}
-              <code>
-                {(draft.branch_prefix?.trim() || view.default_branch_prefix).replace(/\/+$/, "")}
-                /add-auth
-              </code>
-            </p>
-
-            <label>
-              <span>Agent</span>
-              {/* Chat is what the server does with the key missing, so it is
-                  the option a file that does not mention it shows. */}
-              <Select
-                value={draft.interface ?? "chat"}
-                onChange={(v) => edit({ interface: v === "terminal" ? "terminal" : "chat" })}
-                options={[
-                  { value: "chat", label: "Chat", hint: "The Agent SDK, drawn by this window" },
-                  { value: "terminal", label: "Terminal", hint: "Claude Code's own, in tmux" },
-                ]}
-              />
-            </label>
-
-            <label>
-              <span>Base branch</span>
-              <input
-                value={draft.base ?? ""}
-                placeholder="the remote's default branch"
-                spellCheck={false}
-                onChange={(e) => edit({ base: text(e.target.value) })}
-              />
-            </label>
-
-            <label>
-              <span>Policy</span>
-              {/* The built-in default is an option rather than a blank row:
-                  "whatever hura chooses" is a real answer here, and the one
-                  that survives the default changing. A policy set to a path
-                  is shown as itself, since no template is it. */}
-              <Select
-                value={draft.policy ?? ""}
-                onChange={(v) => edit({ policy: text(v) })}
-                options={[
-                  {
-                    value: "",
-                    label: options ? options.default_policy : "The default",
-                    hint: "The built-in default",
-                  },
-                  ...(options?.policies ?? []).map((p) => ({
-                    value: p.spec,
-                    label: p.spec,
-                    hint: p.summary,
-                  })),
-                  ...(draft.policy && !(options?.policies ?? []).some((p) => p.spec === draft.policy)
-                    ? [{ value: draft.policy, label: draft.policy, hint: "From the config file" }]
-                    : []),
-                ]}
-              />
-            </label>
-            {/* A policy set to a file path is a perfectly good answer and one
-                no chooser can offer, so it is shown rather than silently
-                replaced by the first template in the list. */}
-            {draft.policy && !(options?.policies ?? []).some((p) => p.spec === draft.policy) && (
-              <p className="hint indent">
-                <code>{draft.policy}</code> is a file, not a template.
-              </p>
-            )}
-
-            <fieldset>
-              <legend>Credentials</legend>
-              {!options && <Waiting size="row" />}
-              {options?.providers_error && <p className="error">{options.providers_error}</p>}
-              {options && options.providers.length === 0 && !options.providers_error && (
-                <p className="hint">
-                  None configured: add a <code>[credentials.NAME]</code> table to the server's config file
-                </p>
-              )}
-              <div className="pills">
-                {(options?.providers ?? []).map((p) => (
-                  <Pill
-                    key={p.name}
-                    on={providers.includes(p.name)}
-                    title={p.kind}
-                    onClick={() => toggleProvider(p.name)}
-                  >
-                    {p.name}
-                  </Pill>
-                ))}
-              </div>
-              <p className="hint">None picked: each repository gets its own guess.</p>
-            </fieldset>
-          </section>
-
-          <section className="setting-group">
-            <h3>Session names</h3>
-            <p className="hint">
-              For a session started without a name: a title to show it by, and the slug its branch and
-              sandbox are named from.
-            </p>
-            <label>
-              <span>Names</span>
-              {/* AI is what the server does with the key missing. */}
-              <Select
-                value={draft.names ?? "ai"}
-                onChange={(v) => edit({ names: v === "rules" ? "rules" : "ai" })}
-                options={[
-                  { value: "ai", label: "By Claude Haiku", hint: "From the task, or by the rules if it can't be asked" },
-                  { value: "rules", label: "By the rules", hint: "The task's first words. Nothing leaves the server" },
-                ]}
-              />
-            </label>
-            <NamingKeyField
-              server={server}
-              source={view.naming_key}
-              // Only the key's status: the draft is the file's, and a key is
-              // not in the file.
-              onChange={(naming_key) => setView((v) => (v ? { ...v, naming_key } : v))}
-            />
-          </section>
-
-          <section className="setting-group">
-            <h3>Queue</h3>
-            <p className="hint">
-              A session added to the queue starts once fewer than this many are creating or running. One
-              scheduled for a time starts then, whatever this says.
-            </p>
-            <label>
-              <span>Run at once</span>
-              <input
-                type="number"
-                min={1}
-                max={50}
-                // Blank is the server's default, which is what the key
-                // missing from the file means.
-                placeholder="2"
-                value={draft.queue_limit ?? ""}
-                onChange={(e) => {
-                  const n = Number.parseInt(e.target.value, 10);
-                  edit({ queue_limit: Number.isFinite(n) && n > 0 ? n : null });
-                }}
-              />
-            </label>
-          </section>
-
-          <section className="setting-group">
-            <h3>This server</h3>
-            <label className="tick">
-              <input
-                type="checkbox"
-                // Absent means on, which is what the server does with the
-                // key missing -- so the box has to be ticked for a file that
-                // does not mention it.
-                checked={draft.auto_update ?? true}
-                onChange={(e) => edit({ auto_update: e.target.checked })}
-              />
-              <span>Auto-update the server</span>
-            </label>
-            <p className="hint indent">
-              Verified, then applied the next time <code>hurad</code> starts.
-            </p>
-          </section>
-
-          <div className="setting-actions">
-            <span className="hint path">
-              {view.present ? "Writes " : "Creates "}
-              <code>{view.path}</code>
-            </span>
-            {dirty && <span className="unsaved">unsaved</span>}
-            {saved && !dirty && <span className="ok">saved</span>}
-            <button className="go" disabled={saving || !dirty} onClick={() => void save()}>
-              {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </>
-      )}
-
-      <section className="setting-group">
-        <h3>This window</h3>
-        <p className="hint">Stored on this machine only.</p>
-
-        <div className="segmented appearance" role="radiogroup" aria-label="Appearance">
-          {APPEARANCES.map(({ value, label }) => (
-            <button
-              key={value}
-              role="radio"
-              aria-checked={prefs.appearance === value}
-              className={prefs.appearance === value ? "on" : ""}
-              onClick={() => onPrefs({ appearance: value })}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <p className="hint">System follows the computer's own.</p>
-
-        <label className="tick">
-          <input
-            type="checkbox"
-            checked={prefs.terminalsDark}
-            onChange={(e) => onPrefs({ terminalsDark: e.target.checked })}
-          />
-          <span>Keep terminals dark</span>
-        </label>
-        <p className="hint indent">
-          For programs drawn for a dark terminal, when the window is light.
-        </p>
-
-        <label className="tick">
-          <input
-            type="checkbox"
-            checked={prefs.notify}
-            onChange={(e) => onPrefs({ notify: e.target.checked })}
-          />
-          <span>Notify when an agent needs me</span>
-        </label>
-
-        {/* Signed in only: signed out there are no trackers, so nothing that
-            could change, and a switch for it is a question about nothing. */}
-        {signedIn && (
+    <>
+      <SettingsActions>
+        {dirty && <span className="px-1 text-xs text-warning-foreground">Unsaved</span>}
+        {saved && !dirty && <span className="px-1 text-xs text-success-foreground">Saved</span>}
+        <Button size="xs" disabled={saving || !dirty} onClick={() => void save()}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </SettingsActions>
+      <SettingsPage
+        notice={
+          view ? (
+            <>
+              This server's defaults, shared with <code>hura new</code>. The create form can override each.{" "}
+              {view.present ? "Written to " : "Saving creates "}
+              <code>{view.path}</code>.
+            </>
+          ) : undefined
+        }
+      >
+        {error && <p className="px-3 text-sm text-destructive-foreground sm:px-4">{error}</p>}
+        {!view && !error && <Waiting />}
+        {view && draft && (
           <>
-            <label className="tick">
-              <input
-                type="checkbox"
-                checked={prefs.notifyTickets}
-                onChange={(e) => onPrefs({ notifyTickets: e.target.checked })}
+            <SettingsSection title="New worktrees">
+              <SettingsRow
+                title="Branch prefix"
+                description="What every work branch on this server starts with."
+                status={
+                  <>
+                    e.g.{" "}
+                    <code>
+                      {(draft.branch_prefix?.trim() || view.default_branch_prefix).replace(/\/+$/, "")}/add-auth
+                    </code>
+                  </>
+                }
+                control={
+                  <Input
+                    className="w-56"
+                    value={draft.branch_prefix ?? ""}
+                    placeholder={view.default_branch_prefix}
+                    spellCheck={false}
+                    onChange={(e) => edit({ branch_prefix: text(e.target.value) })}
+                  />
+                }
               />
-              <span>Notify when my tickets or pull requests change</span>
-            </label>
-            <p className="hint indent">
-              A status moved, somebody else's comment, a ticket newly yours, a review asked of you,
-              and your pull requests' checks and reviews. Checked every few minutes.
-            </p>
-            <label className="tick">
-              <input
-                type="checkbox"
-                checked={prefs.pullCommentsToAgent}
-                onChange={(e) => onPrefs({ pullCommentsToAgent: e.target.checked })}
+              <SettingsRow
+                title="Agent"
+                description="How a new worktree's agent is drawn."
+                control={
+                  <div data-legacy className="w-56">
+                    {/* Chat is what the server does with the key missing, so
+                        it is the option a file that does not mention it shows. */}
+                    <Select
+                      className="w-full"
+                      value={draft.interface ?? "chat"}
+                      onChange={(v) => edit({ interface: v === "terminal" ? "terminal" : "chat" })}
+                      options={[
+                        { value: "chat", label: "Chat", hint: "The Agent SDK, drawn by this window" },
+                        { value: "terminal", label: "Terminal", hint: "Claude Code's own, in tmux" },
+                      ]}
+                    />
+                  </div>
+                }
               />
-              <span>Send review comments on my pull requests to their agents</span>
-            </label>
-            <p className="hint indent">
-              What reviewers say on a pull request you opened goes to the worktree on its branch, as
-              one message, while this window is open. Each comment once. Checked every few minutes.
-            </p>
+              <SettingsRow
+                title="Base branch"
+                description="What a new work branch starts from."
+                control={
+                  <Input
+                    className="w-56"
+                    value={draft.base ?? ""}
+                    placeholder="The remote's default"
+                    spellCheck={false}
+                    onChange={(e) => edit({ base: text(e.target.value) })}
+                  />
+                }
+              />
+              <SettingsRow
+                title="Policy"
+                description="What the sandbox lets the agent reach."
+                status={
+                  // A policy set to a file path is a perfectly good answer
+                  // and one no chooser can offer, so it is said rather than
+                  // silently replaced by the first template in the list.
+                  fileBased ? (
+                    <>
+                      <code>{draft.policy}</code> is a file, not a template.
+                    </>
+                  ) : undefined
+                }
+                control={
+                  <div data-legacy className="w-56">
+                    <Select
+                      className="w-full"
+                      value={draft.policy ?? ""}
+                      onChange={(v) => edit({ policy: text(v) })}
+                      options={[
+                        {
+                          value: "",
+                          label: options ? options.default_policy : "The default",
+                          hint: "The built-in default",
+                        },
+                        ...(options?.policies ?? []).map((p) => ({ value: p.spec, label: p.spec, hint: p.summary })),
+                        ...(fileBased && draft.policy
+                          ? [{ value: draft.policy, label: draft.policy, hint: "From the config file" }]
+                          : []),
+                      ]}
+                    />
+                  </div>
+                }
+              />
+              <SettingsRow
+                title="Credentials"
+                description="The providers a new worktree's sandbox is given. None picked: each repository gets its own guess."
+              >
+                <div data-legacy className="pills mt-2.5">
+                  {!options && <Waiting size="row" />}
+                  {options?.providers_error && <p className="error">{options.providers_error}</p>}
+                  {options && options.providers.length === 0 && !options.providers_error && (
+                    <p className="hint">
+                      None configured: add a <code>[credentials.NAME]</code> table to the server's config file.
+                    </p>
+                  )}
+                  {(options?.providers ?? []).map((p) => (
+                    <Pill key={p.name} on={providers.includes(p.name)} title={p.kind} onClick={() => toggleProvider(p.name)}>
+                      {p.name}
+                    </Pill>
+                  ))}
+                </div>
+              </SettingsRow>
+            </SettingsSection>
+
+            <SettingsSection
+              title="Names"
+              description="For a worktree started without a name: a title to show it by, and the slug its branch and sandbox are named from."
+            >
+              <SettingsRow
+                title="Named"
+                control={
+                  <div data-legacy className="w-56">
+                    {/* AI is what the server does with the key missing. */}
+                    <Select
+                      className="w-full"
+                      value={draft.names ?? "ai"}
+                      onChange={(v) => edit({ names: v === "rules" ? "rules" : "ai" })}
+                      options={[
+                        { value: "ai", label: "By Claude Haiku", hint: "From the task, or by the rules if it can't be asked" },
+                        { value: "rules", label: "By the rules", hint: "The task's first words. Nothing leaves the server" },
+                      ]}
+                    />
+                  </div>
+                }
+              />
+              <NamingKeyRow
+                server={server}
+                source={view.naming_key}
+                // Only the key's status: the draft is the file's, and a key
+                // is not in the file.
+                onChange={(naming_key) => setView((v) => (v ? { ...v, naming_key } : v))}
+              />
+            </SettingsSection>
+
+            <SettingsSection title="Queue">
+              <SettingsRow
+                title="Run at once"
+                description="A worktree added to the queue starts once fewer than this many are creating or running. One scheduled for a time starts then, whatever this says."
+                control={
+                  <Input
+                    className="w-20"
+                    type="number"
+                    min={1}
+                    max={50}
+                    // Blank is the server's default, which is what the key
+                    // missing from the file means.
+                    placeholder="2"
+                    value={draft.queue_limit ?? ""}
+                    onChange={(e) => {
+                      const n = Number.parseInt(e.target.value, 10);
+                      edit({ queue_limit: Number.isFinite(n) && n > 0 ? n : null });
+                    }}
+                  />
+                }
+              />
+            </SettingsSection>
+
+            <SettingsSection title="Server">
+              <SettingsRow
+                title="Auto-update"
+                description={
+                  <>
+                    Verified, then applied the next time <code>hurad</code> starts.
+                  </>
+                }
+                control={
+                  // Absent means on, which is what the server does with the
+                  // key missing.
+                  <Switch checked={draft.auto_update ?? true} onCheckedChange={(on) => edit({ auto_update: on })} />
+                }
+              />
+            </SettingsSection>
           </>
         )}
-      </section>
-
-      {/* Scrolled to once the server's half has drawn above it, or it lands
-          where the section was before that half pushed it down. */}
-      <TrackersSection
-        key={String(signedIn)}
-        signedIn={signedIn}
-        onSignIn={onSignIn}
-        focus={at === "trackers" && (view !== null || error !== null)}
-        onChanged={onTrackers}
-      />
-    </Screen>
+      </SettingsPage>
+    </>
   );
 }
 
 /// The Anthropic API key naming calls Claude with, kept in the server's secret
-/// store -- so per server, and write-only: this says whether there is one and
+/// store, so per server, and write-only: this says whether there is one and
 /// where it comes from, never what it is. Stored or forgotten at once rather
 /// than with Save, because it is not part of the config file Save writes.
-function NamingKeyField({
+function NamingKeyRow({
   server,
   source,
   onChange,
@@ -480,44 +429,47 @@ function NamingKeyField({
   };
 
   return (
-    <>
-      <label>
-        <span>API key</span>
-        <span className="key-field">
-          <input
+    <SettingsRow
+      title="API key"
+      description={
+        <>
+          {source === "stored" && "Stored on this server, which names with it. It can't be shown again."}
+          {source === "environment" && (
+            <>
+              From <code>ANTHROPIC_API_KEY</code> in <code>hurad</code>'s environment. One stored here would be
+              used instead.
+            </>
+          )}
+          {source === "none" && (
+            <>
+              None, so naming uses the <code>claude</code> command on the server if it is there and signed in.
+              Stored on the server, never sent back here.
+            </>
+          )}
+        </>
+      }
+      status={error ? <span className="text-destructive-foreground">{error}</span> : undefined}
+      control={
+        <>
+          <Input
+            className="w-56"
             type="password"
             value={value}
-            placeholder={source === "stored" ? "Stored. Paste to replace it" : "sk-ant-…"}
+            placeholder={source === "stored" ? "Paste to replace it" : "sk-ant-…"}
             spellCheck={false}
             autoComplete="off"
             onChange={(e) => setValue(e.target.value)}
           />
-          <button disabled={busy || value.trim() === ""} onClick={() => void change(value.trim())}>
+          <Button variant="outline" size="sm" disabled={busy || value.trim() === ""} onClick={() => void change(value.trim())}>
             Store
-          </button>
+          </Button>
           {source === "stored" && (
-            <button disabled={busy} onClick={() => void change(null)}>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => void change(null)}>
               Forget
-            </button>
+            </Button>
           )}
-        </span>
-      </label>
-      {error && <p className="error indent">{error}</p>}
-      <p className="hint indent">
-        {source === "stored" && "Stored on this server, which names with it. It can't be shown again."}
-        {source === "environment" && (
-          <>
-            From <code>ANTHROPIC_API_KEY</code> in <code>hurad</code>'s environment. One stored here
-            would be used instead.
-          </>
-        )}
-        {source === "none" && (
-          <>
-            None, so naming uses the <code>claude</code> command on the server if it is there and signed
-            in. Stored on the server, never sent back here.
-          </>
-        )}
-      </p>
-    </>
+        </>
+      }
+    />
   );
 }
