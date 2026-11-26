@@ -332,6 +332,98 @@ export function kept(msg) {
   return true;
 }
 
+/// A message as the transcript keeps it: without `tool_use_result`, which is a
+/// tool's result again, as Claude Code structured it for itself. Nothing draws
+/// it, and both clients' history files already drop it. A screenshot is in it
+/// a second time, as `file.base64`, so in a session that takes a lot of them
+/// it was over 40% of the transcript, sent again every time a phone opened it
+/// over a relayed link.
+export function lean(msg) {
+  if (!msg || typeof msg !== "object" || !("tool_use_result" in msg)) return msg;
+  const { tool_use_result: _, ...rest } = msg;
+  return rest;
+}
+
+/// An entry read back from the transcript file, kept the way `lean` keeps one
+/// now: a transcript written before it still has the copy in it.
+export function leanEntry(entry) {
+  if (entry?.ev?.kind !== "sdk") return entry;
+  const msg = lean(entry.ev.msg);
+  return msg === entry.ev.msg ? entry : { ...entry, ev: { ...entry.ev, msg } };
+}
+
+/// An entry with each of its pictures put through `f(picture, index)`, which
+/// answers with what goes in the picture's place. The pictures are a file sent
+/// with your message that went to the model as one, and an image block
+/// anywhere in an SDK message: a screenshot a tool answered with, most often.
+/// `index` counts them in the order this finds them, which is the same every
+/// time for the same entry, so it is what a client asks for one by.
+///
+/// The entry itself is not changed. What has no picture in it comes back as
+/// the same object, so a replay copies only the entries that have one.
+function mapPictures(entry, f) {
+  let index = 0;
+  const walk = (v) => {
+    if (Array.isArray(v)) {
+      let out = null;
+      v.forEach((x, i) => {
+        const y = walk(x);
+        if (y !== x) (out ??= v.slice())[i] = y;
+      });
+      return out ?? v;
+    }
+    if (!v || typeof v !== "object") return v;
+    const source = v.source;
+    if (v.type === "image" && source?.type === "base64" && typeof source.data === "string") {
+      return { ...v, source: f({ mime: source.media_type, data: source.data }, index++, source) };
+    }
+    let out = null;
+    for (const [k, x] of Object.entries(v)) {
+      const y = walk(x);
+      if (y !== x) (out ??= { ...v })[k] = y;
+    }
+    return out ?? v;
+  };
+  const ev = entry?.ev;
+  if (ev?.kind === "sdk") {
+    const msg = walk(ev.msg);
+    return msg === ev.msg ? entry : { ...entry, ev: { ...ev, msg } };
+  }
+  if (ev?.kind === "prompt" && Array.isArray(ev.files) && ev.files.some((file) => typeof file.data === "string")) {
+    const files = ev.files.map((file) => {
+      if (typeof file.data !== "string") return file;
+      const { data, ...rest } = file;
+      return { ...rest, ...f({ mime: file.mime, data }, index++, null) };
+    });
+    return { ...entry, ev: { ...ev, files } };
+  }
+  return entry;
+}
+
+/// An entry as a client that fetches pictures is sent it: each picture's bytes
+/// left out, and in their place the number to ask for them by. An image
+/// block's source becomes `{type: "held", media_type, index}`, and a sent
+/// file's `data` becomes `held: index`.
+///
+/// A session that screenshots a lot is mostly pictures, and a conversation
+/// opens with its earlier turns folded shut, their pictures unseen. Sending
+/// them anyway was most of what a phone waited for before it drew anything.
+export function withoutPictures(entry) {
+  return mapPictures(entry, (picture, index, source) =>
+    source ? { type: "held", media_type: source.media_type, index } : { held: index },
+  );
+}
+
+/// The `index`th picture in an entry, as `{mime, data}`, or null.
+export function pictureIn(entry, index) {
+  let found = null;
+  mapPictures(entry, (picture, i, source) => {
+    if (i === index) found = picture;
+    return source ?? {};
+  });
+  return found;
+}
+
 /// The input side of a streaming `query()`: a queue the SDK reads from for as
 /// long as the conversation lasts.
 export class Inbox {
@@ -760,7 +852,7 @@ class Conversation {
     for (const line of text.split("\n")) {
       if (!line) continue;
       try {
-        entries.push(JSON.parse(line));
+        entries.push(leanEntry(JSON.parse(line)));
       } catch {
         // A line cut short by a crash mid-write. The rest is still worth having.
       }
@@ -825,10 +917,35 @@ class Conversation {
     this.host.report();
   }
 
-  attach(client, since) {
+  /// `fetchPictures`: the client asks for a picture when it draws it, so the
+  /// replay leaves the bytes out. What arrives after the replay is whole
+  /// either way: an entry as it happens is the one being watched.
+  attach(client, since, fetchPictures = false) {
     this.watchers.add(client);
-    for (const frame of replayFrames(this.entries, since, this.seq)) client.send(frame);
+    const entries = fetchPictures ? this.entries.map(withoutPictures) : this.entries;
+    for (const frame of replayFrames(entries, since, this.seq)) client.send(frame);
     client.send({ t: "state", state: this.snapshot() });
+  }
+
+  /// The answer to a client asking for a picture the replay left out.
+  picture(seq, index) {
+    const entry = this.#entry(seq);
+    return { t: "picture", seq, index, picture: entry ? pictureIn(entry, index) : null };
+  }
+
+  /// The entry `seq`, by bisection: they are kept in the order they were
+  /// numbered.
+  #entry(seq) {
+    let lo = 0;
+    let hi = this.entries.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const at = this.entries[mid].seq;
+      if (at === seq) return this.entries[mid];
+      if (at < seq) lo = mid + 1;
+      else hi = mid - 1;
+    }
+    return null;
   }
 
   async start() {
@@ -1008,7 +1125,7 @@ class Conversation {
       }
     }
 
-    if (kept(msg)) this.append({ kind: "sdk", msg });
+    if (kept(msg)) this.append({ kind: "sdk", msg: lean(msg) });
     if (msg.type === "result" || msg.type === "assistant") this.changed();
   }
 
@@ -1377,7 +1494,7 @@ class Client {
         const target = this.host.conversations.get(req.conv);
         if (!target) throw new Error(`no conversation named ${req.conv}`);
         this.conversation = target;
-        target.attach(this, Number(req.since) || 0);
+        target.attach(this, Number(req.since) || 0, req.fetch_pictures === true);
         return;
       }
       case "list":
@@ -1420,6 +1537,9 @@ class Client {
         return c.setEffort(req.effort ?? null);
       case "shell":
         return c.shell(req.command);
+      // To this client alone: it asked, and nobody else is drawing it.
+      case "picture":
+        return this.send(c.picture(Number(req.seq), Number(req.index)));
       default:
         throw new Error(`unknown op ${req.op}`);
     }

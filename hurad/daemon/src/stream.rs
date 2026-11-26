@@ -236,10 +236,16 @@ async fn open(
                 detach: false,
             }
         }
-        Channel::Chat { conv, since, .. } => {
+        Channel::Chat {
+            conv,
+            since,
+            fetch_pictures,
+            ..
+        } => {
             let (tx, rx) = mpsc::channel(64);
+            let attach = chat::Attach::new(&conv, since, fetch_pictures);
             ChannelHandle {
-                task: tokio::spawn(chat_channel(id, session, conv, since, out, rx)),
+                task: tokio::spawn(chat_channel(id, session, attach, out, rx)),
                 to_terminal: Some(tx),
                 detach: false,
             }
@@ -268,20 +274,18 @@ const HOST_WAIT_EVERY: Duration = Duration::from_secs(1);
 async fn chat_channel(
     id: ChannelId,
     session: Session,
-    conv: String,
-    since: u64,
+    attach: chat::Attach,
     out: mpsc::Sender<ServerFrame>,
     mut input: mpsc::Receiver<ToChannel>,
 ) {
-    let reason = chat(id, &session, &conv, since, &out, &mut input).await;
+    let reason = chat(id, &session, attach, &out, &mut input).await;
     let _ = out.send(ServerFrame::Closed { id, reason }).await;
 }
 
 async fn chat(
     id: ChannelId,
     session: &Session,
-    conv: &str,
-    mut since: u64,
+    mut attach: chat::Attach,
     out: &mpsc::Sender<ServerFrame>,
     input: &mut mpsc::Receiver<ToChannel>,
 ) -> Option<String> {
@@ -320,7 +324,7 @@ async fn chat(
                 };
             match lease.connect().await {
                 Ok(stream) => {
-                    match converse(id, stream, conv, &mut since, &mut held, out, input).await {
+                    match converse(id, stream, &mut attach, &mut held, out, input).await {
                         Conversed::ClientGone => return None,
                         // Talking, then not: the host stopped, and is starting
                         // again. The wait begins afresh.
@@ -381,11 +385,12 @@ enum Conversed {
 }
 
 /// Attach to one conversation and carry frames both ways until one end goes.
+/// `attach.since` follows what has been passed on, so attaching again after
+/// the host restarts asks for what came after that.
 async fn converse(
     id: ChannelId,
     stream: tokio::net::TcpStream,
-    conv: &str,
-    since: &mut u64,
+    attach: &mut chat::Attach,
     held: &mut Vec<ChatCommand>,
     out: &mpsc::Sender<ServerFrame>,
     input: &mut mpsc::Receiver<ToChannel>,
@@ -396,12 +401,12 @@ async fn converse(
     let (read, mut write) = stream.into_split();
     let mut lines = tokio::io::BufReader::new(read).lines();
 
-    let mut attach = match serde_json::to_string(&chat::Attach::new(conv, *since)) {
+    let mut hello = match serde_json::to_string(&*attach) {
         Ok(text) => text,
         Err(e) => return Conversed::Refused(e.to_string()),
     };
-    attach.push('\n');
-    if write.write_all(attach.as_bytes()).await.is_err() {
+    hello.push('\n');
+    if write.write_all(hello.as_bytes()).await.is_err() {
         return Conversed::HostGone { heard: false };
     }
     // What was said while there was no host, in the order it was said. Kept
@@ -437,8 +442,8 @@ async fn converse(
                     }
                     heard = true;
                     match &frame {
-                        ChatFrame::Replay { seq, .. } => *since = (*since).max(*seq),
-                        ChatFrame::Entry { entry } => *since = (*since).max(entry.seq),
+                        ChatFrame::Replay { seq, .. } => attach.since = attach.since.max(*seq),
+                        ChatFrame::Entry { entry } => attach.since = attach.since.max(entry.seq),
                         _ => {}
                     }
                     // Waited for rather than dropped: a replay is one large

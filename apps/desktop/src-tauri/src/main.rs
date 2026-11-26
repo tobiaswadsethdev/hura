@@ -1629,10 +1629,12 @@ fn catch_up(
             .lock()
             .map_err(failed)?
             .last(server, name, &conv);
+        // Without pictures: what is kept here goes without them anyway.
         let channel = Channel::Chat {
             session: name.to_string(),
             conv: conv.clone(),
             since,
+            fetch_pictures: true,
         };
         if sink.send(ClientFrame::Open { id, channel }) {
             let c = Conversation {
@@ -1791,6 +1793,7 @@ fn watch(
         session,
         conv,
         since,
+        ..
     } = &channel
     {
         let c = Conversation {

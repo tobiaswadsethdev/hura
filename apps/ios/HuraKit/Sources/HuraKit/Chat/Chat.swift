@@ -195,6 +195,10 @@ public enum ChatTranscript {
                     if let data = f["data"]?.string, let mime = f["mime"]?.string {
                         blocks.append(TranscriptBlock(type: "image", name: f["name"]?.string,
                                                       pictures: [Picture(mime: mime, data: data)]))
+                    } else if case let .number(i)? = f["held"], let mime = f["mime"]?.string {
+                        let held = HeldPicture(seq: seq, index: Int(i))
+                        blocks.append(TranscriptBlock(type: "image", name: f["name"]?.string,
+                                                      pictures: [Picture(mime: mime, held: held)]))
                     } else if let path = f["path"]?.string {
                         blocks.append(TranscriptBlock(type: "file", text: path, name: f["name"]?.string))
                     }
@@ -294,7 +298,7 @@ public enum ChatTranscript {
             guard case let .array(blocks)? = content else { return nil }
             let results: [TranscriptBlock] = blocks.compactMap { b in
                 guard b["type"]?.string == "tool_result", let id = b["tool_use_id"]?.string else { return nil }
-                let pictures = resultPictures(b["content"])
+                let pictures = resultPictures(b["content"], seq: seq)
                 return TranscriptBlock(type: "tool_result", text: resultText(b["content"]), toolUseID: id,
                                        isError: b["is_error"]?.bool ?? false,
                                        pictures: pictures.isEmpty ? nil : pictures)
@@ -343,13 +347,20 @@ public enum ChatTranscript {
         }
     }
 
-    /// The images in a tool result, sent whole as base64.
-    static func resultPictures(_ content: JSONValue?) -> [Picture] {
+    /// The images in a tool result: sent whole as base64, or held back by a
+    /// replay, with the place in entry `seq` to ask for one by.
+    static func resultPictures(_ content: JSONValue?, seq: UInt64) -> [Picture] {
         guard case let .array(parts)? = content else { return [] }
         return parts.compactMap { p in
-            guard p["type"]?.string == "image", let source = p["source"], source["type"]?.string == "base64",
-                  let mime = source["media_type"]?.string, let data = source["data"]?.string else { return nil }
-            return Picture(mime: mime, data: data)
+            guard p["type"]?.string == "image", let source = p["source"],
+                  let mime = source["media_type"]?.string else { return nil }
+            switch source["type"]?.string {
+            case "base64": return source["data"]?.string.map { Picture(mime: mime, data: $0) }
+            case "held":
+                guard case let .number(i)? = source["index"] else { return nil }
+                return Picture(mime: mime, held: HeldPicture(seq: seq, index: Int(i)))
+            default: return nil
+            }
         }
     }
 
@@ -405,6 +416,18 @@ public struct ChatUpload: Encodable, Equatable, Identifiable, Sendable {
 
 /// Opens a websocket to a hura server.
 public typealias TransportFactory = @MainActor (_ record: ServerRecord) -> WebSocketTransport
+
+/// A picture a conversation's replay left out: the `index`th in entry `seq`,
+/// asked for when it is drawn. See `Chat.picture(_:)`.
+public struct HeldPicture: Codable, Hashable, Sendable {
+    public var seq: UInt64
+    public var index: Int
+
+    public init(seq: UInt64, index: Int) {
+        self.seq = seq
+        self.index = index
+    }
+}
 
 /// One conversation in a hura chat session, live: its transcript, what is
 /// waiting on you, and the reply as it is written. One websocket, one chat
@@ -477,7 +500,19 @@ public final class Chat {
     /// says is a host whose transcript started again.
     @ObservationIgnored private var since: UInt64 = 0
     @ObservationIgnored private let history: ChatHistory?
+    /// The pictures the replay held back that have been fetched, nil for one
+    /// the host said it hasn't got, oldest first so the oldest can go: a
+    /// screenshot is megabytes.
+    @ObservationIgnored private var fetched: [HeldPicture: Picture?] = [:]
+    @ObservationIgnored private var fetchedOrder: [HeldPicture] = []
+    /// Asked for and not yet answered: asked again on the next connection
+    /// when this one drops first.
+    @ObservationIgnored private var asked: [HeldPicture: [CheckedContinuation<Picture?, Never>]] = [:]
+    /// The host's transcript started again: what is here is another
+    /// conversation's, so it goes and the next connection asks for all of it.
+    @ObservationIgnored private var restarted = false
     private static let channel = 1
+    private static let keepPictures = 24
 
     public init(record: ServerRecord, session: String, conversation: String = "agent",
                 transport: @escaping TransportFactory = Chat.network, history: ChatHistory? = nil) {
@@ -516,6 +551,35 @@ public final class Chat {
         loop = nil
         socket?.close(code: 1000)
         socket = nil
+    }
+
+    /// Stopped for good: what is still waiting for a picture is told there
+    /// won't be one.
+    public func discard() {
+        stop()
+        let waiting = asked
+        asked = [:]
+        for c in waiting.values.joined() { c.resume(returning: nil) }
+    }
+
+    /// A picture the replay held back, from the host. Asked once however many
+    /// rows draw it, and kept for a while after.
+    public func picture(_ held: HeldPicture) async -> Picture? {
+        if let had = fetched[held] { return had }
+        return await withCheckedContinuation { c in
+            let first = asked[held] == nil
+            asked[held, default: []].append(c)
+            // Not connected now, it goes when the channel opens again.
+            if first { Task { await askFor(held) } }
+        }
+    }
+
+    private func askFor(_ held: HeldPicture) async {
+        struct Body: Encodable {
+            var seq: UInt64
+            var index: Int
+        }
+        try? await command(Op(op: "picture", body: Body(seq: held.seq, index: held.index)))
     }
 
     public func send(_ text: String, files: [ChatUpload] = []) async throws {
@@ -611,10 +675,15 @@ public final class Chat {
         self.socket = socket
         if phase != .live { phase = .connecting }
         since = lastSeq
+        // With `fetch_pictures`, the replay leaves every picture's bytes out
+        // and they're asked for as they're drawn: most are in turns that
+        // open folded shut, and a session that screenshots a lot was mostly
+        // pictures, all of which a phone waited for before drawing anything.
         let open: [String: RequestJSON] = [
             "do": .string("open"), "id": .number(Self.channel),
             "channel": .object(["kind": .string("chat"), "session": .string(session),
-                                "conv": .string(conversation), "since": .number(Int(lastSeq))]),
+                                "conv": .string(conversation), "since": .number(Int(lastSeq)),
+                                "fetch_pictures": .bool(true)]),
         ]
         var opened = false
         do {
@@ -627,8 +696,15 @@ public final class Chat {
                 case "opened":
                     opened = true
                     phase = .live
+                    for held in asked.keys { Task { await askFor(held) } }
                 case "chat":
                     if let f = frame["frame"] { apply(f) }
+                    if restarted {
+                        restarted = false
+                        socket.close(code: 1000)
+                        self.socket = nil
+                        return opened
+                    }
                 case "closed":
                     phase = .offline(frame["reason"]?.string ?? "The conversation closed.")
                     socket.close(code: 1000)
@@ -655,8 +731,15 @@ public final class Chat {
     func apply(_ f: JSONValue) {
         switch f["t"]?.string {
         case "replay":
+            let seq = f["seq"]?.uint ?? 0
             if case let .array(list)? = f["entries"] {
-                history?.replay(kept, since: since, seq: f["seq"]?.uint ?? 0, entries: list)
+                history?.replay(kept, since: since, seq: seq, entries: list)
+                // Ending before what was asked from, the host has less than
+                // this has: its transcript started again.
+                if seq < since {
+                    startAgain()
+                    return
+                }
                 list.forEach(append)
             }
         case "entry":
@@ -701,9 +784,39 @@ public final class Chat {
         case "notice":
             notice = f["text"]?.string
             loaded = true
+        case "picture":
+            guard let seq = f["seq"]?.uint, case let .number(i)? = f["index"] else { return }
+            let held = HeldPicture(seq: seq, index: Int(i))
+            var got: Picture?
+            if let p = f["picture"], let mime = p["mime"]?.string, let data = p["data"]?.string {
+                got = Picture(mime: mime, data: data)
+            }
+            keep(got, for: held)
+            for c in asked.removeValue(forKey: held) ?? [] { c.resume(returning: got) }
         default:
             break
         }
+    }
+
+    private func keep(_ picture: Picture?, for held: HeldPicture) {
+        if fetched.updateValue(picture, forKey: held) == nil { fetchedOrder.append(held) }
+        while fetchedOrder.count > Self.keepPictures { fetched[fetchedOrder.removeFirst()] = nil }
+    }
+
+    /// Everything here was another transcript's. Asked for again from the
+    /// start, on a connection of its own.
+    private func startAgain() {
+        entries = []
+        lastSeq = 0
+        loaded = false
+        streaming = ""
+        tasks = [:]
+        fetched = [:]
+        fetchedOrder = []
+        let waiting = asked
+        asked = [:]
+        for c in waiting.values.joined() { c.resume(returning: nil) }
+        restarted = true
     }
 
     private func append(_ raw: JSONValue) {
