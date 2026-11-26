@@ -78,12 +78,21 @@ pub enum Channel {
     /// `since` is the last entry the client already has, so a channel opened
     /// again after the connection dropped is sent what it missed rather than
     /// the whole transcript twice.
+    ///
+    /// `fetch_pictures` says the client asks for a picture's bytes when it
+    /// draws one (`ChatCommand::Picture`), so the replay leaves them out: a
+    /// session that takes screenshots is mostly pictures, and a conversation
+    /// opens with its old turns folded shut, their pictures unseen. A client
+    /// that does not say is sent them whole, as every one before it was.
     Chat {
         session: String,
         conv: String,
         #[serde(default)]
         #[cfg_attr(feature = "ts", ts(type = "number"))]
         since: u64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[cfg_attr(feature = "ts", ts(optional, as = "Option<bool>"))]
+        fetch_pictures: bool,
     },
 }
 
@@ -254,6 +263,7 @@ mod tests {
                 session: "a".into(),
                 conv: "agent".into(),
                 since: 0,
+                fetch_pictures: false,
             },
         ] {
             assert_eq!(c.session(), "a");
@@ -353,7 +363,32 @@ mod tests {
                 session: "s".into(),
                 conv: "chat-1".into(),
                 since: 0,
+                fetch_pictures: false,
             }
+        );
+        // A client that fetches pictures says so, and one that does not is
+        // written as it always was.
+        let c: Channel = serde_json::from_str(
+            r#"{"kind":"chat","session":"s","conv":"agent","since":4,"fetch_pictures":true}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            c,
+            Channel::Chat {
+                fetch_pictures: true,
+                since: 4,
+                ..
+            }
+        ));
+        let plain = Channel::Chat {
+            session: "s".into(),
+            conv: "agent".into(),
+            since: 4,
+            fetch_pictures: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&plain).unwrap(),
+            serde_json::json!({"kind": "chat", "session": "s", "conv": "agent", "since": 4})
         );
         let f = ClientFrame::Chat {
             id: 2,

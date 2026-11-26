@@ -81,14 +81,20 @@ pub struct Attach {
     pub op: &'static str,
     pub conv: String,
     pub since: u64,
+    /// The client asks for a picture's bytes when it draws it, with
+    /// [`ChatCommand::Picture`], so the replay leaves them out. Left off the
+    /// line when it is not, which is what every host before it was sent.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub fetch_pictures: bool,
 }
 
 impl Attach {
-    pub fn new(conv: &str, since: u64) -> Self {
+    pub fn new(conv: &str, since: u64, fetch_pictures: bool) -> Self {
         Attach {
             op: "attach",
             conv: conv.to_string(),
             since,
+            fetch_pictures,
         }
     }
 }
@@ -124,6 +130,15 @@ pub enum ChatCommand {
     /// starting a turn of its own. Sent only to a host whose
     /// [`ChatState::shell`] says it takes one.
     Shell { command: String },
+    /// A picture's bytes, which the replay left out because the client said
+    /// it would ask: the `index`th picture in the entry `seq`, as the marker
+    /// in its place says. Answered with [`ChatFrame::Picture`], to this
+    /// client alone.
+    Picture {
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        seq: u64,
+        index: u32,
+    },
 }
 
 /// A file as a client sends it, whole.
@@ -158,6 +173,12 @@ pub struct ChatFile {
     /// draw what was sent. Anything else is a path the agent reads for itself.
     #[serde(default)]
     pub data: Option<String>,
+    /// In place of `data`, in a replay to a client that fetches pictures: the
+    /// picture's place in its entry, to ask for it by. See
+    /// [`ChatCommand::Picture`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
+    pub held: Option<u32>,
 }
 
 /// The answer to one [`ChatAsk`].
@@ -218,6 +239,14 @@ pub enum ChatFrame {
     /// Said by `hurad` rather than the host: why there is nothing yet. A
     /// session still cloning has no host to talk to.
     Notice { text: String },
+    /// The answer to a [`ChatCommand::Picture`]: the picture, or `None` when
+    /// the host has no such entry or no such picture in it.
+    Picture {
+        #[cfg_attr(feature = "ts", ts(type = "number"))]
+        seq: u64,
+        index: u32,
+        picture: Option<crate::files::Picture>,
+    },
 }
 
 /// One thing that happened in a conversation, as the transcript keeps it.
@@ -700,6 +729,42 @@ mod tests {
         assert!(state.pending[0].can_remember);
     }
 
+    /// A held picture's marker, and the answer to asking for it, as the host
+    /// writes them.
+    #[test]
+    fn a_held_picture_reads_and_so_does_its_answer() {
+        let prompt = r#"{"seq":1,"at":1,"ev":{"kind":"prompt","text":"look","uuid":"u1",
+            "files":[{"name":"a.png","path":"/u/a.png","mime":"image/png","size":3,"held":0}]}}"#;
+        let entry: ChatEntry = serde_json::from_str(prompt).unwrap();
+        let ChatEvent::Prompt { files, .. } = &entry.ev else {
+            panic!("not a prompt");
+        };
+        assert_eq!((files[0].data.as_deref(), files[0].held), (None, Some(0)));
+        // And it goes on to the client with its marker.
+        assert_eq!(
+            serde_json::to_value(&entry).unwrap()["ev"]["files"][0]["held"],
+            0
+        );
+
+        let found =
+            r#"{"t":"picture","seq":1,"index":0,"picture":{"mime":"image/png","data":"AAAA"}}"#;
+        let ChatFrame::Picture {
+            seq,
+            index,
+            picture,
+        } = serde_json::from_str(found).unwrap()
+        else {
+            panic!("not a picture");
+        };
+        assert_eq!(
+            (seq, index, picture.unwrap().data),
+            (1, 0, "AAAA".to_string())
+        );
+        let gone: ChatFrame =
+            serde_json::from_str(r#"{"t":"picture","seq":9,"index":0,"picture":null}"#).unwrap();
+        assert!(matches!(gone, ChatFrame::Picture { picture: None, .. }));
+    }
+
     #[test]
     fn a_tasks_progress_comes_through_whole() {
         let frame = r#"{"t":"task","ev":{"type":"system","subtype":"task_progress","task_id":"a1",
@@ -734,8 +799,16 @@ mod tests {
             "interrupt"
         );
         assert_eq!(
-            serde_json::to_value(Attach::new("chat-1", 7)).unwrap(),
+            serde_json::to_value(Attach::new("chat-1", 7, false)).unwrap(),
             serde_json::json!({"op": "attach", "conv": "chat-1", "since": 7})
+        );
+        assert_eq!(
+            serde_json::to_value(Attach::new("chat-1", 0, true)).unwrap(),
+            serde_json::json!({"op": "attach", "conv": "chat-1", "since": 0, "fetch_pictures": true})
+        );
+        assert_eq!(
+            serde_json::to_value(ChatCommand::Picture { seq: 12, index: 1 }).unwrap(),
+            serde_json::json!({"op": "picture", "seq": 12, "index": 1})
         );
         assert_eq!(
             serde_json::to_value(ChatCommand::Effort {

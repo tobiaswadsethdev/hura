@@ -79,15 +79,24 @@ public struct Fetched: Decodable, Equatable, Sendable {
 }
 
 /// An image, whole: a file of the working copy, or one a tool answered with.
+/// Or, in a conversation's replay, one whose bytes the host held back until
+/// it is drawn: `held` says where to ask for them, and `data` is empty.
 public struct Picture: Codable, Equatable, Hashable, Sendable {
     /// `image/png` and the like.
     public var mime: String
     /// Base64.
     public var data: String
+    public var held: HeldPicture?
 
     public init(mime: String, data: String) {
         self.mime = mime
         self.data = data
+    }
+
+    public init(mime: String, held: HeldPicture) {
+        self.mime = mime
+        data = ""
+        self.held = held
     }
 
     public var bytes: Data? { Data(base64Encoded: data) }

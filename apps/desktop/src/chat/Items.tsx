@@ -24,7 +24,7 @@ import { Markdown } from "../Markdown";
 import { leadingCommand } from "./commands";
 import { since, Ticking, useNow } from "./elapsed";
 import { type Item, type Located, type ToolCall, type ToolResult, TYPED_SKILL } from "./transcript";
-import { Zoomable } from "../Picture";
+import { ChatImage, sentPicture } from "./pictures";
 
 /// Where the working copy is in the sandbox. Paths under it are shown relative
 /// to it, which is how the file tree and the git pane show them.
@@ -379,9 +379,7 @@ export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
       <Fold open={shown}>
         <div className="chat-tool-body">
           <ToolBody call={call} />
-          {call.result?.images.map((p, i) => (
-            <Zoomable key={i} className="chat-image" src={`data:${p.mime};base64,${p.data}`} alt="" />
-          ))}
+          {call.result?.images.map((p, i) => <ChatImage key={i} className="chat-image" picture={p} />)}
           {fetch && files.length > 0 && !KEEPS.has(call.name) && (
             <div className="chat-downloads">
               {files.map((f) => (
@@ -435,14 +433,16 @@ const ShellCard = memo(function ShellCard({ item }: { item: Extract<Item, { kind
 });
 
 /// What was sent with a message: a picture the model saw as itself, and any
-/// other file as the path the agent was given.
-function SentFiles({ files }: { files: ChatFile[] }) {
+/// other file as the path the agent was given. `seq` is the message's entry,
+/// which a picture the replay held back is asked for by.
+function SentFiles({ files, seq }: { files: ChatFile[]; seq: number }) {
   return (
     <ul className="chat-sent">
-      {files.map((f) =>
-        f.data ? (
+      {files.map((f) => {
+        const picture = sentPicture(f, seq);
+        return picture ? (
           <li key={f.path} title={f.path}>
-            <Zoomable src={`data:${f.mime};base64,${f.data}`} alt={f.name} />
+            <ChatImage picture={picture} alt={f.name} />
           </li>
         ) : (
           <li key={f.path} title={f.path}>
@@ -451,8 +451,8 @@ function SentFiles({ files }: { files: ChatFile[] }) {
               {f.name}
             </span>
           </li>
-        ),
-      )}
+        );
+      })}
     </ul>
   );
 }
@@ -771,7 +771,7 @@ export const ItemView = memo(function ItemView({ item, receipts = "off" }: { ite
     case "prompt":
       return (
         <>
-          {item.files.length > 0 && <SentFiles files={item.files} />}
+          {item.files.length > 0 && <SentFiles files={item.files} seq={item.seq} />}
           {item.text && <Prompt text={item.text} />}
           <Receipt at={item.at} read={item.read} receipts={receipts} />
         </>

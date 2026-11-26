@@ -58,6 +58,21 @@ struct ChatTranscriptTests {
         #expect(blocks[2].text == "look")
     }
 
+    /// A replay to a client that fetches pictures has, where each one's
+    /// bytes were, the place to ask for it by.
+    @Test func aHeldPictureSaysWhereToAskForIt() {
+        let result = json(#"{"seq":12,"at":0,"ev":{"kind":"sdk","msg":{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"image","source":{"type":"held","media_type":"image/png","index":1}}]}]}}}}"#)
+        #expect(ChatTranscript.entry(result)?.blocks?.first?.pictures
+            == [Picture(mime: "image/png", held: HeldPicture(seq: 12, index: 1))])
+        let sent = json(#"{"seq":13,"at":0,"ev":{"kind":"prompt","text":"look","uuid":"u","files":[{"name":"a.png","path":"/u/a.png","mime":"image/png","size":3,"held":0}]}}"#)
+        let blocks = ChatTranscript.entry(sent)?.blocks ?? []
+        #expect(blocks.map(\.type) == ["image", "text"])
+        #expect(blocks[0].pictures?.first?.held == HeldPicture(seq: 13, index: 0))
+        // One whose number was not kept, read back from history, is nothing to draw.
+        let kept = json(#"{"seq":14,"at":0,"ev":{"kind":"sdk","msg":{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":[{"type":"image","source":{"type":"held","media_type":"image/png"}}]}]}}}}"#)
+        #expect(ChatTranscript.entry(kept)?.blocks?.first?.pictures == nil)
+    }
+
     @Test func aPromptKeepsWhenItWasSentAndAReceiptNamesIt() {
         let prompt = ChatTranscript.entry(json(#"{"seq":1,"at":1790000000000,"ev":{"kind":"prompt","text":"hi","uuid":"u1","receipt":true}}"#))
         #expect(prompt?.uuid == "u1")
@@ -276,6 +291,96 @@ struct ChatTests {
         #expect(answer?["command"]?["op"]?.string == "answer")
         #expect(answer?["command"]?["id"]?.string == "toolu_1")
         #expect(answer?["command"]?["decision"]?["allow"] == .bool(false))
+    }
+
+    /// The channel says it fetches pictures, and a picture asked for is asked
+    /// once, answered from the host, and asked again on the next connection
+    /// when the one it was asked on drops first.
+    @Test func fetchesAHeldPictureWhenItIsDrawn() async throws {
+        let first = ScriptedSocket()
+        first.dropWhenDone = false
+        first.say(#"{"is":"opened","id":1}"#,
+                  #"{"is":"chat","id":1,"frame":{"t":"replay","seq":0,"entries":[]}}"#,
+                  #"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle"}}}"#)
+        let chat = Chat(record: Self.record, session: "fix-tests", transport: { _ in first })
+        chat.start()
+        defer { chat.discard() }
+        try await until { chat.loaded }
+        #expect(first.sent.first?["channel"]?["fetch_pictures"] == .bool(true))
+
+        let held = HeldPicture(seq: 7, index: 1)
+        async let one = chat.picture(held)
+        async let two = chat.picture(held)
+        try await until { first.sent.count == 2 }
+        #expect(first.sent.last?["command"]?["op"]?.string == "picture")
+        #expect(first.sent.last?["command"]?["seq"] == .number(7))
+        #expect(first.sent.last?["command"]?["index"] == .number(1))
+
+        first.say(#"{"is":"chat","id":1,"frame":{"t":"picture","seq":7,"index":1,"picture":{"mime":"image/png","data":"AAAA"}}}"#)
+        let (a, b) = await (one, two)
+        #expect(a == Picture(mime: "image/png", data: "AAAA"))
+        #expect(b == a)
+        #expect(first.sent.count == 2, "asked once for both")
+        // Kept, so drawing it again asks nothing.
+        #expect(await chat.picture(held) == a)
+        #expect(first.sent.count == 2)
+
+        first.say(#"{"is":"chat","id":1,"frame":{"t":"picture","seq":9,"index":0,"picture":null}}"#)
+        #expect(await chat.picture(HeldPicture(seq: 9, index: 0)) == nil)
+    }
+
+    @Test func aPictureAskedForAsTheChannelDropsIsAskedAgain() async throws {
+        let first = ScriptedSocket()
+        first.dropWhenDone = false
+        first.say(#"{"is":"opened","id":1}"#,
+                  #"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle"}}}"#)
+        let second = ScriptedSocket()
+        second.dropWhenDone = false
+        var queue = [first, second]
+        let chat = Chat(record: Self.record, session: "fix-tests", transport: { _ in queue.removeFirst() })
+        chat.start()
+        defer { chat.discard() }
+        try await until { chat.loaded }
+        async let got = chat.picture(HeldPicture(seq: 3, index: 0))
+        try await until { first.sent.count == 2 }
+        first.dropWhenDone = true
+        first.say()
+        second.say(#"{"is":"opened","id":1}"#)
+        try await until { second.sent.count == 2 }
+        #expect(second.sent.last?["command"]?["op"]?.string == "picture")
+        second.say(#"{"is":"chat","id":1,"frame":{"t":"picture","seq":3,"index":0,"picture":{"mime":"image/png","data":"BBBB"}}}"#)
+        #expect(await got?.data == "BBBB")
+    }
+
+    /// A host that answers with less than was asked from has started its
+    /// transcript again, as one closed and opened under the same name does:
+    /// what was here goes, and all of the new one is asked for.
+    @Test func aTranscriptThatStartedAgainIsReplayedWhole() async throws {
+        var sockets: [ScriptedSocket] = []
+        let first = ScriptedSocket()
+        first.say(#"{"is":"opened","id":1}"#,
+                  #"{"is":"chat","id":1,"frame":{"t":"replay","seq":3,"entries":[{"seq":1,"at":0,"ev":{"kind":"prompt","text":"one","uuid":"a"}},{"seq":2,"at":0,"ev":{"kind":"prompt","text":"two","uuid":"b"}},{"seq":3,"at":0,"ev":{"kind":"prompt","text":"three","uuid":"c"}}]}}"#,
+                  #"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle"}}}"#)
+        let second = ScriptedSocket()
+        second.say(#"{"is":"opened","id":1}"#,
+                   #"{"is":"chat","id":1,"frame":{"t":"replay","seq":1,"entries":[]}}"#)
+        let third = ScriptedSocket()
+        third.dropWhenDone = false
+        third.say(#"{"is":"opened","id":1}"#,
+                  #"{"is":"chat","id":1,"frame":{"t":"replay","seq":1,"entries":[{"seq":1,"at":0,"ev":{"kind":"prompt","text":"new","uuid":"d"}}]}}"#,
+                  #"{"is":"chat","id":1,"frame":{"t":"state","state":{"activity":"idle"}}}"#)
+        var queue = [first, second, third]
+        let chat = Chat(record: Self.record, session: "fix-tests", transport: { _ in
+            let s = queue.removeFirst()
+            sockets.append(s)
+            return s
+        })
+        chat.start()
+        defer { chat.discard() }
+        try await until { sockets.count == 3 && chat.loaded }
+        #expect(chat.entries.map { $0.blocks?.first?.text } == ["new"])
+        #expect(sockets[1].sent.first?["channel"]?["since"] == .number(3))
+        #expect(sockets[2].sent.first?["channel"]?["since"] == .number(0))
     }
 
     @Test func offersTheEffortsOfTheModelInUseAndSetsOne() async throws {

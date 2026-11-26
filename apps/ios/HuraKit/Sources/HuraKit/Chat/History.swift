@@ -403,6 +403,9 @@ public final class ChatHistory: @unchecked Sendable {
                 let kind = map["type"]?.string
                 if kind == "image", case var .object(source)? = map["source"] {
                     source["data"] = nil
+                    // A held picture's number is for asking its host, which
+                    // a conversation read back from here may no longer have.
+                    source["index"] = nil
                     map["source"] = .object(source)
                 }
                 let inResult = inResult || kind == "tool_result"
@@ -433,6 +436,7 @@ public final class ChatHistory: @unchecked Sendable {
                 ev["files"] = .array(files.map { f in
                     guard case var .object(o) = f else { return f }
                     o["data"] = .null
+                    o["held"] = nil
                     return .object(o)
                 })
             }
@@ -561,10 +565,12 @@ extension ChatHistory {
         for (i, conv) in conversations.enumerated() {
             let c = Conversation(serverID: record.serverID, session: session, conv: conv)
             let since = await last(c)
+            // Without pictures: what is kept here goes without them anyway.
             let open: [String: RequestJSON] = [
                 "do": .string("open"), "id": .number(i + 1),
                 "channel": .object(["kind": .string("chat"), "session": .string(session),
-                                    "conv": .string(conv), "since": .number(Int(since))]),
+                                    "conv": .string(conv), "since": .number(Int(since)),
+                                    "fetch_pictures": .bool(true)]),
             ]
             guard let data = try? JSONEncoder().encode(open), (try? await socket.send(.text(data))) != nil else { break }
             waiting[i + 1] = (c, since)

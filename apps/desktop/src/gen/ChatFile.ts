@@ -12,4 +12,10 @@ path: string, mime: string, size: number,
  * The picture, base64, when it went to the model as one, so a window can
  * draw what was sent. Anything else is a path the agent reads for itself.
  */
-data: string | null, };
+data: string | null, 
+/**
+ * In place of `data`, in a replay to a client that fetches pictures: the
+ * picture's place in its entry, to ask for it by. See
+ * [`ChatCommand::Picture`].
+ */
+held?: number, };
