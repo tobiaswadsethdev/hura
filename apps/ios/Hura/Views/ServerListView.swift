@@ -14,14 +14,21 @@ struct ServerListView: View {
         NavigationStack(path: $path) {
             List {
                 ForEach(model.servers) { s in
-                    NavigationLink(value: Route.server(s.id)) {
-                        ServerRow(server: s)
-                    }
-                    .swipeActions {
-                        Button("Remove", role: .destructive) { removing = s }
-                    }
+                    ServerRow(server: s)
+                        .padding(12)
+                        .card()
+                        // Behind the card, so the list draws no chevron, as
+                        // a server's own list has it.
+                        .background { NavigationLink(value: Route.server(s.id)) { EmptyView() }.opacity(0) }
+                        .canvasRow(.card)
+                        .swipeActions {
+                            Button("Remove", systemImage: "trash", role: .destructive) { removing = s }
+                        }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.canvas)
             .overlay {
                 if model.servers.isEmpty {
                     ContentUnavailableView {
