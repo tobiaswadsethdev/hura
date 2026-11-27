@@ -556,40 +556,38 @@ fn create(new: hura_core::ops::NewSession) -> Outcome {
 /// a thread of its own, and what the queue runs for a session whose turn has
 /// come: both should start the same way.
 pub fn start(draft: &ops::Draft, cfg: &config::Config) {
-    // The CLI builds the image before creating, because the build streams
-    // docker's output to a terminal. There is no terminal here, so it
-    // happens on this thread with the session sitting in `creating` -- which
-    // is what a client watching the list sees either way, only for longer
-    // the first time a set of toolchains is used.
     let backends = backends();
     // Said on the record as well as here, because the window that asked
     // for this session reads the record and nothing else. `ops::create`
     // records its own failures, so for those this only prints; the ones it
-    // cannot record are the image build below and its refusals before its
-    // first write, which would otherwise leave no session at all.
+    // cannot record are its refusals before its first write, which would
+    // otherwise leave no session at all.
     let failed = |why: String| {
         eprintln!("hurad: {}: {why}", draft.name);
         if let Err(e) = ops::record_failure(draft, &why) {
             eprintln!("hurad: {}: could not record why: {e}", draft.name);
         }
     };
-    if let Err(e) = image::ensure_session(draft, cfg) {
-        failed(format!("could not build the image: {e}"));
-        return;
-    }
-    // The managed MCP containers, before the seeder registers them with the
-    // agent. Here rather than in `ops::create` for the same reason the image
-    // build is here: it is a side effect on the host with output of its own,
-    // and `ops` is what both front ends share. A server that will not start
-    // is a warning -- the session is still worth having, and the agent will
-    // report the tool as unreachable, which the events pane explains.
-    for warning in hura_core::mcp::ensure(cfg.mcp()) {
-        eprintln!("hurad: {}: {warning}", draft.name);
-    }
+    // The image, and the managed MCP containers before the seeder registers
+    // them with the agent. Handed to `ops::create` rather than done first, so
+    // they happen with the session already listed as `creating`: the first
+    // time a set of toolchains is used that is minutes, and a client watching
+    // the list saw nothing at all for them. Not inside `ops` itself because
+    // each is a side effect on the host with output of its own.
+    let mut prepare = || {
+        image::ensure_session(draft, cfg).map_err(|e| format!("could not build the image: {e}"))?;
+        // A server that will not start is a warning. The session is still
+        // worth having, and the agent will report the tool as unreachable,
+        // which the events pane explains.
+        for warning in hura_core::mcp::ensure(cfg.mcp()) {
+            eprintln!("hurad: {}: {warning}", draft.name);
+        }
+        Ok(())
+    };
     // Progress is dropped rather than reported: the steps map onto states
     // the record already carries, and a channel per create would be a second
     // way to learn the same thing.
-    if let Err(e) = ops::create(&backends, draft, &mut |_| {}) {
+    if let Err(e) = ops::create(&backends, draft, &mut prepare, &mut |_| {}) {
         failed(format!("could not create the session: {e}"));
     }
 }

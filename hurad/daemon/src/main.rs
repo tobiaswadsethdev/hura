@@ -944,6 +944,10 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     // caller can afford. The first session wanting a toolchain pays for the
     // variant; every one after it starts as fast as any other. A chat session
     // also needs an image new enough to carry its host.
+    //
+    // Before the create rather than as its `prepare`, which is what the server
+    // does: here the build is on screen as it happens, and one that fails is
+    // better left as an error to run again than as a record to remove first.
     image::ensure_session(&draft, cfg)?;
     // The managed MCP containers, before the seeder points the agent at them.
     // Here rather than in `ops::create` for the reason the image build is here:
@@ -954,7 +958,7 @@ fn cmd_new(backends: &Backends, args: NewArgs, cfg: &Config) -> Fallible {
     }
 
     let repo = draft.repo.clone();
-    let created = ops::create(backends, &draft, &mut |step| match step {
+    let created = ops::create(backends, &draft, &mut || Ok(()), &mut |step| match step {
         // The URL is worth naming, since this is the slow step and the one that
         // fails when a credential or a policy is wrong.
         ops::Step::Clone => println!("cloning {repo} ..."),
