@@ -51,11 +51,11 @@ struct TrackersView: View {
                             if let who = t.connected {
                                 Text(t.hasToken ? who : "connect again")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(t.hasToken ? .green : .red)
+                                    .foregroundStyle(t.hasToken ? Color.ok : Color.bad)
                             } else {
                                 Text(t.hasToken ? "token stored" : "NO token")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(t.hasToken ? .green : .red)
+                                    .foregroundStyle(t.hasToken ? Color.ok : Color.bad)
                             }
                         }
                     }
@@ -198,7 +198,7 @@ struct AddTrackerView: View {
                     SecureField("Paste the token", text: $token)
                 }
                 if let error {
-                    Section { Text(error).foregroundStyle(.red).font(.callout) }
+                    Section { Text(error).foregroundStyle(Color.bad).font(.callout) }
                 }
             }
             .navigationTitle("Add a Tracker")
@@ -321,7 +321,7 @@ private struct TrackerSheet: View {
                     }
                 }
                 if let error {
-                    Section { Text(error).foregroundStyle(.red).font(.callout) }
+                    Section { Text(error).foregroundStyle(Color.bad).font(.callout) }
                 }
             }
             .navigationTitle(name)

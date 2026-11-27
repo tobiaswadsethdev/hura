@@ -94,11 +94,11 @@ struct PolicyPane: View {
                     HStack(spacing: 8) {
                         Text(r.methods.isEmpty ? "any" : r.methods.joined(separator: ","))
                             .font(.caption.monospaced().weight(.semibold))
-                            .foregroundStyle(r.allow ? .green : .red)
+                            .foregroundStyle(r.allow ? Color.ok : Color.bad)
                         Text(r.methods.isEmpty ? "every request" : (r.path ?? "/**"))
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
-                        if !r.allow { Text("deny").font(.caption.weight(.bold)).foregroundStyle(.red) }
+                        if !r.allow { Text("deny").font(.caption.weight(.bold)).foregroundStyle(Color.bad) }
                         Spacer()
                         if busy == r.id { ProgressView() }
                     }
@@ -114,7 +114,7 @@ struct PolicyPane: View {
                 Button("Remove", role: .destructive) { remove(r, host: host) }
             }
             if !readOnly, !denied {
-                Button("Block") { blocking = endpoint }.tint(.red)
+                Button("Block") { blocking = endpoint }.tint(Color.bad)
             }
         }
     }
@@ -159,7 +159,7 @@ struct PolicyPane: View {
             Button("Copy Endpoint", systemImage: "doc.on.doc") { UIPasteboard.general.string = endpoint }
         } label: {
             HStack {
-                Image(glyph: allow ? .allow : .block).foregroundStyle(allow ? .green : .red)
+                Image(glyph: allow ? .allow : .block).foregroundStyle(allow ? Color.ok : Color.bad)
                 Text(endpoint).font(.callout.monospaced())
                 Spacer()
                 if busy == endpoint { ProgressView() } else { Text(here).font(.caption).foregroundStyle(.secondary) }

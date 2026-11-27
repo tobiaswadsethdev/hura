@@ -66,7 +66,7 @@ struct NotificationSettings: View {
             Text("Notifications")
         } footer: {
             if let message = message ?? model.pushError {
-                Text(message).foregroundStyle(.red)
+                Text(message).foregroundStyle(Color.bad)
             } else if encrypted {
                 Text("When Claude needs you or a session fails, \(server.record.name) notifies this phone through hura's push relay, and a working session shows on the Lock Screen as a Live Activity. Only this phone can read the text; the relay and Apple see which kind of notification it is.")
             } else {

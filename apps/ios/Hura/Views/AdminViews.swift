@@ -122,7 +122,7 @@ struct IntegrationsView: View {
             }
             .buttonStyle(.borderless)
             Text(s.image ?? s.url).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-            if let problem = s.problem { Text(problem).font(.caption).foregroundStyle(.orange) }
+            if let problem = s.problem { Text(problem).font(.caption).foregroundStyle(Color.warn) }
             if let log = s.log {
                 Text(log).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(8).textSelection(.enabled)
             }
@@ -132,8 +132,8 @@ struct IntegrationsView: View {
     private func stateColor(_ s: McpStatus) -> Color {
         guard s.managed else { return .secondary }
         switch s.state {
-        case "running": return .green
-        case "crashing", "detached": return .orange
+        case "running": return Color.ok
+        case "crashing", "detached": return Color.warn
         default: return .secondary
         }
     }
@@ -149,7 +149,7 @@ struct IntegrationsView: View {
             if busy == "secret:\(s.name)" {
                 ProgressView()
             } else {
-                Text(s.set ? "stored" : "NOT set").font(.caption.weight(.semibold)).foregroundStyle(s.set ? .green : .red)
+                Text(s.set ? "stored" : "NOT set").font(.caption.weight(.semibold)).foregroundStyle(s.set ? Color.ok : Color.bad)
             }
         }
     }
@@ -333,7 +333,7 @@ struct ServerSettingsView: View {
                                 }
                             }
                         }
-                        if let e = options?.providersError { Text(e).foregroundStyle(.red).font(.caption) }
+                        if let e = options?.providersError { Text(e).foregroundStyle(Color.bad).font(.caption) }
                     }
                 } header: {
                     Text("Credentials")
@@ -481,7 +481,7 @@ struct AboutView: View {
                         LabeledContent("hurad", value: hello.version)
                         LabeledContent("Protocol", value: "\(hello.protocol)")
                     } else if let error {
-                        Text(error).foregroundStyle(.red)
+                        Text(error).foregroundStyle(Color.bad)
                     } else {
                         WaitingRow()
                     }

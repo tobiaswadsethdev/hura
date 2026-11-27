@@ -32,7 +32,7 @@ struct InboxView: View {
         List {
             if let inbox = trackers.inbox {
                 ForEach(inbox.warnings, id: \.self) { w in
-                    Label(w, glyph: .warning).font(.caption).foregroundStyle(.orange)
+                    Label(w, glyph: .warning).font(.caption).foregroundStyle(Color.warn)
                 }
                 switch showing {
                 case .tickets:
@@ -52,7 +52,7 @@ struct InboxView: View {
                 }
             }
             if let e = trackers.lastError {
-                Text(e).font(.caption).foregroundStyle(.red)
+                Text(e).font(.caption).foregroundStyle(Color.bad)
             }
         }
         .overlay {
@@ -131,7 +131,7 @@ struct InboxView: View {
                     let on = ticketSession(t)
                     NavigationLink(value: t) { TicketRow(task: t, session: on?.name) }
                         .swipeActions {
-                            Button("Start") { starting = .ticket(t) }.tint(.green)
+                            Button("Start") { starting = .ticket(t) }.tint(Color.ok)
                         }
                         .contextMenu { rowMenu(on, url: t.url, copy: t.key) }
                 }
@@ -147,8 +147,8 @@ struct InboxView: View {
                     let on = pullSession(p)
                     NavigationLink(value: p) { PullRow(pull: p, session: on?.name) }
                         .swipeActions {
-                            Button("Review") { starting = .pull(p, review: true) }.tint(.blue)
-                            Button("Work") { starting = .pull(p, review: false) }.tint(.green)
+                            Button("Review") { starting = .pull(p, review: true) }.tint(Color.accentColor)
+                            Button("Work") { starting = .pull(p, review: false) }.tint(Color.ok)
                         }
                         .contextMenu { rowMenu(on, url: p.url, copy: p.branch) }
                 }
@@ -209,7 +209,7 @@ struct TicketRow: View {
                     .background(Color.secondary.opacity(0.15), in: Capsule())
                 Spacer()
                 if let session {
-                    Label(session, glyph: .branch).font(.caption2).foregroundStyle(.green).lineLimit(1)
+                    Label(session, glyph: .branch).font(.caption2).foregroundStyle(Color.ok).lineLimit(1)
                 }
             }
             Text(task.title).font(.callout).lineLimit(2)
@@ -235,11 +235,11 @@ struct PullRow: View {
             HStack {
                 Text(pullName(pull)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 if pull.draft { Text("draft").font(.caption2).foregroundStyle(.secondary) }
-                if pull.conflicts { Image(glyph: .warning).font(.caption2).foregroundStyle(.orange) }
+                if pull.conflicts { Image(glyph: .warning).font(.caption2).foregroundStyle(Color.warn) }
                 ChecksMark(checks: pull.checks)
                 Spacer()
                 if let session {
-                    Label(session, glyph: .branch).font(.caption2).foregroundStyle(.green).lineLimit(1)
+                    Label(session, glyph: .branch).font(.caption2).foregroundStyle(Color.ok).lineLimit(1)
                 }
             }
             Text(pull.title).font(.callout).lineLimit(2)
@@ -262,8 +262,8 @@ struct ChecksMark: View {
 
     var body: some View {
         switch checks {
-        case "passing": Image(glyph: .passing).font(.caption2).foregroundStyle(.green).accessibilityLabel("Checks passed")
-        case "failing": Image(glyph: .failing).font(.caption2).foregroundStyle(.red).accessibilityLabel("Checks failed")
+        case "passing": Image(glyph: .passing).font(.caption2).foregroundStyle(Color.ok).accessibilityLabel("Checks passed")
+        case "failing": Image(glyph: .failing).font(.caption2).foregroundStyle(Color.bad).accessibilityLabel("Checks failed")
         case "pending": Image(glyph: .pending).font(.caption2).foregroundStyle(Color.working).accessibilityLabel("Checks running")
         default: EmptyView()
         }

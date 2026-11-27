@@ -104,7 +104,7 @@ private struct SignInForm: View {
                 Section { WaitingRow() }
             }
             if let error = account.error {
-                Section { Text(error).foregroundStyle(.red).font(.callout) }
+                Section { Text(error).foregroundStyle(Color.bad).font(.callout) }
             }
         }
     }
@@ -172,7 +172,7 @@ private struct SignedIn: View {
                 Text("The export is everything hura cloud keeps about you, as JSON. Tokens are never included.")
             }
             if let error = account.error {
-                Section { Text(error).foregroundStyle(.red).font(.callout) }
+                Section { Text(error).foregroundStyle(Color.bad).font(.callout) }
             }
         }
         .refreshable { await account.load() }

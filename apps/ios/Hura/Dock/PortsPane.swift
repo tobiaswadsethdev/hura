@@ -89,7 +89,7 @@ struct PortsPane: View {
                 }
             }
             if let error {
-                Section { Text(error).foregroundStyle(.red).font(.callout) }
+                Section { Text(error).foregroundStyle(Color.bad).font(.callout) }
             }
         }
         .task {
@@ -129,7 +129,7 @@ struct PortsPane: View {
         let live = row.preview != nil || row.forward != nil
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(glyph: .ports).foregroundStyle(live ? .green : .secondary)
+                Image(glyph: .ports).foregroundStyle(live ? Color.ok : .secondary)
                 // Not "\(row.port)", which a Text formats as a number: 5 173.
                 Text(String(row.port)).font(.body.monospaced().weight(.medium))
                 Text(!row.listening ? "not listening" : row.owner.map { short($0.command) } ?? "")
@@ -171,7 +171,7 @@ struct PortsPane: View {
             }
         }
         .swipeActions {
-            if live { Button("Stop") { stopPreview(row.port) }.tint(.orange) }
+            if live { Button("Stop") { stopPreview(row.port) }.tint(Color.warn) }
             if row.owner != nil { Button("Kill", role: .destructive) { killing = row } }
         }
     }

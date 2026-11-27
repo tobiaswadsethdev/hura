@@ -26,7 +26,7 @@ struct PairView: View {
                 if let error {
                     Section {
                         Label(error, glyph: .warning)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Color.bad)
                     }
                 }
             }

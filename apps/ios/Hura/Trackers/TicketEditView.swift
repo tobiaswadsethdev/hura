@@ -21,7 +21,7 @@ struct TicketEditView: View {
         NavigationStack {
             Loaded(value: form, error: form == nil ? error : nil) { form in
                 Form {
-                    if let error { Section { Text(error).foregroundStyle(.red).font(.callout) } }
+                    if let error { Section { Text(error).foregroundStyle(Color.bad).font(.callout) } }
                     ForEach(form.fields) { f in
                         Section {
                             control(f)
@@ -60,7 +60,7 @@ struct TicketEditView: View {
                       axis: .vertical)
                 .lineLimit(f.id == "description" ? 6...20 : 3...10)
             if !v.lost.isEmpty {
-                Text("Saving loses what Markdown can't say: \(v.lost.joined(separator: ", ")).").font(.caption).foregroundStyle(.orange)
+                Text("Saving loses what Markdown can't say: \(v.lost.joined(separator: ", ")).").font(.caption).foregroundStyle(Color.warn)
             }
         case let .number(v):
             TextField(f.name, text: Binding(get: { v.map { $0.formatted() } ?? "" },

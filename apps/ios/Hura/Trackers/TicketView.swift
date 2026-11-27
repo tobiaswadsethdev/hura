@@ -248,7 +248,7 @@ struct CommentEditor: View {
                 if !lost.isEmpty {
                     Section {
                         Text("Saving loses what Markdown can't say: \(lost.joined(separator: ", ")).")
-                            .font(.caption).foregroundStyle(.orange)
+                            .font(.caption).foregroundStyle(Color.warn)
                     }
                 }
             }
