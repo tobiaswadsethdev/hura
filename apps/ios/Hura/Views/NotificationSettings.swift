@@ -34,7 +34,7 @@ struct NotificationSettings: View {
             Toggle(isOn: Binding(get: { isOn }, set: { on in change { try await model.setNotifications(on, for: server) } })) {
                 HStack {
                     Text("Notifications")
-                    if working { ProgressView() }
+                    if working { Spinner().foregroundStyle(Color.dim) }
                 }
             }
             .disabled(!canChange)

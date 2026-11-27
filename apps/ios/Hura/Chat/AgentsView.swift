@@ -107,7 +107,7 @@ struct WorkStatus: View {
 
     var body: some View {
         switch status {
-        case "running": WorkingDots().foregroundStyle(Color.working)
+        case "running": Spinner().foregroundStyle(Color.working)
         case "completed": Image(glyph: .passing).foregroundStyle(Color.ok)
         case "stopped": Image(glyph: .stop).foregroundStyle(Color.dim)
         default: Image(glyph: .failing).foregroundStyle(Color.bad)
@@ -193,14 +193,16 @@ struct CommandScreen: View {
                             .font(.caption)
                             .foregroundStyle(Color.dim)
                     } else if failure == nil {
-                        ProgressView().frame(maxWidth: .infinity)
+                        Spinner().foregroundStyle(Color.dim).frame(maxWidth: .infinity)
                     }
                     Color.clear.frame(height: 1).id("end")
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
             }
-            .defaultScrollAnchor(.bottom)
+            // Followed to its end by scrolling rather than anchored there: an
+            // anchor at the bottom left output shorter than the screen
+            // hanging under a gap.
             .onChange(of: output?.bytes) { proxy.scrollTo("end", anchor: .bottom) }
         }
         .navigationTitle(c.title)
@@ -268,7 +270,7 @@ struct AgentScreen: View {
                     ChatRows(items: items, cwd: Self.cwd, working: agent.running)
                     if agent.running {
                         HStack(spacing: 8) {
-                            WorkingDots(size: 22).foregroundStyle(Color.working)
+                            Spinner(size: 16).foregroundStyle(Color.working)
                             if let tool = progress?["last_tool_name"]?.string {
                                 Text(tool).font(.caption).foregroundStyle(.secondary)
                             }

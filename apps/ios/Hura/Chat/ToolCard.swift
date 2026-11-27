@@ -61,7 +61,11 @@ struct ToolCard: View {
                 Text(label.subject)
                     .foregroundStyle(Color.dim)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+                    // Running, its label shines rather than a spinner turning
+                    // beside it, as T3 Code's does.
+                    .shine(call.result == nil && working)
                 Image(systemName: "chevron.right")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Color.dimmer)
@@ -107,6 +111,7 @@ struct ToolCard: View {
             Text("background")
                 .font(.caption)
                 .foregroundStyle(Color.dimmer)
+                .fixedSize()
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("In the background, \(command.map { $0.running ? "running" : $0.status } ?? (failedHard ? "failed" : "started"))")
@@ -134,11 +139,9 @@ struct ToolCard: View {
     private var status: some View {
         if call.result == nil {
             if working {
-                HStack(spacing: 6) {
-                    if let at = call.at { Elapsed(since: at, after: 5) }
-                    WorkingDots()
+                if let at = call.at {
+                    Elapsed(since: at, after: 5).foregroundStyle(Color.dimmer)
                 }
-                .foregroundStyle(Color.working)
             }
         } else if call.stopped {
             Text("stopped").font(.caption).foregroundStyle(Color.dimmer)
@@ -336,7 +339,7 @@ struct ShellCard: View {
     @ViewBuilder
     private var status: some View {
         if run.running {
-            WorkingDots().foregroundStyle(Color.working)
+            Spinner().foregroundStyle(Color.working)
         } else if run.stopped {
             Text("stopped").font(.caption).foregroundStyle(Color.dimmer)
         } else if run.failed {

@@ -67,7 +67,7 @@ struct GitPane: View {
             HStack {
                 Label(s.branch, glyph: .branch).font(.body)
                 Spacer()
-                if running != nil { ProgressView() }
+                if running != nil { Spinner().foregroundStyle(Color.dim) }
             }
             if let up = s.upstream {
                 HStack(spacing: 10) {

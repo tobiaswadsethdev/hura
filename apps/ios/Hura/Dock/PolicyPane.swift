@@ -100,7 +100,7 @@ struct PolicyPane: View {
                             .foregroundStyle(.secondary)
                         if !r.allow { Text("deny").font(.caption.weight(.bold)).foregroundStyle(Color.bad) }
                         Spacer()
-                        if busy == r.id { ProgressView() }
+                        if busy == r.id { Spinner().foregroundStyle(Color.dim) }
                     }
                 }
             }
@@ -162,7 +162,7 @@ struct PolicyPane: View {
                 Image(glyph: allow ? .allow : .block).foregroundStyle(allow ? Color.ok : Color.bad)
                 Text(endpoint).font(.callout.monospaced())
                 Spacer()
-                if busy == endpoint { ProgressView() } else { Text(here).font(.caption).foregroundStyle(.secondary) }
+                if busy == endpoint { Spinner().foregroundStyle(Color.dim) } else { Text(here).font(.caption).foregroundStyle(.secondary) }
             }
             .contentShape(Rectangle())
         }

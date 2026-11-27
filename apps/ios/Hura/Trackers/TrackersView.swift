@@ -206,7 +206,7 @@ struct AddTrackerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    if busy { ProgressView() } else { Button("Add", action: add) }
+                    if busy { Spinner().foregroundStyle(Color.dim) } else { Button("Add", action: add) }
                 }
             }
         }
@@ -329,7 +329,7 @@ private struct TrackerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    if busy { ProgressView() } else {
+                    if busy { Spinner().foregroundStyle(Color.dim) } else {
                         Button("Save", action: save).disabled(!edited && trimmedToken.isEmpty)
                     }
                 }

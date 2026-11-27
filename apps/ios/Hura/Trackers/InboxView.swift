@@ -65,7 +65,7 @@ struct InboxView: View {
                     Button("Add a Tracker") { settings = true }.buttonStyle(.borderedProminent)
                 }
             } else if trackers.inbox == nil {
-                ProgressView()
+                Spinner().foregroundStyle(Color.dim)
             } else if let inbox = trackers.inbox {
                 switch showing {
                 case .tickets where inbox.tasks.isEmpty:
@@ -101,7 +101,7 @@ struct InboxView: View {
                 Button { settings = true } label: { Label("Trackers", glyph: .settings) }
             }
             if trackers.reading {
-                ToolbarItem(placement: .status) { ProgressView() }
+                ToolbarItem(placement: .status) { Spinner().foregroundStyle(Color.dim) }
             }
         }
         .navigationDestination(for: TrackerTask.self) { TicketView(task: $0, starting: $starting) }

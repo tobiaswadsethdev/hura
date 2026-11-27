@@ -636,6 +636,8 @@ class H(BaseHTTPRequestHandler):
         # machine's port FAKE_PORT_OFFSET above the sandbox's (20000 by
         # default, so 5173 is 25173), where a test page can be served.
         socks = {}
+        # Open conversations, by channel, with the last seq each has said.
+        chats = {}
         def pump_sock(cid, sock):
             while True:
                 try: out = sock.recv(65536)
@@ -674,6 +676,21 @@ class H(BaseHTTPRequestHandler):
                     try: socks.pop(req["id"]).shutdown(socket.SHUT_RDWR)
                     except OSError: pass
                     continue
+                # A message said in a conversation comes back as your prompt and
+                # a one-line answer, so a side chat's first words and an edited
+                # message show; nothing else a chat is told does anything.
+                if req.get("do") == "chat" and req.get("id") in chats:
+                    cmd = req.get("command", {})
+                    if cmd.get("op") == "send":
+                        said = chats[req["id"]]
+                        for ev in [prompt(cmd.get("text", ""), f"u-said-{said['seq'] + 1}"),
+                                   {"kind": "sdk", "msg": {"type": "assistant", "uuid": f"a-said-{said['seq'] + 2}",
+                                    "parent_tool_use_id": None, "message": {"content": [
+                                        {"type": "text", "text": "(The fake server heard that.)"}]}}}]:
+                            said["seq"] += 1
+                            send({"is": "chat", "id": req["id"], "frame": {"t": "entry", "entry": {
+                                "seq": said["seq"], "at": int(time.time() * 1000), "ev": ev}}})
+                    continue
                 if req.get("do") == "resize" and req.get("id") in ptys:
                     tty_size(ptys[req["id"]][1], req["cols"], req["rows"])
                     continue
@@ -699,7 +716,9 @@ class H(BaseHTTPRequestHandler):
                     continue
                 send({"is": "opened", "id": cid})
                 if kind == "chat":
-                    for frame in chat_frames(name, cid, ch.get("conv")): send(frame)
+                    frames = chat_frames(name, cid, ch.get("conv"))
+                    chats[cid] = {"seq": frames[0]["frame"]["seq"]}
+                    for frame in frames: send(frame)
                 elif kind == "status":
                     send({"is": "status", "id": cid, "poll": poll(name)})
                 elif kind == "events":

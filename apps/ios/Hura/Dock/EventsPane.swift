@@ -425,7 +425,7 @@ struct PolicyChangeSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     if busy {
-                        ProgressView()
+                        Spinner().foregroundStyle(Color.dim)
                     } else {
                         Button(asking.kind == .allow ? "Allow" : "Block", role: asking.kind == .block ? .destructive : nil, action: go)
                             .disabled(!ready)

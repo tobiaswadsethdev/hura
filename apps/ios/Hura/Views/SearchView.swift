@@ -194,7 +194,7 @@ struct KeptChatView: View {
                 .padding(.vertical, 12)
                 .environment(\.foundRow, located.map { FoundRow(id: $0.id, nonce: Int(hit.seq)) })
             }
-            .overlay { if items == nil { ProgressView() } }
+            .overlay { if items == nil { Spinner().foregroundStyle(Color.dim) } }
             .task(id: hit) {
                 let raw = await model.history.transcript(serverID: hit.serverID, sessionKey: hit.sessionKey,
                                                          convKey: hit.convKey)

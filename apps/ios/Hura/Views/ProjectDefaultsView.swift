@@ -39,7 +39,7 @@ struct ProjectDefaultsView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 if busy {
-                    ProgressView()
+                    Spinner().foregroundStyle(Color.dim)
                 } else {
                     Button("Save", action: save)
                         .disabled(options == nil || defaults == saved)

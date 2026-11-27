@@ -36,7 +36,7 @@ struct TicketEditView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    if saving { ProgressView() } else { Button("Save", action: save).disabled(changed.isEmpty) }
+                    if saving { Spinner().foregroundStyle(Color.dim) } else { Button("Save", action: save).disabled(changed.isEmpty) }
                 }
             }
             .interactiveDismissDisabled(!changed.isEmpty)

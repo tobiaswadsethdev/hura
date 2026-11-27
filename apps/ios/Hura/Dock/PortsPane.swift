@@ -77,7 +77,7 @@ struct PortsPane: View {
                             if p.protected {
                                 Text("agent").font(.caption).foregroundStyle(.secondary)
                             } else if busy == -p.pid {
-                                ProgressView()
+                                Spinner().foregroundStyle(Color.dim)
                             }
                         }
                         .swipeActions {
@@ -138,7 +138,7 @@ struct PortsPane: View {
                     .lineLimit(1)
                 Spacer()
                 if busy == row.port {
-                    ProgressView()
+                    Spinner().foregroundStyle(Color.dim)
                 } else {
                     Button {
                         open(row.port, host: row.host)

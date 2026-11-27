@@ -88,7 +88,7 @@ struct PairView: View {
                     Text("Pair")
                     if working {
                         Spacer()
-                        ProgressView()
+                        Spinner().foregroundStyle(Color.dim)
                     }
                 }
             }

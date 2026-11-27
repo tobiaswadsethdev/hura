@@ -103,7 +103,7 @@ struct TicketView: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text(issue.status)
-                            if busy == "status" { ProgressView() } else { Image(systemName: "chevron.up.chevron.down").font(.caption) }
+                            if busy == "status" { Spinner().foregroundStyle(Color.dim) } else { Image(systemName: "chevron.up.chevron.down").font(.caption) }
                         }
                     }
                     .disabled(transitions.isEmpty)
@@ -137,7 +137,7 @@ struct TicketView: View {
                             Text(when(c.created)).font(.caption).foregroundStyle(.secondary)
                             if c.edited != nil { Text("· edited").font(.caption).foregroundStyle(.secondary) }
                             Spacer()
-                            if busy == "comment:\(c.id)" { ProgressView() }
+                            if busy == "comment:\(c.id)" { Spinner().foregroundStyle(Color.dim) }
                         }
                         DocView(blocks: c.body)
                     }

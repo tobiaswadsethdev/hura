@@ -270,7 +270,7 @@ struct PullView: View {
             HStack {
                 Text(words.section)
                 Spacer()
-                if busy == "merge" { ProgressView() }
+                if busy == "merge" { Spinner().foregroundStyle(Color.dim) }
             }
         }
     }
@@ -285,7 +285,7 @@ struct PullView: View {
                 if t.outdated { Text("outdated").font(.caption2).foregroundStyle(.secondary) }
                 if let v = t.verdict { Text(verdictSaid(v)).font(.caption2.weight(.semibold)) }
                 Spacer()
-                if busy == t.id { ProgressView() }
+                if busy == t.id { Spinner().foregroundStyle(Color.dim) }
             }
             ForEach(Array(t.comments.enumerated()), id: \.offset) { _, c in
                 VStack(alignment: .leading, spacing: 2) {

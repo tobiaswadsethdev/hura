@@ -113,7 +113,7 @@ struct WorktreeView: View {
                     .toolbarBackground(.visible, for: .navigationBar)
                     .toolbarColorScheme(dark ? .dark : nil, for: .navigationBar)
             } else if hasWorkspace, !listed, tabs.isEmpty {
-                ProgressView()
+                Spinner().foregroundStyle(Color.dim)
             } else if hasWorkspace, listed, tabs.isEmpty {
                 nothingOpen
             } else {
@@ -213,8 +213,10 @@ struct WorktreeView: View {
         ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? ""), pull: nested ? nil : pull,
                  usage: { [server, name] in try? await server.api.poll(name).usage },
                  jump: jump?.conv == conv ? jump?.to : nil, onJumped: { jump = nil },
-                 waiting: nested ? [] : server.queue.messages(for: name),
-                 onSchedule: nested ? nil : { [server, name] text, at, rule in
+                 // The server says what is queued to the agent's own
+                 // conversation, so only that one shows it or schedules more.
+                 waiting: nested || conv != "agent" ? [] : server.queue.messages(for: name),
+                 onSchedule: nested || conv != "agent" ? nil : { [server, name] text, at, rule in
                      try await server.queueMessage(name, text: text, at: at, repeat: rule)
                  },
                  utcOffset: server.queue.utcOffset,
@@ -274,7 +276,7 @@ struct WorktreeView: View {
                 if let side, let c = chats[side] {
                     chatView(c, conv: side, nested: true)
                 } else {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.canvas)
+                    Spinner().foregroundStyle(Color.dim).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.canvas)
                 }
             }
             .navigationTitle("Side Chat")

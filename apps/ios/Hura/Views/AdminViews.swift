@@ -107,7 +107,7 @@ struct IntegrationsView: View {
                     .foregroundStyle(stateColor(s))
                 Spacer()
                 if busy == "mcp:\(s.name)" {
-                    ProgressView()
+                    Spinner().foregroundStyle(Color.dim)
                 } else if s.managed {
                     if s.state == "running" {
                         Button("Restart", glyph: .restart) { mcp(s, "restart") }
@@ -147,7 +147,7 @@ struct IntegrationsView: View {
             }
             Spacer()
             if busy == "secret:\(s.name)" {
-                ProgressView()
+                Spinner().foregroundStyle(Color.dim)
             } else {
                 Text(s.set ? "stored" : "NOT set").font(.caption.weight(.semibold)).foregroundStyle(s.set ? Color.ok : Color.bad)
             }
@@ -272,7 +272,7 @@ struct ServerSettingsView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 if saving {
-                    ProgressView()
+                    Spinner().foregroundStyle(Color.dim)
                 } else if view != nil {
                     Button("Save", action: save).disabled(!dirty)
                 }
@@ -431,7 +431,7 @@ private struct NamingKeyRow: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             if busy {
-                ProgressView()
+                Spinner().foregroundStyle(Color.dim)
             } else if !value.isEmpty {
                 Button("Store") { change(value.trimmingCharacters(in: .whitespacesAndNewlines)) }
             } else if source == "stored" {

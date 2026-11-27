@@ -200,7 +200,7 @@ struct NewWorktreeView: View {
             ZStack {
                 Circle().fill(ready ? Color.accentColor : Color.surface2)
                 if busy {
-                    ProgressView().controlSize(.small).tint(.white)
+                    Spinner().foregroundStyle(.white)
                 } else {
                     Image(systemName: when == .now ? "arrow.up" : whenSymbol)
                         .font(.system(size: 14, weight: .bold))

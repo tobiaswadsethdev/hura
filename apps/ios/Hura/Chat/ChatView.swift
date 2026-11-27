@@ -365,6 +365,17 @@ struct ChatView: View {
         }
         .padding(.top, 8)
         .padding(.bottom, 6)
+        // The canvas behind it, fading in at its top, as T3 Code's composer
+        // sits: the conversation scrolls under it, and showed through the
+        // gaps between the strips and below the card.
+        .background {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Color.canvas.opacity(0), Color.canvas], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 16)
+                Color.canvas
+            }
+            .ignoresSafeArea(edges: .bottom)
+        }
     }
 
     /// The tab over the box that opens the stash, while it has something in
@@ -406,7 +417,7 @@ struct ChatView: View {
                 Text("No messages yet").font(.headline).foregroundStyle(Color.ink)
                 Text("Send Claude a message below.")
             } else {
-                ProgressView()
+                Spinner().foregroundStyle(Color.dim)
             }
         }
         .font(.subheadline)
@@ -885,14 +896,15 @@ private struct Writing: View {
         if !chat.streaming.isEmpty {
             MarkdownText(text: chat.streaming).opacity(0.8)
         }
+        // T3 Code's line for a turn under way, as the desktop's: "Working
+        // for" and a running clock, with no spinner beside it.
         if showsWorking || started != nil {
-            HStack(spacing: 6) {
-                if showsWorking { WorkingDots(size: 22) }
-                // The word only while there is nothing else to look at.
-                if chat.streaming.isEmpty { Text("Working").font(.caption) }
-                if let started { Elapsed(since: started) }
+            HStack(spacing: 4) {
+                Text(started == nil ? "Working" : "Working for")
+                if let started { Elapsed(since: started).font(.subheadline.monospacedDigit()) }
             }
-            .foregroundStyle(Color.working)
+            .font(.subheadline)
+            .foregroundStyle(Color.dim)
         }
     }
 }

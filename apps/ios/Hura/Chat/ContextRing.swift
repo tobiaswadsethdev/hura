@@ -65,7 +65,7 @@ private struct UsageCard: View {
                     Meter(label: w.label, pct: w.usedPercentage, after: nil, note: w.resetsAt.map(resets))
                 }
             } else if windows == nil {
-                ProgressView().controlSize(.small)
+                Spinner(size: 12).foregroundStyle(Color.dim)
             } else {
                 Text("No limits reported yet.").font(.footnote).foregroundStyle(.secondary)
             }

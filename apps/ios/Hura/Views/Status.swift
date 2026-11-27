@@ -35,7 +35,7 @@ struct StatusBadge: View {
 }
 
 /// What an agent is doing, as one mark: the desktop's sidebar column
-/// (`StateDot` in `icons.tsx`). The turning dots while it works or while the
+/// (`StateDot` in `icons.tsx`). A still dashed circle while it works or while the
 /// sandbox is still being made; a question mark, in amber, while it waits on
 /// you -- a shape, so the row is findable in a list without reading it; an
 /// alert when it failed; and a plain dot otherwise, emerald when ready.
@@ -47,8 +47,10 @@ struct StateMark: View {
     var body: some View {
         Group {
             switch state {
-            case "running": WorkingDots(size: 16).foregroundStyle(Color.working)
-            case "creating", "seeding": WorkingDots(size: 16).foregroundStyle(.secondary)
+            // T3 Code's Working, a dashed circle standing still, as the
+            // desktop's list draws it: a whole list of them turning read as
+            // a page still loading.
+            case "running", "creating", "seeding": Image(glyph: .pending).foregroundStyle(Color.working)
             case "waiting": Image(glyph: .waiting).foregroundStyle(Color.attention)
             case "failed", "dead": Image(glyph: .failed).foregroundStyle(Color.bad)
             default:
