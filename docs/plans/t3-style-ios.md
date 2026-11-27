@@ -57,3 +57,21 @@ composer that does a lot without looking busy.
   says its clock. Project scripts run in a new shell.
 - [ ] **5. Usage,** and the rest of the screens (the dock's panes, trackers,
   settings) through the tokens.
+
+## More of T3 Code
+
+- [x] **Groups within a project.** Named, foldable groups of related
+  worktrees inside a project's folder, as the desktop's, kept on the phone
+  per server (`Model/Groups.swift`). Made from a project's or a worktree's
+  menu, joined and left from a worktree's menu or a swipe; folded, a group
+  says how many need you. Pinned and settled worktrees stay on their shelves.
+- [x] **One Live Activity for every session.** T3 Code's mobile activity:
+  how many agents are working and how many need you, over a row for each, the
+  ones waiting on you first, in its tints and symbols, with Allow and Deny
+  kept for a permission. The relay keeps a device's sessions as rows and sends
+  them all (`docs/relay-api.md`, "One activity for every session"); an older
+  app keeps one per session. Needs the relay deployed with migration 0005.
+- [x] **T3 Code's terminal keys.** A scrolling bar over the keyboard (arrows,
+  esc, sticky ctrl and alt, tab, clear, ~ | / -) with Paste and a way to put
+  the keyboard away, and a glass button to bring it back.
+- [x] **A background command's row** in the conversation opens its output.
