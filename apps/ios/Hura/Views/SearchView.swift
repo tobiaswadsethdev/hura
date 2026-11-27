@@ -111,9 +111,9 @@ private struct HitRow: View {
                 if let project = hit.project { Text(project).foregroundStyle(.secondary).lineLimit(1) }
                 if let server { Text(server).foregroundStyle(.secondary).lineLimit(1) }
                 if hit.removed {
-                    Text("deleted").foregroundStyle(.orange)
+                    Text("deleted").foregroundStyle(Color.warn)
                 } else if hit.ended {
-                    Text("ended").foregroundStyle(.orange)
+                    Text("ended").foregroundStyle(Color.warn)
                 }
                 Spacer(minLength: 4)
                 Text(when).foregroundStyle(.tertiary).monospacedDigit()
@@ -156,7 +156,7 @@ private struct HitRow: View {
         for w in words {
             var from = text.startIndex
             while let r = text[from...].range(of: w, options: .caseInsensitive) {
-                text[r].backgroundColor = .yellow.opacity(0.3)
+                text[r].backgroundColor = Color.attention.opacity(0.3)
                 from = r.upperBound
             }
         }
@@ -194,7 +194,7 @@ struct KeptChatView: View {
                 .padding(.vertical, 12)
                 .environment(\.foundRow, located.map { FoundRow(id: $0.id, nonce: Int(hit.seq)) })
             }
-            .overlay { if items == nil { ProgressView() } }
+            .overlay { if items == nil { Spinner().foregroundStyle(Color.dim) } }
             .task(id: hit) {
                 let raw = await model.history.transcript(serverID: hit.serverID, sessionKey: hit.sessionKey,
                                                          convKey: hit.convKey)

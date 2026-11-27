@@ -2,11 +2,12 @@ import ActivityKit
 import Foundation
 import HuraKit
 
-/// A session's Live Activity, on the phone's side. The relay starts, updates
-/// and ends them (`docs/relay-api.md`, "Live Activities"); all the app does is
-/// hand it the tokens ActivityKit gives out for that, and update an activity
-/// itself straight after an answer from it, so the Lock Screen doesn't keep
-/// offering Allow until the server's next look.
+/// The Live Activity, on the phone's side: one for every session, T3 Code's,
+/// which the relay starts, updates and ends (`docs/relay-api.md`, "One
+/// activity for every session"). All the app does is hand the relay the tokens
+/// ActivityKit gives out for it, and update it itself straight after an answer
+/// from it, so the Lock Screen doesn't keep offering Allow until the server's
+/// next look.
 ///
 /// Push-to-start is iOS 17.2's, so before that nothing starts an activity and
 /// there is nothing to do.
@@ -26,80 +27,71 @@ final class LiveActivities {
     func start() {
         guard #available(iOS 17.2, *) else { return }
         Task {
-            for await token in Activity<SessionActivityAttributes>.pushToStartTokenUpdates {
+            for await token in Activity<AgentsActivityAttributes>.pushToStartTokenUpdates {
                 await push.activityStartTokenChanged(token)
             }
         }
-        for activity in Activity<SessionActivityAttributes>.activities { watch(activity) }
+        for activity in Activity<AgentsActivityAttributes>.activities { watch(activity) }
         Task {
-            for await activity in Activity<SessionActivityAttributes>.activityUpdates { watch(activity) }
+            for await activity in Activity<AgentsActivityAttributes>.activityUpdates { watch(activity) }
         }
-        Task { await Self.dedupe() }
+        Task { await Self.tidy() }
     }
 
-    /// Each time the app comes to the front: the relay is told every
-    /// activity's token again. iOS doesn't always give the app the time to
-    /// tell it when a push starts one, and until it hears, the relay can only
-    /// keep what it would have said (`docs/relay-api.md`, "Live Activities").
+    /// Each time the app comes to the front: the relay is told the activity's
+    /// token again. iOS doesn't always give the app the time to tell it when a
+    /// push starts one, and until it hears, the relay can only keep the rows.
     func resumed() {
         guard #available(iOS 17.2, *) else { return }
-        for activity in Activity<SessionActivityAttributes>.activities {
-            let a = activity.attributes
+        for activity in Activity<AgentsActivityAttributes>.activities {
             guard let token = activity.pushToken, activity.activityState == .active else { continue }
-            Task { await push.activityTokenChanged(token, linkID: a.linkID, session: a.session) }
+            Task { await push.agentsActivityTokenChanged(token) }
         }
-        Task { await Self.dedupe() }
+        Task { await Self.tidy() }
     }
 
-    /// One activity per session. A relay from before it waited for an
-    /// activity's token started another on each change, and one from before it
-    /// kept a finished turn's activity started another each turn, leaving the
-    /// ended one on the Lock Screen beside it. The one kept is the newest still
-    /// going, which the relay can update, or failing that the newest.
-    nonisolated private static func dedupe() async {
-        let shown = Activity<SessionActivityAttributes>.activities.filter {
+    /// One activity. A session's own, from before there was one for all of
+    /// them, is no longer updated once the relay hears this app's style, and
+    /// goes; of two of the one, the newest still going stays.
+    nonisolated private static func tidy() async {
+        for activity in Activity<SessionActivityAttributes>.activities {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        let shown = Activity<AgentsActivityAttributes>.activities.filter {
             $0.activityState == .active || $0.activityState == .ended
         }
-        let bySession = Dictionary(grouping: shown) { "\($0.attributes.serverID):\($0.attributes.session)" }
-        for (_, same) in bySession where same.count > 1 {
-            let keep = same.max {
-                ($0.activityState == .active ? 1 : 0, $0.content.state.at ?? 0)
-                    < ($1.activityState == .active ? 1 : 0, $1.content.state.at ?? 0)
-            }
-            for activity in same where activity.id != keep?.id {
-                await activity.end(nil, dismissalPolicy: .immediate)
-            }
+        guard shown.count > 1 else { return }
+        let keep = shown.last { $0.activityState == .active } ?? shown.last
+        for activity in shown where activity.id != keep?.id {
+            await activity.end(nil, dismissalPolicy: .immediate)
         }
     }
 
-    private func watch(_ activity: Activity<SessionActivityAttributes>) {
+    private func watch(_ activity: Activity<AgentsActivityAttributes>) {
         guard watching.insert(activity.id).inserted else { return }
-        let a = activity.attributes
         Task {
             for await token in activity.pushTokenUpdates {
-                await push.activityTokenChanged(token, linkID: a.linkID, session: a.session)
+                await push.agentsActivityTokenChanged(token)
             }
         }
         Task {
             for await state in activity.activityStateUpdates where state == .ended || state == .dismissed {
-                await push.activityEnded(activity.pushToken, linkID: a.linkID, session: a.session)
+                await push.agentsActivityEnded(activity.pushToken)
                 watching.remove(activity.id)
                 break
             }
         }
     }
 
-    /// After Allow or Deny on an activity: show it working again, with what
-    /// was said, until the server says what came next. The text is shown in
-    /// the clear because only this phone ever sees a local update.
+    /// After Allow or Deny on the activity: that session's row shows it
+    /// working again, with what was said, until the server says what came
+    /// next.
     static func answered(_ allow: Bool, serverID: String, session: String, askID: String) async {
         let keys = KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup)
-        for activity in Activity<SessionActivityAttributes>.activities
-        where activity.attributes.serverID == serverID && activity.attributes.session == session {
-            let state = activity.content.state
-            guard state.askID == askID else { continue }
-            let text = state.text(serverID: serverID, session: session, keys: keys)
-            let next = state.answered(text, body: allow ? "Allowed" : "Declined")
+        for activity in Activity<AgentsActivityAttributes>.activities {
+            guard let next = activity.content.state.answered(serverID: serverID, session: session, askID: askID,
+                                                             allow: allow, keys: keys)
+            else { continue }
             await activity.update(ActivityContent(state: next, staleDate: nil))
         }
     }
@@ -125,19 +117,12 @@ extension LiveActivities {
     /// `-HuraActivity` (`HuraApp.pairFromLaunchArguments`).
     static let demoServerID = "h_demodemodemodemo"
 
+    /// Three made-up sessions in the one activity, the first in `phase`,
+    /// started here rather than by a push. Their text is sealed as hurad
+    /// seals it, under a key kept where the real ones are, so the widget has
+    /// to open it as it opens a real one.
     static func demo(_ phase: SessionPhase) {
-        let body = switch phase {
-        case .working: "Claude is working"
-        case .permission: "Bash: npm test -- --run login.spec.ts"
-        case .input: "Which database should the cache use: Redis or SQLite?"
-        case .done: "Claude finished and is waiting for you"
-        case .failed: "The session failed"
-        case .ended: "The session ended"
-        }
-        // Sealed as hurad seals it, under a key kept where the real ones are,
-        // so the widget has to open it as it opens a real one.
-        let serverID = demoServerID, session = "fix-flaky-login-test"
-        let askID = phase == .permission ? "toolu_demo" : nil
+        let serverID = demoServerID
         let keys = KeychainPushKeyStore(accessGroup: KeychainPushKeyStore.sharedGroup)
         do {
             let key = try keys.key(serverID: serverID) ?? PushCrypto.newKey()
@@ -146,14 +131,24 @@ extension LiveActivities {
             // Where the widget reads it on a phone (`ActivityKeyFile`).
             try ActivityKeyFile.shared?.save(key, serverID: serverID)
             try ActivityKeyFile.shared?.saveName("devbox", serverID: serverID)
-            let enc = try PushCrypto.seal(PushCrypto.Text(title: "Fix the flaky login test", subtitle: "scope-creep",
-                                                          body: body),
-                                          key: key, serverID: serverID, kind: SessionActivity.kind, session: session,
-                                          askID: askID)
-            let state = SessionActivityState(phase: phase, at: Date().addingTimeInterval(-73),
-                                             since: Date().addingTimeInterval(-312), askID: askID, enc: enc)
-            _ = try Activity.request(attributes: SessionActivityAttributes(serverID: serverID, linkID: "l_demo",
-                                                                           session: session),
+            func row(_ session: String, _ title: String, _ project: String, _ phase: SessionPhase, _ body: String,
+                     ago: TimeInterval) throws -> AgentRow {
+                let askID = phase == .permission ? "toolu_demo" : nil
+                let enc = try PushCrypto.seal(PushCrypto.Text(title: title, subtitle: project, body: body), key: key,
+                                              serverID: serverID, kind: SessionActivity.kind, session: session,
+                                              askID: askID)
+                return AgentRow(serverID: serverID, session: session,
+                                state: SessionActivityState(phase: phase, at: Date().addingTimeInterval(-ago),
+                                                            since: Date().addingTimeInterval(-ago - 240),
+                                                            askID: askID, enc: enc))
+            }
+            let state = AgentsActivityState(rows: [
+                try row("fix-flaky-login-test", "Fix the flaky login test", "scope-creep", phase,
+                        phase == .permission ? "Bash: npm test -- --run login.spec.ts" : phase.status, ago: 73),
+                try row("cache-backend", "Pick a cache backend", "scope-creep", .working, "Claude is working", ago: 140),
+                try row("docs-pass", "Tidy the README", "hura", .done, "Claude finished", ago: 600),
+            ])
+            _ = try Activity.request(attributes: AgentsActivityAttributes(),
                                      content: ActivityContent(state: state, staleDate: nil))
         } catch {
             print("hura: couldn't start the demo activity: \(error)")

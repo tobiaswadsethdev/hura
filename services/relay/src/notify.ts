@@ -136,3 +136,78 @@ export function activityPayload(
   }
   return { aps };
 }
+
+// --- One activity for every session --------------------------------------
+
+/** A session's row in a device's one activity: its latest event, and whose. */
+export type AgentRow = SessionActivity & { serverId: string };
+
+/** The most an activity's push may be, under APNs' 4 KB, with room to spare. */
+const AGENTS_PAYLOAD_BYTES = 3800;
+
+/**
+ * The order T3 Code's activity lists its agents in: waiting on you first, then
+ * failed, then working, then done; the newest first within each.
+ */
+function rank(phase: Phase): number {
+  if (phase === "permission" || phase === "input") return 0;
+  if (phase === "failed") return 1;
+  if (phase === "working") return 2;
+  return 3;
+}
+
+export function orderRows(rows: AgentRow[]): AgentRow[] {
+  return [...rows].sort((a, b) => rank(a.phase) - rank(b.phase) || b.at - a.at);
+}
+
+function rowState(r: AgentRow): Record<string, unknown> {
+  const s: Record<string, unknown> = { server_id: r.serverId, session: r.session, phase: r.phase, at: r.at };
+  if (r.since !== undefined) s.since = r.since;
+  if (r.askId !== undefined) s.ask_id = r.askId;
+  if (r.encrypted !== undefined) {
+    s.enc = r.encrypted;
+  } else {
+    s.title = clip(r.title, 100);
+    if (r.subtitle) s.subtitle = clip(r.subtitle, 100);
+    s.body = clip(r.body, 200);
+  }
+  return s;
+}
+
+/**
+ * The push for a device's one activity: every session's row in T3 Code's
+ * order, as many as fit, and how many there are of each kind, which count
+ * them all whether or not they fit.
+ */
+export function agentsPayload(rows: AgentRow[], event: ActivityEvent, now = Date.now()) {
+  const ordered = orderRows(rows);
+  const state: Record<string, unknown> = {
+    active: ordered.filter((r) => r.phase === "working" || r.phase === "permission" || r.phase === "input").length,
+    waiting: ordered.filter((r) => r.phase === "permission" || r.phase === "input").length,
+    failed: ordered.filter((r) => r.phase === "failed").length,
+    rows: [] as Record<string, unknown>[],
+  };
+  const at = Math.floor(now / 1000);
+  const aps: Record<string, unknown> = { timestamp: at, event, "content-state": state };
+  if (event === "start") {
+    aps["attributes-type"] = "AgentsActivityAttributes";
+    aps.attributes = { kind: "agents" };
+    const waiting = state.waiting as number;
+    // APNs wants an alert to start an activity; this one makes no sound.
+    aps.alert = {
+      title: "hura",
+      body: waiting > 0 ? (waiting === 1 ? "An agent needs you" : `${waiting} agents need you`) : "An agent is working",
+    };
+  } else if (event === "end") {
+    aps["dismissal-date"] = at;
+  }
+  const list = state.rows as Record<string, unknown>[];
+  for (const r of ordered) {
+    list.push(rowState(r));
+    if (JSON.stringify({ aps }).length > AGENTS_PAYLOAD_BYTES) {
+      list.pop();
+      break;
+    }
+  }
+  return { aps };
+}

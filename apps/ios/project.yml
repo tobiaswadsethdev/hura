@@ -139,7 +139,6 @@ targets:
       - HuraWidgets
       - Hura/LiveActivity/AnswerIntents.swift
       # The app's working mark, drawn still: a widget doesn't animate.
-      - Hura/Chat/WorkingDots.swift
     dependencies:
       - package: HuraKit
     info:

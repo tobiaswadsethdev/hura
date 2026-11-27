@@ -132,3 +132,15 @@ struct WorkspaceTests {
         #expect(server.sessions.map(\.name) == ["doomed", "kept"])
     }
 }
+
+struct ProjectDefaultsTests {
+    @Test func readsAProjectsDefaultsAndLeavesOutWhatIsUnset() throws {
+        let raw = #"{"name":"hura","repo":"r","path":"/p","created_at":1,"defaults":{"interface":"chat","base":"main"}}"#
+        let p = try JSONDecoder().decode(Project.self, from: Data(raw.utf8))
+        #expect(p.defaults == ProjectDefaults(interface: "chat", base: "main"))
+        let old = try JSONDecoder().decode(Project.self, from: Data(#"{"name":"a","repo":"r","path":"/p","created_at":1}"#.utf8))
+        #expect(old.defaults.isEmpty)
+        let sent = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(ProjectDefaults(worktree: true)))
+        #expect(sent == .object(["worktree": .bool(true)]))
+    }
+}

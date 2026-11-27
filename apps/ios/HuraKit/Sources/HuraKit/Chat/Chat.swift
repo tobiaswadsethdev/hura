@@ -289,7 +289,10 @@ public enum ChatTranscript {
                 default: nil
                 }
             }
-            return blocks.isEmpty ? nil : TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.assistant, blocks: blocks)
+            // With Claude Code's uuid for it: where a conversation forks to
+            // edit a message after it (`assistantBefore`).
+            return blocks.isEmpty ? nil : TranscriptEntry(seq: seq, uuid: m["uuid"]?.string,
+                                                          kind: TranscriptEntry.Kind.assistant, blocks: blocks)
         case "user":
             let content = m["message"]?["content"]
             if case let .string(text)? = content {

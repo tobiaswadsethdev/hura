@@ -30,13 +30,37 @@ struct ChatView: View {
     var onJumped: (() -> Void)?
     /// Messages waiting on the server to be said to this session's agent.
     var waiting: [QueuedMessage] = []
-    /// Keep a message on the server to say at a time. nil hides the clock.
-    var onSchedule: ((String, Date) async throws -> Void)?
+    /// Keep a message on the server to say at a time, and again by a rule if
+    /// one is given. nil hides the clock.
+    var onSchedule: ((String, Date, Repeat?) async throws -> Void)?
+    /// The server's offset from UTC, from its queue: a repeat's time of day is
+    /// on its clock. nil from a server too old to repeat, which is then not
+    /// offered.
+    var utcOffset: Int?
     /// Take one of `waiting` back.
     var onUnqueue: ((QueuedMessage) -> Void)?
+    /// Where this conversation's draft is kept on the phone (`Drafts.key`).
+    var draftKey: String?
+    /// Paths in the working copy for what is typed after `@`.
+    var findFiles: ((String) async throws -> FoundPaths)?
+    /// The end of a file in the sandbox: a background command's output.
+    var tailFile: ((String) async throws -> TailText)?
+    /// Say something else in place of an earlier message: a new conversation
+    /// forked at `at`, the uuid of what the agent said last before it (nil
+    /// for a plain new one), with `text` said in it. Unset where a
+    /// conversation cannot fork, such as a side chat.
+    var onBranch: ((_ at: String?, _ text: String) -> Void)?
+    /// Ask a question on the side (`/btw`). Unset in a side chat itself.
+    var onSideChat: ((String) -> Void)?
+    /// To say as soon as the conversation is open, once: a side chat's
+    /// question, an edited message's new words. `onSaidFirst` takes it.
+    var sayFirst: String?
+    var onSaidFirst: (() -> Void)?
     @State private var target: ChatJump?
     /// While a message is being written for later: the time it is for.
     @State private var later: Date?
+    /// And how it comes round again; nil is once.
+    @State private var cadence: Cadence?
     @State private var found: FoundRow?
     @State private var draft = ""
     @State private var sending = false
@@ -60,9 +84,21 @@ struct ChatView: View {
     @State private var photos: [PhotosPickerItem] = []
     /// The subagents, kept with the items they're folded beside.
     @State private var agents: [AgentInfo] = []
+    /// The commands the agent left running in the background.
+    @State private var commands: [BackgroundCommand] = []
     /// The subagent being followed, by task id.
     @State private var following: Following?
+    /// The background command being followed, by its id.
+    @State private var followingCommand: Following?
+    /// The message being edited, by its entry's seq: sending forks the
+    /// conversation from just before it.
+    @State private var branchFrom: UInt64?
+    /// What the server found for the last `@` asked about.
+    @State private var mentioned: (query: String, paths: [String], error: String?)?
+    /// The stash is open in the drawer.
+    @State private var stashOpen = false
     @FocusState private var composing: Bool
+    private let stash = PromptStash.shared
 
     /// hura clones every session's repository here.
     private static let cwd = "/sandbox/repo"
@@ -75,24 +111,50 @@ struct ChatView: View {
     private var shellRunning: Bool {
         if case let .shell(_, run)? = items.last { run.running } else { false }
     }
+    /// The commands on offer: Claude Code's, and the side chat where there
+    /// can be one.
+    private var offered: [SlashCommand] {
+        onSideChat == nil ? chat.commands : [sideCommand] + chat.commands
+    }
     /// What is being typed, as Claude Code's terminal reads it.
     private var input: ComposerInput {
-        ComposerInput.parse(draft, commands: chat.commands, shell: chat.runsShell)
+        ComposerInput.parse(draft, commands: offered, shell: chat.runsShell)
     }
     private var isShell: Bool {
         if case .shell = input { true } else { false }
     }
     /// A command, which the keyboard mustn't correct: `wc` became "we".
     private var isCode: Bool { isShell || ComposerInput.naming(draft) != nil }
+    /// `/btw` and the question.
+    private var sideQuestion: String? {
+        guard onSideChat != nil, case let .command(name, _, rest) = input,
+              name == sideCommand.name || sideCommand.aliases.contains(name) else { return nil }
+        return rest.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    /// Sending would steer: while a turn runs, a message waits for it to end,
+    /// and a long press on send stops it and says this now instead.
+    private var steers: Bool {
+        working && branchFrom == nil && later == nil && !isShell && sideQuestion == nil
+    }
+    /// The `@` being typed, while there is a server to ask.
+    private var mention: Mention? {
+        guard findFiles != nil, later == nil, !isShell else { return nil }
+        return ComposerInput.mention(draft)
+    }
 
     var body: some View {
+        let grouped = ChatItem.group(items, working: working)
+        let started = working ? ChatTranscript.turnStart(chat.entries) : nil
+        // The clock is on the work log's line while it has one.
+        let liveFold = grouped.contains { if case .steps(_, _, true) = $0 { true } else { false } }
         VStack(spacing: 0) {
             if !preparing, case let .offline(why) = chat.phase {
                 Label(why, glyph: .offline)
                     .font(.footnote)
+                    .foregroundStyle(Color.dim)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
-                    .background(Color.gray.opacity(0.25))
+                    .background(Color.surface2)
             }
             ScrollViewReader { proxy in
                 ZStack(alignment: .bottomTrailing) {
@@ -103,18 +165,24 @@ struct ChatView: View {
                     // scrolled, until the next message came.
                     List {
                         Group {
-                            if items.isEmpty && queued.isEmpty { emptyState }
-                            ChatRows(items: ChatItem.group(items, working: working), cwd: Self.cwd, working: working,
-                                     receipts: chat.receipts)
+                            if items.isEmpty && queued.isEmpty && waiting.isEmpty { emptyState }
+                            ChatRows(items: grouped, cwd: Self.cwd, working: working, receipts: chat.receipts)
                             // Under whatever is being written, for the whole
                             // turn, as on the desktop; not the dots while a
-                            // tool call is running, whose card has its own,
+                            // tool call is running, whose line has its own,
                             // but still how long the turn has taken.
                             Writing(chat: chat,
                                     showsWorking: working && chat.pending.isEmpty && !callRunning && !shellRunning,
-                                    started: working && chat.pending.isEmpty && !shellRunning
-                                        ? ChatTranscript.turnStart(chat.entries) : nil)
+                                    started: working && chat.pending.isEmpty && !shellRunning && !liveFold
+                                        ? started : nil)
                             ChatRows(items: queued, cwd: Self.cwd, working: working, receipts: chat.receipts)
+                            // What is waiting on the server to be said, last,
+                            // on your side: it is what you will say next.
+                            ForEach(waiting) { m in
+                                WaitingBubble(message: m, utcOffset: utcOffset,
+                                              edit: onUnqueue.map { unqueue in { unqueue(m); takeBack(m) } },
+                                              remove: onUnqueue.map { unqueue in { unqueue(m) } })
+                            }
                             Color.clear.frame(height: 1).id("bottom")
                                 .onAppear { atBottom = true }
                                 // Not the empty one's, going as the history
@@ -128,6 +196,11 @@ struct ChatView: View {
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                         .environment(\.foundRow, found)
+                        .environment(\.turnStarted, started)
+                        .environment(\.editPrompt, onBranch == nil ? nil : EditPrompt { seq, text in edit(from: seq, text) })
+                        .environment(\.backgroundCommands, tailFile == nil ? nil : BackgroundCommands(all: commands) {
+                            followingCommand = Following(id: $0.id)
+                        })
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
@@ -144,6 +217,7 @@ struct ChatView: View {
                         onJumped?()
                     }
                     .onChange(of: target) { fold(proxy) }
+                    .onChange(of: waiting.count) { if atBottom { end.scroll() } }
                     .background {
                         FollowsReply(chat: chat) {
                             if atBottom { end.scroll() }
@@ -166,20 +240,51 @@ struct ChatView: View {
                     }
                 }
                 // Over the transcript rather than under it, which scrolls on
-                // beneath the glass.
+                // beneath the composer.
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottom }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { room = $0 }
             }
         }
-        // The system's background, black in dark mode as it always was here,
-        // and white in light: the rows and cards take their shades from the
-        // text colour over it (`Color.primary`), so they follow.
-        .background(Color(.systemBackground))
+        // T3 Code's canvas: black in dark, near white in light, with the
+        // cards and your bubble a step up from it.
+        .background(Color.canvas)
         .sheet(item: $following) { f in AgentScreen(chat: chat, id: f.id) }
+        .sheet(item: $followingCommand) { f in
+            if let tailFile { CommandScreen(chat: chat, id: f.id, tail: tailFile) }
+        }
         .alert("Couldn't do that", isPresented: Binding(get: { chat.error != nil }, set: { if !$0 { chat.error = nil } })) {
             Button("OK") { chat.error = nil }
         } message: {
             Text(chat.error ?? "")
+        }
+        // A draft left here last time, unless something is already typed.
+        .task(id: draftKey) {
+            if let draftKey, draft.isEmpty { draft = Drafts().read(draftKey) }
+        }
+        .onChange(of: draft) {
+            if let draftKey { Drafts().write(draftKey, draft) }
+        }
+        // A side chat's question or an edited message's words, said as soon
+        // as the conversation is there to hear them.
+        .task(id: chat.loaded && chat.phase == .live) {
+            guard chat.loaded, chat.phase == .live, let words = sayFirst else { return }
+            onSaidFirst?()
+            do { try await chat.send(words) } catch { chat.error = error.userMessage }
+        }
+        // What the server has for the `@` being typed, a moment after typing
+        // stops.
+        .task(id: mention?.query) {
+            guard let query = mention?.query, let findFiles else { return }
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            do {
+                mentioned = (query, try await findFiles(query).paths, nil)
+            } catch {
+                guard !Task.isCancelled else { return }
+                let said = error.userMessage
+                mentioned = (query, [], said.firstMatch(of: /(?i)unsupported|unknown variant/) != nil
+                    ? "This server can't look for files yet: update hurad." : said)
+            }
         }
     }
 
@@ -194,6 +299,7 @@ struct ChatView: View {
         let had = !items.isEmpty
         (items, queued) = ChatItem.fold(chat.entries)
         agents = AgentInfo.all(chat.entries)
+        commands = tailFile == nil ? [] : BackgroundCommand.all(chat.entries)
         if let target, found?.nonce != target.nonce,
            let at = ChatItem.locate(ChatItem.group(items, working: working), seq: target.seq) {
             found = FoundRow(id: at.id, nonce: target.nonce)
@@ -227,7 +333,8 @@ struct ChatView: View {
     }
 
     /// What floats over the end of the transcript: what is waiting on you,
-    /// the subagents, the pull request, and the composer, each its own glass.
+    /// the work going on beside the conversation, the pull request, and the
+    /// composer.
     private var bottom: some View {
         VStack(spacing: 8) {
             // The oldest first; the rest wait their turn, as in the terminal.
@@ -236,7 +343,7 @@ struct ChatView: View {
                     AskCard(ask: ask, enabled: answering == nil && chat.phase == .live) { answer(ask, $0) }
                         .id(ask.id)
                     if chat.pending.count > 1 {
-                        Text("\(chat.pending.count - 1) more after this").font(.caption).foregroundStyle(.secondary)
+                        Text("\(chat.pending.count - 1) more after this").font(.caption).foregroundStyle(Color.dim)
                             .padding(.bottom, 6)
                     }
                 }
@@ -247,24 +354,58 @@ struct ChatView: View {
                 .glass(in: RoundedRectangle(cornerRadius: 24))
                 .padding(.horizontal, 12)
             }
-            if !agents.isEmpty {
-                AgentsStrip(agents: agents) { following = Following(id: $0.id) }
+            if !agents.isEmpty || !commands.isEmpty {
+                AgentsStrip(agents: agents, commands: commands) { following = Following(id: $0.id) } openCommand: {
+                    followingCommand = Following(id: $0.id)
+                }
             }
             if let pull { PullBar(pull: pull) }
-            if !waiting.isEmpty {
-                WaitingMessages(messages: waiting, onRemove: onUnqueue)
-            }
-            if !suggestions.isEmpty {
-                CommandSuggestions(commands: suggestions) { draft = "/\($0.name) " }
-                    .padding(.vertical, 4)
-                    .clipShape(RoundedRectangle(cornerRadius: 22))
-                    .glass(in: RoundedRectangle(cornerRadius: 22))
-                    .padding(.horizontal, 12)
-            }
+            if !stash.all.isEmpty { stashTab }
             composer
         }
         .padding(.top, 8)
         .padding(.bottom, 6)
+        // The canvas behind it, fading in at its top, as T3 Code's composer
+        // sits: the conversation scrolls under it, and showed through the
+        // gaps between the strips and below the card.
+        .background {
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Color.canvas.opacity(0), Color.canvas], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 16)
+                Color.canvas
+            }
+            .ignoresSafeArea(edges: .bottom)
+        }
+    }
+
+    /// The tab over the box that opens the stash, while it has something in
+    /// it, as T3 Code has it.
+    private var stashTab: some View {
+        HStack {
+            Button {
+                withAnimation(.snappy) { stashOpen.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "tray.full")
+                    Text("Stash")
+                    Text("\(stash.all.count)").foregroundStyle(Color.dimmer)
+                    Image(systemName: "chevron.up")
+                        .font(.caption2.weight(.semibold))
+                        .rotationEffect(.degrees(stashOpen ? 180 : 0))
+                }
+                .font(.caption)
+                .foregroundStyle(stashOpen ? Color.ink : Color.dim)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.surface, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.line, lineWidth: 1))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Prompts put aside, \(stash.all.count)")
+            Spacer()
+        }
+        .padding(.horizontal, 16)
     }
 
     @ViewBuilder
@@ -273,14 +414,14 @@ struct ChatView: View {
             if let notice = chat.notice {
                 Text(notice)
             } else if chat.loaded {
-                Text("No messages yet").font(.headline)
+                Text("No messages yet").font(.headline).foregroundStyle(Color.ink)
                 Text("Send Claude a message below.")
             } else {
-                ProgressView()
+                Spinner().foregroundStyle(Color.dim)
             }
         }
         .font(.subheadline)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Color.dim)
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
@@ -289,43 +430,51 @@ struct ChatView: View {
     /// Slash commands that fit the name being typed, best first.
     private var suggestions: [SlashCommand] {
         guard let typed = ComposerInput.naming(draft) else { return [] }
-        return SlashCommand.matching(typed, in: chat.commands)
+        return SlashCommand.matching(typed, in: offered)
     }
 
     /// What sending will do, when it isn't to say something to Claude: run a
     /// shell command, or a slash command, which says what it does once the
-    /// list of them has gone.
+    /// list of them has gone; and, while a turn runs, that a message waits
+    /// for it, and how to say it now instead.
     @ViewBuilder
     private var modeNote: some View {
         switch input {
         case .shell:
-            Label("Runs in the working copy. Claude sees what it prints with your next message.", glyph: .agentTerminal)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
+            note(Label("Runs in the working copy. Claude sees what it prints with your next message.", glyph: .agentTerminal))
         case let .command(_, known?, _) where suggestions.isEmpty:
             HStack(spacing: 6) {
                 Text("/\(known.name)")
                     .font(.caption.monospaced().weight(.semibold))
                     .foregroundStyle(Color.accentColor)
                 if !known.argumentHint.isEmpty {
-                    Text(known.argumentHint).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                    Text(known.argumentHint).font(.caption.monospaced()).foregroundStyle(Color.dimmer)
                 }
-                Text(known.description).font(.caption).foregroundStyle(.secondary)
+                Text(known.description).font(.caption).foregroundStyle(Color.dim)
             }
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 12)
         default:
-            EmptyView()
+            if steers && canSend {
+                note(Label("Sends when this turn ends. Hold send to stop it and send now.", systemImage: "text.append"))
+            }
         }
+    }
+
+    private func note(_ label: some View) -> some View {
+        label
+            .font(.caption)
+            .foregroundStyle(Color.dim)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
     }
 
     private var canSend: Bool {
         if case let .shell(line) = input { return !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if let sideQuestion { return !sideQuestion.isEmpty }
         return !(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attached.isEmpty)
     }
 
@@ -343,32 +492,37 @@ struct ChatView: View {
         e == "xhigh" ? "Extra High" : e.prefix(1).uppercased() + e.dropFirst()
     }
 
+    /// Attach, and put what is written aside: T3 Code's stash is a key on the
+    /// desktop, and here one more thing the `+` holds.
     private var attachMenu: some View {
         Menu {
-            Button("Photo Library", systemImage: "photo.on.rectangle") { choosingPhotos = true }
-            Button("Files", glyph: .folder) { choosingFiles = true }
+            // Only for a host that keeps them: an older one drops them.
+            if chat.takesFiles {
+                Button("Photo Library", systemImage: "photo.on.rectangle") { choosingPhotos = true }
+                Button("Files", glyph: .folder) { choosingFiles = true }
+                Divider()
+            }
+            Button("Put Aside", systemImage: "tray.and.arrow.down") { putAside() }
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         } label: {
             Image(systemName: "plus")
                 .font(.body.weight(.medium))
-                .foregroundStyle(.primary)
-                .frame(width: 34, height: 34)
-                .background(Color.primary.opacity(0.1), in: Circle())
+                .foregroundStyle(Color.ink)
+                .frame(width: 32, height: 32)
+                .background(Color.surface2, in: Circle())
                 .contentShape(Circle())
         }
-        .accessibilityLabel("Attach")
+        .accessibilityLabel("Attach or put aside")
     }
 
-    /// Stop while Claude works and nothing is typed; send otherwise.
+    /// Stop while Claude works and nothing is typed; send otherwise. While a
+    /// turn runs, send says it will wait, and a long press offers to stop the
+    /// turn and send now.
     @ViewBuilder
     private var sendButton: some View {
         if later != nil {
-            Button(action: send) {
-                Image(systemName: "calendar.badge.clock")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(Color.accentColor, in: Circle())
-                    .opacity(!canSend || sending ? 0.4 : 1)
+            Button { send() } label: {
+                Round(symbol: "calendar.badge.clock", fill: .accentColor, dim: !canSend || sending)
             }
             .disabled(!canSend || sending)
             .accessibilityLabel("Schedule")
@@ -377,52 +531,83 @@ struct ChatView: View {
                 Task { try? await chat.interrupt() }
             } label: {
                 Image(systemName: "stop.fill")
-                    .font(.footnote)
+                    .font(.caption)
                     .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(Color.red, in: Circle())
+                    .frame(width: 32, height: 32)
+                    .background(Color.stop, in: Circle())
             }
             .accessibilityLabel("Stop Claude")
-        } else {
-            Button(action: send) {
-                Image(systemName: "arrow.up")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(Color.accentColor, in: Circle())
-                    .opacity(!canSend || sending ? 0.4 : 1)
+        } else if steers {
+            Button { send() } label: {
+                Round(symbol: "text.append", fill: .accentColor, dim: !canSend || sending)
             }
             .disabled(!canSend || sending)
-            .accessibilityLabel(isShell ? "Run" : "Send")
+            .contextMenu {
+                Button("Send Now", systemImage: "arrow.turn.up.right") { send(steer: true) }
+                Button("Send After This Turn", systemImage: "text.append") { send() }
+            }
+            .accessibilityLabel("Send after this turn")
+            .accessibilityAction(named: "Stop the turn and send now") { send(steer: true) }
+        } else {
+            Button { send() } label: {
+                Round(symbol: branchFrom != nil ? "arrow.triangle.branch" : "arrow.up", fill: .accentColor,
+                      dim: !canSend || sending)
+            }
+            .disabled(!canSend || sending)
+            .accessibilityLabel(isShell ? "Run" : branchFrom != nil ? "Send in a new conversation" : "Send")
         }
     }
 
-    /// One glass card, as Claude Code's app has it: what is attached, the
-    /// message, and under it a line of what it goes with -- files, the model
-    /// and its effort, the permission mode, how full the context is -- and
-    /// send.
+    /// The drawer on the card's top edge: the commands or files that fit what
+    /// is typed, or the stash.
+    @ViewBuilder
+    private var drawer: some View {
+        if !suggestions.isEmpty {
+            ComposerDrawer {
+                CommandSuggestions(commands: suggestions) { draft = "/\($0.name) " }
+            }
+        } else if let mention {
+            ComposerDrawer {
+                MentionSuggestions(paths: mentioned?.paths ?? [], error: mentioned?.error,
+                                   searching: mentioned?.query != mention.query) { path in
+                    draft = ComposerInput.mentioning(path, in: draft)
+                }
+            }
+        } else if stashOpen, !stash.all.isEmpty {
+            ComposerDrawer {
+                StashList(stashed: stash.all) { s in
+                    takeOut(s)
+                } delete: { s in
+                    stash.take(s.id)
+                }
+            }
+        }
+    }
+
+    /// T3 Code's composer: one card a step up from the canvas, with the
+    /// drawer on its top edge, what is attached, the message, and under it a
+    /// line of what it goes with -- attach on the left; the model and its
+    /// effort, the permission mode, how full the context is, and the round
+    /// send or stop on the right.
     private var composer: some View {
         VStack(alignment: .leading, spacing: 0) {
+            drawer
+            if branchFrom != nil {
+                ComposerBar(glyph: .edit, text: "Editing an earlier message: sending starts a new conversation from there.") {
+                    branchFrom = nil
+                    draft = ""
+                }
+            }
             if !attached.isEmpty {
                 AttachedStrip(files: attached) { f in attached.removeAll { $0.id == f.id } }
             }
             modeNote
-            if let at = later {
-                HStack(spacing: 6) {
-                    DatePicker("Say it at", selection: Binding(get: { at }, set: { later = $0 }),
-                               in: Date.now..., displayedComponents: [.date, .hourAndMinute])
-                        .font(.footnote)
-                    Button { later = nil } label: { Image(systemName: "xmark.circle.fill") }
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel("Send now instead")
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-            }
+            if let at = later { scheduleLine(at) }
             TextField(later == nil ? "Message Claude" : "Message for later", text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 // A `!` command is code, and set as code.
                 .font(isShell ? Font.body.monospaced() : Font.body)
+                .foregroundStyle(Color.ink)
                 .autocorrectionDisabled(isCode)
                 .textInputAutocapitalization(isCode ? TextInputAutocapitalization.never : .sentences)
                 .focused($composing)
@@ -439,24 +624,23 @@ struct ChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
                 .padding(.bottom, 10)
-            HStack(spacing: 6) {
-                // Only for a host that keeps them: an older one drops them.
-                if chat.takesFiles { attachMenu }
-                ModelMenu(chat: chat)
+            HStack(spacing: 4) {
+                attachMenu
                 ModeMenu(chat: chat)
+                ModelMenu(chat: chat)
                 Spacer(minLength: 0)
                 // Text only: a file isn't something the server keeps for later.
-                if onSchedule != nil, later == nil, attached.isEmpty, !isShell {
+                if onSchedule != nil, later == nil, attached.isEmpty, !isShell, branchFrom == nil {
                     Button { later = .now.addingTimeInterval(60 * 60) } label: {
                         Image(systemName: "calendar.badge.clock")
                             .font(.body)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 30, height: 34)
+                            .foregroundStyle(Color.dim)
+                            .frame(width: 30, height: 32)
                     }
                     .accessibilityLabel("Send later")
                 }
                 if chat.status == "compacting" {
-                    Text("compacting").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text("compacting").font(.caption).foregroundStyle(Color.dim).lineLimit(1)
                 }
                 if chat.loaded {
                     ContextRing(percentage: chat.contextPercentage, size: chat.contextSize, usage: usage)
@@ -467,8 +651,10 @@ struct ChatView: View {
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
         }
-        .glass(in: RoundedRectangle(cornerRadius: 26))
-        .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(isShell ? Color.accentColor : .clear, lineWidth: 1))
+        .background(Color.surface, in: RoundedRectangle(cornerRadius: Radius.composer, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.composer, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.composer, style: .continuous)
+            .strokeBorder(isShell ? Color.accentColor : Color.line, lineWidth: 1))
         .padding(.horizontal, 12)
         .disabled(chat.phase != .live)
         .photosPicker(isPresented: $choosingPhotos, selection: $photos, maxSelectionCount: 10, matching: .images)
@@ -496,17 +682,62 @@ struct ChatView: View {
         }
     }
 
-    private func send() {
+    /// When a message for later is to be said, and whether it comes round
+    /// again: once, or by one of the queue's rules, where the server can.
+    private func scheduleLine(_ at: Date) -> some View {
+        HStack(spacing: 6) {
+            DatePicker(cadence == .hourly ? "From" : "Say it at", selection: Binding(get: { at }, set: { later = $0 }),
+                       in: Date.now..., displayedComponents: cadence == nil ? [.date, .hourAndMinute] : [.hourAndMinute])
+                .font(.footnote)
+                .foregroundStyle(Color.dim)
+            if utcOffset != nil {
+                Menu {
+                    Picker("Repeat", selection: $cadence) {
+                        Text("Once").tag(Cadence?.none)
+                        ForEach(Cadence.all) { c in Text(c.label).tag(Cadence?.some(c)) }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        if cadence != nil { Image(systemName: "repeat") }
+                        Text(cadence?.label ?? "Once")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(cadence == nil ? Color.dim : Color.ink)
+                    .padding(.horizontal, 8)
+                    .frame(height: 30)
+                    .background(Color.surface2, in: Capsule())
+                }
+                .menuOrder(.fixed)
+                .accessibilityLabel("Repeat, \(cadence?.label ?? "Once")")
+            }
+            Button {
+                later = nil
+                cadence = nil
+            } label: { Image(systemName: "xmark.circle.fill") }
+                .foregroundStyle(Color.dimmer)
+                .accessibilityLabel("Send now instead")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+    }
+
+    // MARK: Sending
+
+    private func send(steer: Bool = false) {
         if let at = later, let onSchedule {
             let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: at)
+            let rule = cadence?.rule(hour: parts.hour ?? 0, minute: parts.minute ?? 0,
+                                     serverOffset: utcOffset ?? TimeZone.current.secondsFromGMT())
             sending = true
             Task {
                 defer { sending = false }
                 do {
-                    try await onSchedule(text, at)
+                    try await onSchedule(text, at, rule)
                     draft = ""
                     later = nil
+                    cadence = nil
                 } catch {
                     chat.error = error.userMessage
                 }
@@ -517,7 +748,22 @@ struct ChatView: View {
             run(line)
             return
         }
+        if let question = sideQuestion, let onSideChat {
+            guard !question.isEmpty else { return }
+            onSideChat(question)
+            draft = ""
+            return
+        }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let from = branchFrom, let onBranch {
+            guard !text.isEmpty else { return }
+            // Forked from what the agent said last before the message; the
+            // conversation edited stays as it was.
+            onBranch(ChatTranscript.assistantBefore(chat.entries, seq: from), text)
+            draft = ""
+            branchFrom = nil
+            return
+        }
         let files = attached
         guard !text.isEmpty || !files.isEmpty else { return }
         // Emptied now rather than once the server has it, so nothing typed
@@ -527,9 +773,14 @@ struct ChatView: View {
         attached = []
         justSent = (text, .now)
         sending = true
+        let steering = steer && working
         Task {
             defer { sending = false }
             do {
+                // Steering is the turn stopped and this said in its place:
+                // the host takes the message as the next turn once the
+                // interrupt has ended this one.
+                if steering { try await chat.interrupt() }
                 try await chat.send(text, files: files)
             } catch {
                 justSent = nil
@@ -561,6 +812,40 @@ struct ChatView: View {
         }
     }
 
+    /// "Edit from Here": the message's words back in the box, and sending
+    /// them forks the conversation from just before it.
+    private func edit(from seq: UInt64, _ text: String) {
+        branchFrom = seq
+        later = nil
+        draft = text
+        composing = true
+    }
+
+    /// A queued message taken back off the queue to be changed: its words in
+    /// the box, after anything already there.
+    private func takeBack(_ m: QueuedMessage) {
+        draft = draft.isEmpty ? m.text : draft + "\n\n" + m.text
+        composing = true
+    }
+
+    /// What is written, put aside in the stash, and the box emptied for the
+    /// next thing.
+    private func putAside() {
+        stash.put(draft)
+        draft = ""
+    }
+
+    /// One taken out of the stash: back in the box, and out of the stash. What
+    /// was in the box goes into the stash in its place, so nothing is lost.
+    private func takeOut(_ s: Stashed) {
+        let had = draft
+        stash.take(s.id)
+        stash.put(had)
+        draft = s.text
+        stashOpen = false
+        composing = true
+    }
+
     private func answer(_ ask: Ask, _ decision: ChatDecision) {
         answering = ask.id
         Task {
@@ -569,6 +854,23 @@ struct ChatView: View {
         }
     }
 }
+
+/// The composer's round button, T3 Code's: a glyph on a filled circle.
+private struct Round: View {
+    let symbol: String
+    let fill: Color
+    let dim: Bool
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(width: 32, height: 32)
+            .background(fill, in: Circle())
+            .opacity(dim ? 0.4 : 1)
+    }
+}
+
 
 /// A model id as a person would say it: `claude-opus-5-5[1m]` is Opus 5.5
 /// (1M). Anything that doesn't look like an id is left as it is.
@@ -579,56 +881,6 @@ func modelName(_ id: String) -> String {
     return m.4 == nil ? name : "\(name) (1M)"
 }
 
-/// The slash commands that fit what is typed: each one's name and what it
-/// takes, then what it does. A tap completes the name.
-private struct CommandSuggestions: View {
-    let commands: [SlashCommand]
-    let pick: (SlashCommand) -> Void
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(commands) { c in
-                    Button { pick(c) } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text("/\(c.name)").layoutPriority(1)
-                                if !c.argumentHint.isEmpty {
-                                    Text(c.argumentHint).foregroundStyle(.tertiary)
-                                }
-                            }
-                            .font(.subheadline.monospaced())
-                            .lineLimit(1)
-                            if !c.description.isEmpty || !c.aliases.isEmpty {
-                                Text(about(c))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if c.id != commands.last?.id {
-                        Divider().padding(.leading, 14)
-                    }
-                }
-            }
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .frame(maxHeight: 240)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func about(_ c: SlashCommand) -> String {
-        guard !c.aliases.isEmpty else { return c.description }
-        let also = "also " + c.aliases.map { "/\($0)" }.joined(separator: ", ")
-        return c.description.isEmpty ? also : "\(c.description) (\(also))"
-    }
-}
 
 /// The reply as Claude writes it, and that it is still working. The only
 /// rows that read the reply: when the transcript's own view did, every word
@@ -644,14 +896,15 @@ private struct Writing: View {
         if !chat.streaming.isEmpty {
             MarkdownText(text: chat.streaming).opacity(0.8)
         }
+        // T3 Code's line for a turn under way, as the desktop's: "Working
+        // for" and a running clock, with no spinner beside it.
         if showsWorking || started != nil {
-            HStack(spacing: 6) {
-                if showsWorking { WorkingDots(size: 22) }
-                // The word only while there is nothing else to look at.
-                if chat.streaming.isEmpty { Text("working").font(.caption) }
-                if let started { Elapsed(since: started) }
+            HStack(spacing: 4) {
+                Text(started == nil ? "Working" : "Working for")
+                if let started { Elapsed(since: started).font(.subheadline.monospacedDigit()) }
             }
-            .foregroundStyle(Color.working)
+            .font(.subheadline)
+            .foregroundStyle(Color.dim)
         }
     }
 }
@@ -706,10 +959,10 @@ private struct ModelMenu: View {
             } label: {
                 HStack(spacing: 4) {
                     if let model = modelLabel {
-                        Text(model).foregroundStyle(.primary)
+                        Text(model).foregroundStyle(Color.ink)
                     }
                     if let effort = chat.effort {
-                        Text(ChatView.effortName(effort)).foregroundStyle(.secondary)
+                        Text(ChatView.effortName(effort)).foregroundStyle(Color.dim)
                     }
                 }
                 .modifier(Chip())
@@ -746,7 +999,7 @@ private struct ModeMenu: View {
         } label: {
             Label(mode?.short ?? (chat.mode ?? "Auto"), glyph: .policy)
                 .labelStyle(TightLabel())
-                .foregroundStyle(chat.mode == "plan" ? Color.accentColor : .primary)
+                .foregroundStyle(chat.mode == "plan" ? Color.accentColor : Color.dim)
                 .modifier(Chip())
                 .fixedSize()
         }
@@ -754,15 +1007,15 @@ private struct ModeMenu: View {
     }
 }
 
-/// A pill in the composer's line, a shade lighter than the glass it is on.
+/// A control in the composer's line, as T3 Code's ghost button: no fill of
+/// its own on the card.
 private struct Chip: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(.subheadline)
             .lineLimit(1)
-            .padding(.horizontal, 12)
-            .frame(height: 34)
-            .background(Color.primary.opacity(0.1), in: Capsule())
+            .padding(.horizontal, 8)
+            .frame(height: 32)
             .contentShape(Capsule())
     }
 }
@@ -848,35 +1101,3 @@ final class ListEnd {
     }
 }
 
-/// Messages waiting on the server to be said, above the composer: when, what,
-/// and a way to take one back.
-private struct WaitingMessages: View {
-    let messages: [QueuedMessage]
-    let onRemove: ((QueuedMessage) -> Void)?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(messages) { m in
-                HStack(spacing: 8) {
-                    Image(systemName: m.at == nil ? "hourglass" : "calendar.badge.clock")
-                        .foregroundStyle(.secondary)
-                    Text(m.at.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "After this turn")
-                        .font(.caption.weight(.medium))
-                    Text(m.text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer(minLength: 0)
-                    if let onRemove {
-                        Button { onRemove(m) } label: { Image(systemName: "xmark") }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel("Don't say it")
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glass(in: RoundedRectangle(cornerRadius: 18))
-        .padding(.horizontal, 12)
-        .buttonStyle(.plain)
-    }
-}

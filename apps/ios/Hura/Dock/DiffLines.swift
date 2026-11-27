@@ -151,7 +151,7 @@ struct DiffLines<Below: View>: View {
         if let span = model.spans[line.id], !line.text.contains("\t"), span.upperBound <= text.count, !span.isEmpty {
             let lower = out.index(out.startIndex, offsetByCharacters: span.lowerBound)
             let upper = out.index(out.startIndex, offsetByCharacters: span.upperBound)
-            out[lower..<upper].backgroundColor = line.kind == .added ? Color.green.opacity(0.4) : Color.red.opacity(0.4)
+            out[lower..<upper].backgroundColor = line.kind == .added ? Color.ok.opacity(0.4) : Color.bad.opacity(0.4)
         }
         return out
     }
@@ -166,7 +166,7 @@ struct DiffLines<Below: View>: View {
                 Text(line.new.map(String.init) ?? "").frame(width: layout.gutter, alignment: .trailing).foregroundStyle(.tertiary)
             }
             Text(line.kind == .added ? "+" : line.kind == .removed ? "-" : " ")
-                .foregroundStyle(line.kind == .added ? .green : line.kind == .removed ? .red : .secondary)
+                .foregroundStyle(line.kind == .added ? Color.ok : line.kind == .removed ? Color.bad : .secondary)
                 .frame(width: layout.char * 2)
             Text(attributed(line))
                 .fixedSize(horizontal: !wrap, vertical: true)
@@ -175,7 +175,7 @@ struct DiffLines<Below: View>: View {
         .padding(.vertical, 1)
         .padding(.trailing, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(line.kind == .added ? Color.green.opacity(0.15) : line.kind == .removed ? Color.red.opacity(0.15) : .clear)
+        .background(line.kind == .added ? Color.ok.opacity(0.15) : line.kind == .removed ? Color.bad.opacity(0.15) : .clear)
         .contentShape(Rectangle())
         .id(line.id)
         .onTapGesture { tap?(line) }

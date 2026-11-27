@@ -5,7 +5,7 @@ import Foundation
 // `hura-core`, whose TypeScript twins are in `apps/desktop/src/gen`.
 
 /// A repository someone is working on, which worktrees are grouped under.
-public struct Project: Codable, Equatable, Identifiable, Sendable {
+public struct Project: Codable, Equatable, Hashable, Identifiable, Sendable {
     /// Unique, and what a session records to say where it belongs.
     public var name: String
     /// Clone URL. Every worktree in the project starts from this.
@@ -13,19 +13,69 @@ public struct Project: Codable, Equatable, Identifiable, Sendable {
     /// The checkout on the server this was named from.
     public var path: String
     public var createdAt: Int64
+    /// What a new worktree in it starts with, over the server's own; empty
+    /// from a server that keeps none.
+    public var defaults: ProjectDefaults
 
     public var id: String { name }
 
     enum CodingKeys: String, CodingKey {
-        case name, repo, path
+        case name, repo, path, defaults
         case createdAt = "created_at"
     }
 
-    public init(name: String, repo: String, path: String, createdAt: Int64 = 0) {
+    public init(name: String, repo: String, path: String, createdAt: Int64 = 0, defaults: ProjectDefaults = .init()) {
         self.name = name
         self.repo = repo
         self.path = path
         self.createdAt = createdAt
+        self.defaults = defaults
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        repo = try c.decode(String.self, forKey: .repo)
+        path = try c.decode(String.self, forKey: .path)
+        createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        defaults = try c.decodeIfPresent(ProjectDefaults.self, forKey: .defaults) ?? .init()
+    }
+}
+
+/// What a new worktree in a project starts with, over the server's config
+/// (`hura_core::projects::ProjectDefaults`). Each one unset is the server's.
+/// Kept with the project on the server, so the phone and the desktop agree.
+public struct ProjectDefaults: Codable, Equatable, Hashable, Sendable {
+    /// `chat` or `terminal`.
+    public var interface: String?
+    /// A git worktree on the server, as its user, rather than a sandbox.
+    public var worktree: Bool?
+    public var policy: String?
+    public var base: String?
+    public var toolchains: [String]?
+    public var providers: [String]?
+
+    public init(interface: String? = nil, worktree: Bool? = nil, policy: String? = nil, base: String? = nil,
+                toolchains: [String]? = nil, providers: [String]? = nil) {
+        self.interface = interface
+        self.worktree = worktree
+        self.policy = policy
+        self.base = base
+        self.toolchains = toolchains
+        self.providers = providers
+    }
+
+    public var isEmpty: Bool { self == ProjectDefaults() }
+
+    // Unset is left out rather than sent as null, as the server writes it.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(interface, forKey: .interface)
+        try c.encodeIfPresent(worktree, forKey: .worktree)
+        try c.encodeIfPresent(policy, forKey: .policy)
+        try c.encodeIfPresent(base, forKey: .base)
+        try c.encodeIfPresent(toolchains, forKey: .toolchains)
+        try c.encodeIfPresent(providers, forKey: .providers)
     }
 }
 

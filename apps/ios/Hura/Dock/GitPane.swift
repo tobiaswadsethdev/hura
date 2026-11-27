@@ -23,7 +23,7 @@ struct GitPane: View {
                 let s = answer.status
                 if s.staged.isEmpty && s.unstaged.isEmpty {
                     Section {
-                        Label("Nothing to commit", glyph: .passing).foregroundStyle(.green)
+                        Label("Nothing to commit", glyph: .passing).foregroundStyle(Color.ok)
                     }
                 } else {
                     Section {
@@ -67,13 +67,13 @@ struct GitPane: View {
             HStack {
                 Label(s.branch, glyph: .branch).font(.body)
                 Spacer()
-                if running != nil { ProgressView() }
+                if running != nil { Spinner().foregroundStyle(Color.dim) }
             }
             if let up = s.upstream {
                 HStack(spacing: 10) {
                     Text("→ \(up)").font(.caption).foregroundStyle(.secondary)
-                    if s.ahead > 0 { Text("\(s.ahead) ahead").font(.caption).foregroundStyle(.blue) }
-                    if s.behind > 0 { Text("\(s.behind) behind").font(.caption).foregroundStyle(.orange) }
+                    if s.ahead > 0 { Text("\(s.ahead) ahead").font(.caption).foregroundStyle(Color.accentColor) }
+                    if s.behind > 0 { Text("\(s.behind) behind").font(.caption).foregroundStyle(Color.warn) }
                     if s.ahead == 0 && s.behind == 0 { Text("in sync").font(.caption).foregroundStyle(.secondary) }
                 }
             } else {
@@ -127,7 +127,7 @@ struct GitPane: View {
                         ChangeRow(file: f)
                     }
                     .swipeActions(edge: .trailing) {
-                        Button(verb) { run(verb, [op(f.path)]) }.tint(verb == "Stage" ? .green : .orange)
+                        Button(verb) { run(verb, [op(f.path)]) }.tint(verb == "Stage" ? Color.ok : Color.warn)
                         if against == .worktree {
                             Button("Discard", role: .destructive) { discarding = f.path }
                         }
@@ -256,10 +256,10 @@ struct ChangeRow: View {
 
     private var color: Color {
         switch file.change {
-        case "added", "untracked": .green
-        case "deleted", "conflicted": .red
-        case "renamed": .blue
-        default: .orange
+        case "added", "untracked": Color.ok
+        case "deleted", "conflicted": Color.bad
+        case "renamed": Color.accentColor
+        default: Color.warn
         }
     }
 }
@@ -376,7 +376,7 @@ struct FileDiffView: View {
         let remarks = line.kind != .removed ? mine.filter { $0.line == line.new } : []
         ForEach(remarks) { c in
             HStack(alignment: .top, spacing: 6) {
-                Image(glyph: .reviewComment).foregroundStyle(.blue)
+                Image(glyph: .reviewComment).foregroundStyle(Color.accentColor)
                 // A width of its own when the diff scrolls sideways: there is
                 // no edge for the text to wrap at.
                 Text(c.body)
@@ -393,7 +393,7 @@ struct FileDiffView: View {
                 .accessibilityLabel("Remove the comment on line \(c.line)")
             }
             .padding(6)
-            .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
             .padding(.leading, layout.indent)
             .padding(.trailing, 8)
             .padding(.vertical, 2)

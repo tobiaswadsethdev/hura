@@ -107,7 +107,7 @@ struct IntegrationsView: View {
                     .foregroundStyle(stateColor(s))
                 Spacer()
                 if busy == "mcp:\(s.name)" {
-                    ProgressView()
+                    Spinner().foregroundStyle(Color.dim)
                 } else if s.managed {
                     if s.state == "running" {
                         Button("Restart", glyph: .restart) { mcp(s, "restart") }
@@ -122,7 +122,7 @@ struct IntegrationsView: View {
             }
             .buttonStyle(.borderless)
             Text(s.image ?? s.url).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-            if let problem = s.problem { Text(problem).font(.caption).foregroundStyle(.orange) }
+            if let problem = s.problem { Text(problem).font(.caption).foregroundStyle(Color.warn) }
             if let log = s.log {
                 Text(log).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(8).textSelection(.enabled)
             }
@@ -132,8 +132,8 @@ struct IntegrationsView: View {
     private func stateColor(_ s: McpStatus) -> Color {
         guard s.managed else { return .secondary }
         switch s.state {
-        case "running": return .green
-        case "crashing", "detached": return .orange
+        case "running": return Color.ok
+        case "crashing", "detached": return Color.warn
         default: return .secondary
         }
     }
@@ -147,9 +147,9 @@ struct IntegrationsView: View {
             }
             Spacer()
             if busy == "secret:\(s.name)" {
-                ProgressView()
+                Spinner().foregroundStyle(Color.dim)
             } else {
-                Text(s.set ? "stored" : "NOT set").font(.caption.weight(.semibold)).foregroundStyle(s.set ? .green : .red)
+                Text(s.set ? "stored" : "NOT set").font(.caption.weight(.semibold)).foregroundStyle(s.set ? Color.ok : Color.bad)
             }
         }
     }
@@ -272,7 +272,7 @@ struct ServerSettingsView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 if saving {
-                    ProgressView()
+                    Spinner().foregroundStyle(Color.dim)
                 } else if view != nil {
                     Button("Save", action: save).disabled(!dirty)
                 }
@@ -333,7 +333,7 @@ struct ServerSettingsView: View {
                                 }
                             }
                         }
-                        if let e = options?.providersError { Text(e).foregroundStyle(.red).font(.caption) }
+                        if let e = options?.providersError { Text(e).foregroundStyle(Color.bad).font(.caption) }
                     }
                 } header: {
                     Text("Credentials")
@@ -431,7 +431,7 @@ private struct NamingKeyRow: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             if busy {
-                ProgressView()
+                Spinner().foregroundStyle(Color.dim)
             } else if !value.isEmpty {
                 Button("Store") { change(value.trimmingCharacters(in: .whitespacesAndNewlines)) }
             } else if source == "stored" {
@@ -481,7 +481,7 @@ struct AboutView: View {
                         LabeledContent("hurad", value: hello.version)
                         LabeledContent("Protocol", value: "\(hello.protocol)")
                     } else if let error {
-                        Text(error).foregroundStyle(.red)
+                        Text(error).foregroundStyle(Color.bad)
                     } else {
                         WaitingRow()
                     }

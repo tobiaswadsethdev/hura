@@ -4,8 +4,10 @@ import SwiftUI
 import UIKit
 
 /// A tmux session in a sandbox: the agent's own screen in a terminal session,
-/// or a shell beside it. SwiftTerm draws it; its keyboard accessory carries
-/// the keys a phone lacks (esc, ctrl, tab, arrows).
+/// or a shell beside it. SwiftTerm draws it; `TerminalKeyBar`, over the
+/// keyboard, carries the keys a phone lacks (arrows, esc, ctrl and alt, tab),
+/// a Paste and the way to put the keyboard away. With the keyboard away, a
+/// button in the corner brings it back.
 ///
 /// A swipe scrolls tmux's history, and typing -- or the Latest button --
 /// brings it back to the live screen. A long press selects as text selects
@@ -31,11 +33,21 @@ struct TerminalScreen: View {
                 .ignoresSafeArea(.container, edges: .bottom)
         }
         .overlay(alignment: .top) { banner }
-        .overlay(alignment: .bottomTrailing) { latest }
+        .overlay(alignment: .bottomTrailing) {
+            VStack(alignment: .trailing, spacing: 12) {
+                latest
+                showKeyboard
+            }
+            .padding(16)
+        }
         .animation(.snappy(duration: 0.2), value: control.inHistory)
         .animation(.snappy(duration: 0.2), value: control.selecting)
+        .animation(.snappy(duration: 0.2), value: control.keyboard)
         .background(SwiftUI.Color(look.background))
         .environment(\.colorScheme, scheme)
+        // For the key bar, which the keyboard hosts outside this view's
+        // environment.
+        .onChange(of: look, initial: true) { control.look = look }
         .onAppear { channel.start() }
         .onDisappear { channel.stop() }
         .onChange(of: scenePhase) { _, phase in
@@ -89,20 +101,48 @@ struct TerminalScreen: View {
                     .padding(.vertical, 9)
             }
             .glass(interactive: true)
-            .padding(14)
             .transition(.scale(scale: 0.8).combined(with: .opacity))
         }
+    }
+
+    /// With the keyboard put away, the key bar goes with it; this brings both
+    /// back, as T3 Code's does. Not while selecting, which has its own Done,
+    /// and not once the session has closed, when there is nothing to type to.
+    @ViewBuilder
+    private var showKeyboard: some View {
+        if !control.keyboard && !control.selecting && !closed {
+            Button { control.view?.showKeyboard() } label: {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 20))
+                    .foregroundStyle(SwiftUI.Color(TerminalLook(scheme).foreground))
+                    .frame(width: 48, height: 48)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .glass(in: Circle(), interactive: true)
+            .accessibilityLabel("Show keyboard")
+            .transition(.scale(scale: 0.8).combined(with: .opacity))
+        }
+    }
+
+    private var closed: Bool {
+        if case .closed = channel.phase { true } else { false }
     }
 }
 
 /// What the SwiftUI around the terminal needs of it: whether to offer the way
-/// back from tmux's history, whether a selection is up, and the view to tell.
+/// back from tmux's history, whether a selection is up, whether the keyboard
+/// is, which modifier the key bar has armed, and the view to tell.
 @MainActor
 @Observable
 final class TerminalControl {
     @ObservationIgnored weak var view: ScrollingTerminalView?
     var inHistory = false
     var selecting = false
+    var keyboard = false
+    var armed: TerminalModifier?
+    /// The terminal's colours, for the key bar.
+    var look: TerminalLook?
 }
 
 /// A terminal's colours, for the app's light and dark, and the same as the
@@ -186,7 +226,12 @@ private struct TerminalHost: UIViewRepresentable {
         control.view = view
         view.onHistory = { [control] in control.inHistory = $0 }
         view.onSelecting = { [control] in control.selecting = $0 }
+        view.onKeyboard = { [control] in control.keyboard = $0 }
+        view.onArmed = { [control] in control.armed = $0 }
         view.onFontSize = onFontSize
+        // In place of SwiftTerm's own accessory, whose ctrl is the only
+        // modifier and whose keys don't follow the terminal's colours.
+        view.inputAccessoryView = TerminalKeyBarHost(control: control)
         channel.output = { [weak view] data in
             view?.feed(byteArray: ArraySlice(data))
             view?.fed()
@@ -281,7 +326,14 @@ final class ScrollingTerminalView: TerminalView {
     var onHistory: ((Bool) -> Void)?
     var onSelecting: ((Bool) -> Void)?
     var onFontSize: ((Double) -> Void)?
+    var onKeyboard: ((Bool) -> Void)?
+    var onArmed: ((TerminalModifier?) -> Void)?
     private(set) var look: TerminalLook?
+
+    /// The modifier the key bar has armed for the next key.
+    private var armed: TerminalModifier? {
+        didSet { if armed != oldValue { onArmed?(armed) } }
+    }
 
     private var scroll: UIPanGestureRecognizer?
     private let simultaneous = Simultaneous()
@@ -446,6 +498,78 @@ final class ScrollingTerminalView: TerminalView {
         scrolledBack = false
         show(history: false)
         if leave { send(txt: "q") }
+    }
+
+    // MARK: Keys
+
+    /// A key on the bar. Bytes go the way typing does, through `send(data:)`
+    /// to the delegate, so a key in tmux's history leaves it first.
+    func press(_ key: TerminalKey) {
+        switch key.action {
+        case let .modifier(m):
+            armed = armed == m ? nil : m
+        case .clear:
+            armed = nil
+            write(TerminalInput.clear)
+        case let .send(data):
+            typeModified(data)
+        }
+    }
+
+    /// What is on the clipboard, as T3 Code pastes it: see `TerminalInput.paste`.
+    func paste() {
+        armed = nil
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        write(TerminalInput.paste(text, bracketed: getTerminal().bracketedPasteMode))
+    }
+
+    func hideKeyboard() {
+        _ = resignFirstResponder()
+    }
+
+    func showKeyboard() {
+        _ = becomeFirstResponder()
+    }
+
+    private func write(_ text: String) {
+        send(data: ArraySlice(Array(text.utf8)))
+    }
+
+    /// Through the armed modifier, if there is one, which is then spent.
+    private func typeModified(_ data: String) {
+        guard let modifier = armed else { return write(data) }
+        armed = nil
+        switch TerminalInput.modified(data, by: modifier) {
+        case let .write(bytes): write(bytes)
+        case .paste: paste()
+        }
+    }
+
+    /// The keyboard's typing, which an armed modifier applies to as well.
+    /// SwiftTerm has a ctrl and a meta of its own for this, but its ctrl maps
+    /// fewer keys, and the bar's two are one place here.
+    override func insertText(_ text: String) {
+        guard armed != nil, !text.isEmpty else { return super.insertText(text) }
+        // Return is a carriage return to a terminal, under a modifier too.
+        typeModified(text == "\n" ? "\r" : text)
+    }
+
+    /// Delete under alt is a word back, in shells and editors alike.
+    override func deleteBackward() {
+        guard armed != nil else { return super.deleteBackward() }
+        typeModified("\u{7F}")
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        onKeyboard?(isFirstResponder)
+        return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        onKeyboard?(isFirstResponder)
+        return resigned
     }
 
     // MARK: Selecting

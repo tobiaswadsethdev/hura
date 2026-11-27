@@ -135,8 +135,17 @@ public struct ServerClient: Sendable {
     }
 
     /// Opens another conversation; `opened` names it.
-    public func newChat(_ name: String) async throws -> Chats {
-        try await call("new-chat", Named(name: name), as: Chats.self)
+    /// Another conversation. With `fork`, it starts from that one's context
+    /// (a side chat), and with `at` as well only up to that assistant message
+    /// (an earlier message edited). A server or host from before forks
+    /// ignores both and opens a plain one.
+    public func newChat(_ name: String, fork: String? = nil, at: String? = nil) async throws -> Chats {
+        struct Body: Encodable {
+            var name: String
+            var fork: String?
+            var at: String?
+        }
+        return try await call("new-chat", Body(name: name, fork: fork, at: at), as: Chats.self)
     }
 
     public func closeChat(_ name: String, conversation: String) async throws -> Chats {
@@ -153,8 +162,36 @@ public struct ServerClient: Sendable {
         try await call("shells", Named(name: name), as: Shells.self)
     }
 
-    public func newShell(_ name: String) async throws -> Shells {
-        try await call("new-shell", Named(name: name), as: Shells.self)
+    /// Another shell; with `run`, a command the server types into it once it
+    /// is up (a project's script). An older server opens it and ignores `run`.
+    public func newShell(_ name: String, run: String? = nil) async throws -> Shells {
+        struct Body: Encodable {
+            var name: String
+            var run: String?
+        }
+        return try await call("new-shell", Body(name: name, run: run), as: Shells.self)
+    }
+
+    /// Paths in the working copy that match what is typed after `@`, best
+    /// first: files, and directories ending in `/`.
+    public func findFiles(_ name: String, query: String, limit: Int = 50) async throws -> FoundPaths {
+        struct Body: Encodable { var name: String; var query: String; var limit: Int }
+        return try await call("find-files", Body(name: name, query: query, limit: limit), as: FoundPaths.self)
+    }
+
+    /// The end of a file in the sandbox: a background command's output as it
+    /// is written. At most 256 KiB.
+    public func tailFile(_ name: String, path: String, bytes: Int = 64 * 1024) async throws -> TailText {
+        struct Body: Encodable { var name: String; var path: String; var bytes: Int }
+        return try await call("tail-file", Body(name: name, path: path, bytes: bytes), as: TailText.self)
+    }
+
+    /// Sets what a project's new worktrees start with. Answers with the
+    /// projects.
+    public func setProjectDefaults(_ project: String, _ defaults: ProjectDefaults) async throws -> [Project] {
+        struct Body: Encodable { var name: String; var defaults: ProjectDefaults }
+        return try await call("set-project-defaults", Body(name: project, defaults: defaults),
+                              as: ProjectsReply.self).projects
     }
 
     /// Closes a shell, or the agent's own terminal when `tmux` is the

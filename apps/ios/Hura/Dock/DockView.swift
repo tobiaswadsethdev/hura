@@ -92,7 +92,7 @@ struct Loaded<T, Content: View>: View {
         } else if let error {
             ContentUnavailableView("Couldn't read it", image: Glyph.warning.name, description: Text(error))
         } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            Spinner().foregroundStyle(Color.dim).frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
@@ -102,6 +102,6 @@ struct Loaded<T, Content: View>: View {
 /// the leading edge, and some sections did that while others centred.
 struct WaitingRow: View {
     var body: some View {
-        ProgressView().frame(maxWidth: .infinity)
+        Spinner().foregroundStyle(Color.dim).frame(maxWidth: .infinity)
     }
 }

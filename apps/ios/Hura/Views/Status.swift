@@ -2,8 +2,8 @@ import HuraKit
 import SwiftUI
 
 /// A state in a capsule, coloured by what it asks of you -- in the desktop's
-/// hues, which are the system's: yellow for an agent working, purple for one
-/// waiting on you, green for ready, red for failed, and grey for the rest.
+/// hues, which are T3 Code's: blue for an agent working, amber for one waiting
+/// on you, emerald for ready, red for failed, and grey for the rest.
 struct StatusBadge: View {
     let status: String
 
@@ -26,19 +26,19 @@ struct StatusBadge: View {
     private var color: Color {
         switch status {
         case "working": Color.working
-        case "needs_input": .purple
-        case "ready": .green
-        case "failed", "dead": .red
+        case "needs_input": .attention
+        case "ready": .ok
+        case "failed", "dead": .bad
         default: .secondary
         }
     }
 }
 
 /// What an agent is doing, as one mark: the desktop's sidebar column
-/// (`StateDot` in `icons.tsx`). The turning dots while it works or while the
-/// sandbox is still being made; a question mark, in purple, while it waits on
+/// (`StateDot` in `icons.tsx`). A still dashed circle while it works or while the
+/// sandbox is still being made; a question mark, in amber, while it waits on
 /// you -- a shape, so the row is findable in a list without reading it; an
-/// alert when it failed; and a plain dot otherwise, green when ready.
+/// alert when it failed; and a plain dot otherwise, emerald when ready.
 struct StateMark: View {
     /// The session's state, with the agent's own in place of `ready` when there
     /// is a report: see `liveState`.
@@ -47,19 +47,34 @@ struct StateMark: View {
     var body: some View {
         Group {
             switch state {
-            case "running": WorkingDots(size: 16).foregroundStyle(Color.working)
-            case "creating", "seeding": WorkingDots(size: 16).foregroundStyle(.secondary)
-            case "waiting": Image(glyph: .waiting).foregroundStyle(.purple)
-            case "failed", "dead": Image(glyph: .failed).foregroundStyle(.red)
+            // T3 Code's Working, a dashed circle standing still, as the
+            // desktop's list draws it: a whole list of them turning read as
+            // a page still loading.
+            case "running", "creating", "seeding": Image(glyph: .pending).foregroundStyle(Color.working)
+            case "waiting": Image(glyph: .waiting).foregroundStyle(Color.attention)
+            case "failed", "dead": Image(glyph: .failed).foregroundStyle(Color.bad)
             default:
                 Circle()
-                    .fill(state == "ready" ? Color.green : Color.secondary.opacity(0.6))
+                    .fill(state == "ready" ? Color.ok : Color.secondary.opacity(0.6))
                     .frame(width: 8, height: 8)
             }
         }
         .font(.subheadline)
         .frame(width: 18, height: 18)
         .accessibilityLabel(state == "waiting" ? "waiting for input" : state)
+    }
+}
+
+/// A state as the desktop's sidebar says it (`statusOf` in `Tree.tsx`), or nil
+/// for one with nothing to say (ready, or idle), whose row shows its age
+/// instead.
+func stateWord(_ state: String) -> (label: String, color: Color)? {
+    switch state {
+    case "creating", "seeding": ("Setting up", .working)
+    case "running": ("Working", .working)
+    case "waiting": ("Needs you", .attention)
+    case "failed", "dead": ("Failed", .bad)
+    default: nil
     }
 }
 

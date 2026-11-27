@@ -36,7 +36,7 @@ struct FactsPane: View {
                         LabeledContent("Runs") {
                             Label("On the server, not isolated", glyph: .unsandboxed)
                                 .labelStyle(.titleAndIcon)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color.warn)
                         }
                         if let dir = session.workdir {
                             LabeledContent("Directory") { Text(dir).font(.footnote.monospaced()) }
@@ -72,7 +72,7 @@ struct FactsPane: View {
                 LabeledContent("Worked", value: usage.durationMS.map(duration) ?? "not yet")
                 LabeledContent("Lines") {
                     if let added = usage.linesAdded {
-                        Text("+\(added)").foregroundStyle(.green) + Text("  −\(usage.linesRemoved ?? 0)").foregroundStyle(.red)
+                        Text("+\(added)").foregroundStyle(Color.ok) + Text("  −\(usage.linesRemoved ?? 0)").foregroundStyle(Color.bad)
                     } else {
                         Text("not yet")
                     }

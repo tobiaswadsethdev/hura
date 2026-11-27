@@ -1,7 +1,8 @@
 import HuraKit
 import SwiftUI
 
-/// One tool call: a header that says what it did, and a body to expand.
+/// One tool call as a line of T3 Code's work log: a glyph for its kind, what
+/// it did, and a chevron, with its answer indented under it when opened.
 struct ToolCard: View {
     let call: ToolCall
     let cwd: String
@@ -10,55 +11,112 @@ struct ToolCard: View {
     @State private var expanded: Bool?
     @State private var showAll = false
     @Environment(\.download) private var download
+    @Environment(\.backgroundCommands) private var backgroundCommands
 
     private var label: ToolLabel { .of(call, cwd: cwd) }
     private var isOpen: Bool { expanded ?? opensItself }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.snappy) { expanded = !isOpen }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(glyph: label.icon)
-                        .frame(width: 18)
-                        .foregroundStyle(.secondary)
-                    Text(label.verb).fontWeight(.semibold)
-                    Text(label.subject)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    status
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                }
-                .font(.subheadline)
-                .contentShape(Rectangle())
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                if let download {
-                    ForEach(files, id: \.self) { f in
-                        Button("Download \((f as NSString).lastPathComponent)", systemImage: "square.and.arrow.down") {
-                            download(f)
-                        }
+            HStack(spacing: 8) {
+                header
+                // Beside the line rather than in it: a button inside the
+                // line's own would open the call instead.
+                if let command, let backgroundCommands {
+                    Button { backgroundCommands.open(command) } label: {
+                        Text("Output")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.ink)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.surface2, in: Capsule())
+                            .contentShape(Capsule())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Output of \(command.title)")
                 }
             }
             if isOpen {
-                Divider().opacity(0.4)
+                // Under the line it answers, past its glyph.
                 detail
-                    .padding(12)
+                    .padding(.leading, 26)
+                    .padding(.top, 2)
+                    .padding(.bottom, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(borderColor, lineWidth: 1))
+    }
+
+    /// The call's line, which opens and closes it.
+    private var header: some View {
+        Button {
+            withAnimation(.snappy) { expanded = !isOpen }
+        } label: {
+            HStack(spacing: 8) {
+                Image(glyph: label.icon)
+                    .frame(width: 18)
+                    .foregroundStyle(failedHard ? Color.bad : Color.dim)
+                Text(label.verb)
+                    .foregroundStyle(failedHard ? Color.bad : Color.ink)
+                    // One word, never shortened: the subject gives way instead.
+                    .fixedSize()
+                Text(label.subject)
+                    .foregroundStyle(Color.dim)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+                    // Running, its label shines rather than a spinner turning
+                    // beside it, as T3 Code's does.
+                    .shine(call.result == nil && working)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.dimmer)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                Spacer(minLength: 4)
+                if inBackground { backgroundStatus } else { status }
+            }
+            .font(.subheadline)
+            .contentShape(Rectangle())
+            .padding(.vertical, 5)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if let download {
+                ForEach(files, id: \.self) { f in
+                    Button("Download \((f as NSString).lastPathComponent)", systemImage: "square.and.arrow.down") {
+                        download(f)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A Bash call left running in the background. Its result comes back at
+    /// once and says only that it started; the command goes on, and how it is
+    /// doing is the task's to say, as on the desktop (`chat/Items.tsx`).
+    private var inBackground: Bool {
+        call.name == "Bash" && call.input["run_in_background"]?.bool == true
+    }
+
+    /// The command the call started, where its output can be read.
+    private var command: BackgroundCommand? {
+        inBackground ? backgroundCommands?.started(by: call.id) : nil
+    }
+
+    private var backgroundStatus: some View {
+        HStack(spacing: 5) {
+            if let command {
+                WorkStatus(status: command.status)
+            } else if failedHard {
+                Image(glyph: .failing).foregroundStyle(Color.bad)
+            }
+            Text("background")
+                .font(.caption)
+                .foregroundStyle(Color.dimmer)
+                .fixedSize()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("In the background, \(command.map { $0.running ? "running" : $0.status } ?? (failedHard ? "failed" : "started"))")
     }
 
     /// The files the call names, by absolute path: what it wrote, and what its
@@ -76,24 +134,21 @@ struct ToolCard: View {
     /// them: still in the menu, but not a row of buttons under every read.
     private static let keeps: Set<String> = ["Read", "Edit", "MultiEdit", "Grep", "Glob"]
 
-    private var borderColor: Color {
-        call.failed && !call.stopped ? .red.opacity(0.5) : .primary.opacity(0.08)
-    }
+    /// Failed, and not because it was stopped.
+    private var failedHard: Bool { call.failed && !call.stopped }
 
     @ViewBuilder
     private var status: some View {
         if call.result == nil {
             if working {
-                HStack(spacing: 6) {
-                    if let at = call.at { Elapsed(since: at, after: 5) }
-                    WorkingDots()
+                if let at = call.at {
+                    Elapsed(since: at, after: 5).foregroundStyle(Color.dimmer)
                 }
-                .foregroundStyle(Color.working)
             }
         } else if call.stopped {
-            Text("stopped").font(.caption).foregroundStyle(.secondary)
+            Text("stopped").font(.caption).foregroundStyle(Color.dimmer)
         } else if call.failed {
-            Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            Text("failed").font(.caption).foregroundStyle(Color.bad)
         }
     }
 
@@ -159,7 +214,7 @@ struct ToolCard: View {
                                     .font(.footnote.monospaced())
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
-                                    .background(Color.primary.opacity(0.08), in: Capsule())
+                                    .background(Color.surface2, in: Capsule())
                             }
                             .buttonStyle(.plain)
                         }
@@ -167,7 +222,7 @@ struct ToolCard: View {
                 }
             }
             if call.inputTruncated {
-                Text("Input cut to 16 KiB per field.").font(.caption2).foregroundStyle(.secondary)
+                Text("Input cut to 16 KiB per field.").font(.caption2).foregroundStyle(Color.dim)
             }
         }
     }
@@ -179,17 +234,17 @@ struct ToolCard: View {
             let lines = text.components(separatedBy: "\n")
             if !text.isEmpty {
                 CodeBlock(text: showAll ? text : lastLines(text, 30))
-                    .foregroundStyle(call.failed && !call.stopped ? .red : .primary)
+                    .foregroundStyle(call.failed && !call.stopped ? Color.bad : Color.ink)
                 if lines.count > 30 && !showAll {
                     Button("Show \(lines.count - 30) earlier lines") { showAll = true }
                         .font(.caption)
                 }
             }
             if let n = r.images, r.pictures == nil {
-                Label("\(n) image\(n == 1 ? "" : "s")", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
+                Label("\(n) image\(n == 1 ? "" : "s")", systemImage: "photo").font(.caption).foregroundStyle(Color.dim)
             }
             if r.truncated == true {
-                Text("Output cut to 16 KiB.").font(.caption2).foregroundStyle(.secondary)
+                Text("Output cut to 16 KiB.").font(.caption2).foregroundStyle(Color.dim)
             }
         }
     }
@@ -197,7 +252,7 @@ struct ToolCard: View {
     @ViewBuilder
     private var errorOutput: some View {
         if call.failed, let text = call.result?.text {
-            Text(text).font(.caption).foregroundStyle(call.stopped ? .secondary : Color.red)
+            Text(text).font(.caption).foregroundStyle(call.stopped ? Color.dim : Color.bad)
         }
     }
 
@@ -231,18 +286,18 @@ struct ShellCard: View {
                 HStack(spacing: 8) {
                     Image(glyph: .agentTerminal)
                         .frame(width: 18)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.dim)
                     Text("You ran").fontWeight(.semibold)
                     Text(run.command)
                         .font(.system(.subheadline, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.dim)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 4)
                     status
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.dimmer)
                         .rotationEffect(.degrees(open ? 90 : 0))
                 }
                 .font(.subheadline)
@@ -252,15 +307,16 @@ struct ShellCard: View {
             }
             .buttonStyle(.plain)
             if open, let printed = run.output {
-                Divider().opacity(0.4)
+                Rectangle().fill(Color.line).frame(height: 1)
                 output(printed)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
-            .strokeBorder(run.failed ? Color.red.opacity(0.5) : Color.primary.opacity(0.08), lineWidth: 1))
+        // A card, unlike the agent's steps: you ran it to see this.
+        .card(fill: .surface)
+        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+            .strokeBorder(run.failed ? Color.bad.opacity(0.5) : .clear, lineWidth: 1))
     }
 
     /// The end of it, which is where a command says how it went, with the
@@ -271,7 +327,7 @@ struct ShellCard: View {
         let lines = text.components(separatedBy: "\n")
         VStack(alignment: .leading, spacing: 8) {
             if text.isEmpty {
-                Text("No output").font(.caption).foregroundStyle(.secondary)
+                Text("No output").font(.caption).foregroundStyle(Color.dim)
             } else {
                 CodeBlock(text: showAll || lines.count <= 30 ? text : lines.suffix(30).joined(separator: "\n"))
                 if lines.count > 30 && !showAll {
@@ -285,13 +341,13 @@ struct ShellCard: View {
     @ViewBuilder
     private var status: some View {
         if run.running {
-            WorkingDots().foregroundStyle(Color.working)
+            Spinner().foregroundStyle(Color.working)
         } else if run.stopped {
-            Text("stopped").font(.caption).foregroundStyle(.secondary)
+            Text("stopped").font(.caption).foregroundStyle(Color.dimmer)
         } else if run.failed {
             Text(run.code.map { "exit \($0)" } ?? "did not finish")
                 .font(.caption.monospaced())
-                .foregroundStyle(.red)
+                .foregroundStyle(Color.bad)
         }
     }
 }
@@ -318,7 +374,8 @@ struct DiffView: View {
                 Color.clear.onChange(of: g.size.width, initial: true) { _, w in width = w }
             }
         }
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.sunken, in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Color.line, lineWidth: 1))
         .textSelection(.enabled)
     }
 

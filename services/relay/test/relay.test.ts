@@ -857,6 +857,175 @@ describe("live activities", () => {
   });
 });
 
+describe("one activity for every session", () => {
+  const START = "5".repeat(64);
+  const UPDATE = "6".repeat(64);
+
+  function activity(extra: Record<string, unknown> = {}) {
+    return {
+      event_id: `h_testboot01-${++eventCounter}`,
+      kind: "session_activity",
+      session: "fix-tests",
+      phase: "working",
+      at: Math.floor(Date.now() / 1000) - 10,
+      title: "Fix the tests",
+      subtitle: "studio",
+      body: "Claude is working",
+      ...extra,
+    };
+  }
+
+  /** A device that asked for one activity, with a link, and its update token if `update`. */
+  async function setup(opts: { update?: boolean } = {}) {
+    const d = await device();
+    const l = await link(d.device_secret);
+    const r = await call("PUT", `/v1/devices/${d.device_id}/activity-token`, {
+      auth: d.device_secret,
+      body: { token: START, style: "agents" },
+    });
+    expect(r.status).toBe(204);
+    if (opts.update) {
+      const u = await call("PUT", `/v1/devices/${d.device_id}/agents-activity`, { auth: d.device_secret, body: { token: UPDATE } });
+      expect(u.status).toBe(204);
+    }
+    return { d, l };
+  }
+
+  const token = (deviceId: string) =>
+    env.DB.prepare("SELECT token FROM agent_activities WHERE device_id = ?").bind(deviceId).first<string | null>("token");
+
+  it("starts one activity for the device, with T3 Code's attributes", async () => {
+    const { l } = await setup();
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    expect(r.json).toEqual({ sent: true, activity: "start" });
+    expect(apnsCalls[0].url).toContain(START);
+    const aps = apnsCalls[0].body.aps;
+    expect(aps).toMatchObject({
+      event: "start",
+      "attributes-type": "AgentsActivityAttributes",
+      attributes: { kind: "agents" },
+      "content-state": { active: 1, waiting: 0, failed: 0 },
+    });
+    expect(aps["content-state"].rows).toEqual([
+      expect.objectContaining({ server_id: SERVER, session: "fix-tests", phase: "working", title: "Fix the tests" }),
+    ]);
+  });
+
+  it("puts every session's row in the one activity, the ones waiting on you first", async () => {
+    const { d, l } = await setup({ update: true });
+    const other = await link(d.device_secret, "h_qrstuvwxyzabcdef", "laptop");
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    await call("POST", "/v1/events", {
+      auth: other.push_token,
+      body: activity({ session: "docs", phase: "permission", ask_id: "toolu_01", encrypted: "c2VhbGVk", title: undefined, subtitle: undefined, body: undefined }),
+    });
+    const aps = apnsCalls.at(-1)!.body.aps;
+    expect(apnsCalls.at(-1)!.url).toContain(UPDATE);
+    expect(aps.event).toBe("update");
+    expect(aps["content-state"]).toMatchObject({ active: 2, waiting: 1 });
+    expect(aps["content-state"].rows.map((r: any) => [r.server_id, r.session, r.phase])).toEqual([
+      ["h_qrstuvwxyzabcdef", "docs", "permission"],
+      [SERVER, "fix-tests", "working"],
+    ]);
+    expect(aps["content-state"].rows[0]).toMatchObject({ ask_id: "toolu_01", enc: "c2VhbGVk" });
+  });
+
+  it("keeps an older event from undoing a newer one", async () => {
+    const { l } = await setup({ update: true });
+    const now = Math.floor(Date.now() / 1000);
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "input", at: now }) });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ at: now - 60 }) });
+    expect(apnsCalls.at(-1)!.body.aps["content-state"].rows[0].phase).toBe("input");
+  });
+
+  it("ends the activity when the last session ends, and keeps it while one is left", async () => {
+    const { d, l } = await setup({ update: true });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ session: "docs" }) });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "ended" }) });
+    expect(apnsCalls.at(-1)!.body.aps.event).toBe("update");
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity({ session: "docs", phase: "ended" }) });
+    expect(r.json).toEqual({ sent: true, activity: "end" });
+    expect(await token(d.device_id)).toBeNull();
+  });
+
+  it("keeps what comes while it starts, and sends it once its token does", async () => {
+    const { d, l } = await setup();
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    const held = await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "input" }) });
+    expect(held.json).toEqual({ sent: false, reason: "activity_starting" });
+    expect(apnsCalls).toHaveLength(1);
+    await call("PUT", `/v1/devices/${d.device_id}/agents-activity`, { auth: d.device_secret, body: { token: UPDATE } });
+    expect(apnsCalls).toHaveLength(2);
+    expect(apnsCalls[1].url).toContain(UPDATE);
+    expect(apnsCalls[1].body.aps["content-state"].rows[0].phase).toBe("input");
+  });
+
+  it("shows a finished turn a while, then takes its row away and ends the activity", async () => {
+    const { d, l } = await setup({ update: true });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "done" }) });
+    expect(apnsCalls.at(-1)!.body.aps["content-state"]).toMatchObject({ active: 0, rows: [{ phase: "done" }] });
+    apnsCalls = [];
+    await worker.scheduled({} as ScheduledController, env);
+    expect(apnsCalls).toHaveLength(0);
+    await env.DB.prepare("UPDATE agent_rows SET updated_at = ? WHERE device_id = ?")
+      .bind(Date.now() - 30 * 60_000 - 1, d.device_id)
+      .run();
+    await worker.scheduled({} as ScheduledController, env);
+    expect(apnsCalls).toHaveLength(1);
+    expect(apnsCalls[0].body.aps.event).toBe("end");
+    expect(await token(d.device_id)).toBeNull();
+  });
+
+  it("does not start an activity for a finished turn", async () => {
+    const { l } = await setup();
+    const r = await call("POST", "/v1/events", { auth: l.push_token, body: activity({ phase: "done" }) });
+    expect(r.json).toEqual({ sent: false, reason: "no_activity" });
+    expect(apnsCalls).toHaveLength(0);
+  });
+
+  it("forgets the device's activity only while the token is still its own", async () => {
+    const { d } = await setup({ update: true });
+    const other = "7".repeat(64);
+    await call("DELETE", `/v1/devices/${d.device_id}/agents-activity`, { auth: d.device_secret, body: { token: other } });
+    expect(await token(d.device_id)).toBe(UPDATE);
+    await call("DELETE", `/v1/devices/${d.device_id}/agents-activity`, { auth: d.device_secret, body: { token: UPDATE } });
+    expect(await token(d.device_id)).toBeNull();
+  });
+
+  it("leaves a device that gave no style with one activity per session", async () => {
+    const d = await device();
+    const l = await link(d.device_secret);
+    await call("PUT", `/v1/devices/${d.device_id}/activity-token`, { auth: d.device_secret, body: { token: START } });
+    await call("POST", "/v1/events", { auth: l.push_token, body: activity() });
+    expect(apnsCalls[0].body.aps["attributes-type"]).toBe("SessionActivityAttributes");
+  });
+
+  it("refuses a style it doesn't know", async () => {
+    const d = await device();
+    const r = await call("PUT", `/v1/devices/${d.device_id}/activity-token`, {
+      auth: d.device_secret,
+      body: { token: START, style: "grid" },
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("fits as many rows as APNs allows, and counts them all", async () => {
+    const { l } = await setup({ update: true });
+    for (let n = 0; n < 12; n++) {
+      await call("POST", "/v1/events", {
+        auth: l.push_token,
+        body: activity({ session: `s-${n}`, encrypted: "A".repeat(600), title: undefined, subtitle: undefined, body: undefined }),
+      });
+    }
+    const last = apnsCalls.at(-1)!.body;
+    expect(JSON.stringify(last).length).toBeLessThanOrEqual(3800);
+    expect(last.aps["content-state"].active).toBe(12);
+    expect(last.aps["content-state"].rows.length).toBeLessThan(12);
+  });
+});
+
 describe("device test route", () => {
   it("reports what APNs said, which doubles as the connectivity check", async () => {
     const d = await device();

@@ -84,13 +84,13 @@ struct EventsPane: View {
         .tint(.primary)
         .swipeActions {
             if g.denied > 0, !s.whole {
-                Button("Allow") { asking = Asking(kind: .allow, endpoint: g.endpoint, requests: g.requests) }.tint(.green)
+                Button("Allow") { asking = Asking(kind: .allow, endpoint: g.endpoint, requests: g.requests) }.tint(Color.ok)
             }
             if g.denied > 0, !s.whole, g.requests.isEmpty, s.watch == nil {
-                Button("Paths") { watch(g.endpoint) }.tint(.blue)
+                Button("Paths") { watch(g.endpoint) }.tint(Color.accentColor)
             }
             if s.open, !s.denied {
-                Button("Block") { asking = Asking(kind: .block, endpoint: g.endpoint, requests: []) }.tint(.red)
+                Button("Block") { asking = Asking(kind: .block, endpoint: g.endpoint, requests: []) }.tint(Color.bad)
             }
         }
     }
@@ -99,14 +99,14 @@ struct EventsPane: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Image(glyph: denied ? .block : .allow)
-                    .foregroundStyle(denied ? .red : .green)
+                    .foregroundStyle(denied ? Color.bad : Color.ok)
                 Text(g.endpoint).font(.callout.monospaced()).lineLimit(1).truncationMode(.middle)
                 Spacer()
                 Text(ago(g.lastSeen)).font(.caption).foregroundStyle(.secondary)
             }
             HStack(spacing: 10) {
-                if g.denied > 0 { Text("\(g.denied) denied").foregroundStyle(.red) }
-                if g.allowed > 0 { Text("\(g.allowed) allowed").foregroundStyle(.green) }
+                if g.denied > 0 { Text("\(g.denied) denied").foregroundStyle(Color.bad) }
+                if g.allowed > 0 { Text("\(g.allowed) allowed").foregroundStyle(Color.ok) }
                 if let listed = s.listed { Text(listed == "allow" ? "allowed for new sessions" : "blocked for new sessions").foregroundStyle(.secondary) }
                 if s.watch != nil, g.requests.isEmpty, denied {
                     Text("its next try shows the path").foregroundStyle(.secondary)
@@ -126,7 +126,7 @@ struct EventsPane: View {
             HStack {
                 Text(e.verdict == "Denied" ? "DENY" : e.verdict == "Allowed" ? "allow" : "-")
                     .font(.caption.monospaced().weight(.bold))
-                    .foregroundStyle(e.verdict == "Denied" ? .red : e.verdict == "Allowed" ? .green : .secondary)
+                    .foregroundStyle(e.verdict == "Denied" ? Color.bad : e.verdict == "Allowed" ? Color.ok : .secondary)
                 Text(e.class).font(.caption.monospaced()).foregroundStyle(.secondary)
                 if e.count > 1 { Text("×\(e.count)").font(.caption) }
                 Spacer()
@@ -382,7 +382,7 @@ struct PolicyChangeSheet: View {
                                             .autocorrectionDisabled()
                                     }
                                     if let p = problems[i], !p.isEmpty {
-                                        Text(p).font(.caption).foregroundStyle(.red)
+                                        Text(p).font(.caption).foregroundStyle(Color.bad)
                                     } else if problems[i] == nil, routes[i].path.trimmingCharacters(in: .whitespaces) != "/**" {
                                         Button("Everything under it: \(widen(routes[i].path))") {
                                             routes[i].path = widen(routes[i].path)
@@ -416,7 +416,7 @@ struct PolicyChangeSheet: View {
                     Toggle("Every new session too", isOn: $everywhere)
                 }
                 if let error {
-                    Section { Text(error).foregroundStyle(.red).font(.callout) }
+                    Section { Text(error).foregroundStyle(Color.bad).font(.callout) }
                 }
             }
             .navigationTitle(asking.kind == .allow ? "Allow" : "Block")
@@ -425,7 +425,7 @@ struct PolicyChangeSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     if busy {
-                        ProgressView()
+                        Spinner().foregroundStyle(Color.dim)
                     } else {
                         Button(asking.kind == .allow ? "Allow" : "Block", role: asking.kind == .block ? .destructive : nil, action: go)
                             .disabled(!ready)

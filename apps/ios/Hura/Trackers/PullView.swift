@@ -39,18 +39,18 @@ struct PullView: View {
                     Text(d.title).font(.headline).textSelection(.enabled)
                     HStack(spacing: 8) {
                         Text(d.state).font(.caption.weight(.semibold))
-                            .foregroundStyle(d.state == "open" ? .green : d.state == "merged" ? .purple : .secondary)
+                            .foregroundStyle(d.state == "open" ? Color.ok : d.state == "merged" ? .purple : .secondary)
                         if d.draft { Text("draft").font(.caption) }
-                        if d.conflicts { Label("conflicts", glyph: .warning).font(.caption).foregroundStyle(.orange) }
+                        if d.conflicts { Label("conflicts", glyph: .warning).font(.caption).foregroundStyle(Color.warn) }
                         Spacer()
                         if let a = d.additions, let r = d.deletions {
-                            Text("+\(a)").foregroundStyle(.green).font(.caption.monospacedDigit())
-                            Text("−\(r)").foregroundStyle(.red).font(.caption.monospacedDigit())
+                            Text("+\(a)").foregroundStyle(Color.ok).font(.caption.monospacedDigit())
+                            Text("−\(r)").foregroundStyle(Color.bad).font(.caption.monospacedDigit())
                         }
                     }
                     LabeledContent("Branch") { Text("\(d.branch) → \(d.base)").font(.caption) }
                     if let a = d.author { LabeledContent("Author", value: a.me ? "\(a.name) (you)" : a.name) }
-                    ForEach(d.warnings, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
+                    ForEach(d.warnings, id: \.self) { Text($0).font(.caption).foregroundStyle(Color.warn) }
                 }
                 Picker("Show", selection: $tab) {
                     Text("Conversation").tag(0)
@@ -230,7 +230,7 @@ struct PullView: View {
         Section {
             if let auto = m.auto {
                 VStack(alignment: .leading, spacing: 3) {
-                    Label(words.isSet, glyph: .autoMerge).foregroundStyle(.green)
+                    Label(words.isSet, glyph: .autoMerge).foregroundStyle(Color.ok)
                     let parts = [auto.by.map { "by \($0.me ? "you" : $0.name)" },
                                  auto.method.map(words.method),
                                  auto.deleteBranch ? "deletes the branch" : nil].compactMap { $0 }
@@ -248,7 +248,7 @@ struct PullView: View {
             } else {
                 if d.conflicts {
                     Label("It conflicts with \(d.base), so it can't merge as it stands.", glyph: .warning)
-                        .font(.callout).foregroundStyle(.orange)
+                        .font(.callout).foregroundStyle(Color.warn)
                 }
                 HStack {
                     // Text, not a Label: in a list row the label's icon is
@@ -270,7 +270,7 @@ struct PullView: View {
             HStack {
                 Text(words.section)
                 Spacer()
-                if busy == "merge" { ProgressView() }
+                if busy == "merge" { Spinner().foregroundStyle(Color.dim) }
             }
         }
     }
@@ -281,11 +281,11 @@ struct PullView: View {
                 if let path = t.path {
                     Text("\(path)\(t.line.map { ":\($0)" } ?? "")").font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
                 }
-                if t.resolved { Text("resolved").font(.caption2).foregroundStyle(.green) }
+                if t.resolved { Text("resolved").font(.caption2).foregroundStyle(Color.ok) }
                 if t.outdated { Text("outdated").font(.caption2).foregroundStyle(.secondary) }
                 if let v = t.verdict { Text(verdictSaid(v)).font(.caption2.weight(.semibold)) }
                 Spacer()
-                if busy == t.id { ProgressView() }
+                if busy == t.id { Spinner().foregroundStyle(Color.dim) }
             }
             ForEach(Array(t.comments.enumerated()), id: \.offset) { _, c in
                 VStack(alignment: .leading, spacing: 2) {
@@ -295,7 +295,7 @@ struct PullView: View {
             }
         }
         .swipeActions {
-            if t.canReply { Button("Reply") { replying = t }.tint(.blue) }
+            if t.canReply { Button("Reply") { replying = t }.tint(Color.accentColor) }
         }
         .contextMenu {
             if t.canReply { Button("Reply", systemImage: "arrowshape.turn.up.left") { replying = t } }
@@ -313,8 +313,8 @@ struct PullView: View {
 
     private func checkColor(_ s: String) -> Color {
         switch s {
-        case "passing": .green
-        case "failing": .red
+        case "passing": Color.ok
+        case "failing": Color.bad
         case "pending": Color.working
         default: .secondary
         }
@@ -520,7 +520,7 @@ private struct PullFilesSection: View {
                 }
                 if files.truncated { Text("Only the first files are listed.").font(.caption).foregroundStyle(.secondary) }
             } else if let error {
-                Text(error).foregroundStyle(.red).font(.callout)
+                Text(error).foregroundStyle(Color.bad).font(.callout)
             } else {
                 WaitingRow()
             }
@@ -632,15 +632,15 @@ struct PullBar: View {
         NavigationLink(value: pull) {
             HStack(spacing: 8) {
                 Image(glyph: .pullRequest)
-                    .foregroundStyle(pull.draft ? Color.secondary : Color.green)
+                    .foregroundStyle(pull.draft ? Color.secondary : Color.ok)
                 Text(pull.key).fontWeight(.semibold)
                 Text(pull.title).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
-                if pull.conflicts { Image(glyph: .warning).foregroundStyle(.orange).accessibilityLabel("Conflicts") }
+                if pull.conflicts { Image(glyph: .warning).foregroundStyle(Color.warn).accessibilityLabel("Conflicts") }
                 ChecksMark(checks: pull.checks)
                 if let r = pull.review {
                     Text(reviewWord(r))
-                        .foregroundStyle(r == "approved" ? .green : r == "changes-requested" ? .red : .secondary)
+                        .foregroundStyle(r == "approved" ? Color.ok : r == "changes-requested" ? Color.bad : .secondary)
                         .fixedSize()
                 } else if pull.draft {
                     Text("draft").foregroundStyle(.secondary)

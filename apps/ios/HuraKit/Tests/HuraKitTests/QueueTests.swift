@@ -49,3 +49,40 @@ struct QueueTests {
         #expect(v["at"] == .number(1_800_000_000))
     }
 }
+
+struct RepeatTests {
+    @Test func readsAndWritesTheServersShape() throws {
+        let raw = """
+        {"reply":"queue","limit":2,"utc_offset":3600,"sessions":[
+          {"id":1,"new":{"project":"hura","name":"nightly","title":null,"repo":"r","task":"t"},
+           "at":1800000000,"added":5,"started":false,"repeat":{"type":"fixed_time","hour":9,"minute":30,"weekdays":[1,2,3,4,5]},"runs":3}],
+         "messages":[{"id":2,"session":"s","text":"status?","at":1800000000,"added":6,"repeat":{"type":"interval","minutes":60},"runs":0}]}
+        """
+        let q = try JSONDecoder().decode(QueueView.self, from: Data(raw.utf8))
+        #expect(q.canRepeat)
+        #expect(q.sessions[0].repeat == .fixedTime(hour: 9, minute: 30, weekdays: [1, 2, 3, 4, 5]))
+        #expect(q.sessions[0].runs == 3)
+        #expect(q.messages[0].repeat == .interval(minutes: 60))
+        let back = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(Repeat.fixedTime(hour: 9, minute: 0, weekdays: [])))
+        #expect(back["type"] == .string("fixed_time"))
+        #expect(back["hour"] == .number(9))
+    }
+
+    @Test func anOlderServerCannotRepeat() throws {
+        let q = try JSONDecoder().decode(QueueView.self, from: Data(QueueTests.raw.utf8))
+        #expect(!q.canRepeat)
+        #expect(q.sessions[0].repeat == nil)
+    }
+
+    /// A time picked on a phone an hour behind the server is an hour later on
+    /// the server's clock, and said back as it was picked; across midnight the
+    /// day moves with it.
+    @Test func movesATimeOntoTheServersClock() {
+        let rule = Cadence.weekly(1).rule(hour: 23, minute: 30, serverOffset: 3600, localOffset: 0)
+        #expect(rule == .fixedTime(hour: 0, minute: 30, weekdays: [2]))
+        #expect(rule.describe(serverOffset: 3600, localOffset: 0) == "Every Monday at 23:30")
+        #expect(Cadence.weekdays.rule(hour: 9, minute: 0, serverOffset: 0, localOffset: 0)
+            .describe(serverOffset: 0, localOffset: 0) == "Every weekday at 09:00")
+        #expect(Cadence.hourly.rule(hour: 9, minute: 0, serverOffset: 0) == .interval(minutes: 60))
+    }
+}

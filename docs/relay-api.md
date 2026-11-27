@@ -277,9 +277,14 @@ the phone when nothing is showing yet (iOS 17.2 and later). The app sends it
 whenever ActivityKit hands out a new one.
 
 ```json
-→ {"token": "<hex>"}
+→ {"token": "<hex>", "style": "agents"}
 ← 204
 ```
+
+`style` is optional. With `"agents"` the device shows one activity for all of
+its sessions, T3 Code's (see [One activity for every
+session](#one-activity-for-every-session)); without it, one per session, which
+is what an app from before it gets.
 
 `DELETE` on the same path forgets it, after which nothing new is started. `204`.
 
@@ -405,6 +410,63 @@ The phone decrypts `enc` in the widget that draws the activity, with the key
 stored for `server_id` and the additional data
 `hura-push-v1\n<server_id>\nsession_activity\n<session>\n<ask_id>`, taking the
 server and session from `attributes`.
+
+### One activity for every session
+
+A device whose push-to-start token came with `"style": "agents"` shows one
+Live Activity for every session on every server it is linked to, as T3 Code's
+does, rather than one each. Its events are the same `session_activity` ones;
+the relay keeps each session's latest as a row of the device's, and sends the
+activity all of them each time one changes:
+
+- A session's row is set by each event, unless the row already has a later
+  `at` (a retry overtaken by a newer event), and taken out by `ended`.
+- A row whose turn finished (`done` or `failed`) stays half an hour, and then
+  goes; the activity ends when no rows are left.
+- An activity is started, from the push-to-start token, by an event in
+  `working`, `permission` or `input` when none shows; one older than seven
+  hours is ended and started again, as a session's is.
+
+#### `PUT /v1/devices/{device_id}/agents-activity`
+
+The update token of the device's activity, once it exists, and whenever it
+changes. An activity a push started has been waiting for it: what it should
+show now goes to it at once.
+
+```json
+→ {"token": "<hex>"}
+← 204
+```
+
+`DELETE` on the same path forgets it, when the activity has ended or been
+dismissed. With `{"token": "<hex>"}`, only while that is still the device's.
+`204`.
+
+#### The payload
+
+`attributes-type` is `AgentsActivityAttributes`, with `{"kind": "agents"}` as
+its `attributes`. The `content-state`:
+
+```json
+{
+  "active": 2,
+  "waiting": 1,
+  "failed": 0,
+  "rows": [
+    {"server_id": "h_…", "session": "docs", "phase": "permission", "at": 1763300000,
+     "ask_id": "toolu_01abc", "enc": "…"},
+    {"server_id": "h_…", "session": "fix-tests", "phase": "working", "at": 1763299900,
+     "since": 1763299000, "title": "Fix the tests", "subtitle": "studio", "body": "Claude is working"}
+  ]
+}
+```
+
+`active` counts the sessions working or waiting, `waiting` those waiting on a
+permission or input, and `failed` those that failed, all of them. `rows` are in
+T3 Code's order (waiting first, then failed, working and done, the newest first
+within each), as many as fit in 3,800 bytes. Each row is a session's event as a
+session's own activity carries it, with `server_id` to say whose key opens its
+`enc`. The push's `timestamp` is the relay's clock.
 
 ## `GET /v1/health`
 

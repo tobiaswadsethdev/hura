@@ -38,7 +38,7 @@ private struct Downloads: ViewModifier {
             .overlay(alignment: .bottom) {
                 if let fetching {
                     HStack(spacing: 8) {
-                        ProgressView()
+                        Spinner().foregroundStyle(Color.dim)
                         Text("Downloading \(fetching)…").font(.subheadline).lineLimit(1)
                     }
                     .padding(.horizontal, 14)

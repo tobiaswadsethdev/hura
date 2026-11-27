@@ -50,6 +50,16 @@ struct WorktreeView: View {
     @State private var error: String?
     /// A search result being opened in one of the conversations.
     @State private var jump: (conv: String, to: ChatJump)?
+    /// What to say in a conversation as soon as it is open, by conversation:
+    /// an edited message's new words, a side chat's question.
+    @State private var firstWords: [String: String] = [:]
+    /// The side chat (`/btw`) over the conversation, while it is open: a
+    /// conversation forked from it, which closing the sheet ends.
+    @State private var side: String?
+    @State private var showingSide = false
+    /// This project's scripts, kept on the phone.
+    @State private var scripts: [ProjectScript] = []
+    @State private var editingScripts = false
 
     private var session: Session? { server.session(named: name) }
     /// The title it is shown by, or its name before the list has it.
@@ -74,14 +84,19 @@ struct WorktreeView: View {
         // prepared has its notice to show, and attaching to a closed
         // conversation is only refused. A terminal agent's waits, because
         // attaching to a closed one starts another.
+        // The side chat is in its sheet, not a tab.
         let agent: [WorkTab] = session.isChat
-            ? (conversations ?? ["agent"]).map(WorkTab.chat)
+            ? (conversations ?? ["agent"]).filter { $0 != side }.map(WorkTab.chat)
             : shells?.agent == true ? [.terminal(nil)] : []
         return agent + (shells?.shells ?? []).map { WorkTab.terminal($0) }
     }
 
     /// Where a worktree opens, and goes back to when the tab in front closes.
     private var home: WorkTab? { tabs.first }
+
+    /// Which project's scripts these are: a session from before projects has
+    /// only its repository to go by.
+    private var project: String? { session.map { $0.project ?? $0.repo } }
 
     var body: some View {
         Group {
@@ -91,20 +106,33 @@ struct WorktreeView: View {
                 // is black on black; otherwise both follow the appearance.
                 let dark = tab.isTerminal && terminalsDark
                 content(tab).id(tab)
-                    .toolbarBackground(dark ? Color.black : Color(.systemBackground), for: .navigationBar)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if tabs.count > 1 { tabStrip(dark: dark) }
+                    }
+                    .toolbarBackground(dark ? Color.black : Color.canvas, for: .navigationBar)
                     .toolbarBackground(.visible, for: .navigationBar)
                     .toolbarColorScheme(dark ? .dark : nil, for: .navigationBar)
             } else if hasWorkspace, !listed, tabs.isEmpty {
-                ProgressView()
+                Spinner().foregroundStyle(Color.dim)
             } else if hasWorkspace, listed, tabs.isEmpty {
                 nothingOpen
             } else {
                 details
             }
         }
-        .navigationTitle(tab.map { $0.isAgent ? label : "\(label) · \($0.label)" } ?? label)
+        .navigationTitle(label)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
+        .sheet(isPresented: $showingSide, onDismiss: closeSide) { sideSheet }
+        .sheet(isPresented: $editingScripts) {
+            ScriptsEditor(project: project ?? "", scripts: scripts) { edited in
+                scripts = edited
+                if let project { ProjectScripts().write(edited, server: server.id, project: project) }
+            }
+        }
+        .task(id: project) {
+            if let project { scripts = ProjectScripts().read(server: server.id, project: project) }
+        }
         // A session has the whole screen; back is the way to the tabs.
         .toolbar(.hidden, for: .tabBar)
         .navigationDestination(isPresented: $showingDock) {
@@ -173,26 +201,118 @@ struct WorktreeView: View {
         // Made in `switchTo`, never here: state set while drawing is dropped.
         switch tab {
         case let .chat(conv):
-            if let c = chats[conv] {
-                ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? ""), pull: pull,
-                         usage: { [server, name] in try? await server.api.poll(name).usage },
-                         jump: jump?.conv == conv ? jump?.to : nil, onJumped: { jump = nil },
-                         waiting: server.queue.messages(for: name),
-                         onSchedule: { [server, name] text, at in try await server.queueMessage(name, text: text, at: at) },
-                         onUnqueue: { [server] m in Task { try? await server.unqueue(m.id) } })
-                    .environment(\.readPicture) { [server, name] path in
-                        try? await server.api.file(name, path: path).image
-                    }
-                    .environment(\.heldPicture) { [c] held in await c.picture(held) }
-                    .downloads(server: server, name: name)
-            }
+            if let c = chats[conv] { chatView(c, conv: conv, nested: false) }
         case let .terminal(tmux):
             if let t = terminals[tmux ?? ""] { TerminalScreen(channel: t) }
         }
     }
 
+    /// A conversation, in a tab or as the side chat in its sheet (`nested`),
+    /// which has no side chat or edits of its own.
+    private func chatView(_ c: Chat, conv: String, nested: Bool) -> some View {
+        ChatView(chat: c, preparing: ["creating", "seeding"].contains(session?.state ?? ""), pull: nested ? nil : pull,
+                 usage: { [server, name] in try? await server.api.poll(name).usage },
+                 jump: jump?.conv == conv ? jump?.to : nil, onJumped: { jump = nil },
+                 // The server says what is queued to the agent's own
+                 // conversation, so only that one shows it or schedules more.
+                 waiting: nested || conv != "agent" ? [] : server.queue.messages(for: name),
+                 onSchedule: nested || conv != "agent" ? nil : { [server, name] text, at, rule in
+                     try await server.queueMessage(name, text: text, at: at, repeat: rule)
+                 },
+                 utcOffset: server.queue.utcOffset,
+                 onUnqueue: { [server] m in Task { try? await server.unqueue(m.id) } },
+                 draftKey: Drafts.key(server: server.id, session: name, conv: conv),
+                 findFiles: { [server, name] query in try await server.api.findFiles(name, query: query) },
+                 tailFile: { [server, name] path in try await server.api.tailFile(name, path: path) },
+                 onBranch: nested ? nil : { at, text in branch(conv, at: at, text) },
+                 onSideChat: nested ? nil : { question in openSide(conv, question) },
+                 sayFirst: firstWords[conv], onSaidFirst: { firstWords[conv] = nil })
+            .environment(\.readPicture) { [server, name] path in
+                try? await server.api.file(name, path: path).image
+            }
+            .environment(\.heldPicture) { [c] held in await c.picture(held) }
+            .downloads(server: server, name: name)
+    }
+
+    /// The conversations and shells as T3 Code's tabs under the header, while
+    /// there is more than one: the menu still lists them, but a tap here is
+    /// quicker than two there.
+    private func tabStrip(dark: Bool) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(tabs, id: \.self) { t in
+                    let on = t == tab
+                    Button { switchTo(t) } label: {
+                        Label(t.label, glyph: icon(t))
+                            .labelStyle(.titleAndIcon)
+                            .font(.caption.weight(on ? .semibold : .regular))
+                            .lineLimit(1)
+                            .foregroundStyle(on ? Color.ink : Color.dim)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(on ? Color.surface2 : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .background(dark ? Color.black : Color.canvas)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.line).frame(height: 1) }
+        .environment(\.colorScheme, dark ? .dark : colorScheme)
+    }
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The side chat: a conversation forked from this one, in a sheet over
+    /// it, so the turn in progress goes on. Closing it ends it.
+    @ViewBuilder
+    private var sideSheet: some View {
+        NavigationStack {
+            Group {
+                if let side, let c = chats[side] {
+                    chatView(c, conv: side, nested: true)
+                } else {
+                    Spinner().foregroundStyle(Color.dim).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.canvas)
+                }
+            }
+            .navigationTitle("Side Chat")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.canvas, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showingSide = false }
+                }
+            }
+        }
+        .presentationDetents([.large, .medium])
+        .presentationDragIndicator(.visible)
+    }
+
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        // T3 Code's breadcrumb, stacked for a phone: the title, and under it
+        // the project and the branch.
+        ToolbarItem(placement: .principal) {
+            VStack(spacing: 0) {
+                Text(label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.ink)
+                if let session {
+                    Text([session.project, session.workBranch.isEmpty ? nil : session.workBranch]
+                        .compactMap { $0 }.joined(separator: " / "))
+                        .font(.caption2)
+                        .foregroundStyle(Color.dim)
+                }
+            }
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .accessibilityElement(children: .combine)
+        }
         if session?.isLive == true {
             ToolbarItem(placement: .primaryAction) {
                 Button { showingDock = true } label: {
@@ -203,28 +323,39 @@ struct WorktreeView: View {
         if hasWorkspace, let session {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
-                    if let current = tab ?? home {
+                    if let current = tab ?? home, tabs.count > 1 {
                         Picker("Open", selection: Binding(get: { current }, set: { switchTo($0) })) {
                             ForEach(tabs, id: \.self) { t in
                                 Label(t.label, glyph: icon(t)).tag(t)
                             }
                         }
-                        Divider()
                     }
-                    if session.isChat {
-                        Button("New Conversation", glyph: .newConversation) { newConversation() }
-                    } else if shells?.agent == false {
-                        Button("New Agent", glyph: .agent) { newAgent() }
+                    Section {
+                        if session.isChat {
+                            Button("New Conversation", glyph: .newConversation) { newConversation() }
+                        } else if shells?.agent == false {
+                            Button("New Agent", glyph: .agent) { newAgent() }
+                        }
+                        Button("New Shell", glyph: .shell) { newShell() }
                     }
-                    Button("New Shell", glyph: .shell) { newShell() }
-                    if let tab {
-                        Button(tab == .terminal(nil) ? "Stop Agent" : "Close \(tab.label)",
-                               systemImage: "xmark", role: .destructive) { close(tab) }
+                    // The project's commands, each in a shell of its own.
+                    Section("Scripts") {
+                        ForEach(scripts) { s in
+                            Button(s.name.isEmpty ? s.command : s.name, glyph: .start) { run(s) }
+                        }
+                        Button(scripts.isEmpty ? "Add a Script…" : "Edit Scripts…", glyph: .edit) {
+                            editingScripts = true
+                        }
                     }
-                    Divider()
-                    Button("Details", glyph: .info) { showingDetails = true }
+                    Section {
+                        if let tab {
+                            Button(tab == .terminal(nil) ? "Stop Agent" : "Close \(tab.label)",
+                                   systemImage: "xmark", role: .destructive) { close(tab) }
+                        }
+                        Button("Details", glyph: .info) { showingDetails = true }
+                    }
                 } label: {
-                    Label("Tabs", systemImage: tabs.count > 1 ? "square.on.square" : "ellipsis.circle")
+                    Label("Worktree", systemImage: "ellipsis.circle")
                 }
             }
         }
@@ -382,6 +513,61 @@ struct WorktreeView: View {
             let after = try await server.api.newShell(name)
             shells = after
             if let made = after.shells.first(where: { !before.contains($0) }) { switchTo(.terminal(made)) }
+        }
+    }
+
+    /// A project's script, run in a new shell named for it, in front: the
+    /// server types the command in once the shell is up. An older server
+    /// opens the shell and leaves it at its prompt.
+    private func run(_ script: ProjectScript) {
+        act {
+            let before = Set(shells?.shells ?? [])
+            let after = try await server.api.newShell(name, run: script.command)
+            shells = after
+            if let made = after.shells.first(where: { !before.contains($0) }) { switchTo(.terminal(made)) }
+        }
+    }
+
+    /// "Edit from Here": a new conversation forked from just before the
+    /// message (or a plain one, before anything was said), in front, with the
+    /// new words said in it. The conversation edited stays as it was.
+    private func branch(_ conv: String, at: String?, _ text: String) {
+        act {
+            let c = try await server.api.newChat(name, fork: at == nil ? nil : conv, at: at)
+            conversations = c.chats
+            guard let opened = c.opened else { return }
+            firstWords[opened] = text
+            switchTo(.chat(opened))
+        }
+    }
+
+    /// `/btw`: the question asked in a conversation forked from this one, in
+    /// a sheet over it.
+    private func openSide(_ conv: String, _ question: String) {
+        act {
+            let c = try await server.api.newChat(name, fork: conv)
+            guard let opened = c.opened else { return }
+            firstWords[opened] = question
+            side = opened
+            conversations = c.chats
+            chat(opened).start()
+            showingSide = true
+        }
+    }
+
+    /// The side chat's sheet has gone: its conversation is ended and
+    /// forgotten, as on the desktop.
+    private func closeSide() {
+        guard let conv = side else { return }
+        // Out of the list before it is out of `side`, or it is a tab for the
+        // moment until the server answers.
+        conversations?.removeAll { $0 == conv }
+        side = nil
+        firstWords[conv] = nil
+        chats.removeValue(forKey: conv)?.stop()
+        server.forgetChat(name, conversation: conv)
+        Task { [server, name] in
+            if let c = try? await server.api.closeChat(name, conversation: conv) { conversations = c.chats }
         }
     }
 
