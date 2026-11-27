@@ -60,7 +60,8 @@ struct ServerDot: View {
 }
 
 /// A hura server: its projects as T3 Code's folders with their worktrees as
-/// cards, then sessions that belong to none. Above them the worktrees pinned
+/// cards, a project's groups of them first, then sessions that belong to
+/// none. Above them the worktrees pinned
 /// to the top, and below them the shelves of what is put off and what is
 /// done, as the desktop's sidebar has it (`Tree.tsx`).
 struct ServerView: View {
@@ -85,6 +86,12 @@ struct ServerView: View {
     @State private var editMode: EditMode = .inactive
     /// Pinned, snoozed and settled worktrees: this phone's, see `Triage`.
     @State private var triage: TriageBook
+    /// Groups of related worktrees within each project: this phone's too, see
+    /// `GroupBook`.
+    @State private var groups: GroupBook
+    /// A group whose name is being asked for, and the name typed so far.
+    @State private var naming: GroupNaming?
+    @State private var groupName = ""
     /// The projects folded shut, by name. Kept as the folded ones rather than
     /// the open ones so a project that appears -- made here, or on the
     /// desktop -- comes in open: the reason it appeared is usually that
@@ -99,6 +106,7 @@ struct ServerView: View {
     init(server: Server) {
         self.server = server
         _triage = State(initialValue: TriageBook.load(server: server.id))
+        _groups = State(initialValue: GroupBook.load(server: server.id))
         _folded = State(initialValue: Set(UserDefaults.standard.stringArray(forKey: Self.foldedKey(server.id)) ?? []))
     }
 
@@ -189,6 +197,7 @@ struct ServerView: View {
             if !Task.isCancelled { now = Date() }
         }
         .onChange(of: triage) { _, book in book.save(server: server.id) }
+        .onChange(of: groups) { _, book in book.save(server: server.id) }
         .onChange(of: folded) { _, names in
             UserDefaults.standard.set(names.sorted(), forKey: Self.foldedKey(server.id))
         }
@@ -210,6 +219,7 @@ struct ServerView: View {
         }
         .navigationDestination(item: $openPull) { LinkedPullView(pull: $0) }
         .modifier(projectScreens)
+        .modifier(GroupNamingAlert(naming: $naming, name: $groupName, done: named))
         .sheet(isPresented: $addingProject) {
             NewProjectView(server: server)
         }
@@ -344,6 +354,7 @@ struct ServerView: View {
 
     private func folder(_ project: Project) -> some View {
         let worktrees = shown(server.worktrees(in: project))
+        let arranged = groups.arrange(worktrees, in: project.name, name: \.name)
         let waiting = shown(server.waiting(in: project))
         let open = searching || !folded.contains(project.name)
         return Section {
@@ -351,13 +362,44 @@ struct ServerView: View {
                           canCreate: server.state == .online,
                           toggle: { fold(project.name) },
                           create: { creatingIn = project },
+                          newGroup: { name(.new(project: project.name, with: nil)) },
                           defaults: { defaulting = project },
                           forget: { forgetting = project })
                 .canvasRow(.folder)
             if open {
-                ForEach(worktrees) { card($0) }
-                    .onMove { reorder(worktrees, from: $0, to: $1) }
+                // The project's groups first, as a folder's folders are, then
+                // the worktrees in none.
+                ForEach(arranged.groups) { group($0, in: project.name, among: worktrees) }
+                ForEach(arranged.rest) { card($0) }
+                    .onMove { reorder(worktrees, moving: arranged.rest, from: $0, to: $1) }
                 ForEach(waiting) { waitingRow($0) }
+            }
+        }
+    }
+
+    /// A group within a project's folder: its header, and its worktrees under
+    /// it on a line, as T3 Code draws a folder's folders. While searching,
+    /// only one holding a match is drawn, and it is open, as the folders are.
+    @ViewBuilder
+    private func group(_ g: Arrangement<Session>.Grouped, in project: String, among worktrees: [Session]) -> some View {
+        if !searching || !g.rows.isEmpty {
+            let open = searching || !g.group.folded
+            GroupHeader(group: g.group, open: open, count: g.rows.count,
+                        needsYou: g.rows.filter { liveState($0, server.reports[$0.name]) == "waiting" }.count,
+                        toggle: { regroup { $0.fold(g.id, in: project) } },
+                        rename: { name(.rename(project: project, g.group)) },
+                        remove: { regroup { $0.remove(g.id, in: project) } })
+                .canvasRow(.group)
+            if open {
+                if g.rows.isEmpty {
+                    Text("Add worktrees from their menus.")
+                        .font(.caption)
+                        .foregroundStyle(.dimmer)
+                        .padding(.vertical, 6)
+                        .canvasRow(.inGroup)
+                }
+                ForEach(g.rows) { card($0, fit: .inGroup) }
+                    .onMove { reorder(worktrees, moving: g.rows, from: $0, to: $1) }
             }
         }
     }
@@ -372,7 +414,7 @@ struct ServerView: View {
             Section {
                 ShelfHead(label: server.projects.isEmpty ? "Sessions" : "Not in a project").canvasRow(.head)
                 ForEach(unfiled) { card($0) }
-                    .onMove { reorder(unfiled, from: $0, to: $1) }
+                    .onMove { reorder(unfiled, moving: unfiled, from: $0, to: $1) }
                 ForEach(waiting) { waitingRow($0) }
             }
         }
@@ -427,18 +469,40 @@ struct ServerView: View {
         }
     }
 
-    /// One group's worktrees after a drag, sent as the order to keep.
-    private func reorder(_ rows: [Session], from: IndexSet, to: Int) {
-        var names = rows.map(\.name)
-        names.move(fromOffsets: from, toOffset: to)
+    /// A folder's worktrees after a drag among `part` of them -- one group's,
+    /// or the ones in none -- sent as the order to keep for the whole folder.
+    private func reorder(_ all: [Session], moving part: [Session], from: IndexSet, to: Int) {
+        let names = GroupBook.reordered(all.map(\.name), moving: part.map(\.name), from: from, to: to)
         act { try await server.reorderSessions(names) }
+    }
+
+    private func regroup(_ change: (inout GroupBook) -> Void) {
+        withAnimation { change(&groups) }
+    }
+
+    /// Asks for a group's name: a new one's, or one being renamed.
+    private func name(_ what: GroupNaming) {
+        if case let .rename(_, g) = what { groupName = g.name } else { groupName = "" }
+        naming = what
+    }
+
+    private func named(_ what: GroupNaming, _ name: String) {
+        switch what {
+        case let .new(project, session):
+            regroup { $0.create(in: project, named: name, with: session.map { [$0] } ?? []) }
+            // Made from a folded project's menu, it would be made out of sight.
+            withAnimation { _ = folded.remove(project) }
+        case let .rename(project, g):
+            regroup { $0.rename(g.id, in: project, to: name) }
+        }
     }
 
     // MARK: Rows
 
-    private func card(_ s: Session, showingProject: Bool = false) -> some View {
+    private func card(_ s: Session, showingProject: Bool = false, fit: RowFit = .card) -> some View {
         let pull = sessionPull(s, in: trackers.inbox?.pulls ?? [])
         let t = triage[s.name]
+        let inGroup = groups.group(of: s.name, in: s.project) != nil
         return SessionRow(session: s, report: server.reports[s.name], pull: pull,
                           waiting: server.queue.messages(for: s.name),
                           project: showingProject ? s.project : nil)
@@ -446,7 +510,7 @@ struct ServerView: View {
             // draws no chevron: T3 Code's cards have none, and the whole card
             // is still what is tapped.
             .background { NavigationLink(value: Route.session(serverID: server.id, name: s.name)) { EmptyView() }.opacity(0) }
-            .canvasRow(.card)
+            .canvasRow(fit)
             .swipeActions(edge: .leading) {
                 if t.pinned {
                     Button("Unpin", systemImage: "pin.slash") { change(s.name, .unpin) }
@@ -464,6 +528,10 @@ struct ServerView: View {
                 // dialog hung off it goes with it before it can be answered.
                 Button("Delete", systemImage: "trash") { destroying = s }
                     .tint(Color.bad)
+                if inGroup {
+                    Button("Ungroup", systemImage: "arrow.uturn.backward") { regroup { $0.assign(s.name, to: nil) } }
+                        .tint(Color.dimmer)
+                }
             }
             // On the row, not the list, so it opens over the row it is about
             // rather than at the top of the screen.
@@ -502,6 +570,7 @@ struct ServerView: View {
                 } else {
                     Button("Settle", systemImage: "checkmark.circle") { change(s.name, .settle(Date())) }
                 }
+                groupMenu(s)
             }
             .alert("Rename", isPresented: Binding(
                 get: { renaming?.name == s.name },
@@ -522,6 +591,7 @@ struct ServerView: View {
             ), titleVisibility: .visible) {
                 Button("Delete Worktree", role: .destructive) {
                     triage.forget(s.name)
+                    groups.forget(s.name)
                     server.destroy(s.name)
                 }
             } message: {
@@ -529,6 +599,42 @@ struct ServerView: View {
                      ? "Its worktree on the server is deleted with its changes. A branch with commits on it is kept."
                      : "Its sandbox is deleted, with everything in it that hasn't been pushed.")
             }
+    }
+
+    /// Putting a worktree in one of its project's groups, a new one, or none.
+    /// Only for a project this server knows, since only its folder draws
+    /// groups.
+    @ViewBuilder
+    private func groupMenu(_ s: Session) -> some View {
+        if let project = s.project, server.projects.contains(where: { $0.name == project }) {
+            let all = groups.groups(in: project)
+            let current = groups.group(of: s.name, in: project)
+            Divider()
+            if all.isEmpty {
+                Button("New Group…", systemImage: "square.stack") { name(.new(project: project, with: s.name)) }
+            } else {
+                Menu {
+                    // Its own group ticked; picking it again takes it out,
+                    // as the desktop's menu has it.
+                    ForEach(all) { g in
+                        Button {
+                            regroup { $0.toggle(s.name, in: g.id, project: project) }
+                        } label: {
+                            if g.id == current { Label(g.name, systemImage: "checkmark") } else { Text(g.name) }
+                        }
+                    }
+                    Divider()
+                    Button("New Group…", systemImage: "plus") { name(.new(project: project, with: s.name)) }
+                } label: {
+                    Label("Group", systemImage: "square.stack")
+                }
+            }
+            if current != nil {
+                Button("Take Out of the Group", systemImage: "arrow.uturn.backward") {
+                    regroup { $0.assign(s.name, to: nil) }
+                }
+            }
+        }
     }
 
     /// A session on the server's queue, where it will appear. Nothing to
@@ -582,8 +688,12 @@ enum RowFit {
     /// A project's folder row, with room above it to set it off from the one
     /// before.
     case folder
-    /// A shelf's or a group's label.
+    /// A shelf's label.
     case head
+    /// A group's header within a project's folder.
+    case group
+    /// A worktree's card in a group, in under the group's line.
+    case inGroup
     /// A queued session, or one on a shelf: no card, lined up with the cards'
     /// text.
     case slim
@@ -593,6 +703,8 @@ enum RowFit {
         case .card: EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12)
         case .folder: EdgeInsets(top: 14, leading: 16, bottom: 4, trailing: 12)
         case .head: EdgeInsets(top: 14, leading: 16, bottom: 2, trailing: 16)
+        case .group: EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 12)
+        case .inGroup: EdgeInsets(top: 3, leading: 30, bottom: 3, trailing: 12)
         case .slim: EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
         }
     }
@@ -602,7 +714,16 @@ extension View {
     func canvasRow(_ fit: RowFit) -> some View {
         listRowInsets(fit.insets)
             .listRowSeparator(.hidden)
-            .listRowBackground(Color.canvas)
+            .listRowBackground(
+                // A group's worktrees hang off a line under its chevron, as
+                // T3 Code's nested folders do. Each row draws its piece, so
+                // the line runs on through the gaps between the cards.
+                Color.canvas.overlay(alignment: .leading) {
+                    if fit == .inGroup {
+                        Rectangle().fill(Color.line).frame(width: 1).padding(.leading, 21)
+                    }
+                }
+            )
     }
 }
 
@@ -616,6 +737,7 @@ private struct ProjectHeader: View {
     let canCreate: Bool
     let toggle: () -> Void
     let create: () -> Void
+    let newGroup: () -> Void
     let defaults: () -> Void
     let forget: () -> Void
 
@@ -656,6 +778,7 @@ private struct ProjectHeader: View {
                 Section(project.repo) {
                     Button("New Worktree", systemImage: "plus", action: create)
                         .disabled(!canCreate)
+                    Button("New Group…", systemImage: "square.stack", action: newGroup)
                     Button("Defaults for New Worktrees", glyph: .settings, action: defaults)
                         .disabled(!canCreate)
                     Button("Forget Project", glyph: .forgetProject, role: .destructive, action: forget)
@@ -700,6 +823,127 @@ private struct ShelfHead: View {
         .accessibilityLabel(count.map { "\(label), \($0)" } ?? label)
         .accessibilityAddTraits(toggle == nil ? .isHeader : .isButton)
     }
+}
+
+/// A group's header within a project's folder, as the desktop draws it: a
+/// chevron, its name, a hairline and how many it holds; folded, how many in
+/// it need you as well. A tap folds it, and its menu, a long press or a swipe
+/// renames or removes it. Removing it keeps its worktrees.
+private struct GroupHeader: View {
+    let group: WorktreeGroup
+    let open: Bool
+    let count: Int
+    let needsYou: Int
+    let toggle: () -> Void
+    let rename: () -> Void
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.dimmer)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .frame(width: 12)
+                Text(group.name)
+                    .foregroundStyle(.ink)
+                    .lineLimit(1)
+                Rectangle().fill(Color.line).frame(height: 1)
+                // What the fold hides that needs you, as T3 Code's shut
+                // folders say it.
+                if !open, needsYou > 0 {
+                    Text(Self.needing(needsYou))
+                        .foregroundStyle(.attention)
+                        .fixedSize()
+                }
+                Text("\(count)").monospacedDigit()
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: toggle)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(open ? "Folds the group" : "Unfolds the group")
+            Menu {
+                actions
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 30, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("\(group.name) menu")
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.dim)
+        .buttonStyle(.borderless)
+        .contextMenu { actions }
+        .swipeActions(edge: .leading) {
+            Button("Rename", systemImage: "pencil", action: rename)
+                .tint(.accentColor)
+        }
+        .swipeActions(edge: .trailing) {
+            // Red by tint, as a worktree's Delete is: a destructive swipe
+            // takes the row out before anything else can happen.
+            Button("Remove", systemImage: "trash", action: remove)
+                .tint(Color.bad)
+        }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        Button("Rename…", systemImage: "pencil", action: rename)
+        Section("Its worktrees stay") {
+            Button("Remove Group", systemImage: "trash", role: .destructive, action: remove)
+        }
+    }
+
+    private static func needing(_ n: Int) -> String { "\(n) need\(n == 1 ? "s" : "") you" }
+
+    private var label: String {
+        var parts = [group.name]
+        if !open { parts.append("folded") }
+        parts.append("\(count) inside")
+        if !open, needsYou > 0 { parts.append(Self.needing(needsYou)) }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// A group's name being asked for: a new one's, made from a project's menu or
+/// with a worktree in it from that worktree's, or one being renamed.
+private enum GroupNaming {
+    case new(project: String, with: String?)
+    case rename(project: String, WorktreeGroup)
+}
+
+/// The alert that asks a group's name. A modifier of its own, as
+/// `ProjectScreens` is, to spare the list's chain.
+private struct GroupNamingAlert: ViewModifier {
+    @Binding var naming: GroupNaming?
+    @Binding var name: String
+    let done: (GroupNaming, String) -> Void
+
+    func body(content: Content) -> some View {
+        content.alert(title, isPresented: Binding(
+            get: { naming != nil },
+            set: { if !$0 { naming = nil } }
+        ), presenting: naming) { what in
+            TextField("New group", text: $name)
+            Button("Cancel", role: .cancel) {}
+            Button(isNew ? "Create" : "Rename") { done(what, name) }
+        } message: { what in
+            if case let .new(project, _) = what {
+                Text("Related worktrees in \(project), kept together and folded as one.")
+            }
+        }
+    }
+
+    private var isNew: Bool {
+        if case .new = naming { return true }
+        return false
+    }
+
+    private var title: String { isNew ? "New Group" : "Rename Group" }
 }
 
 /// A worktree as T3 Code's card: its title at full weight, with its state as
