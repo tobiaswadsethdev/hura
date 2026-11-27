@@ -29,19 +29,19 @@ composer that does a lot without looking busy.
   `TailFile`, `NewChat` with `fork` and `at`, `NewShell` with `run`, `Enqueue`
   and `QueueMessage` with `repeat`, the queue's `utc_offset`, and
   `SetProjectDefaults` with each project's `defaults`.
-- [ ] **1. The list.** A server's projects as T3 Code's folders (a monogram,
+- [x] **1. The list.** A server's projects as T3 Code's folders (a monogram,
   foldable, a count when folded), each worktree a card: the title, the branch
   under it, the state as a glyph and a word or its age, its pull request and
   the sandbox's mark. Pin, snooze and settle, with the pinned shelf at the top
   and the settled one at the bottom; one waiting on you is never hidden. A
   search field narrows the list. Queued sessions as slim rows, a repeating
   one saying its rule.
-- [ ] **2. The conversation.** Your messages in a quiet bubble rather than the
+- [x] **2. The conversation.** Your messages in a quiet bubble rather than the
   accent, replies as prose, a turn's steps as its work log ("Worked for 2m
   14s", one line per tool call with a glyph for its kind). Queued messages as
   dashed bubbles on your side, with Edit and Remove. Edit from here, from a
   long press on your message, forks the conversation from just before it.
-- [ ] **3. The composer.** T3 Code's card and footer: attach on the left; the
+- [x] **3. The composer.** T3 Code's card and footer: attach on the left; the
   mode, the model and effort, the context meter, and the round send and stop
   on the right. `@` mentions a file from the working copy (`FindFiles`).
   While a turn runs, send queues; a long press on send stops the turn and
@@ -49,7 +49,7 @@ composer that does a lot without looking busy.
   stash; a message scheduled for later can repeat. `/btw` asks on the side in
   a forked conversation. Background commands beside the subagents, with their
   output followed by `TailFile`.
-- [ ] **4. New worktrees.** A draft rather than a form: "What should we build
+- [x] **4. New worktrees.** A draft rather than a form: "What should we build
   in ‹project›?" over a composer, with where it runs, the base branch, the
   policy and the name in a strip under it, and the rest under More. It opens
   with the project's defaults, which a project's menu can change. A worktree
