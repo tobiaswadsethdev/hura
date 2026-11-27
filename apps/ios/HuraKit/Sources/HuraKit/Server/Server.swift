@@ -58,6 +58,18 @@ public final class Server: Identifiable {
     @ObservationIgnored fileprivate var client: ServerClient
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private let every: Duration
+    /// The conversations opened here lately, kept when their worktree is
+    /// left, as the desktop keeps its panes': going back draws what was there
+    /// and asks only for what came after, where it used to ask for the whole
+    /// transcript again. A few, the most recently opened last.
+    @ObservationIgnored private var chats: [ChatKey: Chat] = [:]
+    @ObservationIgnored private var chatOrder: [ChatKey] = []
+    private static let keepChats = 12
+
+    private struct ChatKey: Hashable {
+        var session: String
+        var conv: String
+    }
 
     public init(record: ServerRecord, every: Duration = .seconds(3)) {
         self.record = record
@@ -70,6 +82,38 @@ public final class Server: Identifiable {
     public func update(record: ServerRecord) {
         self.record = record
         client = ServerClient(record: record)
+        // Each was made with the old record, which may dial the wrong place.
+        chats.values.forEach { $0.discard() }
+        chats = [:]
+        chatOrder = []
+    }
+
+    /// A conversation, as it was left when there is one kept, and otherwise
+    /// a new one. Not started: whoever shows it does that.
+    public func chat(_ session: String, conversation: String) -> Chat {
+        let key = ChatKey(session: session, conv: conversation)
+        chatOrder.removeAll { $0 == key }
+        chatOrder.append(key)
+        if let c = chats[key] { return c }
+        let c = Chat(record: record, session: session, conversation: conversation, history: history)
+        chats[key] = c
+        while chatOrder.count > Self.keepChats {
+            chats.removeValue(forKey: chatOrder.removeFirst())?.discard()
+        }
+        return c
+    }
+
+    /// A conversation that has been closed: one opened later by the same name
+    /// is another conversation.
+    public func forgetChat(_ session: String, conversation: String) {
+        let key = ChatKey(session: session, conv: conversation)
+        chatOrder.removeAll { $0 == key }
+        chats.removeValue(forKey: key)?.discard()
+    }
+
+    private func forgetChats(_ session: String) {
+        for key in chatOrder where key.session == session { chats.removeValue(forKey: key)?.discard() }
+        chatOrder.removeAll { $0.session == session }
     }
 
     /// Start asking; called when the app becomes active.
@@ -267,6 +311,7 @@ public final class Server: Identifiable {
                 if chat { await catchUp(name, waiting: true) }
                 listed = try await client.destroy(name)
                 history?.removed(serverID: serverID, session: name)
+                forgetChats(name)
             } catch {
                 deleting.remove(name)
                 deleteFailure = "\(name) wasn't deleted: \(error.userMessage)"

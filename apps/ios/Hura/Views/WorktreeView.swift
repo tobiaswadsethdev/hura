@@ -40,6 +40,8 @@ struct WorktreeView: View {
     /// there, since attaching to a closed one's terminal starts another.
     @State private var conversations: [String]?
     @State private var shells: Shells?
+    /// The conversations this screen has opened, out of the server's: kept
+    /// there after this screen goes, so coming back doesn't replay them.
     @State private var chats: [String: Chat] = [:]
     @State private var terminals: [String: TerminalChannel] = [:]
     @State private var showingDetails = false
@@ -181,6 +183,7 @@ struct WorktreeView: View {
                     .environment(\.readPicture) { [server, name] path in
                         try? await server.api.file(name, path: path).image
                     }
+                    .environment(\.heldPicture) { [c] held in await c.picture(held) }
                     .downloads(server: server, name: name)
             }
         case let .terminal(tmux):
@@ -331,7 +334,7 @@ struct WorktreeView: View {
 
     private func chat(_ conv: String) -> Chat {
         if let c = chats[conv] { return c }
-        let c = Chat(record: server.record, session: name, conversation: conv, history: server.history)
+        let c = server.chat(name, conversation: conv)
         chats[conv] = c
         return c
     }
@@ -393,7 +396,9 @@ struct WorktreeView: View {
     /// left in front instead.
     private func forget(_ t: WorkTab) {
         switch t {
-        case let .chat(conv): chats.removeValue(forKey: conv)?.stop()
+        case let .chat(conv):
+            chats.removeValue(forKey: conv)?.stop()
+            server.forgetChat(name, conversation: conv)
         case let .terminal(tmux): terminals.removeValue(forKey: tmux ?? "")?.stop()
         }
         guard tab == t else { return }

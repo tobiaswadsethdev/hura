@@ -17,6 +17,10 @@ import {
   forkReceipt,
   holding,
   kept,
+  lean,
+  leanEntry,
+  pictureIn,
+  withoutPictures,
   namedCommands,
   nextName,
   permissionResult,
@@ -254,6 +258,111 @@ test("a long replay goes in frames a client can take, each saying where it ends"
 
   // Nothing new is still a frame, which tells the client the seq.
   assert.deepEqual(replayFrames(entries, 6, 6), [{ t: "replay", seq: 6, entries: [] }]);
+});
+
+test("the transcript keeps a tool's result once, as the model saw it", () => {
+  const picture = { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } };
+  const msg = {
+    type: "user",
+    message: { content: [{ type: "tool_result", tool_use_id: "t1", content: [picture] }] },
+    tool_use_result: { type: "image", file: { base64: "AAAA", type: "image/png" } },
+  };
+  const kept = lean(msg);
+  assert.equal("tool_use_result" in kept, false);
+  assert.deepEqual(kept.message, msg.message);
+  // The SDK's own message is left as it was.
+  assert.equal("tool_use_result" in msg, true);
+  // A message without one is the same message.
+  const plain = { type: "assistant", message: { content: [] } };
+  assert.equal(lean(plain), plain);
+  const prompt = { seq: 1, at: 0, ev: { kind: "prompt", text: "hi" } };
+  assert.equal(leanEntry(prompt), prompt);
+});
+
+test("a transcript written with the copy in it is replayed without it", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hura-agent-test-"));
+  new Host({ dir, cwd: dir }).open("agent");
+  const msg = { type: "user", message: { content: [] }, tool_use_result: { file: { base64: "A".repeat(1000) } } };
+  fs.appendFileSync(path.join(dir, "chat", "agent.jsonl"), JSON.stringify({ seq: 1, at: 0, ev: { kind: "sdk", msg } }) + "\n");
+  const c = new Host({ dir, cwd: dir }).conversations.get("agent");
+  const frames = [];
+  c.attach({ send: (f) => frames.push(f), end() {} }, 0);
+  const replayed = frames.find((f) => f.t === "replay").entries;
+  assert.equal(replayed.length, 1);
+  assert.deepEqual(replayed[0].ev.msg, { type: "user", message: { content: [] } });
+});
+
+/// A tool's answer with two screenshots in it, and a message of yours with a
+/// picture and a file that is not one.
+function withPictures() {
+  const shot = (data) => ({ type: "image", source: { type: "base64", media_type: "image/png", data } });
+  const result = {
+    seq: 2,
+    at: 0,
+    ev: {
+      kind: "sdk",
+      msg: {
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "t1", content: [shot("AAAA"), { type: "text", text: "two" }, shot("BBBB")] }] },
+      },
+    },
+  };
+  const prompt = {
+    seq: 1,
+    at: 0,
+    ev: {
+      kind: "prompt",
+      text: "look",
+      uuid: "u1",
+      files: [
+        { name: "notes.txt", path: "/u/notes.txt", mime: "text/plain", size: 3 },
+        { name: "a.jpg", path: "/u/a.jpg", mime: "image/jpeg", size: 3, data: "CCCC" },
+      ],
+    },
+  };
+  return { prompt, result };
+}
+
+test("a replay can leave a picture out and say how to ask for it", () => {
+  const { prompt, result } = withPictures();
+  const held = withoutPictures(result);
+  const parts = held.ev.msg.message.content[0].content;
+  assert.deepEqual(parts[0], { type: "image", source: { type: "held", media_type: "image/png", index: 0 } });
+  assert.deepEqual(parts[1], { type: "text", text: "two" });
+  assert.deepEqual(parts[2].source, { type: "held", media_type: "image/png", index: 1 });
+  assert.doesNotMatch(JSON.stringify(held), /AAAA|BBBB/);
+  // The transcript's own entry keeps its pictures.
+  assert.equal(result.ev.msg.message.content[0].content[0].source.data, "AAAA");
+  assert.deepEqual(pictureIn(result, 1), { mime: "image/png", data: "BBBB" });
+  assert.equal(pictureIn(result, 2), null);
+
+  const sent = withoutPictures(prompt).ev.files;
+  assert.deepEqual(sent[0], prompt.ev.files[0], "a file that is not a picture is as it was");
+  assert.deepEqual(sent[1], { name: "a.jpg", path: "/u/a.jpg", mime: "image/jpeg", size: 3, held: 0 });
+  assert.deepEqual(pictureIn(prompt, 0), { mime: "image/jpeg", data: "CCCC" });
+
+  // Nothing to leave out is the same entry, not a copy.
+  const plain = { seq: 3, at: 0, ev: { kind: "sdk", msg: { type: "assistant", message: { content: [{ type: "text", text: "hi" }] } } } };
+  assert.equal(withoutPictures(plain), plain);
+});
+
+test("a client that fetches pictures is replayed without them, and asks for one", () => {
+  const { dir, c } = hostWithWatcher();
+  const { prompt, result } = withPictures();
+  c.append(prompt.ev);
+  c.append(result.ev);
+  const whole = [];
+  c.attach({ send: (f) => whole.push(f), end() {} }, 0);
+  assert.match(JSON.stringify(whole), /BBBB/, "one that does not say is sent them, as before");
+  const lean = [];
+  c.attach({ send: (f) => lean.push(f), end() {} }, 0, true);
+  assert.doesNotMatch(JSON.stringify(lean.filter((f) => f.t === "replay")), /AAAA|BBBB|CCCC/);
+  assert.deepEqual(c.picture(2, 1), { t: "picture", seq: 2, index: 1, picture: { mime: "image/png", data: "BBBB" } });
+  assert.deepEqual(c.picture(1, 0).picture, { mime: "image/jpeg", data: "CCCC" });
+  assert.equal(c.picture(9, 0).picture, null);
+  // And after a restart, read back from the file, the same number is the same picture.
+  const again = new Host({ dir, cwd: dir }).conversations.get("agent");
+  assert.deepEqual(again.picture(2, 0).picture, { mime: "image/png", data: "AAAA" });
 });
 
 test("a sent file's name can only name a file in its own directory", () => {

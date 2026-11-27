@@ -27,6 +27,7 @@ import type { ChatCommand } from "../gen/ChatCommand";
 import type { ChatEntry } from "../gen/ChatEntry";
 import type { ChatFrame } from "../gen/ChatFrame";
 import type { ChatState } from "../gen/ChatState";
+import type { Picture } from "../gen/Picture";
 import type { SlashCommand } from "../gen/SlashCommand";
 import { EditPrompt } from "../chat/Items";
 import type { Usage } from "../gen/Usage";
@@ -90,6 +91,7 @@ import { arrived, build, group, type Item, locate, settle, turnStart } from "../
 import { Since, Ticking } from "../chat/elapsed";
 import { readDraft, writeDraft } from "../chat/drafts";
 import { AgentPanel, AgentsBar, CommandPanel, type TaskProgress } from "../chat/Agents";
+import { HeldPictures, type PictureSource } from "../chat/pictures";
 import { PullBar } from "../chat/PullBar";
 import type { PullRequest as Pull } from "../gen/PullRequest";
 import { ContextRing } from "../chat/Usage";
@@ -137,6 +139,12 @@ const EMPTY: View = {
 type Kept = { entries: ChatEntry[]; seq: number; state: ChatState | null };
 const kept = new Remembered<Kept>(12);
 
+/// The pictures a replay held back that have been asked for since, under the
+/// conversation's key: `null` for one the host said it does not have. A few
+/// dozen, since a card shut and opened again draws its pictures again.
+const fetched = new Remembered<Picture | null>(64);
+const pictureKey = (chatKey: string, seq: number, index: number) => `${chatKey}\npicture\n${seq}\n${index}`;
+
 /// A conversation that has ended: one opened later under the same name is
 /// another conversation.
 /// What to say in a conversation as soon as it is open: a side chat's
@@ -170,7 +178,9 @@ const SIDE_COMMAND: SlashCommand = {
 };
 
 export function forgetChat(server: string, name: string, conv: string) {
-  kept.delete(keyFor(server, name, "chat", conv));
+  const key = keyFor(server, name, "chat", conv);
+  kept.delete(key);
+  fetched.forgetUnder(key);
 }
 
 /// Where a pane starts: from what it had, drawn at once, when it had anything.
@@ -230,6 +240,9 @@ function reduce(v: View, a: Action): View {
       return { ...v, notice: f.text, caughtUp: true };
     case "error":
       return { ...v, error: f.message };
+    // Answered where it was asked for: see `pictures` in the pane.
+    case "picture":
+      return v;
   }
 }
 
@@ -1504,6 +1517,28 @@ export function ChatPane({
   // A file a tool call or a reply names, out of this session's sandbox.
   const fetchFile = useCallback((path: string) => void download(server, name, path), [server, name]);
 
+  // The pictures the replay held back, asked of the host as they are drawn:
+  // once each however many cards draw one, and again on a channel opened
+  // after the one they were asked on dropped.
+  type Asked = { seq: number; index: number; promise: Promise<Picture | null>; resolve: (p: Picture | null) => void };
+  const asked = useRef(new Map<string, Asked>());
+  const pictures = useMemo<PictureSource>(
+    () => ({
+      known: (at, index) => fetched.get(pictureKey(key, at, index)),
+      fetch: (at, index) => {
+        const k = `${at}/${index}`;
+        const had = asked.current.get(k);
+        if (had) return had.promise;
+        let resolve: (p: Picture | null) => void = () => {};
+        const promise = new Promise<Picture | null>((r) => (resolve = r));
+        asked.current.set(k, { seq: at, index, promise, resolve });
+        chat.command(channel.current, { op: "picture", seq: at, index }).catch(() => {});
+        return promise;
+      },
+    }),
+    [key],
+  );
+
   useEffect(() => {
     let live = true;
     let retry: ReturnType<typeof setTimeout> | undefined;
@@ -1512,7 +1547,8 @@ export function ChatPane({
     const connect = () => {
       const id = nextChannelId();
       channel.current = id;
-      void open(server, id, { kind: "chat", session: name, conv, since: seq.current }, (frame) => {
+      const channelOf = { kind: "chat" as const, session: name, conv, since: seq.current, fetch_pictures: true };
+      void open(server, id, channelOf, (frame) => {
         if (!live || id !== channel.current) return;
         if (frame.is === "chat") {
           wait = 2_000;
@@ -1521,9 +1557,19 @@ export function ChatPane({
           // another conversation's. Asked again from the beginning.
           if (frame.frame.t === "replay" && frame.frame.seq < seq.current) {
             seq.current = 0;
+            fetched.forgetUnder(key);
+            for (const a of asked.current.values()) a.resolve(null);
+            asked.current.clear();
             dispatch({ type: "reset" });
             void close(id);
             connect();
+            return;
+          }
+          if (frame.frame.t === "picture") {
+            const { seq: at, index, picture } = frame.frame;
+            fetched.set(pictureKey(key, at, index), picture);
+            asked.current.get(`${at}/${index}`)?.resolve(picture);
+            asked.current.delete(`${at}/${index}`);
             return;
           }
           dispatch({ type: "frame", frame: frame.frame });
@@ -1535,12 +1581,20 @@ export function ChatPane({
           retry = setTimeout(connect, wait);
           wait = Math.min(wait * 2, 30_000);
         }
-      }).catch((e) => {
-        if (!live) return;
-        dispatch({ type: "down", reason: messageOf(e) });
-        retry = setTimeout(connect, wait);
-        wait = Math.min(wait * 2, 30_000);
-      });
+      })
+        .then(() => {
+          // What was asked on a channel that has gone, asked again on this one.
+          if (!live || id !== channel.current) return;
+          for (const a of asked.current.values()) {
+            chat.command(id, { op: "picture", seq: a.seq, index: a.index }).catch(() => {});
+          }
+        })
+        .catch((e) => {
+          if (!live) return;
+          dispatch({ type: "down", reason: messageOf(e) });
+          retry = setTimeout(connect, wait);
+          wait = Math.min(wait * 2, 30_000);
+        });
     };
     connect();
 
@@ -1549,7 +1603,7 @@ export function ChatPane({
       clearTimeout(retry);
       void close(channel.current);
     };
-  }, [server, name, conv]);
+  }, [server, name, conv, key]);
 
   const command = (c: ChatCommand) => {
     chat.command(channel.current, c).catch(() => {});
@@ -1724,6 +1778,7 @@ export function ChatPane({
 
   return (
     <div className="chat-split">
+      <HeldPictures.Provider value={pictures}>
       <Ticking.Provider value={working}>
       <OpenAgent.Provider value={openAgent}>
       <EditPrompt.Provider value={editPrompt}>
@@ -1871,6 +1926,7 @@ export function ChatPane({
         </aside>
       )}
       </Ticking.Provider>
+      </HeldPictures.Provider>
     </div>
   );
 }

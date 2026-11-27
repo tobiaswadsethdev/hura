@@ -210,7 +210,9 @@ const RESULT_CHARS: usize = 4_000;
 
 /// An entry as it is kept: a picture's bytes taken out -- an image block's
 /// `source.data`, wherever in an SDK message it is, and a sent file's `data` --
-/// and a tool's result cut to its start.
+/// and a tool's result cut to its start. A picture a replay held back has no
+/// bytes to take, and its number goes too: it is for asking the host, and a
+/// conversation read from here is one there may no longer be a host for.
 fn trimmed(entry: &ChatEntry) -> ChatEntry {
     fn cut(text: &mut String) {
         if let Some((at, _)) = text.char_indices().nth(RESULT_CHARS) {
@@ -227,6 +229,7 @@ fn trimmed(entry: &ChatEntry) -> ChatEntry {
                     && let Some(Value::Object(source)) = map.get_mut("source")
                 {
                     source.remove("data");
+                    source.remove("index");
                 }
                 let in_result = in_result || kind == Some("tool_result");
                 for (k, v) in map.iter_mut() {
@@ -252,7 +255,10 @@ fn trimmed(entry: &ChatEntry) -> ChatEntry {
             }
             strip(msg, false)
         }
-        ChatEvent::Prompt { files, .. } => files.iter_mut().for_each(|f| f.data = None),
+        ChatEvent::Prompt { files, .. } => files.iter_mut().for_each(|f| {
+            f.data = None;
+            f.held = None;
+        }),
         _ => {}
     }
     entry
@@ -1018,6 +1024,37 @@ mod tests {
         let text = fs::read_to_string(h.conv_file("wsl", "s", "agent")).unwrap();
         assert!(!text.contains("AAAA"), "{text}");
         assert!(text.contains("image/png"));
+    }
+
+    /// A replay to a client that fetches pictures has their numbers where the
+    /// bytes were, which mean nothing once the host is gone.
+    #[test]
+    fn a_held_pictures_number_is_not_kept() {
+        let mut h = scratch();
+        let shot = sdk(
+            1,
+            json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t", "content": [
+                {"type": "image", "source": {"type": "held", "media_type": "image/png", "index": 0}}
+            ]}]}}),
+        );
+        let mut sent = prompt(2, "look");
+        if let ChatEvent::Prompt { files, .. } = &mut sent.ev {
+            files.push(hura_core::chat::ChatFile {
+                name: "a.png".into(),
+                path: "/u/a.png".into(),
+                mime: "image/png".into(),
+                size: 3,
+                data: None,
+                held: Some(1),
+            });
+        }
+        h.keep("wsl", "s", "agent", &[shot, sent]).unwrap();
+        let text = fs::read_to_string(h.conv_file("wsl", "s", "agent")).unwrap();
+        assert!(
+            !text.contains("index") && !text.contains("held\":1"),
+            "{text}"
+        );
+        assert!(text.contains("a.png"));
     }
 
     #[test]

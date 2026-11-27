@@ -58,6 +58,20 @@ struct HistoryTests {
         #expect(!text.contains("tool_use_result"))
     }
 
+    /// A held picture's number is for asking its host, which a conversation
+    /// read back from here may no longer have.
+    @Test func aHeldPicturesNumberIsNotKept() async throws {
+        let h = scratch()
+        let result = json(#"{"seq":2,"at":2,"ev":{"kind":"sdk","msg":{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image","source":{"type":"held","media_type":"image/png","index":0}}]}]}}}}"#)
+        let sent = json(#"{"seq":3,"at":3,"ev":{"kind":"prompt","text":"look","uuid":"u3","files":[{"name":"a.png","path":"/u/a.png","mime":"image/png","size":3,"held":1}]}}"#)
+        h.keep(agent, [prompt(1, "read it"), result, sent])
+        await h.flush()
+        let text = try String(contentsOf: h.file(agent), encoding: .utf8)
+        #expect(!text.contains("index"))
+        #expect(!text.contains(#""held":1"#))
+        #expect(text.contains("a.png"))
+    }
+
     @Test func entriesAlreadyKeptAreNotKeptTwice() async {
         let h = scratch()
         h.keep(agent, [prompt(1, "one"), prompt(2, "two")])

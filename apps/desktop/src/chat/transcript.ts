@@ -22,11 +22,11 @@ import type {
   SystemMessage,
   UserMessage,
 } from "../sdk";
-import type { Picture } from "../gen/Picture";
+import { type ChatPicture, resultPictures } from "./pictures";
 
 /// `stopped` is a call that never finished because you interrupted the turn,
 /// which Claude Code reports as an error and which is not one.
-export type ToolResult = { text: string; isError: boolean; stopped: boolean; images: Picture[] };
+export type ToolResult = { text: string; isError: boolean; stopped: boolean; images: ChatPicture[] };
 
 /// What Claude Code puts in a tool result it cut short at an interrupt.
 const INTERRUPTED = /^(The user doesn't want to proceed with this tool use|\[Request interrupted)/;
@@ -55,7 +55,7 @@ export type Item =
   /// `at` is when it was sent and `read` when Claude Code took it into a turn,
   /// both epoch milliseconds from the sandbox's clock; `read` is null until
   /// then.
-  | { kind: "prompt"; key: string; text: string; files: ChatFile[]; at: number; read: number | null }
+  | { kind: "prompt"; key: string; seq: number; text: string; files: ChatFile[]; at: number; read: number | null }
   /// A `!` command you ran in the sandbox. `output` is null while it runs;
   /// `code` is null when it did not exit by itself.
   | {
@@ -91,7 +91,7 @@ function sameDay(a: number, b: number): boolean {
 }
 
 /// The text in a tool result, however it was sent. An image is left out:
-/// it is drawn, by `resultImages`. A `tool_reference`, which is how
+/// it is drawn, by `resultPictures`. A `tool_reference`, which is how
 /// ToolSearch answers, is the name of the tool it loaded.
 function resultText(content: Extract<Block, { type: "tool_result" }>["content"]): string {
   if (typeof content === "string") return content;
@@ -109,18 +109,6 @@ function resultText(content: Extract<Block, { type: "tool_result" }>["content"])
       }
     })
     .join("\n");
-}
-
-/// The images in a tool result: what `Read` answers with for a picture, and a
-/// screenshot from a browser tool.
-function resultImages(content: Extract<Block, { type: "tool_result" }>["content"]): Picture[] {
-  if (!Array.isArray(content)) return [];
-  return content.flatMap((part) => {
-    const source = (part as { source?: { type?: string; media_type?: string; data?: string } }).source;
-    return part.type === "image" && source?.type === "base64" && source.media_type && source.data
-      ? [{ mime: source.media_type, data: source.data }]
-      : [];
-  });
 }
 
 function seconds(ms: number | undefined): string {
@@ -261,7 +249,15 @@ export function build(entries: ChatEntry[]): Built {
     const key = String(entry.seq);
     switch (ev.kind) {
       case "prompt": {
-        const prompt = { kind: "prompt" as const, key, text: ev.text, files: ev.files, at: entry.at, read: null };
+        const prompt = {
+          kind: "prompt" as const,
+          key,
+          seq: entry.seq,
+          text: ev.text,
+          files: ev.files,
+          at: entry.at,
+          read: null,
+        };
         prompts.set(ev.uuid, prompt);
         if (read.has(ev.uuid) || (ev.receipt && entry.seq > lastRead)) held.set(ev.uuid, prompt);
         else place(prompt, entry.at);
@@ -311,7 +307,7 @@ export function build(entries: ChatEntry[]): Built {
         break;
       }
       case "sdk":
-        message(ev.msg as SdkMessage, key, entry.at);
+        message(ev.msg as SdkMessage, key, entry.at, entry.seq);
         break;
     }
   }
@@ -381,7 +377,7 @@ export function build(entries: ChatEntry[]): Built {
     items.push(prompt);
   }
 
-  function message(msg: SdkMessage, key: string, at: number) {
+  function message(msg: SdkMessage, key: string, at: number, seq: number) {
     switch (msg.type) {
       case "assistant": {
         const m = msg as AssistantMessage;
@@ -435,7 +431,9 @@ export function build(entries: ChatEntry[]): Built {
                 text,
                 isError,
                 stopped: isError && INTERRUPTED.test(text),
-                images: resultImages(block.content),
+                // What `Read` answers with for a picture, and a screenshot
+                // from a browser tool.
+                images: resultPictures(block.content, seq),
               };
             }
           } else if (block.type === "text" && "text" in block) {

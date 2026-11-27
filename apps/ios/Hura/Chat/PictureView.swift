@@ -17,6 +17,11 @@ extension EnvironmentValues {
     /// Reads an https image a pull request's text names, through its tracker.
     /// Unset everywhere else: an image at a URL is its alt text.
     @Entry var readForgePicture: (@MainActor (String) async -> Picture?)?
+
+    /// Fetches a picture a conversation's replay held back, from its host.
+    /// Unset where there is none to ask, as in a conversation read back from
+    /// this phone's history, and there such a picture is not drawn.
+    @Entry var heldPicture: (@MainActor (HeldPicture) async -> Picture?)?
 }
 
 /// An image, fitted to the width it is given and no taller than `maxHeight`.
@@ -24,6 +29,7 @@ extension EnvironmentValues {
 struct PictureView: View {
     let picture: Picture
     var maxHeight: CGFloat = 360
+    @Environment(\.heldPicture) private var fetchHeld
     @State private var image: UIImage?
     @State private var opened = false
 
@@ -42,7 +48,14 @@ struct PictureView: View {
                 Label("Image", systemImage: "photo").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .task(id: picture) { image = await Self.decode(picture) }
+        .task(id: picture) {
+            if let held = picture.held, picture.data.isEmpty {
+                guard let fetched = await fetchHeld?(held) else { return }
+                image = await Self.decode(fetched)
+            } else {
+                image = await Self.decode(picture)
+            }
+        }
     }
 
     /// Off the main actor: a screenshot is megabytes of base64.

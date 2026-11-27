@@ -2558,6 +2558,13 @@ main { position: relative; }
   display: block; max-width: 100%; max-height: 60vh; object-fit: contain;
   margin: 8px 0; border-radius: 6px;
 }
+/* A picture the replay held back, while the host is asked for it: room for
+   one, so the card does not jump twice. */
+.chat-image-waiting {
+  display: block; width: min(320px, 100%); height: 180px;
+  background: var(--surface-2);
+}
+.chat-sent .chat-image-waiting { width: 120px; height: 90px; border-radius: var(--r); }
 /* An image in a message or a ticket opens on its own when clicked. */
 img.zoomable { cursor: zoom-in; }
 .picture-scrim {
