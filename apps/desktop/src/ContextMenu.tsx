@@ -24,6 +24,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -60,12 +61,37 @@ type Open = {
   keyboard: boolean;
   /// Opened upward from `y`, for a button near the bottom of the window.
   up?: boolean;
+  /// Opened by pressing `from`, which pressing again closes, as a select's
+  /// button does. A right-click's row is not a toggle: a click on it means
+  /// the row.
+  button?: boolean;
 };
 
-const Ctx = createContext<(open: Open) => void>(() => {});
+const Ctx = createContext<{
+  show: (open: Open | null) => void;
+  /// The button the menu on screen was opened by, if a button opened it.
+  shownBy: () => HTMLElement | null;
+}>({ show: () => {}, shownBy: () => null });
 
 export function MenuProvider({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState<Open | null>(null);
+  // Numbered, so each opening is a menu of its own. A right-click while one
+  // is open closes it and opens the next in the same event, and without the
+  // number that is one menu whose props changed, still listening as the first.
+  const [open, setOpen] = useState<(Open & { n: number }) | null>(null);
+  const opened = useRef(0);
+  // Beside the state for the button that asks, in the click that opened the
+  // menu or closes it: read there, the state would be the last render's.
+  const shown = useRef<Open | null>(null);
+  const ctx = useMemo(
+    () => ({
+      show: (o: Open | null) => {
+        shown.current = o;
+        setOpen(o && { ...o, n: ++opened.current });
+      },
+      shownBy: () => (shown.current?.button ? shown.current.from : null),
+    }),
+    [],
+  );
 
   // No webview menu anywhere else. Its Reload, Back and Inspect Element are a
   // browser's, not this window's, and a right-click that offers them on a row
@@ -87,9 +113,9 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <Ctx.Provider value={setOpen}>
+    <Ctx.Provider value={ctx}>
       {children}
-      {open && <Menu {...open} onClose={() => setOpen(null)} />}
+      {open && <Menu key={open.n} {...open} onClose={() => ctx.show(null)} />}
     </Ctx.Provider>
   );
 }
@@ -101,7 +127,7 @@ export function MenuProvider({ children }: { children: React.ReactNode }) {
 /// opens, not the state at the last render. An empty list opens nothing, and
 /// the browser's own menu is left alone.
 export function useContextMenu() {
-  const show = useContext(Ctx);
+  const { show } = useContext(Ctx);
   return useCallback(
     (items: () => MenuItem[]) => ({
       onContextMenu: (e: React.MouseEvent<HTMLElement>) => {
@@ -131,18 +157,31 @@ export function useContextMenu() {
 /// The same menu, opened by pressing a button rather than by a right-click:
 /// for a button whose action is a choice between a few things. Opened under
 /// the button, and from the keyboard when the press was a key, so the first
-/// item takes focus as it does for the menu key.
+/// item takes focus as it does for the menu key. Pressed again while its menu
+/// is open, it closes it.
 export function useButtonMenu() {
-  const show = useContext(Ctx);
+  const { show, shownBy } = useContext(Ctx);
   return useCallback(
     (items: () => MenuItem[], options: { up?: boolean } = {}) => (e: React.MouseEvent<HTMLElement>) => {
+      if (shownBy() === e.currentTarget) {
+        show(null);
+        return;
+      }
       const list = items();
       if (list.length === 0) return;
       const r = e.currentTarget.getBoundingClientRect();
       const up = options.up ?? false;
-      show({ x: r.left, y: up ? r.top - 6 : r.bottom + 4, up, items: list, from: e.currentTarget, keyboard: e.detail === 0 });
+      show({
+        x: r.left,
+        y: up ? r.top - 6 : r.bottom + 4,
+        up,
+        items: list,
+        from: e.currentTarget,
+        keyboard: e.detail === 0,
+        button: true,
+      });
     },
-    [show],
+    [show, shownBy],
   );
 }
 
@@ -150,7 +189,7 @@ export function copy(text: string) {
   void navigator.clipboard?.writeText(text).catch(() => {});
 }
 
-function Menu({ x, y, up, items, from, keyboard, onClose }: Open & { onClose: () => void }) {
+function Menu({ x, y, up, items, from, keyboard, button, onClose }: Open & { onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState({ x, y });
 
@@ -190,7 +229,13 @@ function Menu({ x, y, up, items, from, keyboard, onClose }: Open & { onClose: ()
     else ref.current?.focus();
 
     const away = (e: Event) => {
-      if (!ref.current?.contains(e.target as Node)) close(false);
+      const t = e.target as Node;
+      if (ref.current?.contains(t)) return;
+      // A press on the button that opened it is the button's to answer, and
+      // it answers by closing. Closed here as well, the click that follows
+      // would find nothing open and open it again.
+      if (button && e.type === "mousedown" && from?.contains(t)) return;
+      close(false);
     };
     const gone = () => close(false);
     window.addEventListener("mousedown", away, true);
@@ -208,6 +253,21 @@ function Menu({ x, y, up, items, from, keyboard, onClose }: Open & { onClose: ()
     // Once per opening: the provider remounts this for every new menu.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The button says its menu is open while it is, which is what a screen
+  // reader announces and what the stylesheet draws as held down. Set here
+  // rather than by each caller, which would each need to know when the one
+  // menu of the window closes. Put back as it was, not to false, on a button
+  // that never said either.
+  useEffect(() => {
+    if (!button || !from) return;
+    const was = from.getAttribute("aria-expanded");
+    from.setAttribute("aria-expanded", "true");
+    return () => {
+      if (was === null) from.removeAttribute("aria-expanded");
+      else from.setAttribute("aria-expanded", was);
+    };
+  }, [button, from]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const all = buttons();

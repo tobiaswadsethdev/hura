@@ -13,13 +13,15 @@
 // The width is the one the window's preferences hold, fitted by `layout.ts`;
 // the handle on its right edge is `Split`, drawn by `App` beside it.
 
-import type { ComponentType, ReactNode } from "react";
+import { type ComponentType, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
+import { useButtonMenu } from "../ContextMenu";
 import {
   Account,
   Close,
   Find,
   Integrations,
+  More,
   NewProject,
   NewSession,
   PullRequest,
@@ -172,37 +174,32 @@ export function Sidebar({
       {children}
 
       {servers && <div className="shrink-0 px-3 pt-1">{servers}</div>}
-      <nav className="flex shrink-0 items-center gap-0.5 px-2 pt-1 pb-2" aria-label="Destinations">
-        <Foot icon={Settings} label="Settings" on={place === "settings"} disabled={!serverReady} onClick={go("settings")} />
-        <Foot
-          icon={Tracker}
-          label="Tickets"
-          on={tickets.on}
-          count={tickets.count}
-          warned={tickets.warned}
-          keys={tickets.keys}
-          onClick={tickets.onClick}
-        />
-        <Foot
-          icon={PullRequest}
-          label="Pull Requests"
-          on={pulls.on}
-          count={pulls.count}
-          keys={pulls.keys}
-          onClick={pulls.onClick}
-        />
-        <Foot icon={Find} label="Search Conversations" keys={searchKeys} on={place === "search"} onClick={go("search")} />
-        <Foot icon={UsageGlyph} label="Usage" on={place === "usage"} disabled={!serverReady} onClick={go("usage")} />
-        <Foot
-          icon={Integrations}
-          label="Integrations"
-          on={place === "integrations"}
-          disabled={!serverReady}
-          onClick={go("integrations")}
-        />
-        <Foot icon={Servers} label="Servers" on={place === "servers"} onClick={go("servers")} />
-        <Foot icon={Account} label="Account" on={place === "account"} onClick={go("account")} />
-      </nav>
+      <FootBar
+        items={[
+          { icon: Settings, label: "Settings", on: place === "settings", disabled: !serverReady, onClick: go("settings") },
+          {
+            icon: Tracker,
+            label: "Tickets",
+            on: tickets.on,
+            count: tickets.count,
+            warned: tickets.warned,
+            keys: tickets.keys,
+            onClick: tickets.onClick,
+          },
+          { icon: PullRequest, label: "Pull Requests", on: pulls.on, count: pulls.count, keys: pulls.keys, onClick: pulls.onClick },
+          { icon: Find, label: "Search Conversations", keys: searchKeys, on: place === "search", onClick: go("search") },
+          { icon: UsageGlyph, label: "Usage", on: place === "usage", disabled: !serverReady, onClick: go("usage") },
+          {
+            icon: Integrations,
+            label: "Integrations",
+            on: place === "integrations",
+            disabled: !serverReady,
+            onClick: go("integrations"),
+          },
+          { icon: Servers, label: "Servers", on: place === "servers", onClick: go("servers") },
+          { icon: Account, label: "Account", on: place === "account", onClick: go("account") },
+        ]}
+      />
     </aside>
   );
 }
@@ -217,20 +214,9 @@ export type Count = {
   onClick: () => void;
 };
 
-/// One of the foot's icons: T3 Code's `SidebarUtilityItem`, a 32 pixel ghost
-/// button, lit while what it opens is showing, with a count in its corner
-/// when it has one.
-function Foot({
-  icon: Mark,
-  label,
-  on,
-  disabled,
-  count,
-  warned,
-  keys,
-  onClick,
-}: {
-  icon: ComponentType<{ className?: string }>;
+/// One of the foot's icons, and what it says when it has to go in the menu.
+type FootItem = {
+  icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
   label: string;
   on: boolean;
   disabled?: boolean;
@@ -238,15 +224,91 @@ function Foot({
   warned?: boolean;
   keys?: Keys;
   onClick: () => void;
-}) {
+};
+
+/// T3 Code's `SidebarUtilityItem`: a 32 pixel ghost button, lit while what it
+/// opens is showing.
+const FOOT = "relative text-sidebar-muted-foreground/80 hover:text-sidebar-foreground";
+const FOOT_ON = "bg-sidebar-row-active text-sidebar-foreground";
+
+/// The foot: as many of its icons as the sidebar has room for, in order, and
+/// the rest behind a last button that opens them as a menu. T3 Code has four
+/// and they always fit; eight are 286 pixels with their gaps, more than the
+/// sidebar's default, and a row that did not give way ran out over the
+/// conversation. The ones at the end go first, which is why the ones used
+/// least are there. At the narrowest sidebar three stay, the two with counts
+/// among them.
+function FootBar({ items }: { items: FootItem[] }) {
+  const ref = useRef<HTMLElement>(null);
+  const [fits, setFits] = useState(items.length);
+  const menu = useButtonMenu();
+
+  // Measured rather than worked out from the width the sidebar was given:
+  // a button is 36 pixels below the `sm` breakpoint and 32 above it, and the
+  // window's zoom moves both. Before paint, so the row is never drawn running
+  // over and then corrected.
+  useLayoutEffect(() => {
+    const nav = ref.current;
+    if (!nav) return;
+    const fit = () => {
+      const css = getComputedStyle(nav);
+      const room = nav.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+      const gap = parseFloat(css.columnGap) || 0;
+      const one = nav.querySelector<HTMLElement>("button")?.offsetWidth || 32;
+      const all = items.length;
+      // Every one, if they fit; else as many as leave room for the menu's.
+      setFits(all * one + (all - 1) * gap <= room ? all : Math.max(0, Math.floor((room + gap) / (one + gap)) - 1));
+    };
+    fit();
+    const watch = new ResizeObserver(fit);
+    watch.observe(nav);
+    return () => watch.disconnect();
+  }, [items.length]);
+
+  const rest = items.slice(fits);
+  return (
+    <nav ref={ref} className="flex shrink-0 items-center gap-0.5 px-2 pt-1 pb-2" aria-label="Destinations">
+      {items.slice(0, fits).map((item) => (
+        <Foot key={item.label} {...item} />
+      ))}
+      {rest.length > 0 && (
+        <Button
+          variant="ghost"
+          size="icon"
+          // Lit, or marked, for what is behind it: where you are, or a
+          // tracker that could not be read, would otherwise be out of sight.
+          className={cn(FOOT, "aria-expanded:bg-sidebar-row-hover", rest.some((i) => i.on) && FOOT_ON)}
+          title={`More: ${rest.map((i) => i.label).join(", ")}`}
+          aria-label="More"
+          aria-haspopup="menu"
+          onClick={menu(
+            () =>
+              rest.map((i) => ({
+                label: i.label,
+                icon: i.icon,
+                // What the icon would have said: its count, or its shortcut.
+                hint: i.count ? String(i.count) : i.keys?.label,
+                disabled: i.disabled,
+                run: i.onClick,
+              })),
+            { up: true },
+          )}
+        >
+          <More />
+          {rest.some((i) => i.warned) && <span className="pointer-events-none absolute right-1 bottom-1 size-1.5 rounded-full bg-warning" />}
+        </Button>
+      )}
+    </nav>
+  );
+}
+
+/// One of the foot's icons, with a count in its corner when it has one.
+function Foot({ icon: Mark, label, on, disabled, count, warned, keys, onClick }: FootItem) {
   return (
     <Button
       variant="ghost"
       size="icon"
-      className={cn(
-        "relative text-sidebar-muted-foreground/80 hover:text-sidebar-foreground",
-        on && "bg-sidebar-row-active text-sidebar-foreground",
-      )}
+      className={cn(FOOT, on && FOOT_ON)}
       disabled={disabled}
       title={keys?.label ? `${label} (${keys.label})` : label}
       aria-label={count !== undefined ? `${label}, ${count}` : label}
