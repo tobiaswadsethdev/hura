@@ -1750,7 +1750,7 @@ dependencies = [
 
 [[package]]
 name = "hura-desktop"
-version = "0.61.0"
+version = "0.61.1"
 dependencies = [
  "hura-client",
  "hura-core",
