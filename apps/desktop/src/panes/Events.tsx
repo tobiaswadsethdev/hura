@@ -666,7 +666,7 @@ function ChangePanel({
   };
 
   return (
-    <div className={`change-panel ${kind}`}>
+    <div className={`change-panel change-${kind}`}>
       {kind === "allow" ? (
         <>
           <p className="change-what">

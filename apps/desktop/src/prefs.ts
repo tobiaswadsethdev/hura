@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { CODE_SIZE, type CustomTheme, sanitizeTheme, ZOOM } from "./look";
 import type { Appearance } from "./theme";
 
 /// One key, so a stray `hura.theme` from some future build cannot be mistaken
@@ -61,6 +62,9 @@ export type Prefs = {
   /// Whether the dock -- files, git and the rest -- is open, or folded to its
   /// rail of pane glyphs, which gives its width to the middle.
   dockOpen: boolean;
+  /// Whether the sidebar of projects and worktrees is showing, or collapsed
+  /// out of the way by its toggle.
+  treeOpen: boolean;
   /// The sidebar's groups that are shut, by key: `tickets:created`, say.
   /// Remembered because the one somebody shuts is the one they never read.
   inboxShut: string[];
@@ -71,6 +75,23 @@ export type Prefs = {
   appearance: Appearance;
   /// Terminals dark even when the window is light. See `theme.ts`.
   terminalsDark: boolean;
+  /// A VS Code theme taken in as the palette, over `appearance` while it is
+  /// set. See `look.ts`.
+  theme: CustomTheme | null;
+  /// The faces for text and for code, ahead of the window's own; empty is
+  /// the window's own.
+  uiFont: string;
+  monoFont: string;
+  /// The size, in pixels, the terminals and the editors draw code at.
+  codeSize: number;
+  /// The whole window's scale, 1 as it was drawn.
+  zoom: number;
+  /// Shortcuts changed from their defaults, by command. See `keys.ts`.
+  keys: Record<string, string>;
+  /// Diffs one column above the other rather than side by side.
+  diffStacked: boolean;
+  /// Diffs leaving out changes that are only whitespace.
+  diffHideWhitespace: boolean;
 };
 
 export type InboxView = "tickets" | "pulls";
@@ -122,12 +143,22 @@ export const DEFAULTS: Prefs = {
   pullCommentsToAgent: false,
   inboxOpen: true,
   dockOpen: true,
+  treeOpen: true,
   inboxShut: [],
   inboxView: "tickets",
   // The system's, as on the phone. Somebody who has run this window in dark for
   // as long as it had no other gets the same window unless their Mac is light.
   appearance: "system",
   terminalsDark: false,
+  theme: null,
+  uiFont: "",
+  monoFont: "",
+  codeSize: CODE_SIZE.default,
+  zoom: ZOOM.default,
+  keys: {},
+  diffStacked: false,
+  // What the diff editor has always done.
+  diffHideWhitespace: true,
 };
 
 function clamp(value: number, { min, max }: { min: number; max: number }): number {
@@ -162,6 +193,7 @@ export function sanitize(stored: unknown): Prefs {
         : DEFAULTS.pullCommentsToAgent,
     inboxOpen: typeof raw.inboxOpen === "boolean" ? raw.inboxOpen : DEFAULTS.inboxOpen,
     dockOpen: typeof raw.dockOpen === "boolean" ? raw.dockOpen : DEFAULTS.dockOpen,
+    treeOpen: typeof raw.treeOpen === "boolean" ? raw.treeOpen : DEFAULTS.treeOpen,
     inboxShut: Array.isArray(raw.inboxShut)
       ? raw.inboxShut.filter((k): k is string => typeof k === "string")
       : DEFAULTS.inboxShut,
@@ -173,6 +205,25 @@ export function sanitize(stored: unknown): Prefs {
         : DEFAULTS.appearance,
     terminalsDark:
       typeof raw.terminalsDark === "boolean" ? raw.terminalsDark : DEFAULTS.terminalsDark,
+    theme: sanitizeTheme(raw.theme),
+    // A face's name, and only that: it goes into a CSS value.
+    uiFont: typeof raw.uiFont === "string" ? raw.uiFont.replace(/[;{}<>]/g, "").slice(0, 120) : DEFAULTS.uiFont,
+    monoFont:
+      typeof raw.monoFont === "string" ? raw.monoFont.replace(/[;{}<>]/g, "").slice(0, 120) : DEFAULTS.monoFont,
+    codeSize: number(raw.codeSize, CODE_SIZE, DEFAULTS.codeSize),
+    zoom:
+      typeof raw.zoom === "number" && Number.isFinite(raw.zoom)
+        ? Math.min(ZOOM.max, Math.max(ZOOM.min, Math.round(raw.zoom * 20) / 20))
+        : DEFAULTS.zoom,
+    diffStacked: typeof raw.diffStacked === "boolean" ? raw.diffStacked : DEFAULTS.diffStacked,
+    diffHideWhitespace:
+      typeof raw.diffHideWhitespace === "boolean" ? raw.diffHideWhitespace : DEFAULTS.diffHideWhitespace,
+    keys:
+      typeof raw.keys === "object" && raw.keys !== null
+        ? Object.fromEntries(
+            Object.entries(raw.keys).filter((e): e is [string, string] => typeof e[1] === "string" && e[1].length < 40),
+          )
+        : DEFAULTS.keys,
   };
 }
 

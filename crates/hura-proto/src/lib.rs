@@ -30,7 +30,7 @@ use hura_core::chat::ChatDecision;
 use hura_core::comments::{Comment, NewComment, PullRemark};
 use hura_core::endpoints::Route;
 use hura_core::events::Event;
-use hura_core::files::{Dir, Fetched, FileText};
+use hura_core::files::{Dir, Fetched, FileText, FoundPaths, TailText};
 use hura_core::git::{Against, FileDiff, Status as GitStatus};
 use hura_core::integrations::View as IntegrationsView;
 use hura_core::ops::{NewOptions, NewSession, Picked, Poll, Refreshed};
@@ -174,6 +174,12 @@ pub enum Request {
     /// Put the projects in this order, by name. Answers with
     /// [`Reply::Projects`], in it.
     ReorderProjects { names: Vec<String> },
+    /// Set what a project's new worktrees start with, over the server's
+    /// defaults. Answers with the projects.
+    SetProjectDefaults {
+        name: String,
+        defaults: hura_core::projects::ProjectDefaults,
+    },
     /// Git repositories on the server's disk, for starting a session from one.
     ///
     /// The server's and not the client's: the checkout is only a way of *naming*
@@ -212,6 +218,23 @@ pub enum Request {
     /// root. One at a time, as a tree is expanded: a repository is tens of
     /// thousands of files and every listing is an exec.
     Files { name: String, path: String },
+    /// Paths in the working copy whose name or path matches `query`, best
+    /// first, for mentioning one with `@` in the composer. Answers with
+    /// [`Reply::Found`], at most `limit` of them (and never more than 200).
+    FindFiles {
+        name: String,
+        query: String,
+        limit: u32,
+    },
+    /// The last `bytes` of one file anywhere in the sandbox (absolute, or
+    /// relative to the working copy), at most 256 KiB, for following a
+    /// background command's output as it is written. Answers with
+    /// [`Reply::Tail`].
+    TailFile {
+        name: String,
+        path: String,
+        bytes: u32,
+    },
     /// One file of it, capped and read-only. The agent owns the working copy.
     File { name: String, path: String },
     /// One file, whole, to save on the client's machine: a screenshot or a
@@ -228,7 +251,12 @@ pub enum Request {
     Shells { name: String },
     /// Open another shell in the same sandbox. Answers with the list, including
     /// the new one, whose name the server chose.
-    NewShell { name: String },
+    NewShell {
+        name: String,
+        /// Typed into it once it is up: a project's script.
+        #[serde(default)]
+        run: Option<String>,
+    },
     /// Close one, killing whatever is running in it. The agent's own tmux
     /// session too, in a terminal session, which then has no agent until
     /// [`Request::NewAgent`]. Answers with the shells.
@@ -242,7 +270,16 @@ pub enum Request {
     Chats { name: String },
     /// Open another conversation beside the agent's. Answers with the list and
     /// the new one's name, which the host chose.
-    NewChat { name: String },
+    NewChat {
+        name: String,
+        /// Start from this conversation's context: a side chat, or with `at`
+        /// an earlier message edited.
+        #[serde(default)]
+        fork: Option<String>,
+        /// Only up to this assistant message of `fork`.
+        #[serde(default)]
+        at: Option<String>,
+    },
     /// End a conversation and forget its transcript, the agent's own
     /// included, which the host then does not start again.
     CloseChat { name: String, conv: String },
@@ -330,10 +367,16 @@ pub enum Request {
     /// Kept on the server's disk and started by it, so it happens whether or
     /// not anything is connected, and after the server or its machine has
     /// restarted.
+    ///
+    /// With `repeat` it comes round again: see `hura_core::queue`. An older
+    /// server ignores it and starts the session once, which is why a client
+    /// offers it only to a server whose queue says its `utc_offset`.
     Enqueue {
         new: Box<NewSession>,
         #[cfg_attr(feature = "ts", ts(type = "number | null"))]
         at: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repeat: Option<hura_core::queue::Repeat>,
     },
     /// Take a waiting session or message off the queue, by id. Answers with
     /// [`Reply::Queue`].
@@ -356,6 +399,10 @@ pub enum Request {
         #[serde(default)]
         #[cfg_attr(feature = "ts", ts(type = "number | null"))]
         at: Option<u64>,
+        /// Said again and again: see `hura_core::queue`. Offered, as a
+        /// repeating worktree is, only by a server whose queue says its clock.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repeat: Option<hura_core::queue::Repeat>,
     },
 
     /// Destroy one: its sandbox, and then its record.
@@ -465,6 +512,7 @@ impl Request {
             | Request::NewProject(_)
             | Request::ForgetProject { .. }
             | Request::ReorderProjects { .. }
+            | Request::SetProjectDefaults { .. }
             | Request::ReorderSessions { .. }
             | Request::Integrations
             | Request::Mcp { .. }
@@ -494,14 +542,16 @@ impl Request {
             | Request::GitDiff { name, .. }
             | Request::Git { name, .. }
             | Request::Files { name, .. }
+            | Request::FindFiles { name, .. }
+            | Request::TailFile { name, .. }
             | Request::File { name, .. }
             | Request::Download { name, .. }
             | Request::Shells { name }
-            | Request::NewShell { name }
+            | Request::NewShell { name, .. }
             | Request::KillShell { name, .. }
             | Request::NewAgent { name }
             | Request::Chats { name }
-            | Request::NewChat { name }
+            | Request::NewChat { name, .. }
             | Request::CloseChat { name, .. }
             | Request::Ports { name }
             | Request::StopForward { name, .. }
@@ -599,6 +649,8 @@ pub enum Reply {
     },
     Ports(hura_core::ports::PortsView),
     Files(Dir),
+    Found(FoundPaths),
+    Tail(TailText),
     File(FileText),
     Download(Fetched),
     /// The status after whatever was asked for, and what git said while doing

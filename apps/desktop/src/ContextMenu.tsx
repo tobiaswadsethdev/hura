@@ -29,6 +29,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { Chosen } from "./icons";
+
 /// One line of a menu.
 export type MenuItem =
   | {
@@ -39,11 +41,26 @@ export type MenuItem =
       /// Red, and only for the things that cannot be taken back.
       danger?: boolean;
       disabled?: boolean;
+      /// One of a set of choices, and the one in force: a check in place of
+      /// the icon. Set (true or false) on every item of the set, so the menu
+      /// reads as a choice rather than a list of actions.
+      checked?: boolean;
       run: () => void;
     }
+  /// A small label over the items that follow it, for a menu that is two
+  /// choices at once: the model, then its effort.
+  | { heading: string }
   | "separator";
 
-type Open = { x: number; y: number; items: MenuItem[]; from: HTMLElement | null; keyboard: boolean };
+type Open = {
+  x: number;
+  y: number;
+  items: MenuItem[];
+  from: HTMLElement | null;
+  keyboard: boolean;
+  /// Opened upward from `y`, for a button near the bottom of the window.
+  up?: boolean;
+};
 
 const Ctx = createContext<(open: Open) => void>(() => {});
 
@@ -118,11 +135,12 @@ export function useContextMenu() {
 export function useButtonMenu() {
   const show = useContext(Ctx);
   return useCallback(
-    (items: () => MenuItem[]) => (e: React.MouseEvent<HTMLElement>) => {
+    (items: () => MenuItem[], options: { up?: boolean } = {}) => (e: React.MouseEvent<HTMLElement>) => {
       const list = items();
       if (list.length === 0) return;
       const r = e.currentTarget.getBoundingClientRect();
-      show({ x: r.left, y: r.bottom + 4, items: list, from: e.currentTarget, keyboard: e.detail === 0 });
+      const up = options.up ?? false;
+      show({ x: r.left, y: up ? r.top - 6 : r.bottom + 4, up, items: list, from: e.currentTarget, keyboard: e.detail === 0 });
     },
     [show],
   );
@@ -132,7 +150,7 @@ export function copy(text: string) {
   void navigator.clipboard?.writeText(text).catch(() => {});
 }
 
-function Menu({ x, y, items, from, keyboard, onClose }: Open & { onClose: () => void }) {
+function Menu({ x, y, up, items, from, keyboard, onClose }: Open & { onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState({ x, y });
 
@@ -145,9 +163,13 @@ function Menu({ x, y, items, from, keyboard, onClose }: Open & { onClose: () => 
     const pad = 6;
     setAt({
       x: x + width + pad > window.innerWidth ? Math.max(pad, x - width) : x,
-      y: y + height + pad > window.innerHeight ? Math.max(pad, y - height) : y,
+      y: up
+        ? Math.max(pad, y - height)
+        : y + height + pad > window.innerHeight
+          ? Math.max(pad, y - height)
+          : y,
     });
-  }, [x, y]);
+  }, [x, y, up]);
 
   const buttons = () =>
     [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
@@ -216,10 +238,15 @@ function Menu({ x, y, items, from, keyboard, onClose }: Open & { onClose: () => 
       {items.map((item, i) =>
         item === "separator" ? (
           <div key={i} className="context-sep" role="separator" />
+        ) : "heading" in item ? (
+          <div key={i} className="context-heading" role="presentation">
+            {item.heading}
+          </div>
         ) : (
           <button
             key={i}
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={item.checked}
             className={item.danger ? "danger" : ""}
             disabled={item.disabled}
             onClick={() => {
@@ -227,7 +254,9 @@ function Menu({ x, y, items, from, keyboard, onClose }: Open & { onClose: () => 
               item.run();
             }}
           >
-            <span className="context-icon">{item.icon && <item.icon aria-hidden />}</span>
+            <span className="context-icon">
+              {item.checked ? <Chosen aria-hidden /> : item.icon && <item.icon aria-hidden />}
+            </span>
             <span className="context-label">{item.label}</span>
             {item.hint && <span className="context-hint">{item.hint}</span>}
           </button>

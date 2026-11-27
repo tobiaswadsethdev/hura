@@ -1028,7 +1028,7 @@ fn cmd_enqueue(args: NewArgs, cfg: &Config) -> Fallible {
         interface: Some(args.interface.unwrap_or_else(|| cfg.interface())),
         worktree: args.worktree,
     };
-    let id = queue::add(new, at, cfg)?;
+    let id = queue::add(new, at, None, cfg)?;
     let q = queue::view(cfg)?;
     let Some(s) = q.sessions.iter().find(|s| s.id == id) else {
         return Ok(());
@@ -1073,7 +1073,7 @@ fn cmd_queue(action: Option<QueueAction>, cfg: &Config) -> Fallible {
                 Some(text) => Some(when::parse(text, chrono::Local::now())?),
                 None => None,
             };
-            let id = queue::say(&name, &text.join(" "), at)?;
+            let id = queue::say(&name, &text.join(" "), at, None)?;
             match at {
                 Some(at) => println!(
                     "queued for `{name}` (#{id}); said {}, or when its agent's turn ends after that",
@@ -1101,6 +1101,14 @@ fn cmd_queue(action: Option<QueueAction>, cfg: &Config) -> Fallible {
             } else {
                 match s.at {
                     Some(at) if at <= queue::now() => "now".to_string(),
+                    // A repeating one's time is only its next.
+                    Some(at) if s.repeat.is_some() => {
+                        format!(
+                            "{}, and again after (started {} times)",
+                            local_time(at),
+                            s.runs
+                        )
+                    }
                     Some(at) => local_time(at),
                     None => format!("when fewer than {} are running", q.limit),
                 }

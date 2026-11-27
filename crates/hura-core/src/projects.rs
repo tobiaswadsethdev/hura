@@ -38,6 +38,36 @@ pub struct Project {
     pub path: String,
     #[cfg_attr(feature = "ts", ts(type = "number"))]
     pub created_at: u64,
+    /// What a new worktree in it starts with, over the server's own.
+    #[serde(default, skip_serializing_if = "ProjectDefaults::is_empty")]
+    pub defaults: ProjectDefaults,
+}
+
+/// What a new worktree in a project starts with, over the server's config:
+/// T3 Code's project defaults. Each one unset is the server's. Kept with the
+/// project, on the server, so every client starting a worktree there agrees.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectDefaults {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface: Option<crate::chat::Interface>,
+    /// A git worktree on the server, as its user, rather than a sandbox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolchains: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub providers: Option<Vec<String>>,
+}
+
+impl ProjectDefaults {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 /// A project a client is asking for.
@@ -112,6 +142,7 @@ pub fn add_at(path: &Path, new: NewProject) -> Result<Vec<Project>, String> {
         repo: new.repo,
         path: new.path,
         created_at: crate::session::now_epoch(),
+        defaults: ProjectDefaults::default(),
     });
     write(path, &all)?;
     Ok(all)
@@ -146,6 +177,34 @@ pub fn reorder_at(path: &Path, names: &[String]) -> Result<Vec<Project>, String>
             .position(|n| *n == p.name)
             .unwrap_or(usize::MAX)
     });
+    write(path, &all)?;
+    Ok(all)
+}
+
+/// Set what a project's new worktrees start with. Blank text is unset, as a
+/// field left empty in a form is.
+pub fn set_defaults(name: &str, defaults: ProjectDefaults) -> Result<Vec<Project>, String> {
+    set_defaults_at(&default_path(), name, defaults)
+}
+
+pub fn set_defaults_at(
+    path: &Path,
+    name: &str,
+    mut defaults: ProjectDefaults,
+) -> Result<Vec<Project>, String> {
+    let blank = |v: &mut Option<String>| {
+        if v.as_deref().is_some_and(|s| s.trim().is_empty()) {
+            *v = None;
+        }
+    };
+    blank(&mut defaults.policy);
+    blank(&mut defaults.base);
+    let mut all = list_at(path);
+    let project = all
+        .iter_mut()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("no project named `{name}`"))?;
+    project.defaults = defaults;
     write(path, &all)?;
     Ok(all)
 }
@@ -250,5 +309,32 @@ mod tests {
         let all = remove_at(&store, "one").unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].name, "two");
+    }
+
+    /// A project's defaults are kept with it, blank text is no default, and a
+    /// file from before them reads as having none.
+    #[test]
+    fn a_projects_defaults_are_kept_and_blank_is_none() {
+        let path = scratch("defaults");
+        add_at(&path, draft("/srv/shop", "git@x:shop.git")).unwrap();
+        let defaults = ProjectDefaults {
+            policy: Some("locked-down".into()),
+            base: Some("  ".into()),
+            toolchains: Some(vec!["node".into()]),
+            ..Default::default()
+        };
+        let all = set_defaults_at(&path, "shop", defaults).unwrap();
+        assert_eq!(all[0].defaults.policy.as_deref(), Some("locked-down"));
+        assert_eq!(all[0].defaults.base, None);
+        assert_eq!(
+            list_at(&path)[0].defaults.toolchains,
+            Some(vec!["node".to_string()])
+        );
+        assert!(set_defaults_at(&path, "nope", ProjectDefaults::default()).is_err());
+
+        let old = r#"[{"name":"a","repo":"r","path":"/p","created_at":1}]"#;
+        let read: Vec<Project> = serde_json::from_str(old).unwrap();
+        assert!(read[0].defaults.is_empty());
+        assert!(!serde_json::to_string(&read).unwrap().contains("defaults"));
     }
 }

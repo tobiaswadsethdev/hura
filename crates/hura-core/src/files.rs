@@ -130,6 +130,45 @@ pub struct Dir {
     pub entries: Vec<Entry>,
 }
 
+/// Paths in a working copy that match what is typed after `@` in the
+/// composer: files, and the directories they are in.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundPaths {
+    /// Relative to the repository root, the best match first. A directory
+    /// ends in `/`.
+    pub paths: Vec<String>,
+    /// More matched than were sent.
+    pub truncated: bool,
+}
+
+/// The most paths a search reads before ranking them: a monorepo's worth, and
+/// a bound on what one keystroke can cost the sandbox.
+const FIND_SCAN: usize = 50_000;
+
+/// The most a search answers with, whatever it is asked for.
+pub const FIND_MOST: usize = 200;
+
+/// The end of a file, for following something as it is written: a
+/// background command's output, which Claude Code keeps in a file in the
+/// sandbox.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TailText {
+    /// Where it is in the sandbox, absolute.
+    pub path: String,
+    /// How big the whole file is.
+    #[cfg_attr(feature = "ts", ts(type = "number"))]
+    pub bytes: u64,
+    /// Its last bytes, as text.
+    pub text: String,
+    /// There is more before `text`.
+    pub cut: bool,
+}
+
+/// The most of a file's end a [`tail`] answers with.
+pub const TAIL_MOST: u64 = 256 * 1024;
+
 /// A file, as much of it as is worth showing.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -265,6 +304,110 @@ pub fn list(backend: &dyn Backend, session: &Session, path: &str) -> Result<Dir,
     Ok(Dir { path: rel, entries })
 }
 
+/// Find paths in the working copy by what they are called, for the
+/// composer's `@`.
+///
+/// What git tracks, and what it would track (new files that are not ignored),
+/// so the build output and `node_modules` that a plain `find` would drown the
+/// answer in are left out. A working copy that is not a git repository falls
+/// back to every file under it. Ranked here rather than in the client, so a
+/// keystroke costs one exec and a few kilobytes rather than the whole tree.
+pub fn find(
+    backend: &dyn Backend,
+    session: &Session,
+    query: &str,
+    limit: usize,
+) -> Result<FoundPaths, String> {
+    let root = backend.paths(session).repo;
+    // `core.quotePath=off` so a name with an accent comes back as itself
+    // rather than as octal escapes in quotes.
+    let script = format!(
+        "[ -d {root} ] || {{ printf '%s\\n' {mark}; exit 0; }}\ncd {root} || exit 1\n{{ git -c core.quotePath=off ls-files --cached --others --exclude-standard 2>/dev/null || find . -path ./.git -prune -o -type f -print | sed 's|^\\./||'; }} | head -n {FIND_SCAN}",
+        root = sh_quote(&root),
+        mark = sh_quote(NO_REPO),
+    );
+    let out = backend
+        .exec(session, &["sh", "-c", &script])
+        .map_err(|e| e.to_string())?;
+    if out.trimmed() == NO_REPO {
+        return Err(no_working_copy(session));
+    }
+    if !out.ok() {
+        return Err(gone_or(
+            &out.stderr,
+            "the working copy is not there any more",
+        ));
+    }
+    let files: Vec<&str> = out
+        .stdout
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.is_empty())
+        .collect();
+    Ok(rank(&files, query, limit.min(FIND_MOST)))
+}
+
+/// The files, and the directories they are in, that match `query`, best
+/// first: the name being the query (with or without its extension), then
+/// starting with it, then containing
+/// it, then the path containing it, then its letters in order anywhere in the
+/// path. Shorter paths first among equals, so `src/app.ts` comes before
+/// `tests/fixtures/app/app.ts`. An empty query is every path, shortest first.
+pub fn rank(files: &[&str], query: &str, limit: usize) -> FoundPaths {
+    let q = query.trim().trim_start_matches("./").to_lowercase();
+    let mut dirs = std::collections::BTreeSet::new();
+    for file in files {
+        let mut at = *file;
+        while let Some(i) = at.rfind('/') {
+            at = &at[..i];
+            if !dirs.insert(format!("{at}/")) {
+                break;
+            }
+        }
+    }
+    let mut scored: Vec<(u8, &str)> = files
+        .iter()
+        .copied()
+        .chain(dirs.iter().map(String::as_str))
+        .filter_map(|path| score(path, &q).map(|s| (s, path)))
+        .collect();
+    scored.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.len().cmp(&b.1.len()))
+            .then(a.1.cmp(b.1))
+    });
+    FoundPaths {
+        truncated: scored.len() > limit,
+        paths: scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, p)| p.to_string())
+            .collect(),
+    }
+}
+
+fn score(path: &str, q: &str) -> Option<u8> {
+    if q.is_empty() {
+        return Some(0);
+    }
+    let lower = path.to_lowercase();
+    let name = lower.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+    // `app.ts` is what someone typing `app` means.
+    let stem = name.split('.').next().unwrap_or(name);
+    if name == q || stem == q {
+        Some(0)
+    } else if name.starts_with(q) {
+        Some(1)
+    } else if name.contains(q) {
+        Some(2)
+    } else if lower.contains(q) {
+        Some(3)
+    } else {
+        let mut rest = lower.chars();
+        q.chars().all(|c| rest.any(|p| p == c)).then_some(4)
+    }
+}
+
 /// Read one file.
 pub fn read(backend: &dyn Backend, session: &Session, path: &str) -> Result<FileText, String> {
     let rel = clean(path)?;
@@ -327,6 +470,48 @@ pub fn read(backend: &dyn Backend, session: &Session, path: &str) -> Result<File
         truncated: bytes > CAP,
         binary: binary || image.is_some(),
         image,
+    })
+}
+
+/// The last `most` bytes of a file anywhere in the sandbox (absolute, or
+/// relative to the working copy), never more than [`TAIL_MOST`]. Anywhere,
+/// as [`fetch`] reads: a background command's output is under `/tmp`.
+pub fn tail(
+    backend: &dyn Backend,
+    session: &Session,
+    path: &str,
+    most: u64,
+) -> Result<TailText, String> {
+    let root = backend.paths(session).repo;
+    let target = locate(&root, path)?;
+    let most = most.clamp(1, TAIL_MOST);
+    let script = format!(
+        "p={path}; [ -f \"$p\" ] || {{ echo missing; exit 3; }}; wc -c < \"$p\"; tail -c {most} \"$p\" | base64 | tr -d '\\n'",
+        path = sh_quote(&target),
+    );
+    let out = backend
+        .exec(session, &["sh", "-c", &script])
+        .map_err(|e| e.to_string())?;
+    // Exit 3 is the script's own way of saying there is no such file: for a
+    // command that has not written anything yet, not yet.
+    if out.exit_code == 3 || out.trimmed() == "missing" {
+        return Err("there is nothing there yet".into());
+    }
+    if !out.ok() {
+        return Err(gone_or(&out.stderr, "that file is not there any more"));
+    }
+    let mut lines = out.trimmed().splitn(2, '\n');
+    let bytes: u64 = lines
+        .next()
+        .and_then(|l| l.trim().parse().ok())
+        .ok_or("the sandbox did not say how big that file is")?;
+    let raw =
+        decode_base64(lines.next().unwrap_or("").trim()).ok_or("the file came back malformed")?;
+    Ok(TailText {
+        path: target,
+        bytes,
+        text: String::from_utf8_lossy(&raw).into_owned(),
+        cut: bytes > most,
     })
 }
 
@@ -535,6 +720,48 @@ pub(crate) fn encode_base64(raw: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TREE: &[&str] = &[
+        "README.md",
+        "src/app.ts",
+        "src/components/AppShell.tsx",
+        "src/lib/cn.ts",
+        "tests/fixtures/app/app.ts",
+    ];
+
+    /// The name first, then the path, then letters in order; shorter paths
+    /// first among equals.
+    #[test]
+    fn an_at_mention_ranks_names_before_paths() {
+        let found = rank(TREE, "app", 10);
+        assert_eq!(
+            found.paths,
+            [
+                "src/app.ts",
+                "tests/fixtures/app/",
+                "tests/fixtures/app/app.ts",
+                "src/components/AppShell.tsx",
+            ]
+        );
+        assert!(!found.truncated);
+    }
+
+    #[test]
+    fn an_at_mention_finds_directories_and_letters_in_order() {
+        assert_eq!(
+            rank(TREE, "src/comp", 10).paths,
+            ["src/components/", "src/components/AppShell.tsx"]
+        );
+        assert_eq!(rank(TREE, "slcn", 10).paths, ["src/lib/cn.ts"]);
+        assert!(rank(TREE, "zzz", 10).paths.is_empty());
+    }
+
+    #[test]
+    fn an_empty_at_mention_is_the_shortest_paths_and_says_when_it_stopped() {
+        let found = rank(TREE, "", 2);
+        assert_eq!(found.paths, ["src/", "tests/"]);
+        assert!(found.truncated);
+    }
 
     /// A component that *is* `..` escapes; one that merely contains dots does
     /// not, and a viewer that refused `..config` would be wrong.

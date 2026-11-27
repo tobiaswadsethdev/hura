@@ -121,7 +121,7 @@ function Policy({ view, change, busy }: { view: View; change: Change; busy: stri
       <header className="policy-head">
         <PolicyGlyph className="policy-glyph" />
         <span className="policy-name">{view.template ?? "no template recorded"}</span>
-        <span className="pill fixed" title="Rules on this session's own sandbox">
+        <span className="pill held" title="Rules on this session's own sandbox">
           {view.rules.filter((r) => !r.global).length} rules
         </span>
       </header>
@@ -186,7 +186,7 @@ function Policy({ view, change, busy }: { view: View; change: Change; busy: stri
             ))}
             {lists.block.map((b) => (
               <li key={b.endpoint} className="listed" tabIndex={0} {...listed(b.endpoint)}>
-                <Revoke className="block" aria-label="blocked" />
+                <Revoke className="blocking" aria-label="blocked" />
                 <span className="host">{b.endpoint}</span>
                 <State busy={busy === b.endpoint} on={b.in_policy} yes="denied here" no="not denied in this one" warnOff />
               </li>

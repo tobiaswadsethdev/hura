@@ -72,13 +72,18 @@ export type Item =
   | { kind: "thinking"; key: string; text: string }
   | { kind: "tool"; key: string; call: ToolCall }
   | { kind: "note"; key: string; text: string; tone: "dim" | "bad" }
-  | { kind: "turn"; key: string; ok: boolean; text: string; at: number }
+  /// `ms` is how long the turn took by Claude Code's own count.
+  | { kind: "turn"; key: string; ok: boolean; text: string; at: number; ms: number | null }
   | { kind: "divider"; key: string; text: string }
   /// The first thing said on a day, so a time is never read as the wrong one.
   | { kind: "day"; key: string; at: number }
   /// The steps of a turn on the way to its answer, folded into one row: see
   /// `group`. `live` while the turn they are in is still running.
-  | { kind: "steps"; key: string; items: Item[]; live: boolean };
+  /// `from` is when the turn began (its prompt taken in, or sent), epoch
+  /// milliseconds, for "Working for" while it runs; `took` how long it took by
+  /// Claude Code's own count once it has ended, for "Worked for". Either is
+  /// null when the transcript does not say.
+  | { kind: "steps"; key: string; items: Item[]; live: boolean; from: number | null; took: number | null };
 
 /// The same calendar day, where this window is.
 function sameDay(a: number, b: number): boolean {
@@ -141,10 +146,31 @@ export type Agent = {
   usage: { total_tokens: number; tool_uses: number; duration_ms: number } | null;
 };
 
+/// A command the agent left running in the background: a Bash call with
+/// `run_in_background`, which returns at once while the command goes on, and
+/// which Claude Code follows as a `local_bash` task. Its output goes to a file
+/// in the sandbox, which is where the panel reads it from.
+export type Command = {
+  /// The call's id, or the task's when no call came through.
+  id: string;
+  /// What Claude Code calls it: the id `BashOutput` and `KillShell` name.
+  taskId: string | null;
+  command: string;
+  /// What the agent said it was for, when it said.
+  description: string;
+  status: Agent["status"];
+  started: number;
+  ended: number | null;
+  /// Its output file in the sandbox, when the transcript says where.
+  output: string | null;
+  /// What Claude Code said about it when it ended.
+  summary: string | null;
+};
+
 /// The transcript as things to draw, your messages Claude has not read yet,
 /// which are drawn after everything else, the reply being written too, and
-/// the subagents, oldest first.
-export type Built = { items: Item[]; queued: Item[]; agents: Agent[] };
+/// the subagents and background commands, oldest first.
+export type Built = { items: Item[]; queued: Item[]; agents: Agent[]; commands: Command[] };
 
 /// What Claude Code names the parent of a typed skill's messages, before the
 /// skill's name: they have no tool call to name.
@@ -199,6 +225,12 @@ export function build(entries: ChatEntry[]): Built {
   /// Waiting for their receipt, to be placed where it comes.
   const held = new Map<string, Extract<Item, { kind: "prompt" }>>();
   const agents = new Map<string, Agent & { callId: string | null }>();
+  // Claude Code's own account of the background commands, by task id: when
+  // each started, and how it ended.
+  const shellTasks = new Map<
+    string,
+    { callId: string | null; description: string; started: number; status: Agent["status"]; ended: number | null; output: string | null; summary: string | null }
+  >();
 
   /// Where a message's items go: inside the call that started its subagent,
   /// or the transcript itself.
@@ -283,7 +315,59 @@ export function build(entries: ChatEntry[]): Built {
     items,
     queued: [...held.values()],
     agents: [...agents.values()].map(({ callId, ...a }) => ({ ...a, call: (callId && calls.get(callId)) || null })),
+    commands: backgroundCommands(),
   };
+
+  /// The commands left running in the background: each Bash call that asked
+  /// for it, with what its result and the task events say about how it went,
+  /// and any `local_bash` task no call came through for.
+  function backgroundCommands(): Command[] {
+    const out: Command[] = [];
+    const seen = new Set<string>();
+    const all = [...calls.values()];
+    const killed = new Set(
+      all
+        .filter((c) => (c.name === "KillShell" || c.name === "KillBash") && c.result && !c.result.isError)
+        .map((c) => String(c.input.shell_id ?? c.input.bash_id ?? "")),
+    );
+    for (const call of all) {
+      if (call.name !== "Bash" || call.input.run_in_background !== true) continue;
+      const said = call.result?.text ?? "";
+      const named = /\bID:\s*([\w-]+)/.exec(said)?.[1] ?? null;
+      const task = [...shellTasks.entries()].find(([id, t]) => t.callId === call.id || id === named);
+      const taskId = task?.[0] ?? named;
+      if (taskId) seen.add(taskId);
+      const t = task?.[1];
+      const failed = call.result?.isError && !named;
+      out.push({
+        id: call.id,
+        taskId,
+        command: typeof call.input.command === "string" ? call.input.command : "",
+        description:
+          (typeof call.input.description === "string" && call.input.description) || t?.description || "",
+        status: failed ? "failed" : taskId && killed.has(taskId) ? "stopped" : (t?.status ?? "running"),
+        started: call.at,
+        ended: t?.ended ?? null,
+        output: t?.output ?? /written to:?\s*(\S+)/i.exec(said)?.[1]?.replace(/[.,;]$/, "") ?? null,
+        summary: t?.summary ?? null,
+      });
+    }
+    for (const [id, t] of shellTasks) {
+      if (seen.has(id)) continue;
+      out.push({
+        id,
+        taskId: id,
+        command: "",
+        description: t.description,
+        status: killed.has(id) ? "stopped" : t.status,
+        started: t.started,
+        ended: t.ended,
+        output: t.output,
+        summary: t.summary,
+      });
+    }
+    return out;
+  }
 
   /// A message into the transcript at `at`, the first of its day under a line
   /// naming the day.
@@ -361,14 +445,15 @@ export function build(entries: ChatEntry[]): Built {
       case "result": {
         const r = msg as ResultMessage;
         const facts = seconds(r.duration_ms);
+        const ms = typeof r.duration_ms === "number" ? r.duration_ms : null;
         if (r.subtype === "success" && !r.is_error) {
-          items.push({ kind: "turn", key, ok: true, text: facts, at });
+          items.push({ kind: "turn", key, ok: true, text: facts, at, ms });
         } else if (r.subtype === "error_during_execution") {
           // What an interrupt ends with. Stopping a turn is not a failure of it.
-          items.push({ kind: "turn", key, ok: true, text: ["stopped", facts].filter(Boolean).join(" · "), at });
+          items.push({ kind: "turn", key, ok: true, text: ["stopped", facts].filter(Boolean).join(" · "), at, ms });
         } else {
           const why = r.subtype.replace(/^error_/, "").replaceAll("_", " ");
-          items.push({ kind: "turn", key, ok: false, text: [why, facts].filter(Boolean).join(" · "), at });
+          items.push({ kind: "turn", key, ok: false, text: [why, facts].filter(Boolean).join(" · "), at, ms });
         }
         break;
       }
@@ -411,6 +496,18 @@ export function build(entries: ChatEntry[]): Built {
       // not a conversation, and an ambient task is housekeeping. Except a
       // forked skill, which is the whole of the work while it runs.
       case "task_started": {
+        if (m.task_type === "local_bash") {
+          shellTasks.set(text("task_id"), {
+            callId: text("tool_use_id") || null,
+            description: text("description"),
+            started: at,
+            status: "running",
+            ended: null,
+            output: text("output_file") || null,
+            summary: null,
+          });
+          break;
+        }
         if (m.task_type !== "local_agent") break;
         const fork = forkedSkill(m);
         if ((m.skip_transcript || m.ambient) && !fork) break;
@@ -436,6 +533,12 @@ export function build(entries: ChatEntry[]): Built {
       case "task_updated": {
         const agent = agents.get(text("task_id"));
         const patch = (m.patch ?? {}) as { status?: string; end_time?: number; description?: string };
+        const shell = shellTasks.get(text("task_id"));
+        if (shell) {
+          if (patch.status) shell.status = status(patch.status);
+          if (patch.end_time) shell.ended = patch.end_time;
+          if (patch.description) shell.description = patch.description;
+        }
         if (!agent) break;
         if (patch.status) agent.status = status(patch.status);
         if (patch.end_time) agent.ended = patch.end_time;
@@ -443,6 +546,13 @@ export function build(entries: ChatEntry[]): Built {
         break;
       }
       case "task_notification": {
+        const shell = shellTasks.get(text("task_id"));
+        if (shell) {
+          shell.status = status(m.status);
+          shell.ended ??= at;
+          shell.summary = text("summary") || shell.summary;
+          shell.output = text("output_file") || shell.output;
+        }
         const agent = agents.get(text("task_id"));
         if (!agent) break;
         agent.status = status(m.status);
@@ -562,12 +672,15 @@ function isStep(item: Item): boolean {
 export function group(items: Item[], working: boolean): Item[] {
   const out: Item[] = [];
   let run: Item[] = [];
-  const flush = () => {
+  // When the turn the run belongs to began: the last prompt's.
+  let from: number | null = null;
+  const flush = (next?: Item) => {
     // The answer: the text the run ends with.
     let end = run.length;
     while (end > 0 && run[end - 1].kind === "text") end--;
     const steps = run.slice(0, end);
-    if (steps.length > 1) out.push({ kind: "steps", key: `${steps[0].key}.steps`, items: steps, live: false });
+    const took = next?.kind === "turn" ? next.ms : null;
+    if (steps.length > 1) out.push({ kind: "steps", key: `${steps[0].key}.steps`, items: steps, live: false, from, took });
     else out.push(...steps);
     out.push(...run.slice(end));
     run = [];
@@ -575,7 +688,8 @@ export function group(items: Item[], working: boolean): Item[] {
   for (const item of items) {
     if (isStep(item)) run.push(item);
     else {
-      flush();
+      flush(item);
+      if (item.kind === "prompt") from = item.read ?? item.at;
       out.push(item);
     }
   }

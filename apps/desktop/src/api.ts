@@ -34,6 +34,8 @@ import type { FeedEvent } from "./gen/FeedEvent";
 import type { Against } from "./gen/Against";
 import type { FileDiff } from "./gen/FileDiff";
 import type { FileText } from "./gen/FileText";
+import type { FoundPaths } from "./gen/FoundPaths";
+import type { TailText } from "./gen/TailText";
 import type { GitOp } from "./gen/GitOp";
 import type { Status as GitStatus } from "./gen/Status";
 import type { NewComment } from "./gen/NewComment";
@@ -45,6 +47,8 @@ import type { NewOptions } from "./gen/NewOptions";
 import type { NewProject } from "./gen/NewProject";
 import type { Project } from "./gen/Project";
 import type { QueueView } from "./gen/QueueView";
+import type { Repeat } from "./gen/Repeat";
+import type { ProjectDefaults } from "./gen/ProjectDefaults";
 import type { NewSession } from "./gen/NewSession";
 import type { Poll } from "./gen/Poll";
 import type { Session } from "./gen/Session";
@@ -182,6 +186,13 @@ export const api = {
     invoke<Dir>("files", { server, name, path }),
   file: (server: string, name: string, path: string) =>
     invoke<FileText>("file", { server, name, path }),
+  /// Paths in a worktree's working copy that fit what follows an `@` in the
+  /// composer, best first.
+  findFiles: (server: string, name: string, query: string) =>
+    invoke<FoundPaths>("find_files", { server, name, query }),
+  /// The end of a file in the sandbox: a background command's output.
+  tailFile: (server: string, name: string, path: string) =>
+    invoke<TailText>("tail_file", { server, name, path }),
   /// A file out of the sandbox, whole, into the Downloads folder: where it was
   /// saved. Relative to the working copy, or absolute anywhere in the sandbox.
   download: (server: string, name: string, path: string) =>
@@ -202,7 +213,9 @@ export const api = {
   // survives this window closing. Each answers with whether the agent is
   // still running too: a terminal session's can be closed, and started again.
   shells: (server: string, name: string) => invoke<Shells>("shells", { server, name }),
-  newShell: (server: string, name: string) => invoke<Shells>("new_shell", { server, name }),
+  /// `run` is typed into the new shell once it is up: a project's script.
+  newShell: (server: string, name: string, run: string | null = null) =>
+    invoke<Shells>("new_shell", { server, name, run }),
   killShell: (server: string, name: string, tmux: string) =>
     invoke<Shells>("kill_shell", { server, name, tmux }),
   newAgent: (server: string, name: string) => invoke<Shells>("new_agent", { server, name }),
@@ -211,7 +224,11 @@ export const api = {
   // reason the shells are asked of tmux. Opening one answers with the list and
   // its name, which the host chose.
   chats: (server: string, name: string) => invoke<Chats>("chats", { server, name }),
-  newChat: (server: string, name: string) => invoke<Chats>("new_chat", { server, name }),
+  /// Another conversation. With `fork`, starting from that one's context (a
+  /// side chat); with `at` as well, only up to that assistant message (an
+  /// earlier message edited).
+  newChat: (server: string, name: string, fork: string | null = null, at: string | null = null) =>
+    invoke<Chats>("new_chat", { server, name, fork, at }),
   closeChat: (server: string, name: string, conv: string) =>
     invoke<Chats>("close_chat", { server, name, conv }),
 
@@ -247,6 +264,9 @@ export const api = {
     invoke<Project[]>("forget_project", { server, name }),
   reorderProjects: (server: string, names: string[]) =>
     invoke<Project[]>("reorder_projects", { server, names }),
+  /// What a project's new worktrees start with, over the server's defaults.
+  setProjectDefaults: (server: string, name: string, defaults: ProjectDefaults) =>
+    invoke<Project[]>("set_project_defaults", { server, name, defaults }),
 
   // The create flow. `repos` and `inspect` answer about the *server's* disk:
   // a checkout is only a way of naming a remote, but which checkouts exist is a
@@ -261,12 +281,13 @@ export const api = {
   // queue has room, and messages for a session's agent. `at` is seconds since
   // the epoch; null is "when there is room" or "when its turn ends".
   queue: (server: string) => invoke<QueueView>("queue", { server }),
-  enqueue: (server: string, session: NewSession, at: number | null) =>
-    invoke<QueueView>("enqueue", { server, session, at }),
+  /// With `repeat`, a template that starts a copy each time it comes round.
+  enqueue: (server: string, session: NewSession, at: number | null, repeat: Repeat | null = null) =>
+    invoke<QueueView>("enqueue", { server, session, at, repeat }),
   unqueue: (server: string, id: number) => invoke<QueueView>("unqueue", { server, id }),
   startQueued: (server: string, id: number) => invoke<QueueView>("start_queued", { server, id }),
-  queueMessage: (server: string, name: string, text: string, at: number | null) =>
-    invoke<QueueView>("queue_message", { server, name, text, at }),
+  queueMessage: (server: string, name: string, text: string, at: number | null, repeat: Repeat | null = null) =>
+    invoke<QueueView>("queue_message", { server, name, text, at, repeat }),
 
   // What the server holds on your sessions' behalf. Every action answers with
   // the whole view, re-read: a secret is usually what a container was waiting

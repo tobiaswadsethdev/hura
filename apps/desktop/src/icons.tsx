@@ -35,6 +35,16 @@
 
 import {
   Activity,
+  AppWindow,
+  Gauge,
+  Repeat,
+  Settings2,
+  Palette,
+  Keyboard,
+  Layers,
+  FlaskConical,
+  Hammer,
+  ListChecks,
   ArrowDownToLine,
   ArrowLeft,
   ArrowUp,
@@ -84,6 +94,10 @@ import {
   Package,
   PanelRightClose,
   PanelRightOpen,
+  PanelLeft,
+  PanelBottom,
+  PanelRight,
+  SquarePen,
   Paperclip,
   KeyRound,
   List,
@@ -99,6 +113,7 @@ import {
   Minus as MinusGlyph,
   RefreshCw,
   RotateCw,
+  Smartphone,
   ScrollText,
   Save,
   Search,
@@ -110,6 +125,19 @@ import {
   ShieldBan,
   ShieldCheck,
   ShieldOff,
+  ShieldQuestion,
+  Lock,
+  FileText,
+  FilePen,
+  CornerUpRight,
+  Bookmark,
+  Pin as PinGlyph,
+  MessageCircleMore,
+  AlarmClock,
+  ListTodo,
+  Wrench,
+  PenLine,
+  NotebookPen,
   Sparkles,
   Square,
   Tag,
@@ -124,25 +152,17 @@ import {
   MoveDown as MoveDownGlyph,
 } from "lucide-react";
 
-import {
-  fileExtensions,
-  fileNames,
-  folderNames,
-  folderNamesExpanded,
-} from "material-icon-theme/dist/material-icons.json";
-
 import type { State } from "./gen/State";
-import "./working.css";
 
 /// The grid every icon in this window is on: 14 pixels across, with a stroke
 /// of `ICON_STROKE` *actual* pixels. Applied to lucide through its provider in
 /// `main.tsx` and to the hand-drawn glyphs below by hand, which is the whole
 /// reason both numbers are named here rather than written twice.
 export const ICON_SIZE = 14;
-/// 1.25 rather than lucide's 2. The window's text is 12 and 13 pixels, and a
-/// two-pixel stroke beside it reads as bold -- which is what an icon set at its
-/// default weight looks like dropped into an interface built at this scale.
-export const ICON_STROKE = 1.25;
+/// 1.75 rather than lucide's 2, which is what T3 Code sets its icons to: a
+/// full two pixels beside 13 and 14 pixel text reads as bold, and the 1.25
+/// this used to be reads as faint on its black.
+export const ICON_STROKE = 1.75;
 /// The one deliberate exception to the 14-grid: the glyph that stands in for a
 /// pane with nothing in it. See `Empty.tsx`.
 ///
@@ -166,6 +186,43 @@ export const ICON_PAGE = 40;
 // The header's five destinations. Icon-only, and the window's own nav: see
 // `App.tsx` for why the labels went and what replaced them.
 export const NewProject = FolderPlus;
+/// The window's frame, as T3 Code draws its toggles: the sidebar on the left,
+/// the panel of files, git and the sandbox on the right, and a new worktree in
+/// the project in front.
+export const SidebarToggle = PanelLeft;
+export const DrawerToggle = PanelBottom;
+/// A session's state in the sidebar, as T3 Code labels a thread's: working
+/// (and being set up), waiting on you, and failed. Static, as T3 Code's are;
+/// the word beside each says it.
+export const StatusWorking = CircleDashed;
+export const StatusNeedsYou = ShieldQuestion;
+export const StatusFailed = CircleAlert;
+/// A tool call's kind, on the left of its row in a turn's work, as T3 Code's
+/// work log draws them.
+export const ToolRead = FileText;
+export const ToolEdit = FilePen;
+export const ToolRun = TerminalGlyph;
+export const ToolSearch = Search;
+export const ToolTodo = ListTodo;
+export const ToolOther = Wrench;
+/// The send button while a turn runs, T3 Code's two: say it after the turn
+/// (the default), or stop the turn and say it now (with Ctrl or Command held).
+export const SendQueued = ListPlus;
+/// Prompts put aside, T3 Code's stash: a bookmark, as its is.
+export const Stash = Bookmark;
+/// A side chat: a question asked beside the conversation (`/btw`).
+export const SideChat = MessageCircleMore;
+/// Keeping the sidebar to what needs you (`triage.ts`): pinned to the top,
+/// snoozed until a time, settled as done for now, and the way back.
+export const Pin = PinGlyph;
+export const Snooze = AlarmClock;
+export const Settle = CircleCheck;
+export const Undo = Undo2;
+export const SendSteer = CornerUpRight;
+/// A group's twisty, turned by CSS rather than swapped, as T3 Code's is.
+export const Disclosure = ChevronDown;
+export const PanelToggle = PanelRight;
+export const NewSession = SquarePen;
 export const Integrations = Plug;
 export const Servers = ServerGlyph;
 export const Settings = SettingsGlyph;
@@ -273,9 +330,15 @@ export const Agent = Bot;
 export const Chat = MessagesSquare;
 /// Sending a message. An arrow up, which is where the message goes.
 export const Send = ArrowUp;
-/// A file sent with a message, once it is in the message. The composer's
-/// button that picks one is a `Plus` in a disc, as on the phone.
+/// A file sent with a message: the composer's button that picks one, and the
+/// file once it is in the message.
 export const Attach = Paperclip;
+/// The permission modes, as the composer's mode control draws them: T3 Code's
+/// glyphs for the same four ideas.
+export const ModeAuto = ShieldCheck;
+export const ModeAsk = Lock;
+export const ModeEdits = PenLine;
+export const ModePlan = NotebookPen;
 /// A file taken out of the sandbox, into this computer's Downloads folder.
 export const Download = DownloadGlyph;
 /// A message the sandbox has, and one Claude Code has taken into a turn: the
@@ -315,6 +378,31 @@ export const Find = Search;
 /// Opening a ticket in the browser. The one icon in the window that means
 /// "this leaves the window".
 export const Elsewhere = ExternalLink;
+/// A port's page, in a tab of the window rather than a browser.
+export const PreviewHere = AppWindow;
+/// The preview at a phone's width.
+export const Phone = Smartphone;
+/// A project's scripts (`scripts.ts`), by the icon each was given.
+export const ScriptRun = Play;
+export const ScriptTest = FlaskConical;
+export const ScriptBuild = Hammer;
+export const ScriptLint = ListChecks;
+export const ScriptDebug = Bug;
+export const ScriptConfigure = Wrench;
+/// The settings' own pages, as T3 Code's nav marks them.
+export const SettingsGeneral = Settings2;
+export const SettingsAppearance = Palette;
+export const SettingsKeys = Keyboard;
+/// What a new worktree starts with: the server's defaults.
+export const SettingsSessions = Layers;
+export const SettingsDiffs = FileDiff;
+export const SettingsProjects = FolderGit2;
+/// What the worktrees have spent, and what the account has left.
+export const UsageGlyph = Gauge;
+/// A group of related worktrees within a project, in the sidebar.
+export const GroupGlyph = FolderPlus;
+/// A worktree that starts again and again, on the server's queue.
+export const Recurring = Repeat;
 export const Forget = Trash;
 /// The current choice in a dropdown.
 export const Chosen = Check;
@@ -390,19 +478,12 @@ export const Twisty = ({ open, className, ...p }: Props & { open: boolean }) => 
 ///
 /// The colours are in `style.css`, keyed on the state name, for the same reason
 /// the palette is: one place to change what `waiting` looks like.
-/// An agent working, or a session being made ready for one: three dots turning
-/// round each other. See `working.css` for where the motion comes from.
-///
-/// Sized by `size` like the lucide glyphs, so the empty states can pass theirs,
-/// and coloured by `currentColor` like them too.
+/// An agent working, or a session being made ready for one: T3 Code's
+/// spinner, lucide's `LoaderCircle` turning once a second (`.working` in
+/// style.css). Sized by `size` like the other glyphs, so the empty states can
+/// pass theirs, and coloured by `currentColor` like them too.
 export function Working({ size = ICON_SIZE, className }: { size?: number; className?: string }) {
-  return (
-    <span className={`working ${className ?? ""}`} style={{ fontSize: size }} aria-hidden>
-      <span className="working-dot a" />
-      <span className="working-dot b" />
-      <span className="working-dot c" />
-    </span>
-  );
+  return <LoaderCircle size={size} className={`working ${className ?? ""}`} aria-hidden />;
 }
 
 export function StateDot({ state, className }: { state: State; className?: string }) {
@@ -452,82 +533,8 @@ export function StateDot({ state, className }: { state: State; className?: strin
   }
 }
 // ---------------------------------------------------------------------------
-// Files and folders: the Material Icon Theme, as VS Code draws them.
-//
-// These used to be hand-drawn -- a page outline with a mark in it for eight
-// kinds of file -- and they were the one place a monochrome line icon was the
-// wrong answer. The tree is scanned, not read, and what the eye scans a
-// directory for is the shape and colour of a file kind it already knows from
-// the editor it spends the rest of the day in. So this borrows that editor's
-// most-installed icon theme wholesale, mapping and all, rather than drawing a
-// smaller one that is nearly it.
-//
-// They are full-colour pictures and not glyphs, so they sit outside the grid
-// above: 16 pixels rather than 14, which is what VS Code renders them at, and
-// no stroke to pin. Served as files rather than inlined -- `vite.config.ts`
-// says why -- so a directory listing fetches the dozen it shows, not all of
-// them.
+// Files and folders: T3 Code's, from Pierre's file-tree icons. See
+// `fileIcons.tsx`.
 // ---------------------------------------------------------------------------
 
-/// What VS Code renders these at, and the row height of its explorer follows.
-export const FILE_ICON_SIZE = 16;
-
-/// Every icon the theme ships, by name: `rust` to the URL of `rust.svg`. A few
-/// are recoloured copies of another, shipped as `<name>.clone.svg` and named
-/// in the mapping without the `.clone`.
-const URLS: Record<string, string> = Object.fromEntries(
-  Object.entries(
-    import.meta.glob<string>("/node_modules/material-icon-theme/icons/*.svg", {
-      eager: true,
-      query: "?url",
-      import: "default",
-    }),
-  ).map(([path, url]) => [path.slice(path.lastIndexOf("/") + 1).replace(/(\.clone)?\.svg$/, ""), url]),
-);
-
-const lookup = (table: Record<string, string>, key: string) =>
-  Object.hasOwn(table, key) ? table[key] : undefined;
-
-/// The theme's icon for a filename, matched the way VS Code matches it: the
-/// whole name first (`package.json`, `Dockerfile`), then the extension from the
-/// longest down, so `foo.test.ts` is a test before it is TypeScript.
-function fileIconName(path: string): string {
-  const name = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-  const whole = lookup(fileNames, name);
-  if (whole) return whole;
-  for (let i = name.indexOf("."); i !== -1; i = name.indexOf(".", i + 1)) {
-    const ext = lookup(fileExtensions, name.slice(i + 1));
-    if (ext) return ext;
-  }
-  return "file";
-}
-
-function Icon({ icon, fallback, className }: { icon: string; fallback: string; className?: string }) {
-  return (
-    <img
-      className={`file-icon ${className ?? ""}`}
-      src={URLS[icon] ?? URLS[fallback]}
-      width={FILE_ICON_SIZE}
-      height={FILE_ICON_SIZE}
-      // Decorative: the filename beside it is the name.
-      alt=""
-      draggable={false}
-    />
-  );
-}
-
-/// A file's icon, by what it is. Takes a path or a bare name.
-export const FileIcon = ({ name, className }: { name: string; className?: string }) => (
-  <Icon icon={fileIconName(name)} fallback="file" className={className} />
-);
-
-/// A directory, open or shut -- and, like VS Code, a `src` or a `.github` gets
-/// a folder of its own.
-export function Folder({ name, open, className }: { name: string; open: boolean; className?: string }) {
-  const lower = name.toLowerCase();
-  return open ? (
-    <Icon icon={lookup(folderNamesExpanded, lower) ?? "folder-open"} fallback="folder-open" className={className} />
-  ) : (
-    <Icon icon={lookup(folderNames, lower) ?? "folder"} fallback="folder" className={className} />
-  );
-}
+export { FILE_ICON_SIZE, FileIcon, Folder } from "./fileIcons";

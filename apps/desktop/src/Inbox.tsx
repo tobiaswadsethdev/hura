@@ -1,10 +1,10 @@
-// The sidebar on the far right: your tickets and your pull requests.
+// Your tickets and your pull requests, as a page in the middle: T3 Code's
+// Issues and Pull requests, opened from the sidebar's foot, where each has its
+// count. A ticket or pull request opened from here is read in the panel on the
+// right (`TicketPanel`, `PullPanel` in App).
 //
-// Always there, whatever worktree is selected and whatever screen is open,
-// because the question it answers ("what is mine right now?") is not about the
-// worktree in front of you. Every tracker is asked the same thing, what is
-// assigned to you or created by you, so that part means the same thing
-// whichever tracker it reads.
+// Every tracker is asked the same thing, what is assigned to you or created by
+// you, so that part means the same thing whichever tracker it reads.
 //
 // **Two views, two groups each.** Tickets assigned to you and tickets you
 // created; pull requests waiting on you (a review asked of you, or assigned
@@ -22,11 +22,6 @@
 // button instead, and starting is the create form, filled in. A pull request
 // starts in a project that is a clone of its repository, on its own branch,
 // either to work on it or to review it.
-//
-// **Folded, it is a rail of two counts**, because four columns do not fit a
-// laptop: tree, middle, dock and this leave little of the middle at 1280
-// pixels. Each count unfolds it to its own view. The shortcut that used to open the tickets screen folds and unfolds
-// it.
 
 import { useMemo } from "react";
 
@@ -47,7 +42,7 @@ import {
   Copy,
   Elsewhere,
   Failing,
-  Fold,
+  Close,
   Passing,
   Pending,
   PullDraft,
@@ -57,7 +52,6 @@ import {
   Start,
   StateDot,
   Tracker,
-  Unfold,
 } from "./icons";
 import { pullName } from "./inboxNotify";
 import { openExternal } from "./open";
@@ -99,8 +93,6 @@ function ticketGroups(
 }
 
 export function InboxBar({
-  width,
-  open,
   shut,
   view,
   inbox,
@@ -125,11 +117,6 @@ export function InboxBar({
   onStart,
   onStartPull,
 }: {
-  /// How wide, in pixels, when open. From the window's own preferences and
-  /// written by the handle on this sidebar's left edge.
-  width: number;
-  /// Open, or folded to its rail.
-  open: boolean;
   /// The groups that are shut, by `tickets:assigned`-style key.
   shut: string[];
   /// Tickets or pull requests: the one being shown.
@@ -154,12 +141,12 @@ export function InboxBar({
   /// The ticket or pull request open beside the sidebar, if any.
   showing: Task | null;
   showingPull: Pull | null;
-  /// The shortcut that folds and unfolds this, for the tooltips.
+  /// The shortcut that opens and closes this page, for the tooltips.
   keys: { label: string; aria: string };
+  /// Close the page.
   onFold: () => void;
   onShut: (shut: string[]) => void;
-  /// Show the other one. Also what a count on the folded rail calls, before
-  /// unfolding.
+  /// Show the other one.
   onView: (view: InboxView) => void;
   onRefresh: () => void;
   onSetup: () => void;
@@ -174,21 +161,6 @@ export function InboxBar({
   const tasks = useMemo(() => newestFirst(inbox?.tasks ?? []), [inbox]);
   const pulls = useMemo(() => newestFirst(inbox?.pulls ?? []), [inbox]);
 
-  if (!open) {
-    return (
-      <Rail
-        view={view}
-        tasks={tasks}
-        pulls={pulls}
-        warned={(inbox?.warnings.length ?? 0) > 0 || error !== null}
-        keys={keys}
-        onUnfold={(to) => {
-          onView(to);
-          onFold();
-        }}
-      />
-    );
-  }
 
   const none = trackers !== null && trackers.length === 0;
   // Pull requests come from GitHub and Azure DevOps. With only Jira or Fizzy
@@ -201,27 +173,27 @@ export function InboxBar({
     onShut(isShut(key) ? shut.filter((k) => k !== key) : [...shut, key]);
 
   return (
-    <aside className="inbox" style={{ width }} aria-label="Your tickets and pull requests">
-      <header className="inbox-head">
+    // A page in the middle, T3 Code's Issues and Pull requests: the title and
+    // how many as its header, level with the sidebar's head, and the two
+    // groups under it at a reading width. The sidebar's foot is the way here.
+    <section className="inbox inbox-page" aria-label="Your tickets and pull requests">
+      <header className="inbox-head" data-tauri-drag-region>
+        <h1 className="inbox-title">
+          {view === "tickets" ? <Tracker aria-hidden /> : <PullRequest aria-hidden />}
+          {view === "tickets" ? "Tickets" : "Pull Requests"}
+          {inbox !== null && (
+            <span className="inbox-title-count">{view === "tickets" ? tasks.length : pulls.length}</span>
+          )}
+        </h1>
         <div className="segmented inbox-views" role="tablist" aria-label="Mine">
           {(
             [
-              ["tickets", Tracker, "Tickets", tasks.length],
-              ["pulls", PullRequest, "Pull Requests", pulls.length],
+              ["tickets", "Tickets"],
+              ["pulls", "Pull Requests"],
             ] as const
-          ).map(([v, Mark, label, count]) => (
-            <button
-              key={v}
-              role="tab"
-              aria-selected={view === v}
-              aria-label={inbox === null ? label : `${label}, ${count}`}
-              title={label}
-              className={view === v ? "on" : ""}
-              onClick={() => onView(v)}
-            >
-              <Mark />
-              <span className="inbox-views-label">{label}</span>
-              {inbox !== null && <span className="inbox-views-count">{count}</span>}
+          ).map(([v, label]) => (
+            <button key={v} role="tab" aria-selected={view === v} className={view === v ? "on" : ""} onClick={() => onView(v)}>
+              {label}
             </button>
           ))}
         </div>
@@ -229,21 +201,16 @@ export function InboxBar({
             the agent's: the trackers being re-read is not an agent working. */}
         {reading && <span className="spin inbox-reading" role="status" aria-label="Loading" />}
         <span className="inbox-tools">
-          <button
-            className="quiet-icon"
-            title="Read Them Again"
-            disabled={reading || none}
-            onClick={onRefresh}
-          >
+          <button className="quiet-icon" title="Read Them Again" disabled={reading || none} onClick={onRefresh}>
             <Refresh aria-label="Refresh" />
           </button>
           <button
             className="quiet-icon"
-            title={`Fold This Sidebar (${keys.label})`}
-            aria-keyshortcuts={keys.aria}
+            title={keys.label ? `Close (${keys.label})` : "Close"}
+            aria-keyshortcuts={keys.aria || undefined}
             onClick={onFold}
           >
-            <Fold aria-label="Fold" />
+            <Close aria-label="Close" />
           </button>
         </span>
       </header>
@@ -341,62 +308,7 @@ export function InboxBar({
           })
         )}
       </div>
-    </aside>
-  );
-}
-
-/// Folded: the two counts, and the way back.
-function Rail({
-  view,
-  tasks,
-  pulls,
-  warned,
-  keys,
-  onUnfold,
-}: {
-  view: InboxView;
-  tasks: Task[];
-  pulls: Pull[];
-  warned: boolean;
-  keys: { label: string; aria: string };
-  onUnfold: (view: InboxView) => void;
-}) {
-  const split = <T extends { relation: Relation }>(rows: T[], mine: string, theirs: string) => {
-    const assigned = rows.filter((r) => r.relation === "assigned").length;
-    const matched = rows.filter((r) => r.relation === "matched").length;
-    const rest = `${assigned} ${theirs}, ${rows.length - assigned - matched} ${mine}`;
-    return matched > 0 ? `${rest}, ${matched} more from filters` : rest;
-  };
-  return (
-    <aside className="inbox-rail" aria-label="Your tickets and pull requests, folded">
-      <button
-        className="quiet-icon"
-        title={`Open This Sidebar (${keys.label})`}
-        aria-keyshortcuts={keys.aria}
-        onClick={() => onUnfold(view)}
-      >
-        <Unfold aria-label="Open" />
-      </button>
-      <button
-        className="inbox-rail-count"
-        title={`Tickets: ${split(tasks, "created by you", "assigned to you")}`}
-        onClick={() => onUnfold("tickets")}
-      >
-        <Tracker />
-        <span>{tasks.length}</span>
-      </button>
-      <button
-        className="inbox-rail-count"
-        title={`Pull requests: ${split(pulls, "yours", "waiting on you")}`}
-        onClick={() => onUnfold("pulls")}
-      >
-        <PullRequest />
-        <span>{pulls.length}</span>
-      </button>
-      {warned && (
-        <span className="inbox-rail-warn" title="A tracker could not be read; open the sidebar to see which" />
-      )}
-    </aside>
+    </section>
   );
 }
 

@@ -28,18 +28,34 @@ import { useConfirm } from "./Confirm";
 import { Dock } from "./Dock";
 import { Empty } from "./Empty";
 import {
+  Account,
   Branch,
+  DrawerToggle,
+  Find,
   Forget,
   Integrations,
   NewProject,
+  NewSession,
   NoSandbox,
   NoServer,
+  PanelToggle,
+  PreviewHere,
+  PullRequest as PullGlyph,
   Servers,
-  Settings,
-  Account,
-  Find,
+  Settings as SettingsGlyph,
+  SettingsAppearance,
+  SettingsKeys,
+  UsageGlyph,
+  SidebarToggle,
+  Tracker,
   Working,
 } from "./icons";
+import { CommandPalette, type PaletteItem } from "./shell/CommandPalette";
+import { useTriage } from "./triage";
+import { useGroups } from "./groups";
+import { noteServerOffset } from "./repeats";
+import { type Script, useScripts } from "./scripts";
+import { pullName } from "./inboxNotify";
 import { InboxBar, pullProjects, pullSession, samePull, sessionPull } from "./Inbox";
 import { IntegrationsScreen } from "./Integrations";
 import { ServersScreen } from "./Connect";
@@ -55,12 +71,19 @@ import { onSessions, reset as resetNotifications } from "./notify";
 import { onCloudChanges } from "./inboxNotify";
 import { close, nextChannelId, open } from "./stream";
 import { NewProjectDialog } from "./NewProject";
-import { forgetChat } from "./panes/Chat";
-import { NewWorktreeDialog } from "./NewWorktree";
-import { fit, type Folding, RAIL, useRoom } from "./layout";
+import { forgetChat, sayFirst } from "./panes/Chat";
+import { NewWorktreeDraft } from "./NewWorktree";
+import { fit, type Folding, useRoom } from "./layout";
+import { Sidebar } from "./shell/Sidebar";
+import { WorkspaceHeader } from "./shell/WorkspaceHeader";
+import { SCRIPT_GLYPHS, ScriptsControl } from "./shell/ScriptsControl";
 import { DEFAULTS, FLYOUT_GAP, flyoutMax, LIMITS, type Prefs, usePrefs } from "./prefs";
 import { SearchScreen } from "./Search";
-import { SettingsScreen } from "./Settings";
+import { GeneralPage, SessionsPage, TrackersPage } from "./Settings";
+import { AppearancePage, DiffsPage, KeybindingsPage } from "./AppearanceSettings";
+import { UsagePage } from "./UsagePage";
+import { ProjectsPage } from "./ProjectsPage";
+import { SettingsModal, type SettingsPageId } from "./settings/SettingsModal";
 import { AccountScreen } from "./Account";
 import { PullPanel, type PullStart } from "./Pull";
 import { TicketPanel } from "./Ticket";
@@ -74,6 +97,9 @@ import { AboutScreen } from "./About";
 import { refreshPreviews } from "./previews";
 import { Select } from "./Select";
 import { applyAppearance, applyTerminalsDark } from "./theme";
+import { applyCustomTheme, applyDiffs, applyFonts, applyZoom } from "./look";
+import { applyKeys, keysOf, pressed, useKeys } from "./keys";
+import { TOGGLE_DRAWER } from "./Tabs";
 
 /// Where in the window you are.
 ///
@@ -82,48 +108,18 @@ import { applyAppearance, applyTerminalsDark } from "./theme";
 /// is what the window *is* when nothing is over it. Writing it as one of six
 /// equal names would invite code that tears it down to show another, which is
 /// the one thing that must not happen -- the terminals live in it.
-type Screen = "search" | "integrations" | "servers" | "account" | "settings" | "about";
+type Screen = "search" | "integrations" | "servers" | "account" | "settings" | "about" | "tickets" | "pulls";
 
 /// How often your tickets and pull requests are read. See the effect that
 /// uses it.
 const INBOX_POLL_MS = 3 * 60_000;
-
-const MAC = navigator.userAgent.includes("Mac");
 
 /// How often the worktree list is re-read, and the events feed with it. Fixed
 /// rather than a preference: it was one, and three seconds was the answer
 /// everybody left it at.
 const REFRESH_MS = 3000;
 
-/// Fold or unfold the sidebar of tickets and pull requests, from anywhere.
-/// With Shift, because Ctrl+T on its own is a terminal's: bash and readline
-/// transpose two characters with it, and the shortcut is taken before a
-/// terminal sees the key.
-const TICKETS_KEYS = MAC
-  ? { label: "⌘⇧T", aria: "Meta+Shift+T" }
-  : { label: "Ctrl+Shift+T", aria: "Control+Shift+T" };
-
-/// Search every conversation. F, as every find is, with Shift for the reason
-/// the others have it: Ctrl+F is readline's forward-a-character.
-const SEARCH_KEYS = MAC
-  ? { label: "⌘⇧F", aria: "Meta+Shift+F" }
-  : { label: "Ctrl+Shift+F", aria: "Control+Shift+F" };
-
-/// Fold or unfold the dock -- files, git and the rest. B, as the editors'
-/// sidebar toggle is, and with Shift for the reason the tickets one has it:
-/// Ctrl+B is readline's back-a-character.
-const DOCK_KEYS = MAC
-  ? { label: "⌘⇧B", aria: "Meta+Shift+B" }
-  : { label: "Ctrl+Shift+B", aria: "Control+Shift+B" };
-
-function isShortcut(e: KeyboardEvent, key: string): boolean {
-  return (
-    e.shiftKey &&
-    !e.altKey &&
-    (MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
-    e.key.toLowerCase() === key
-  );
-}
+// The shortcuts are `keys.ts`'s, where Settings can change them.
 
 /// The tabs a worktree has open.
 ///
@@ -143,6 +139,8 @@ function tabsFor(
   shells: Shells | undefined,
   chats: string[] | undefined,
   open: Tab[],
+  /// What a shell a script was run in is called, by its tmux name.
+  named: Record<string, string> = {},
 ): Tab[] {
   const agent: Tab[] =
     session.interface === "chat"
@@ -152,7 +150,7 @@ function tabsFor(
         : [];
   return [
     ...agent,
-    ...(shells?.shells ?? []).map((tmux): Tab => ({ kind: "terminal", tmux, label: tmux })),
+    ...(shells?.shells ?? []).map((tmux): Tab => ({ kind: "terminal", tmux, label: named[tmux] ?? tmux })),
     // Files and diffs last, in the order they were opened -- the one thing here
     // that is genuinely this window's state. A file is open because someone in
     // *this* window clicked it, and nothing in the sandbox knows that.
@@ -218,8 +216,28 @@ export default function App() {
 
   // Light, dark or the system's. Applied once already in `main.tsx`, before
   // the first paint; this is for when it is changed in Settings.
-  useEffect(() => applyAppearance(prefs.appearance), [prefs.appearance]);
+  // A theme taken in from VS Code is in its own light or dark, and its colours
+  // go over the palette that picks; see `look.ts`.
+  useEffect(() => applyAppearance(prefs.theme?.scheme ?? prefs.appearance), [prefs.appearance, prefs.theme]);
   useEffect(() => applyTerminalsDark(prefs.terminalsDark), [prefs.terminalsDark]);
+  useEffect(() => applyCustomTheme(prefs.theme), [prefs.theme]);
+  useEffect(
+    () => applyFonts({ ui: prefs.uiFont, mono: prefs.monoFont, codeSize: prefs.codeSize }),
+    [prefs.uiFont, prefs.monoFont, prefs.codeSize],
+  );
+  const zoomed = useRef(prefs.zoom);
+  useEffect(() => {
+    // Not on the first render: `main.tsx` has, and 1 needs nothing.
+    if (zoomed.current === prefs.zoom) return;
+    zoomed.current = prefs.zoom;
+    applyZoom(prefs.zoom);
+  }, [prefs.zoom]);
+  useEffect(() => applyKeys(prefs.keys), [prefs.keys]);
+  useEffect(
+    () => applyDiffs({ stacked: prefs.diffStacked, hideWhitespace: prefs.diffHideWhitespace }),
+    [prefs.diffStacked, prefs.diffHideWhitespace],
+  );
+  useKeys();
 
   /// Asking before something irreversible, in a dialog of this window's own.
   /// `dialog` is rendered at the end, beside the others.
@@ -232,6 +250,8 @@ export default function App() {
   // What is waiting on the server: sessions to start and messages to say.
   // Null from a server too old to have a queue, which then shows none.
   const [queue, setQueue] = useState<QueueView | null>(null);
+  // The server's clock, for a repeating worktree's time of day. See `repeats.ts`.
+  useEffect(() => noteServerOffset(queue?.utc_offset), [queue?.utc_offset]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -240,9 +260,20 @@ export default function App() {
   /// together, and nothing enforced it -- opening the tickets from the settings
   /// screen put both on screen at once, each with its own scrim.
   const [screen, setScreen] = useState<Screen | null>(null);
+  // Which of the two pages the tickets shortcut opens: the one last shown.
+  const inboxViewRef = useRef<"tickets" | "pulls">("tickets");
   /// The settings screen opened at its trackers, because the sidebar's "add a
   /// tracker" is what opened it.
-  const [settingsAt, setSettingsAt] = useState<"trackers" | null>(null);
+  /// The settings card's page, kept while it is shut so it opens where it
+  /// was left, as T3 Code's does. The card is `screen === "settings"`.
+  const [settingsPage, setSettingsPage] = useState<SettingsPageId>("general");
+  const openSettings = (page: SettingsPageId) => {
+    setSettingsPage(page);
+    setScreen("settings");
+  };
+  /// Whether a screen is in the workspace's place. Settings are not: they
+  /// float over it, and it stays drawn behind them.
+  const covered = screen !== null && screen !== "settings";
   /// This window's own version, for the wordmark. Asked once: it cannot change
   /// without a restart.
   const [version, setVersion] = useState<string | null>(null);
@@ -259,7 +290,50 @@ export default function App() {
     return () => clearInterval(id);
   }, [server]);
   const [creatingProject, setCreatingProject] = useState(false);
+  // Pinned, settled and snoozed worktrees: see `triage.ts`.
+  const [triage, setTriageOf] = useTriage(server);
+  const worktreeGroups = useGroups(server);
+  // The command palette (`shell/CommandPalette.tsx`), on Command+K or Ctrl+K.
+  const [palette, setPalette] = useState(false);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (!pressed(e, "palette")) return;
+      // Ctrl+K in a terminal is the shell's kill-line, and stays its own.
+      if (e.ctrlKey && (document.activeElement as Element | null)?.closest(".xterm")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setPalette((open) => !open);
+    };
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
+  }, []);
+  /// The project a new worktree is being drafted in: the draft takes the
+  /// workspace's place, as T3 Code's new thread does (`NewWorktree.tsx`).
   const [creatingIn, setCreatingIn] = useState<Project | null>(null);
+  const startDraft = (project: Project) => {
+    setScreen(null);
+    setCreatingIn(project);
+  };
+  /// Leave the draft: for a worktree, or because it was sent.
+  const leaveDraft = () => {
+    setCreatingIn(null);
+    setFromTask(null);
+    setFromPull(null);
+  };
+  const goToWorktree = (name: string) => {
+    leaveDraft();
+    setSelected(name);
+  };
+  // A draft taken to another server goes with it: to the same repository's
+  // project there, or the first one, or away when the server has none.
+  useEffect(() => {
+    if (!creatingIn || projects.some((p) => p.name === creatingIn.name && p.repo === creatingIn.repo)) return;
+    const there = projects.find((p) => p.repo === creatingIn.repo) ?? projects[0] ?? null;
+    if (there) setCreatingIn(there);
+    else setCreatingIn(null);
+    // Only when the projects change: picking one is `creatingIn` changing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects]);
   /// The ticket a create was started from, carried from the sidebar to the form.
   const [fromTask, setFromTask] = useState<Task | null>(null);
   /// Or the pull request, and whether the session is to work on it or review it.
@@ -280,6 +354,9 @@ export default function App() {
   /// per worktree: switching away and back finds it as you left it, because a
   /// shell you opened in one is not a shell in another.
   const [shells, setShells] = useState<Record<string, Shells>>({});
+  /// The shells scripts were run in, by worktree and then tmux name: the
+  /// drawer calls each by its script's name.
+  const [scriptShells, setScriptShells] = useState<Record<string, Record<string, string>>>({});
   /// A chat session's conversations beside the agent's, the same way.
   const [chats, setChats] = useState<Record<string, string[]>>({});
   const [files, setFiles] = useState<Record<string, Tab[]>>({});
@@ -313,7 +390,8 @@ export default function App() {
   // dropdown, the ticket beside the board -- is marked `defaultPrevented` and
   // left alone: closing a menu must not also close the screen under it.
   useEffect(() => {
-    if (screen === null) return;
+    // The settings card closes itself, after its way out.
+    if (screen === null || screen === "settings") return;
     const onKey = (e: KeyboardEvent) =>
       e.key === "Escape" && !e.defaultPrevented && setScreen(null);
     window.addEventListener("keydown", onKey);
@@ -351,22 +429,24 @@ export default function App() {
   const [keep, setKeep] = useState<Folding>("dock");
   // Whether a dock is drawn at all: the branches of the workspace below that
   // end in one.
-  const hasDock = screen === null && session !== null && server !== null && !preparing && !gone;
+  const hasDock = !covered && creatingIn === null && session !== null && server !== null && !preparing && !gone;
   const fitted = fit({
     room,
-    workspace: screen === null,
-    tree: prefs.treeWidth,
+    workspace: !covered,
+    tree: prefs.treeOpen ? prefs.treeWidth : null,
     dock: hasDock ? { open: prefs.dockOpen, width: prefs.dockWidth } : null,
-    inbox: { open: prefs.inboxOpen, width: prefs.inboxWidth },
+    // Tickets and pull requests are pages now (`screen`), not a column.
+    inbox: { open: false, width: prefs.inboxWidth },
     keep,
   });
   // Open as drawn, not as asked for. With no dock on screen, the asking is all
   // there is.
-  const inboxOpen = fitted.inbox !== null;
+  const inboxOpen = screen === "tickets" || screen === "pulls";
+  if (screen === "tickets" || screen === "pulls") inboxViewRef.current = screen;
   const dockOpen = hasDock ? fitted.dock !== null : prefs.dockOpen;
   // Where the ticket and pull request flyouts stand: against the sidebar, or
   // against its folded rail.
-  const flyoutRight = fitted.inbox ?? RAIL;
+  const flyoutRight = fitted.inbox ?? 0;
 
   // A fold button, a rail's way back, or a shortcut. Opening one makes it the
   // one kept when only one fits, so the other folds rather than it. Folding one
@@ -387,6 +467,15 @@ export default function App() {
     },
     [dockOpen, inboxOpen, fitted.folded, setPrefs],
   );
+  // The sidebar's Tickets and Pull Requests: the tickets sidebar on that view,
+  // or put away when it is already showing it.
+  const showInbox = (view: typeof prefs.inboxView) => {
+    setPrefs({ inboxView: view });
+    setScreen((now) => (now === view ? null : view));
+  };
+  // Where the sidebar's new-worktree button starts one: the project in front,
+  // or the first there is.
+  const newIn = projects.find((p) => p.name === session?.project) ?? projects[0] ?? null;
 
   // A handle dragged. The other sidebars are written at the widths they are
   // drawn at, so that the one dragged follows the pointer: left at what was
@@ -394,7 +483,7 @@ export default function App() {
   // outwards could draw it narrower.
   const resize = (change: Partial<Prefs>) =>
     setPrefs({
-      treeWidth: fitted.tree,
+      ...(fitted.tree !== null && { treeWidth: fitted.tree }),
       ...(fitted.dock !== null && { dockWidth: fitted.dock }),
       ...(fitted.inbox !== null && { inboxWidth: fitted.inbox }),
       ...change,
@@ -407,17 +496,35 @@ export default function App() {
   // before a focused terminal takes the key and sends it to the sandbox. Not
   // while a dialog is up: that is asking a question, and the window would
   // change under it.
-  const dialogOpen = creatingProject || creatingIn !== null || confirmation !== null;
+  const dialogOpen = creatingProject || confirmation !== null;
+  /// What the shortcuts without a place of their own do, as of the last
+  /// render: set below, once what they need is defined.
+  const keyActions = useRef({ sidebar: () => {}, newWorktree: () => {}, runScript: () => {} });
   useEffect(() => {
     if (!server || dialogOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (isShortcut(e, "f")) {
+      if (pressed(e, "search")) {
         e.preventDefault();
         e.stopPropagation();
         setScreen((now) => (now === "search" ? null : "search"));
         return;
       }
-      const which: Folding | null = isShortcut(e, "t") ? "inbox" : isShortcut(e, "b") ? "dock" : null;
+      if (pressed(e, "tickets")) {
+        e.preventDefault();
+        e.stopPropagation();
+        setScreen((now) => (now === "tickets" || now === "pulls" ? null : inboxViewRef.current));
+        return;
+      }
+      // Unbound until somebody binds them in Settings.
+      for (const command of ["sidebar", "newWorktree", "runScript"] as const) {
+        if (pressed(e, command)) {
+          e.preventDefault();
+          e.stopPropagation();
+          keyActions.current[command]();
+          return;
+        }
+      }
+      const which: Folding | null = pressed(e, "panel") ? "dock" : null;
       if (!which) return;
       e.preventDefault();
       e.stopPropagation();
@@ -617,6 +724,15 @@ export default function App() {
   const [showing, setShowing] = useState<Task | null>(null);
   /// Or the pull request: one at a time, since they open in the same place.
   const [showingPull, setShowingPull] = useState<PullRequest | null>(null);
+  // A ticket or pull request read in the panel belongs to the page it was
+  // opened from: going to another screen, or back to the work, puts it away.
+  const shownOn = useRef(screen);
+  useEffect(() => {
+    if (shownOn.current === screen) return;
+    shownOn.current = screen;
+    setShowing(null);
+    setShowingPull(null);
+  }, [screen]);
   // Read through a ref: turning notifications off is not a reason to ask
   // every tracker again, which a dependency would make it.
   const notifyTickets = useRef(prefs.notifyTickets);
@@ -735,6 +851,21 @@ export default function App() {
     () => group(projects, live, queue?.sessions ?? []),
     [projects, live, queue],
   );
+  // What the sidebar's search field narrows the list to: worktrees whose
+  // title, name, branch or task has the words in it, and a project by its
+  // name. The groups keep their order and their projects.
+  const [query, setQuery] = useState("");
+  const shownGroups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return groups;
+    const has = (...values: (string | null | undefined)[]) => values.some((v) => v?.toLowerCase().includes(q));
+    return groups.flatMap((g) => {
+      if (g.project && has(g.project.name)) return [g];
+      const worktrees = g.worktrees.filter((s) => has(s.title, s.name, s.work_branch, s.task));
+      const waiting = g.waiting.filter((w) => has(w.new.name, w.new.task));
+      return worktrees.length || waiting.length ? [{ ...g, worktrees, waiting }] : [];
+    });
+  }, [groups, query]);
 
   // The two asks below follow the name and not the record. The list is
   // fetched again every few seconds and each fetch is a new object, so
@@ -776,7 +907,13 @@ export default function App() {
 
   const openTabs = session
     ? arrange(
-        tabsFor(session, shells[session.name], chats[session.name], files[session.name] ?? []),
+        tabsFor(
+          session,
+          shells[session.name],
+          chats[session.name],
+          files[session.name] ?? [],
+          scriptShells[session.name],
+        ),
         order[session.name] ?? [],
       )
     : [];
@@ -817,10 +954,27 @@ export default function App() {
   /// conversation in front, at the message.
   const openHit = (hit: HistoryHit) => {
     if (hit.server !== server) setServer(hit.server);
-    setSelected(hit.session);
+    goToWorktree(hit.session);
     setActive((a) => ({ ...a, [hit.session]: `chat:${hit.conv}` }));
     setJump({ server: hit.server, session: hit.session, conv: hit.conv, seq: hit.seq, nonce: Date.now() });
     setScreen(null);
+  };
+
+  const [scripts] = useScripts(server, session?.project ?? null);
+  /// Run one of the project's scripts in a new shell in the worktree in
+  /// front, shown in the drawer and called by the script's name.
+  const runScript = (script: Script) => {
+    if (!server || !session) return;
+    const worktree = session.name;
+    api
+      .newShell(server, worktree, script.command)
+      .then((list) => {
+        const opened = list.shells.find((t) => !(shells[worktree]?.shells ?? []).includes(t)) ?? list.shells.at(-1);
+        if (opened) setScriptShells((all) => ({ ...all, [worktree]: { ...(all[worktree] ?? {}), [opened]: script.name } }));
+        setShells((all) => ({ ...all, [worktree]: list }));
+        if (opened) setActive((a) => ({ ...a, [worktree]: `terminal:${opened}` }));
+      })
+      .catch((e) => setError(messageOf(e)));
   };
 
   /// Open a tab if it is not already open, and bring it to the front either way.
@@ -897,7 +1051,7 @@ export default function App() {
     return (
       <div className="app">
         <header data-tauri-drag-region />
-        {screen === "servers" ? (
+        {screen === "settings" && settingsPage === "servers" ? (
           <ServersScreen
             servers={[]}
             onClose={() => setScreen(null)}
@@ -919,7 +1073,7 @@ export default function App() {
               leaving it out is the usual reason a paired server cannot be
               reached.
             </p>
-            <button className="go" onClick={() => setScreen("servers")}>
+            <button className="go" onClick={() => openSettings("servers")}>
               <Servers />
               Paste a Pairing String
             </button>
@@ -929,122 +1083,279 @@ export default function App() {
     );
   }
 
+  // Everything the palette offers, built when it opens from what is here now.
+  keyActions.current = {
+    sidebar: () => setPrefs({ treeOpen: !prefs.treeOpen }),
+    newWorktree: () => newIn && startDraft(newIn),
+    runScript: () => {
+      if (scripts[0] && !preparing && !gone) runScript(scripts[0]);
+    },
+  };
+
+  const paletteItems = (): PaletteItem[] => {
+    const items: PaletteItem[] = [];
+    const go = (to: Screen | null) => () => setScreen(to);
+    for (const s of live) {
+      items.push({
+        id: `wt:${s.name}`,
+        group: "Worktrees",
+        label: s.title ?? s.name,
+        hint: [s.project, polls[s.name]?.branch ?? s.work_branch].filter(Boolean).join(" · "),
+        keywords: `${s.name} ${s.task ?? ""}`,
+        icon: Branch,
+        run: () => {
+          setScreen(null);
+          goToWorktree(s.name);
+        },
+      });
+    }
+    for (const p of projects) {
+      items.push({
+        id: `new:${p.name}`,
+        group: "Projects",
+        label: `New Worktree in ${p.name}`,
+        hint: p.repo,
+        icon: NewSession,
+        run: () => startDraft(p),
+      });
+    }
+    for (const t of inbox?.tasks ?? []) {
+      items.push({
+        id: `t:${t.tracker}:${t.key}`,
+        group: "Tickets and Pull Requests",
+        label: t.title,
+        hint: t.key,
+        icon: Tracker,
+        run: () => {
+          setShowingPull(null);
+          setShowing(t);
+        },
+      });
+    }
+    for (const pr of inbox?.pulls ?? []) {
+      items.push({
+        id: `p:${pr.tracker}:${pr.id}`,
+        group: "Tickets and Pull Requests",
+        label: pr.title,
+        hint: pullName(pr),
+        icon: PullGlyph,
+        run: () => showPull(pr),
+      });
+    }
+    // The project's scripts, to run in the worktree in front.
+    if (session && server && !preparing && !gone) {
+      for (const sc of scripts) {
+        items.push({
+          id: `script:${sc.id}`,
+          group: "Do",
+          label: `Run ${sc.name}`,
+          hint: sc.command,
+          keywords: "script",
+          icon: SCRIPT_GLYPHS[sc.icon],
+          run: () => runScript(sc),
+        });
+      }
+    }
+    // What the worktree in front is listening on, to look at in a tab.
+    if (session && server) {
+      for (const l of (selected ? polls[selected]?.ports : undefined) ?? []) {
+        items.push({
+          id: `preview:${l.port}`,
+          group: "Do",
+          label: `Preview localhost:${l.port}`,
+          hint: session.title ?? session.name,
+          keywords: "port browser page",
+          icon: PreviewHere,
+          run: () => {
+            api
+              .previewOpen(server, session.name, l.port, l.host)
+              .then((p) => openTab(session.name, { kind: "preview", port: l.port, url: p.url }))
+              .catch((e) => setError(messageOf(e)));
+          },
+        });
+      }
+    }
+    const act = (id: string, label: string, run: () => void, icon?: PaletteItem["icon"], keys?: string, keywords?: string) =>
+      items.push({ id: `do:${id}`, group: "Do", label, run, icon, keys, keywords });
+    act("new-project", "New Project", () => setCreatingProject(true), NewProject);
+    if (newIn) act("new-worktree", `New Worktree in ${newIn.name}`, () => startDraft(newIn), NewSession, keysOf("newWorktree").label);
+    act("sidebar", prefs.treeOpen ? "Hide the Sidebar" : "Show the Sidebar", () => setPrefs({ treeOpen: !prefs.treeOpen }), SidebarToggle, keysOf("sidebar").label);
+    if (hasDock) act("panel", dockOpen ? "Hide the Panel" : "Show the Panel", () => toggle("dock"), PanelToggle, keysOf("panel").label);
+    act("terminal", "Show or Hide the Terminal", () => window.dispatchEvent(new Event(TOGGLE_DRAWER)), DrawerToggle, keysOf("terminal").label, "shell drawer");
+    act("tickets", "Tickets", go("tickets"), Tracker, keysOf("tickets").label);
+    act("pulls", "Pull Requests", go("pulls"), PullGlyph);
+    act("search", "Search Conversations", go("search"), Find, keysOf("search").label);
+    act("settings", "Settings", () => openSettings("general"), SettingsGlyph);
+    act("appearance", "Appearance Settings", () => openSettings("appearance"), SettingsAppearance, undefined, "theme font zoom");
+    act("keybindings", "Keybindings", () => openSettings("keybindings"), SettingsKeys, undefined, "shortcuts keys");
+    act("usage", "Usage", () => openSettings("usage"), UsageGlyph, undefined, "cost limits spent tokens");
+    act("integrations", "Integrations", () => openSettings("integrations"), Integrations, undefined, "mcp skills secrets");
+    act("servers", "Servers", () => openSettings("servers"), Servers);
+    act("account", "Account", () => openSettings("account"), Account);
+    act("about", "About hura", () => openSettings("about"), undefined, undefined, "version update");
+    for (const a of ["dark", "light", "system"] as const) {
+      if (prefs.appearance !== a) {
+        act(`theme-${a}`, `Appearance: ${a === "system" ? "Follow the System" : a === "dark" ? "Dark" : "Light"}`, () => setPrefs({ appearance: a }), undefined, undefined, "theme");
+      }
+    }
+    return items;
+  };
+
   return (
     <div className="app">
-      <header data-tauri-drag-region>
-        {/* The wordmark is the way to the about screen, and carries the
-            version so "which build is this" is never more than a glance. */}
-        <button
-          className={`mark${screen === "about" ? " on" : ""}`}
-          title="About hura"
-          onClick={() => setScreen(screen === "about" ? null : "about")}
+      {/* No bar of its own: the sidebar's head and the header over the
+          conversation are the top of the window, as in T3 Code. An error
+          that used to sit in the bar floats at the top instead. */}
+      {error && (
+        <div
+          role="alert"
+          className="fixed top-3 left-1/2 z-50 max-w-[60%] -translate-x-1/2 truncate rounded-lg bg-card px-3 py-1.5 text-xs text-destructive-foreground shadow-lg ring-1 ring-border"
+          title={error}
         >
-          hura
-          {version && <span className="mark-version">{version}</span>}
-        </button>
-        <UpdateBadge onOpen={() => setScreen("about")} />
-        {/* The chooser only when there is a choice, and nothing at all when
-            there is not: with one paired server there is nothing to
-            disambiguate, and the servers screen names it.
-
-            An address and a port used to sit here, and it was the wrong fact
-            in the wrong place: `127.0.0.1:17671` is what you check once when
-            pairing goes wrong, not something to read every time you look at
-            the top of the window -- and it is already on the row for each
-            server in that screen, next to the button that forgets it.
-
-            The tally that stood beside it is gone for the same reason. "4
-            worktrees in 2 projects" is the tree's own content restated as
-            arithmetic: the tree is two feet to the left with the worktrees
-            actually in it, and the count was reliably wrong anyway -- every
-            session started from a terminal has no project, so a full list of
-            them read "5 worktrees in 0 projects". */}
-        {servers && servers.length > 1 && (
-          <Select
-            className="server-pick"
-            aria-label="Server"
-            value={server ?? ""}
-            onChange={setServer}
-            options={servers.map((s) => ({ value: s.name, label: s.name, hint: s.address }))}
-          />
-        )}
-        {error && <span className="error">{error}</span>}
-
-        {/* The window's five buttons, and the words are gone from all of them.
-            The old row read `inbox`, `new project`, `integrations`, `servers`,
-            `settings` -- about 210 pixels of label for five things that are
-            pressed once each per sitting, in a 40-pixel strip that is also
-            where an error message has to fit.
-
-            The note that used to sit here said an icon-only toolbar is a quiz,
-            and it was right about the failure mode and wrong about the
-            remedy. Three things answer it, and all three had to be built
-            rather than asserted: every button carries a `title`, so the label
-            is one hover away for as long as it takes to learn five glyphs; the
-            screen each one opens is headed by *the same glyph* beside its name,
-            so pressing one teaches what it was; and the one that is showing is
-            lit, so the strip says where you are rather than only what it can
-            do. A tooltip alone would have been the quiz with an answer key.
-
-            The divider is not decoration: `new project` is an action and the
-            four after it are destinations. A row that mixed them silently
-            would be a row where one button does not come back. */}
-        <nav className="destinations" aria-label="Destinations">
-          <button
-            className="dest"
-            disabled={!server}
-            title="New Project"
-            aria-label="New Project"
-            onClick={() => setCreatingProject(true)}
-          >
-            <NewProject />
-          </button>
-          <span className="dest-split" />
-          <Destination
-            icon={Find}
-            label="Search"
-            keys={SEARCH_KEYS}
-            on={screen === "search"}
-            onOpen={() => setScreen("search")}
-            onClose={() => setScreen(null)}
-          />
-          <Destination
-            icon={Integrations}
-            label="Integrations"
-            on={screen === "integrations"}
-            disabled={!server}
-            onOpen={() => setScreen("integrations")}
-            onClose={() => setScreen(null)}
-          />
-          <Destination
-            icon={Servers}
-            label="Servers"
-            on={screen === "servers"}
-            onOpen={() => setScreen("servers")}
-            onClose={() => setScreen(null)}
-          />
-          <Destination
-            icon={Account}
-            label="Account"
-            on={screen === "account"}
-            onOpen={() => setScreen("account")}
-            onClose={() => setScreen(null)}
-          />
-          <Destination
-            icon={Settings}
-            label="Settings"
-            on={screen === "settings"}
-            disabled={!server}
-            onOpen={() => {
-              setSettingsAt(null);
-              setScreen("settings");
-            }}
-            onClose={() => setScreen(null)}
-          />
-        </nav>
-      </header>
+          {error}
+        </div>
+      )}
 
       <main>
+        {fitted.tree !== null && (
+          <>
+            <Sidebar
+              width={fitted.tree}
+              version={version}
+              aboutOn={screen === "settings" && settingsPage === "about"}
+              onAbout={() =>
+                screen === "settings" && settingsPage === "about" ? setScreen(null) : openSettings("about")
+              }
+              onCollapse={() => setPrefs({ treeOpen: false })}
+              update={<UpdateBadge onOpen={() => openSettings("about")} />}
+              query={query}
+              onQuery={setQuery}
+              newProject={{ disabled: !server, onClick: () => setCreatingProject(true) }}
+              newSession={{
+                project: newIn?.name ?? null,
+                onClick: () => newIn && startDraft(newIn),
+              }}
+              // The foot's settings-like buttons each open the card at their
+              // page, and are lit while it shows it.
+              place={
+                screen === "settings"
+                  ? settingsPage === "integrations" ||
+                    settingsPage === "servers" ||
+                    settingsPage === "account" ||
+                    settingsPage === "usage"
+                    ? settingsPage
+                    : "settings"
+                  : screen
+              }
+              onPlace={(to) => {
+                if (to === null || to === "search") setScreen(to);
+                else openSettings(to === "settings" ? "general" : to);
+              }}
+              serverReady={!!server}
+              searchKeys={keysOf("search")}
+              tickets={{
+                count: inbox?.tasks.length ?? 0,
+                on: screen === "tickets",
+                warned: (inbox?.warnings.length ?? 0) > 0 || inboxError !== null,
+                keys: keysOf("tickets"),
+                onClick: () => showInbox("tickets"),
+              }}
+              pulls={{
+                count: inbox?.pulls.length ?? 0,
+                on: screen === "pulls",
+                onClick: () => showInbox("pulls"),
+              }}
+              servers={
+                servers && servers.length > 1 ? (
+                  <Select
+                    className="server-pick"
+                    aria-label="Server"
+                    value={server ?? ""}
+                    onChange={setServer}
+                    options={servers.map((s) => ({ value: s.name, label: s.name, hint: s.address }))}
+                  />
+                ) : null
+              }
+            >
+              <Tree
+                triage={triage}
+                onTriage={setTriageOf}
+                groups={shownGroups}
+                polls={polls}
+                selected={creatingIn ? null : selected}
+                sets={worktreeGroups}
+                onSelect={goToWorktree}
+                pulls={inbox?.pulls ?? []}
+                onPull={showPull}
+                onNewWorktree={setCreatingIn}
+                onForget={(p) => {
+                  if (!server) return;
+                  api
+                    .forgetProject(server, p.name)
+                    .then(setProjects)
+                    .catch((e) => setError(messageOf(e)));
+                }}
+                onDestroy={destroy}
+                onRename={(s, title) => {
+                  if (!server) return;
+                  api
+                    .retitle(server, s.name, title)
+                    .then(setSessions)
+                    .catch((e) => setError(messageOf(e)));
+                }}
+                // Drawn in the new order at once, rather than after the round
+                // trip: a row that springs back for a moment and then lands where
+                // it was dropped reads as a drop that failed. The answer, or the
+                // next refresh after a refusal, settles it either way.
+                onReorderProjects={(names) => {
+                  if (!server) return;
+                  setProjects((all) =>
+                    [...all].sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name)),
+                  );
+                  api
+                    .reorderProjects(server, names)
+                    .then(setProjects)
+                    .catch((e) => setError(messageOf(e)));
+                }}
+                onReorderWorktrees={(names) => {
+                  if (!server) return;
+                  setSessions((all) =>
+                    all.map((s) => (names.includes(s.name) ? { ...s, rank: names.indexOf(s.name) } : s)),
+                  );
+                  api
+                    .reorderSessions(server, names)
+                    .then(setSessions)
+                    .catch((e) => setError(messageOf(e)));
+                }}
+                queueLimit={queue?.limit ?? 0}
+                messages={queue?.messages ?? []}
+                onUnqueue={(w) => {
+                  if (!server) return;
+                  api
+                    .unqueue(server, w.id)
+                    .then(setQueue)
+                    .catch((e) => setError(messageOf(e)));
+                }}
+                onStartQueued={(w) => {
+                  if (!server) return;
+                  api
+                    .startQueued(server, w.id)
+                    .then(setQueue)
+                    .catch((e) => setError(messageOf(e)));
+                }}
+              />
+            </Sidebar>
+            <Split
+              label="Projects sidebar width"
+              value={fitted.tree}
+              min={LIMITS.treeWidth.min}
+              max={widest(LIMITS.treeWidth, fitted.tree)}
+              reset={DEFAULTS.treeWidth}
+              grows="right"
+              onChange={(treeWidth) => resize({ treeWidth })}
+            />
+          </>
+        )}
         {/* **Hidden, not unmounted, and this is the line that matters.**
             Every terminal in the window lives under here, and a terminal that
             unmounts closes its channel and detaches from tmux -- so opening
@@ -1058,277 +1369,267 @@ export default function App() {
             It is also why `Screen` is a sibling here rather than something the
             workspace renders: a screen has to be able to fill the middle
             without the middle being torn down to make room. */}
-        <div className="workspace" hidden={screen !== null}>
-          {/* The widths are inline styles rather than CSS variables, and that
-              is the point of doing it this way: they are *values*, one per
-              sidebar, kept in the window's preferences and written by the
-              handle beside each. A `--tree-width` on the root would be a
-              second place for the same fact to live. */}
-          <Tree
-            width={fitted.tree}
-            groups={groups}
-            polls={polls}
-            selected={selected}
-            onSelect={setSelected}
-            pulls={inbox?.pulls ?? []}
-            onPull={showPull}
-            onNewWorktree={setCreatingIn}
-            onForget={(p) => {
-              if (!server) return;
-              api
-                .forgetProject(server, p.name)
-                .then(setProjects)
-                .catch((e) => setError(messageOf(e)));
-            }}
-            onDestroy={destroy}
-            onRename={(s, title) => {
-              if (!server) return;
-              api
-                .retitle(server, s.name, title)
-                .then(setSessions)
-                .catch((e) => setError(messageOf(e)));
-            }}
-            // Drawn in the new order at once, rather than after the round
-            // trip: a row that springs back for a moment and then lands where
-            // it was dropped reads as a drop that failed. The answer, or the
-            // next refresh after a refusal, settles it either way.
-            onReorderProjects={(names) => {
-              if (!server) return;
-              setProjects((all) =>
-                [...all].sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name)),
-              );
-              api
-                .reorderProjects(server, names)
-                .then(setProjects)
-                .catch((e) => setError(messageOf(e)));
-            }}
-            onReorderWorktrees={(names) => {
-              if (!server) return;
-              setSessions((all) =>
-                all.map((s) => (names.includes(s.name) ? { ...s, rank: names.indexOf(s.name) } : s)),
-              );
-              api
-                .reorderSessions(server, names)
-                .then(setSessions)
-                .catch((e) => setError(messageOf(e)));
-            }}
-            queueLimit={queue?.limit ?? 0}
-            messages={queue?.messages ?? []}
-            onUnqueue={(w) => {
-              if (!server) return;
-              api
-                .unqueue(server, w.id)
-                .then(setQueue)
-                .catch((e) => setError(messageOf(e)));
-            }}
-            onStartQueued={(w) => {
-              if (!server) return;
-              api
-                .startQueued(server, w.id)
-                .then(setQueue)
-                .catch((e) => setError(messageOf(e)));
-            }}
-          />
-
-          <Split
-            label="Projects sidebar width"
-            value={fitted.tree}
-            min={LIMITS.treeWidth.min}
-            max={widest(LIMITS.treeWidth, fitted.tree)}
-            reset={DEFAULTS.treeWidth}
-            grows="right"
-            onChange={(treeWidth) => resize({ treeWidth })}
-          />
-
-          {preparing ? (
-            // The create's own progress, said once in the middle: the steps
-            // are seconds of runtime and then however long the clone takes,
-            // and a spinner with the step beside it is all there is to know.
-            <Empty size="page" icon={Working} note={preparingNote(session)} />
-          ) : gone && session ? (
-            // Why there is nothing here, which is what used to be missing: the
-            // panes each said `sandbox not found`, and the reason was on the
-            // server's terminal. The mark is grey because it only says what is
-            // absent; the reason is red because it is an error.
-            <Empty size="page" icon={NoSandbox} note="No sandbox behind this worktree">
-              {session.failure && <p className="error">{session.failure}</p>}
-              <button className="go" onClick={() => destroy(session)}>
-                <Forget />
-                Remove
-              </button>
-            </Empty>
-          ) : session && server ? (
-            <>
-              <Tabs
+        <div className="workspace" hidden={covered}>
+          {/* The conversation's column, T3 Code's: the header over it and the
+              tabs under that. The panel stands beside it at full height. */}
+          <div className="workspace-main">
+          <WorkspaceHeader
+            sidebarOpen={fitted.tree !== null}
+            onSidebar={() => setPrefs({ treeOpen: true })}
+            project={creatingIn ? creatingIn.name : (session?.project ?? null)}
+            onProject={
+              !creatingIn && session?.project
+                ? () => {
+                    const p = projects.find((p) => p.name === session.project);
+                    if (p) startDraft(p);
+                  }
+                : null
+            }
+            title={creatingIn ? "New Worktree" : session ? (session.title ?? session.name) : null}
+            titleHint={!creatingIn && session?.title ? session.name : undefined}
+            panel={hasDock ? { open: dockOpen, keys: keysOf("panel"), onToggle: () => toggle("dock") } : null}
+          >
+            {!creatingIn && session?.project && server && !preparing && !gone && (
+              <ScriptsControl server={server} project={session.project} onRun={runScript} />
+            )}
+          </WorkspaceHeader>
+          <div className="workspace-body">
+            {creatingIn && server ? (
+              <NewWorktreeDraft
+                // Another server is a fresh draft, with that server's answers.
+                key={server}
                 server={server}
-                name={session.name}
-                tabs={openTabs}
-                active={activeTab}
-                failure={session.state === "failed" ? session.failure : null}
-                listed={!!shells[session.name] && (session.interface !== "chat" || !!chats[session.name])}
-                usage={polls[session.name]?.usage ?? null}
-                pull={sessionPull(session, inbox?.pulls ?? [])}
-                onPull={showPull}
-                jump={jump && jump.server === server && jump.session === session.name ? jump : null}
-                onJumped={jumped}
-                onActivate={(key) => setActive((a) => ({ ...a, [session.name]: key }))}
-                onReorder={(moved, onto) =>
-                  setOrder((all) => ({
-                    ...all,
-                    [session.name]: reordered(openTabs, moved, onto),
-                  }))
-                }
-                onNewShell={() => {
-                  api
-                    .newShell(server, session.name)
-                    .then((list) => {
-                      setShells((all) => ({ ...all, [session.name]: list }));
-                      // Opened in front, because asking for a shell is asking
-                      // to use one.
-                      const opened = list.shells[list.shells.length - 1];
-                      if (opened) {
-                        setActive((a) => ({ ...a, [session.name]: `terminal:${opened}` }));
-                      }
-                    })
-                    .catch((e) => setError(messageOf(e)));
+                servers={(servers ?? []).map((s) => s.name)}
+                onServer={setServer}
+                projects={projects}
+                project={creatingIn}
+                onProject={setCreatingIn}
+                canRepeat={queue?.utc_offset != null}
+                from={fromTask}
+                fromPull={fromPull}
+                onClose={leaveDraft}
+                onCreated={(name) => {
+                  // Selected before it exists, on purpose: the record is
+                  // written as soon as the server's thread reaches it, and the
+                  // burst below is what puts it in the sidebar rather than the
+                  // next poll.
+                  goToWorktree(name);
+                  void refreshUntil(name);
                 }}
-                onNewChat={
-                  session.interface === "chat"
-                    ? () => {
+                onQueued={(waiting) => {
+                  leaveDraft();
+                  setQueue(waiting);
+                }}
+              />
+            ) : preparing ? (
+              // The create's own progress, said once in the middle: the steps
+              // are seconds of runtime and then however long the clone takes,
+              // and a spinner with the step beside it is all there is to know.
+              <Empty size="page" icon={Working} note={preparingNote(session)} />
+            ) : gone && session ? (
+              // Why there is nothing here, which is what used to be missing: the
+              // panes each said `sandbox not found`, and the reason was on the
+              // server's terminal. The mark is grey because it only says what is
+              // absent; the reason is red because it is an error.
+              <Empty size="page" icon={NoSandbox} note="No sandbox behind this worktree">
+                {session.failure && <p className="error">{session.failure}</p>}
+                <button className="go" onClick={() => destroy(session)}>
+                  <Forget />
+                  Remove
+                </button>
+              </Empty>
+            ) : session && server ? (
+              <>
+                <Tabs
+                  server={server}
+                  name={session.name}
+                  agent={session.agent}
+                  onBranch={(from, at, text) => {
+                    // A new conversation forked from just before the message
+                    // (or from nothing, before the first), in front, with the
+                    // edited words said in it.
+                    api
+                      .newChat(server, session.name, from, at)
+                      .then(({ chats: list, opened }) => {
+                        setChats((all) => ({ ...all, [session.name]: list }));
+                        if (!opened) return;
+                        sayFirst(server, session.name, opened, text);
+                        setActive((a) => ({ ...a, [session.name]: `chat:${opened}` }));
+                      })
+                      .catch((e) => setError(messageOf(e)));
+                  }}
+                  tabs={openTabs}
+                  active={activeTab}
+                  failure={session.state === "failed" ? session.failure : null}
+                  listed={!!shells[session.name] && (session.interface !== "chat" || !!chats[session.name])}
+                  usage={polls[session.name]?.usage ?? null}
+                  pull={sessionPull(session, inbox?.pulls ?? [])}
+                  onPull={showPull}
+                  jump={jump && jump.server === server && jump.session === session.name ? jump : null}
+                  onJumped={jumped}
+                  onActivate={(key) => setActive((a) => ({ ...a, [session.name]: key }))}
+                  onReorder={(moved, onto) =>
+                    setOrder((all) => ({
+                      ...all,
+                      [session.name]: reordered(openTabs, moved, onto),
+                    }))
+                  }
+                  onNewShell={() => {
+                    api
+                      .newShell(server, session.name)
+                      .then((list) => {
+                        setShells((all) => ({ ...all, [session.name]: list }));
+                        // Opened in front, because asking for a shell is asking
+                        // to use one.
+                        const opened = list.shells[list.shells.length - 1];
+                        if (opened) {
+                          setActive((a) => ({ ...a, [session.name]: `terminal:${opened}` }));
+                        }
+                      })
+                      .catch((e) => setError(messageOf(e)));
+                  }}
+                  onNewChat={
+                    session.interface === "chat"
+                      ? () => {
+                          api
+                            .newChat(server, session.name)
+                            .then(({ chats: list, opened }) => {
+                              setChats((all) => ({ ...all, [session.name]: list }));
+                              // In front, for the reason a new shell is.
+                              if (opened) setActive((a) => ({ ...a, [session.name]: `chat:${opened}` }));
+                            })
+                            .catch((e) => setError(messageOf(e)));
+                        }
+                      : undefined
+                  }
+                  onNewAgent={
+                    session.interface !== "chat" && shells[session.name]?.agent === false
+                      ? () => {
+                          api
+                            .newAgent(server, session.name)
+                            .then((list) => {
+                              setShells((all) => ({ ...all, [session.name]: list }));
+                              // In front, for the reason a new shell is.
+                              setActive((a) => ({ ...a, [session.name]: "terminal:agent" }));
+                            })
+                            .catch((e) => setError(messageOf(e)));
+                        }
+                      : undefined
+                  }
+                  onCloseAgent={() => {
+                    ask({
+                      title: "Stop the agent?",
+                      body: (
+                        <>
+                          Claude Code stops, along with whatever it is doing. The worktree stays, and{" "}
+                          <b>+</b> starts a new agent in it.
+                        </>
+                      ),
+                      confirm: "Stop It",
+                      onConfirm: () => {
                         api
-                          .newChat(server, session.name)
-                          .then(({ chats: list, opened }) => {
-                            setChats((all) => ({ ...all, [session.name]: list }));
-                            // In front, for the reason a new shell is.
-                            if (opened) setActive((a) => ({ ...a, [session.name]: `chat:${opened}` }));
-                          })
-                          .catch((e) => setError(messageOf(e)));
-                      }
-                    : undefined
-                }
-                onNewAgent={
-                  session.interface !== "chat" && shells[session.name]?.agent === false
-                    ? () => {
-                        api
-                          .newAgent(server, session.name)
+                          .killShell(server, session.name, session.tmux)
                           .then((list) => {
                             setShells((all) => ({ ...all, [session.name]: list }));
-                            // In front, for the reason a new shell is.
-                            setActive((a) => ({ ...a, [session.name]: "terminal:agent" }));
+                            unchoose(session.name, "terminal:agent");
                           })
                           .catch((e) => setError(messageOf(e)));
-                      }
-                    : undefined
-                }
-                onCloseAgent={() => {
-                  ask({
-                    title: "Stop the agent?",
-                    body: (
-                      <>
-                        Claude Code stops, along with whatever it is doing. The worktree stays, and{" "}
-                        <b>+</b> starts a new agent in it.
-                      </>
-                    ),
-                    confirm: "Stop It",
-                    onConfirm: () => {
-                      api
-                        .killShell(server, session.name, session.tmux)
-                        .then((list) => {
-                          setShells((all) => ({ ...all, [session.name]: list }));
-                          unchoose(session.name, "terminal:agent");
-                        })
-                        .catch((e) => setError(messageOf(e)));
-                    },
-                  });
-                }}
-                onCloseChat={(conv) => {
-                  ask({
-                    title: conv === "agent" ? "End the agent's conversation?" : `End ${conv}?`,
-                    body: <>The conversation stops, and its transcript is forgotten.</>,
-                    confirm: "End It",
-                    onConfirm: () => {
-                      api
-                        .closeChat(server, session.name, conv)
-                        .then(({ chats: list }) => {
-                          setChats((all) => ({ ...all, [session.name]: list }));
-                          forgetChat(server, session.name, conv);
-                          unchoose(session.name, `chat:${conv}`);
-                        })
-                        .catch((e) => setError(messageOf(e)));
-                    },
-                  });
-                }}
-                onCloseFile={(key) => {
-                  setFiles((all) => ({
-                    ...all,
-                    [session.name]: (all[session.name] ?? []).filter((t) => keyOf(t) !== key),
-                  }));
-                  unchoose(session.name, key);
-                }}
-                onCloseShell={(tmux) => {
-                  api
-                    .killShell(server, session.name, tmux)
-                    .then((list) => {
-                      setShells((all) => ({ ...all, [session.name]: list }));
-                      // Whatever was in front may have just been killed.
-                      unchoose(session.name, `terminal:${tmux}`);
-                    })
-                    .catch((e) => setError(messageOf(e)));
-                }}
-              />
-              {/* Between the editor and the dock, so a drag on it takes width
-                  from the middle and gives it to the right -- which is why
-                  this one `grows="left"`. */}
-              {fitted.dock !== null && (
-                <Split
-                  label="Dock width"
-                  value={fitted.dock}
-                  min={LIMITS.dockWidth.min}
-                  max={widest(LIMITS.dockWidth, fitted.dock)}
-                  reset={DEFAULTS.dockWidth}
-                  grows="left"
-                  onChange={(dockWidth) => resize({ dockWidth })}
+                      },
+                    });
+                  }}
+                  onCloseChat={(conv) => {
+                    ask({
+                      title: conv === "agent" ? "End the agent's conversation?" : `End ${conv}?`,
+                      body: <>The conversation stops, and its transcript is forgotten.</>,
+                      confirm: "End It",
+                      onConfirm: () => {
+                        api
+                          .closeChat(server, session.name, conv)
+                          .then(({ chats: list }) => {
+                            setChats((all) => ({ ...all, [session.name]: list }));
+                            forgetChat(server, session.name, conv);
+                            unchoose(session.name, `chat:${conv}`);
+                          })
+                          .catch((e) => setError(messageOf(e)));
+                      },
+                    });
+                  }}
+                  onCloseFile={(key) => {
+                    setFiles((all) => ({
+                      ...all,
+                      [session.name]: (all[session.name] ?? []).filter((t) => keyOf(t) !== key),
+                    }));
+                    unchoose(session.name, key);
+                  }}
+                  onCloseShell={(tmux) => {
+                    api
+                      .killShell(server, session.name, tmux)
+                      .then((list) => {
+                        setShells((all) => ({ ...all, [session.name]: list }));
+                        // Whatever was in front may have just been killed.
+                        unchoose(session.name, `terminal:${tmux}`);
+                      })
+                      .catch((e) => setError(messageOf(e)));
+                  }}
                 />
-              )}
-              <Dock
-                width={fitted.dock ?? prefs.dockWidth}
-                open={dockOpen}
-                keys={DOCK_KEYS}
-                onFold={() => toggle("dock")}
-                server={server}
-                session={session}
-                usage={(selected ? polls[selected]?.usage : undefined) ?? null}
-                listening={(selected ? polls[selected]?.ports : undefined) ?? []}
-                refreshMs={REFRESH_MS}
-                onOpenFile={(path) => openTab(session.name, { kind: "file", path })}
-                onOpenDiff={(path, against: Against) =>
-                  openTab(session.name, { kind: "filediff", path, against })
+              </>
+            ) : projects.length === 0 ? (
+              // A glyph that is the button that fixes it, which is as close as an
+              // empty state gets to explaining itself: the mark here and the mark
+              // on `new project` in the header are the same picture.
+              <Empty size="page" icon={NewProject} note="No projects yet">
+                <button className="go" disabled={!server} onClick={() => setCreatingProject(true)}>
+                  <NewProject />
+                  New Project
+                </button>
+              </Empty>
+            ) : (
+              // The note survives because it names the control: a `+` that only
+              // appears when a project row is hovered is the one thing in the
+              // tree that a glyph here cannot point at.
+              <Empty
+                size="page"
+                icon={Branch}
+                note={
+                  sessions.length === 0
+                    ? "Start a worktree with + beside a project"
+                    : "Pick a worktree, or start one with + beside a project"
                 }
               />
-            </>
-          ) : projects.length === 0 ? (
-            // A glyph that is the button that fixes it, which is as close as an
-            // empty state gets to explaining itself: the mark here and the mark
-            // on `new project` in the header are the same picture.
-            <Empty size="page" icon={NewProject} note="No projects yet">
-              <button className="go" disabled={!server} onClick={() => setCreatingProject(true)}>
-                <NewProject />
-                New Project
-              </button>
-            </Empty>
-          ) : (
-            // The note survives because it names the control: a `+` that only
-            // appears when a project row is hovered is the one thing in the
-            // tree that a glyph here cannot point at.
-            <Empty
-              size="page"
-              icon={Branch}
-              note={
-                sessions.length === 0
-                  ? "Start a worktree with + beside a project"
-                  : "Pick a worktree, or start one with + beside a project"
+            )}
+          </div>
+          </div>
+          {hasDock && session && server && (
+            <>
+            {/* Between the editor and the dock, so a drag on it takes width
+                from the middle and gives it to the right, which is why
+                this one `grows="left"`. */}
+            {fitted.dock !== null && (
+              <Split
+                label="Dock width"
+                value={fitted.dock}
+                min={LIMITS.dockWidth.min}
+                max={widest(LIMITS.dockWidth, fitted.dock)}
+                reset={DEFAULTS.dockWidth}
+                grows="left"
+                onChange={(dockWidth) => resize({ dockWidth })}
+              />
+            )}
+            <Dock
+              width={fitted.dock ?? prefs.dockWidth}
+              open={dockOpen}
+              server={server}
+              session={session}
+              usage={(selected ? polls[selected]?.usage : undefined) ?? null}
+              listening={(selected ? polls[selected]?.ports : undefined) ?? []}
+              refreshMs={REFRESH_MS}
+              onOpenFile={(path) => openTab(session.name, { kind: "file", path })}
+              onOpenDiff={(path, against: Against) =>
+                openTab(session.name, { kind: "filediff", path, against })
               }
+              onPreview={(port, url) => openTab(session.name, { kind: "preview", port, url })}
             />
+            </>
           )}
         </div>
 
@@ -1336,65 +1637,67 @@ export default function App() {
           <SearchScreen server={server} sessions={sessions} onOpen={openHit} onClose={() => setScreen(null)} />
         )}
 
-        {screen === "integrations" && server && (
-          <IntegrationsScreen server={server} onClose={() => setScreen(null)} />
-        )}
-
-        {screen === "servers" && (
-          <ServersScreen
-            servers={servers ?? []}
-            onClose={() => setScreen(null)}
-            onPaired={paired}
-            onForgot={forgot}
-          />
-        )}
-
-        {screen === "about" && (
-          <AboutScreen
-            server={server}
-            agent={(selected ? polls[selected]?.usage : null) ?? null}
-            onClose={() => setScreen(null)}
-          />
-        )}
-
         {screen === "settings" && server && (
-          <SettingsScreen
-            server={server}
-            prefs={prefs}
-            onPrefs={setPrefs}
-            at={settingsAt}
-            onTrackers={(list) => {
-              setTrackers(list);
-              readInbox();
-            }}
-            signedIn={signedIn}
-            onSignIn={() => setScreen("account")}
-            onClose={() => setScreen(null)}
-          />
+          <SettingsModal page={settingsPage} onPage={setSettingsPage} onClose={() => setScreen(null)}>
+            {settingsPage === "general" && <GeneralPage prefs={prefs} onPrefs={setPrefs} signedIn={signedIn} />}
+            {settingsPage === "appearance" && <AppearancePage prefs={prefs} onPrefs={setPrefs} />}
+            {settingsPage === "diffs" && <DiffsPage prefs={prefs} onPrefs={setPrefs} />}
+            {settingsPage === "keybindings" && <KeybindingsPage prefs={prefs} onPrefs={setPrefs} />}
+            {settingsPage === "usage" && (
+              <UsagePage
+                sessions={live}
+                polls={polls}
+                onOpen={(name) => {
+                  setScreen(null);
+                  goToWorktree(name);
+                }}
+              />
+            )}
+            {settingsPage === "sessions" && <SessionsPage server={server} />}
+            {settingsPage === "projects" && (
+              <ProjectsPage server={server} projects={projects} onProjects={setProjects} />
+            )}
+            {settingsPage === "integrations" && (
+              <IntegrationsScreen server={server} onClose={() => setScreen(null)} />
+            )}
+            {settingsPage === "servers" && (
+              <ServersScreen
+                servers={servers ?? []}
+                onClose={() => setScreen(null)}
+                onPaired={paired}
+                onForgot={forgot}
+              />
+            )}
+            {settingsPage === "trackers" && (
+              <TrackersPage
+                signedIn={signedIn}
+                onSignIn={() => setSettingsPage("account")}
+                onTrackers={(list) => {
+                  setTrackers(list);
+                  readInbox();
+                }}
+              />
+            )}
+            {settingsPage === "account" && (
+              <AccountScreen onChanged={setSignedIn} onClose={() => setScreen(null)} />
+            )}
+            {settingsPage === "about" && (
+              <AboutScreen
+                server={server}
+                agent={(selected ? polls[selected]?.usage : null) ?? null}
+                onClose={() => setScreen(null)}
+              />
+            )}
+          </SettingsModal>
         )}
 
-        {screen === "account" && (
-          <AccountScreen onChanged={setSignedIn} onClose={() => setScreen(null)} />
-        )}
-
-        {/* Beside the workspace and beside every screen, which is the point
-            of it being a sidebar rather than a destination. */}
-        {fitted.inbox !== null && (
-          <Split
-            label="Tickets sidebar width"
-            value={fitted.inbox}
-            min={LIMITS.inboxWidth.min}
-            max={widest(LIMITS.inboxWidth, fitted.inbox)}
-            reset={DEFAULTS.inboxWidth}
-            grows="left"
-            onChange={(inboxWidth) => resize({ inboxWidth })}
-          />
-        )}
+        {/* Your tickets and pull requests, as T3 Code's Issues and Pull
+            requests are: a page each in the middle, opened from the sidebar's
+            foot, and one of them read in the panel on the right. */}
+        {inboxOpen && (
         <InboxBar
-          width={fitted.inbox ?? prefs.inboxWidth}
-          open={inboxOpen}
           shut={prefs.inboxShut}
-          view={prefs.inboxView}
+          view={screen === "pulls" ? "pulls" : "tickets"}
           inbox={inbox}
           reading={inboxReading}
           error={inboxError}
@@ -1405,25 +1708,23 @@ export default function App() {
           currentProject={session?.project ?? null}
           showing={showing}
           showingPull={showingPull}
-          keys={TICKETS_KEYS}
-          onFold={() => toggle("inbox")}
+          keys={keysOf("tickets")}
+          onFold={() => setScreen(null)}
           onShut={(inboxShut) => setPrefs({ inboxShut })}
-          onView={(inboxView) => setPrefs({ inboxView })}
+          onView={(view) => {
+            setPrefs({ inboxView: view });
+            setScreen(view);
+          }}
           onRefresh={readInbox}
           // Signed out, the way to trackers is signing in; signed in, it is
           // adding one.
           onSetup={() => {
-            if (signedIn === false) {
-              setScreen("account");
-              return;
-            }
-            setSettingsAt("trackers");
-            setScreen("settings");
+            openSettings(signedIn === false ? "account" : "trackers");
           }}
           onSelect={(name) => {
             // Going to a worktree is going back to the workspace.
             setScreen(null);
-            setSelected(name);
+            goToWorktree(name);
           }}
           onShow={(task) => {
             setShowingPull(null);
@@ -1435,6 +1736,7 @@ export default function App() {
           onStart={startFrom}
           onStartPull={startFromPull}
         />
+        )}
 
         {/* The ticket, read in full beside the sidebar and over whatever is
             under it, rather than in a column of its own: it is read and put
@@ -1496,7 +1798,7 @@ export default function App() {
               onStart={startFromPull}
               onSelect={(name) => {
                 setScreen(null);
-                setSelected(name);
+                goToWorktree(name);
               }}
               onClose={() => setShowingPull(null)}
               onChanged={readInbox}
@@ -1505,6 +1807,7 @@ export default function App() {
         )}
       </main>
 
+      {palette && <CommandPalette items={paletteItems()} onClose={() => setPalette(false)} />}
       {creatingProject && server && (
         <NewProjectDialog
           server={server}
@@ -1518,35 +1821,6 @@ export default function App() {
 
       {confirmation}
 
-      {creatingIn && server && (
-        <NewWorktreeDialog
-          server={server}
-          project={creatingIn}
-          from={fromTask}
-          fromPull={fromPull}
-          onClose={() => {
-            setCreatingIn(null);
-            setFromTask(null);
-            setFromPull(null);
-          }}
-          onCreated={(name) => {
-            setCreatingIn(null);
-            setFromTask(null);
-            setFromPull(null);
-            // Selected before it exists, on purpose: the record is written as
-            // soon as the server's thread reaches it, and the burst below is
-            // what puts it in the sidebar rather than the next poll.
-            setSelected(name);
-            void refreshUntil(name);
-          }}
-          onQueued={(waiting) => {
-            setCreatingIn(null);
-            setFromTask(null);
-            setFromPull(null);
-            setQueue(waiting);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -1557,49 +1831,3 @@ function preparingNote(session: Session | null) {
   return `Creating the sandbox${session ? ` for ${session.title ?? session.name}` : ""}`;
 }
 
-/// One of the header's destinations.
-///
-/// A toggle rather than a link, and that is the behaviour worth naming: pressing
-/// the lit one goes back to the workspace. With no labels on these buttons, the
-/// press that teaches you what a glyph meant is also the press you want to undo
-/// immediately, and making the same button do it means never having to find the
-/// way back.
-///
-/// `aria-current` and not `aria-pressed`: this says which of five places is
-/// showing, not that a control is held down.
-function Destination({
-  icon: Mark,
-  label,
-  keys,
-  on,
-  disabled,
-  onOpen,
-  onClose,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  /// The word that is no longer on screen. It is still the tooltip and still
-  /// the accessible name -- a button whose only content is an SVG has no name
-  /// at all to a screen reader, which is the one way an icon-only strip can be
-  /// genuinely worse rather than merely terser.
-  label: string;
-  /// The shortcut, when it has one, for the tooltip.
-  keys?: { label: string; aria: string };
-  on: boolean;
-  disabled?: boolean;
-  onOpen: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <button
-      className={`dest${on ? " on" : ""}`}
-      disabled={disabled}
-      title={keys ? `${label} (${keys.label})` : label}
-      aria-label={label}
-      aria-keyshortcuts={keys?.aria}
-      aria-current={on ? "page" : undefined}
-      onClick={on ? onClose : onOpen}
-    >
-      <Mark />
-    </button>
-  );
-}

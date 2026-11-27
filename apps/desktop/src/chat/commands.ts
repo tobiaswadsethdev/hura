@@ -72,3 +72,34 @@ export function leadingCommand(text: string): { command: string; rest: string } 
   const m = NAME.exec(text);
   return m ? { command: m[0], rest: text.slice(m[0].length) } : null;
 }
+
+/// An `@` mention: an `@` at the start of the text or after whitespace, and
+/// what follows it up to the next space. What Claude Code reads as a path to
+/// look at, and what the composer offers to complete from the working copy.
+const MENTION = /(^|\s)(@[^\s@]+)/g;
+
+/// What is typed, cut into the stretches that are `@` mentions and the ones
+/// that are not, for the composer to colour the first.
+export function mentions(text: string): { text: string; mention: boolean }[] {
+  const out: { text: string; mention: boolean }[] = [];
+  let last = 0;
+  for (const m of text.matchAll(MENTION)) {
+    const start = (m.index ?? 0) + m[1].length;
+    if (start > last) out.push({ text: text.slice(last, start), mention: false });
+    out.push({ text: m[2], mention: true });
+    last = start + m[2].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), mention: false });
+  return out;
+}
+
+export function hasMention(text: string): boolean {
+  return new RegExp(MENTION.source).test(text);
+}
+
+/// The mention being typed at the caret, if one is: where its `@` is, and what
+/// follows it so far, which is what the working copy is searched for.
+export function mentionAt(text: string, caret: number): { start: number; query: string } | null {
+  const m = /(^|\s)@([^\s@]*)$/.exec(text.slice(0, caret));
+  return m ? { start: caret - m[2].length - 1, query: m[2] } : null;
+}

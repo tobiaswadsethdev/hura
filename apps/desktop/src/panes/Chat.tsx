@@ -19,6 +19,7 @@
 // A search result opens a conversation at the message it found: the pane is
 // handed the entry, marks the row it is drawn in, and scrolls there.
 
+import { keysOf, pressed } from "../keys";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { Empty } from "../Empty";
@@ -28,25 +29,68 @@ import type { ChatFrame } from "../gen/ChatFrame";
 import type { ChatState } from "../gen/ChatState";
 import type { Picture } from "../gen/Picture";
 import type { SlashCommand } from "../gen/SlashCommand";
+import { EditPrompt } from "../chat/Items";
 import type { Usage } from "../gen/Usage";
-import { Attach, Chat as ChatGlyph, Close, Plus, Queued, Scheduled, Send, Shell, Skill, Stop, Working } from "../icons";
+import {
+  Attach,
+  Chat as ChatGlyph,
+  Close,
+  Edit,
+  FileIcon,
+  SideChat as SideGlyph,
+  Folder,
+  ModeAsk,
+  ModeAuto,
+  ModeEdits,
+  Stash as StashGlyph,
+  ModePlan,
+  Queued,
+  Recurring,
+  Scheduled,
+  Send,
+  SendQueued,
+  SendSteer,
+  Shell,
+  Skill,
+  Working,
+} from "../icons";
+import { useButtonMenu } from "../ContextMenu";
+import type { ChatModel } from "../gen/ChatModel";
+import type { FoundPaths } from "../gen/FoundPaths";
+import type { ChatAsk } from "../gen/ChatAsk";
+import type { ChatDecision } from "../gen/ChatDecision";
+import { QuestionDrawer, useQuestions } from "../chat/Questions";
+import { type Stashed, useStash } from "../chat/stash";
+import { since } from "../chat/elapsed";
+import { AgentMark } from "../agents";
 import { api, messageOf } from "../api";
 import { epochOf, localInput } from "../NewWorktree";
+import { type Cadence, describeRepeat, repeatOf, serverCanRepeat } from "../repeats";
+import type { Repeat } from "../gen/Repeat";
 import { startsAt } from "../Tree";
 import type { QueuedMessage } from "../gen/QueuedMessage";
 import { keyFor, Remembered } from "../cache";
 import { download, Downloader } from "../Download";
 import { Markdown, Pictures, type ReadPicture } from "../Markdown";
 import type { PartialMessage } from "../sdk";
-import { Select } from "../Select";
 import { chat, close, nextChannelId, open } from "../stream";
 import { AskCard } from "../chat/Ask";
-import { matching, naming, offeredCommands, type Typed, typed } from "../chat/commands";
+import {
+  hasMention,
+  matching,
+  mentionAt,
+  mentions,
+  naming,
+  offeredCommands,
+  type Typed,
+  typed,
+} from "../chat/commands";
 import { type Attached, isPicture, read, size, UPLOAD_BYTES } from "../chat/files";
 import { Found, Items, OpenAgent, Unpin } from "../chat/Items";
 import { arrived, build, group, type Item, locate, settle, turnStart } from "../chat/transcript";
 import { Since, Ticking } from "../chat/elapsed";
-import { AgentPanel, AgentsBar, type TaskProgress } from "../chat/Agents";
+import { readDraft, writeDraft } from "../chat/drafts";
+import { AgentPanel, AgentsBar, CommandPanel, type TaskProgress } from "../chat/Agents";
 import { HeldPictures, type PictureSource } from "../chat/pictures";
 import { PullBar } from "../chat/PullBar";
 import type { PullRequest as Pull } from "../gen/PullRequest";
@@ -103,6 +147,36 @@ const pictureKey = (chatKey: string, seq: number, index: number) => `${chatKey}\
 
 /// A conversation that has ended: one opened later under the same name is
 /// another conversation.
+/// What to say in a conversation as soon as it is open: a side chat's
+/// question, an edited message's new words. Said once, by its pane.
+const firstWords = new Map<string, string>();
+export function sayFirst(server: string, name: string, conv: string, text: string) {
+  firstWords.set(keyFor(server, name, "chat", conv), text);
+}
+
+/// The last thing the agent said before an entry, by the uuid Claude Code
+/// gave it: where a conversation forks to edit the message at `seq`. Null
+/// before anything was said, when there is nothing to keep.
+function assistantBefore(entries: ChatEntry[], seq: number): string | null {
+  let at: string | null = null;
+  for (const e of entries) {
+    if (e.seq >= seq) break;
+    if (e.ev.kind !== "sdk") continue;
+    const m = e.ev.msg as { type?: string; uuid?: unknown; parent_tool_use_id?: unknown };
+    if (m.type === "assistant" && m.parent_tool_use_id == null && typeof m.uuid === "string") at = m.uuid;
+  }
+  return at;
+}
+
+/// T3 Code's side chat, as a command of the composer's own: a question asked
+/// beside the conversation, with its context, that does not interrupt it.
+const SIDE_COMMAND: SlashCommand = {
+  name: "btw",
+  description: "Ask on the side, with this conversation's context, without interrupting it",
+  argument_hint: "<question>",
+  aliases: ["side"],
+};
+
 export function forgetChat(server: string, name: string, conv: string) {
   const key = keyFor(server, name, "chat", conv);
   kept.delete(key);
@@ -225,12 +299,24 @@ function Writing({ live, entries }: { live: Live; entries: ChatEntry[] }) {
 }
 
 /// Claude Code's permission modes, in the words the window uses for them.
+/// Stop the turn and say it now, rather than after the turn: T3 Code's steer,
+/// on the platform's command key with Enter or a click.
+const MAC = navigator.userAgent.includes("Mac");
+const STEER_KEYS = MAC ? "⌘↵" : "Ctrl+Enter";
+const steering = (e: { metaKey: boolean; ctrlKey: boolean }) => (MAC ? e.metaKey : e.ctrlKey);
+
 const MODES = [
   { value: "auto", label: "Auto", hint: "Decides what to ask" },
   { value: "default", label: "Ask", hint: "Before edits and commands" },
   { value: "acceptEdits", label: "Accept Edits", hint: "Asks for the rest" },
   { value: "plan", label: "Plan", hint: "Changes nothing" },
 ];
+const MODE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
+  auto: ModeAuto,
+  default: ModeAsk,
+  acceptEdits: ModeEdits,
+  plan: ModePlan,
+};
 
 /// A model id as a person would say it: `claude-opus-5-5[1m]` is Opus 5.5,
 /// with the million-token context. Anything that does not look like an id is
@@ -278,19 +364,33 @@ function AttachedFiles({ files, onRemove }: { files: Attached[]; onRemove: (key:
 /// typed there, or a `!` command with its bang marked. Only colour and a
 /// background differ from the textarea's own text, never the metrics, so
 /// every character lands where the caret thinks it is.
-function Shade({ what, shade }: { what: Typed; shade: React.Ref<HTMLDivElement> }) {
-  if (what.kind === "message" || (what.kind === "command" && !what.known)) return null;
+function Shade({ what, text, shade }: { what: Typed; text: string; shade: React.Ref<HTMLDivElement> }) {
+  const plain = what.kind === "message" || (what.kind === "command" && !what.known);
+  if (plain && !hasMention(text)) return null;
+  // A mention, coloured as a chip is, in whatever it is typed into.
+  const marked = (t: string) =>
+    mentions(t).map((part, i) =>
+      part.mention ? (
+        <span key={i} className="chat-mention">
+          {part.text}
+        </span>
+      ) : (
+        part.text
+      ),
+    );
   return (
     <div className="chat-shade" ref={shade} aria-hidden>
-      {what.kind === "shell" ? (
+      {plain ? (
+        marked(text)
+      ) : what.kind === "shell" ? (
         <>
           <span className="chat-bang">!</span>
           {what.command}
         </>
-      ) : (
+      ) : what.kind === "command" ? (
         <>
           <span className="chat-slash">/{what.name}</span>
-          {what.rest}
+          {marked(what.rest)}
           {what.known?.argument_hint && !what.rest.trim() && (
             <span className="chat-ghost">
               {what.rest ? "" : " "}
@@ -298,10 +398,67 @@ function Shade({ what, shade }: { what: Typed; shade: React.Ref<HTMLDivElement> 
             </span>
           )}
         </>
-      )}
+      ) : null}
       {/* A last line that is empty still has a height. */}
       {"\u200b"}
     </div>
+  );
+}
+
+/// The paths in the working copy that fit the `@` being typed, in the same
+/// drawer as the slash commands: the file's kind as its icon, its name, and
+/// the directory it is in, quieter.
+function MentionList({
+  id,
+  found,
+  active,
+  onHover,
+  onPick,
+}: {
+  id: string;
+  found: { paths: string[]; error: string | null; searching: boolean };
+  active: number;
+  onHover: (i: number) => void;
+  onPick: (path: string) => void;
+}) {
+  const list = useRef<HTMLUListElement>(null);
+  useLayoutEffect(() => {
+    list.current?.children[active]?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+  return (
+    <ul className="chat-commands" role="listbox" id={id} ref={list} aria-label="Files">
+      {found.paths.length === 0 ? (
+        <li className="chat-mention-note" role="presentation">
+          {found.error ?? (found.searching ? "Searching the working copy…" : "No matching files or folders")}
+        </li>
+      ) : (
+        found.paths.map((path, i) => {
+          const dir = path.endsWith("/");
+          const trimmed = dir ? path.slice(0, -1) : path;
+          const cut = trimmed.lastIndexOf("/");
+          const name = trimmed.slice(cut + 1);
+          return (
+            <li
+              key={path}
+              id={`${id}-${i}`}
+              role="option"
+              aria-selected={i === active}
+              className={i === active ? "active" : undefined}
+              onMouseMove={() => i !== active && onHover(i)}
+              // Down rather than click, so the textarea keeps the focus.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onPick(path);
+              }}
+            >
+              <span className="chat-mention-icon">{dir ? <Folder name={name} open={false} /> : <FileIcon name={name} />}</span>
+              <span className="chat-command-name">{name}</span>
+              {cut > 0 && <span className="chat-command-about">{trimmed.slice(0, cut)}</span>}
+            </li>
+          );
+        })
+      )}
+    </ul>
   );
 }
 
@@ -380,6 +537,8 @@ function ModeNote({ what, open }: { what: Typed; open: boolean }) {
 }
 
 function Composer({
+  draftKey,
+  history,
   state,
   usage,
   onCommand,
@@ -388,7 +547,21 @@ function Composer({
   onRemove,
   onSent,
   onSchedule,
+  findFiles,
+  load,
+  question,
+  onAnswer,
+  agent,
+  onSideChat,
+  branching,
+  onBranch,
+  onCancelBranch,
 }: {
+  /// Which conversation's draft the box holds: see `chat/drafts.ts`.
+  draftKey: string;
+  /// What you have said in this conversation, oldest first: what the up arrow
+  /// in an empty box steps back through.
+  history: string[];
   state: ChatState | null;
   usage: Usage | null;
   onCommand: (command: ChatCommand) => void;
@@ -398,12 +571,54 @@ function Composer({
   onSent: () => void;
   /// Keep a message on the server to say at a time: what the clock button
   /// does instead of sending. Throws to leave the text where it is.
-  onSchedule: (text: string, at: number) => Promise<void>;
+  /// With `repeat`, said again and again: see `repeats.ts`.
+  onSchedule: (text: string, at: number, repeat: Repeat | null) => Promise<void>;
+  /// The working copy's paths that fit an `@` mention; rejects on a server
+  /// that cannot search them.
+  findFiles: (query: string) => Promise<FoundPaths>;
+  /// Text to put in the box, once per `nonce`: a queued message taken back to
+  /// change. After what is already there, if anything is.
+  load: { text: string; nonce: number; replace?: boolean } | null;
+  /// The agent's question waiting on you, answered from here: see
+  /// `chat/Questions.tsx`.
+  question: ChatAsk | null;
+  onAnswer: (decision: ChatDecision) => void;
+  agent: string;
+  /// Ask on the side (`/btw`); unset in a side chat itself.
+  onSideChat?: (question: string) => void;
+  /// An earlier message is being edited: sending forks the conversation
+  /// rather than saying it here.
+  branching: boolean;
+  onBranch: (text: string) => void;
+  onCancelBranch: () => void;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => readDraft(draftKey));
+  // Kept a moment after typing stops, and at once when the pane goes, so a
+  // switch to another worktree mid-word keeps the word.
+  const latest = useRef(text);
+  latest.current = text;
+  useEffect(() => {
+    if (!load) return;
+    const had = latest.current.trimEnd();
+    const next = had && !load.replace ? `${had}\n${load.text}` : load.text;
+    setText(next);
+    requestAnimationFrame(() => {
+      const el = box.current;
+      if (!el) return;
+      el.focus();
+      el.selectionStart = el.selectionEnd = next.length;
+    });
+  }, [load?.nonce]);
+  useEffect(() => {
+    const timer = setTimeout(() => writeDraft(draftKey, text), 300);
+    return () => clearTimeout(timer);
+  }, [draftKey, text]);
+  useEffect(() => () => writeDraft(draftKey, latest.current), [draftKey]);
   // Open while a message is being written for later: the time it is for, as
   // a `datetime-local` input holds it. Enter then schedules rather than sends.
   const [later, setLater] = useState<string | null>(null);
+  // And how often after that, when the server can repeat it.
+  const [again, setAgain] = useState<"once" | "daily" | "weekdays" | "weekly" | "hourly">("once");
   const box = useRef<HTMLTextAreaElement>(null);
   const shade = useRef<HTMLDivElement>(null);
   const picker = useRef<HTMLInputElement>(null);
@@ -414,12 +629,45 @@ function Composer({
   const sent = useRef<{ text: string; at: number } | null>(null);
   const working = state?.activity === "running" || state?.activity === "waiting";
 
-  const commands = useMemo(() => offeredCommands(state), [state?.slash_commands, state?.commands]);
-  const placeholder = working
-    ? "Queue a message for when this turn is done"
-    : commands.length || state?.shell
-      ? `Tell the agent what to do${commands.length ? " · / for commands" : ""}${state?.shell ? " · ! for the shell" : ""}`
-      : "Tell the agent what to do";
+  const commands = useMemo(
+    () => [...(onSideChat ? [SIDE_COMMAND] : []), ...offeredCommands(state)],
+    [state?.slash_commands, state?.commands, onSideChat],
+  );
+  // T3 Code's "Ask anything", with the keys this box answers to after it.
+  const hints = [commands.length ? "/ commands" : null, state?.shell ? "! shell" : null].filter(Boolean);
+  const flow = useQuestions(question, onAnswer);
+  // T3 Code's stash: Ctrl+S puts what is written aside, and the tab on the box
+  // gives it back.
+  const stash = useStash();
+  const [stashOpen, setStashOpen] = useState(false);
+  const unstash = (s: Stashed) => {
+    setText((had) => (had.trim() ? `${had.trimEnd()}\n${s.text}` : s.text));
+    stash.take(s.id);
+    setStashOpen(false);
+    requestAnimationFrame(() => box.current?.focus());
+  };
+  const asking = flow.question !== null;
+  const placeholder = asking
+    ? "Type your own answer, or leave this blank to use the choice picked"
+    : branching
+    ? "Say it again, or differently: it goes to a new conversation"
+    : working
+    ? `Queue a message for after this turn, or ${STEER_KEYS} to stop it and send now`
+    : `Ask anything.${hints.length ? ` ${hints.join(", ")}` : ""}`;
+
+  // Where the up arrow has got to in `history`, while what is in the box is
+  // still what it put there. Typing anything else lets go of it.
+  const [recalled, setRecalled] = useState<number | null>(null);
+  const recall = (at: number | null) => {
+    setRecalled(at);
+    setText(at === null ? "" : history[at]);
+    // At the end, so the next arrow down is a step forward rather than a
+    // move through the recalled text's lines.
+    requestAnimationFrame(() => {
+      const el = box.current;
+      if (el) el.selectionStart = el.selectionEnd = el.value.length;
+    });
+  };
 
   // Grows with what is typed, up to a third of the pane, and no further.
   //
@@ -459,6 +707,58 @@ function Composer({
   }, [fit]);
 
   const what = typed(text, commands, state?.shell ?? false);
+
+  // The `@` mention at the caret, T3 Code's: the working copy searched for
+  // what follows it, a moment after typing stops, and the paths offered in the
+  // drawer over the box until one is picked or Esc puts them away.
+  const [caret, setCaret] = useState(0);
+  const typing = later === null && what.kind !== "shell" ? mentionAt(text, caret) : null;
+  const [unmentioned, setUnmentioned] = useState<number | null>(null);
+  const mention = typing && typing.start !== unmentioned ? typing : null;
+  const [found, setFound] = useState<{ query: string; paths: string[]; error: string | null } | null>(null);
+  useEffect(() => {
+    if (!mention) return;
+    const query = mention.query;
+    let live = true;
+    const timer = setTimeout(() => {
+      findFiles(query).then(
+        (f) => live && setFound({ query, paths: f.paths, error: null }),
+        (e) =>
+          live &&
+          setFound({
+            query,
+            paths: [],
+            error: /unsupported|unknown variant/i.test(messageOf(e))
+              ? "This server cannot search files yet: update hurad"
+              : messageOf(e),
+          }),
+      );
+    }, 120);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [mention?.query, mention?.start, findFiles]);
+  const shownFound = mention
+    ? { paths: found?.paths ?? [], error: found?.error ?? null, searching: found?.query !== mention.query }
+    : null;
+  const [mentionActive, setMentionActive] = useState(0);
+  useEffect(() => setMentionActive(0), [found]);
+  const pickedPath = shownFound?.paths[Math.min(mentionActive, shownFound.paths.length - 1)];
+  const mentionListId = useId();
+  const pickMention = (path: string) => {
+    if (!mention) return;
+    const before = text.slice(0, mention.start);
+    const after = text.slice(caret).replace(/^\S*/, "");
+    const inserted = `@${path}${after.startsWith(" ") ? "" : " "}`;
+    setText(before + inserted + after);
+    const at = before.length + inserted.length;
+    setCaret(at);
+    requestAnimationFrame(() => {
+      const el = box.current;
+      if (el) el.selectionStart = el.selectionEnd = at;
+    });
+  };
   // The commands, offered while a name is being typed, until Esc puts them
   // away for that name.
   const query = naming(text);
@@ -480,15 +780,23 @@ function Composer({
     sent.current = { text: t, at: Date.now() };
     setText("");
   };
-  const send = () => {
+  const send = (steer = false) => {
     if (later !== null) {
       const t = text.trim();
       const at = epochOf(later);
       if (!t || at === null) return;
-      void onSchedule(t, at).then(
+      // The time of day, and for a weekly one the day, are the first time's.
+      const first = new Date(at * 1000);
+      const clock = `${String(first.getHours()).padStart(2, "0")}:${String(first.getMinutes()).padStart(2, "0")}`;
+      const rule =
+        again === "once"
+          ? null
+          : repeatOf(again === "weekly" ? (`weekly-${first.getDay()}` as Cadence) : again, clock);
+      void onSchedule(t, at, rule).then(
         () => {
           say(t);
           setLater(null);
+          setAgain("once");
         },
         () => {},
       );
@@ -504,6 +812,21 @@ function Composer({
     }
     const t = text.trim();
     if (!t && !files.length) return;
+    if (what.kind === "command" && what.known === SIDE_COMMAND && onSideChat) {
+      const q = what.rest.trim();
+      if (!q) return;
+      onSideChat(q);
+      say(t);
+      return;
+    }
+    if (branching) {
+      onBranch(t);
+      say(t);
+      return;
+    }
+    // Steering is the turn stopped and this said in its place: the host takes
+    // the message as the next turn once the interrupt has ended this one.
+    if (steer && working) onCommand({ op: "interrupt" });
     onCommand({
       op: "send",
       text: t,
@@ -512,6 +835,25 @@ function Composer({
     say(t);
     onSent();
   };
+  // Whether the steer key is held, so the button can say which it will do.
+  const [steerHeld, setSteerHeld] = useState(false);
+  useEffect(() => {
+    if (!working) return;
+    const look = (e: KeyboardEvent) => setSteerHeld(steering(e));
+    const off = () => setSteerHeld(false);
+    window.addEventListener("keydown", look);
+    window.addEventListener("keyup", look);
+    window.addEventListener("blur", off);
+    return () => {
+      window.removeEventListener("keydown", look);
+      window.removeEventListener("keyup", look);
+      window.removeEventListener("blur", off);
+      setSteerHeld(false);
+    };
+  }, [working]);
+  // Sending an edited message starts another conversation, so this one's
+  // turn has nothing to wait for or stop.
+  const steers = working && !branching && later === null && what.kind !== "shell";
   const sendable =
     later !== null
       ? Boolean(text.trim()) && epochOf(later) !== null
@@ -528,7 +870,56 @@ function Composer({
   const effort = state?.effort ?? null;
   return (
     <div className="chat-composer">
-      {offered.length > 0 && (
+      {asking && <QuestionDrawer flow={flow} onPick={(label) => flow.toggle(label, () => setText(""))} />}
+      {branching && (
+        <p className="chat-branching">
+          <Edit aria-hidden />
+          <span>Editing an earlier message: sending it starts a new conversation from just before it, and this one stays as it is.</span>
+          <button onClick={onCancelBranch}>Cancel</button>
+        </p>
+      )}
+      {!asking && !branching && !shownFound && offered.length === 0 && stash.all.length > 0 && (
+        <button
+          className={`chat-stash-tab${stashOpen ? " on" : ""}`}
+          title={`Prompts Put Aside${keysOf("stash").label ? ` (${keysOf("stash").label} puts one here)` : ""}`}
+          aria-expanded={stashOpen}
+          onClick={() => setStashOpen(!stashOpen)}
+        >
+          <StashGlyph aria-hidden />
+          Stash {stash.all.length}
+        </button>
+      )}
+      {!asking && !shownFound && offered.length === 0 && stashOpen && stash.all.length > 0 && (
+        <ul className="chat-commands chat-stash" aria-label="Prompts put aside">
+          {stash.all.map((s) => (
+            <li key={s.id} onMouseDown={(e) => e.preventDefault()} onClick={() => unstash(s)} title="Back into the box">
+              <span className="chat-stash-text">{s.text}</span>
+              <span className="chat-command-about chat-stash-age">{since(Date.now() - s.at)} ago</span>
+              <button
+                className="chat-stash-drop"
+                title="Throw It Away"
+                aria-label="Throw it away"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  stash.take(s.id);
+                }}
+              >
+                <Close aria-hidden />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!asking && shownFound && offered.length === 0 && (
+        <MentionList
+          id={mentionListId}
+          found={shownFound}
+          active={mentionActive}
+          onHover={setMentionActive}
+          onPick={pickMention}
+        />
+      )}
+      {!asking && offered.length > 0 && (
         <CommandList id={listId} commands={offered} active={active} onHover={setActive} onPick={complete} />
       )}
       {/* One box: what you write, and under it, in the same frame, what it
@@ -550,6 +941,16 @@ function Composer({
               aria-label="When to say it"
               onChange={(e) => setLater(e.target.value)}
             />
+            {serverCanRepeat() && (
+              <AgainControl
+                value={again}
+                day={(() => {
+                  const at = epochOf(later);
+                  return at === null ? null : new Date(at * 1000).toLocaleDateString([], { weekday: "long" });
+                })()}
+                onChange={setAgain}
+              />
+            )}
             <span className="hint">or when the turn running then ends · kept by the server</span>
             <button className="quiet-icon" title="Send Now Instead" aria-label="Cancel" onClick={() => setLater(null)}>
               <Close />
@@ -557,12 +958,16 @@ function Composer({
           </div>
         )}
         <div className="chat-field">
-          <Shade what={what} shade={shade} />
+          <Shade what={what} text={text} shade={shade} />
           <textarea
             ref={box}
             rows={1}
             value={text}
-            className={what.kind === "shell" || (what.kind === "command" && what.known) ? "shaded" : undefined}
+            className={
+              what.kind === "shell" || (what.kind === "command" && what.known) || hasMention(text)
+                ? "shaded"
+                : undefined
+            }
             role="combobox"
             aria-expanded={offered.length > 0}
             aria-controls={offered.length > 0 ? listId : undefined}
@@ -576,7 +981,10 @@ function Composer({
             onScroll={(e) => {
               if (shade.current) shade.current.scrollTop = e.currentTarget.scrollTop;
             }}
+            // Where the caret is, for the `@` being typed at it.
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onChange={(e) => {
+              setCaret(e.target.selectionStart);
               const just = sent.current;
               if (just && Date.now() - just.at < 1000) {
                 const kind = (e.nativeEvent as InputEvent).inputType;
@@ -586,6 +994,7 @@ function Composer({
                 }
               }
               sent.current = null;
+              setRecalled(null);
               setText(e.target.value);
               if (naming(e.target.value) !== dismissed) setDismissed(null);
             }}
@@ -600,6 +1009,49 @@ function Composer({
             }}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
+              if (pressed(e.nativeEvent, "stash")) {
+                // Put aside, not saved: the box empties for the next thing.
+                e.preventDefault();
+                if (text.trim()) {
+                  stash.put(text);
+                  setText("");
+                }
+                return;
+              }
+              if (asking) {
+                // A choice by its number, while nothing of your own is typed.
+                const n = /^[1-9]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey ? Number(e.key) : 0;
+                const option = n ? flow.question?.options?.[n - 1] : undefined;
+                if (option && !text) {
+                  e.preventDefault();
+                  flow.toggle(option.label ?? "", () => setText(""));
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (flow.ready(text)) setText(flow.next(text));
+                  return;
+                }
+              }
+              if (shownFound && offered.length === 0) {
+                const count = shownFound.paths.length;
+                if (count && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+                  e.preventDefault();
+                  const step = e.key === "ArrowDown" ? 1 : -1;
+                  setMentionActive((mentionActive + step + count) % count);
+                  return;
+                }
+                if (pickedPath && (e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+                  e.preventDefault();
+                  pickMention(pickedPath);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setUnmentioned(mention?.start ?? null);
+                  return;
+                }
+              }
               if (picked && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
                 e.preventDefault();
                 const step = e.key === "ArrowDown" ? 1 : -1;
@@ -612,9 +1064,28 @@ function Composer({
                 // command is never run by a key meant to finish typing it.
                 e.preventDefault();
                 complete(picked);
+              } else if (
+                e.key === "ArrowUp" &&
+                !files.length &&
+                history.length > 0 &&
+                (text === "" || (recalled !== null && text === history[recalled])) &&
+                e.currentTarget.selectionStart === e.currentTarget.selectionEnd &&
+                (text === "" || e.currentTarget.selectionStart === text.length)
+              ) {
+                // Back through what was said here, as a shell's history is.
+                e.preventDefault();
+                recall(recalled === null ? history.length - 1 : Math.max(0, recalled - 1));
+              } else if (
+                e.key === "ArrowDown" &&
+                recalled !== null &&
+                text === history[recalled] &&
+                e.currentTarget.selectionStart === text.length
+              ) {
+                e.preventDefault();
+                recall(recalled + 1 < history.length ? recalled + 1 : null);
               } else if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                send();
+                send(steers && steering(e));
               } else if (e.key === "Escape" && picked) {
                 e.preventDefault();
                 setDismissed(query);
@@ -626,16 +1097,20 @@ function Composer({
           />
         </div>
         <ModeNote what={what} open={offered.length > 0} />
+        {/* T3 Code's footer: what goes with the message on the left, and on
+            the right what the next turn runs under, then the one round
+            button that sends it (or, while a turn runs and nothing is
+            written, stops it). */}
         <div className="chat-controls">
           {state?.files && (
             <>
               <button
-                className="chat-round chat-attach"
-                title="Send files with the message"
+                className="chat-ghost-button"
+                title="Attach Files"
                 aria-label="Attach Files"
                 onClick={() => picker.current?.click()}
               >
-                <Plus size={16} />
+                <Attach size={16} />
               </button>
               <input
                 ref={picker}
@@ -650,51 +1125,23 @@ function Composer({
               />
             </>
           )}
-          <Select
-            className="chat-select"
-            aria-label="Permission mode"
-            title="Permission mode"
-            value={state?.mode ?? "auto"}
-            options={MODES}
-            onChange={(mode) => onCommand({ op: "mode", mode })}
-          />
-          {models.length > 0 && (
-            <Select
-              className="chat-select"
-              aria-label="Model"
-              title={model ? `Model: ${model}` : "Model"}
-              // Claude Code reports a full id and offers aliases to switch to,
-              // so the closed control names the one running and the list
-              // holds the choices, each with the model it stands for.
-              value={model ?? models[0].value}
-              shown={model ? modelName(model) : undefined}
-              options={models.map((m) => ({
-                value: m.value,
-                label: m.display_name,
-                hint: m.description.split(" · ")[0],
-              }))}
-              onChange={(next) => onCommand({ op: "model", model: next })}
-            />
-          )}
-          {efforts.length > 0 && (
-            <Select
-              className="chat-select"
-              aria-label="Reasoning effort"
-              title={effort ? `Reasoning effort: ${effortName(effort)}` : "Reasoning effort"}
-              value={effort ?? ""}
-              shown={effort ? undefined : "Effort"}
-              options={[
-                { value: "", label: "Default", hint: "The model's own" },
-                ...efforts.map((e) => ({ value: e, label: effortName(e) })),
-              ]}
-              onChange={(next) => onCommand({ op: "effort", effort: next || null })}
-            />
-          )}
           <span className="chat-facts">{state?.status === "compacting" && <span>compacting</span>}</span>
+          <ModeControl mode={state?.mode ?? "auto"} onChange={(mode) => onCommand({ op: "mode", mode })} />
+          {models.length > 0 && (
+            <ModelControl
+              agent={agent}
+              models={models}
+              model={model}
+              efforts={efforts}
+              effort={effort}
+              onModel={(next) => onCommand({ op: "model", model: next })}
+              onEffort={(next) => onCommand({ op: "effort", effort: next })}
+            />
+          )}
           {/* Text only: a file is not something the server keeps for later. */}
           {later === null && what.kind !== "shell" && !files.length && (
             <button
-              className="chat-round chat-attach"
+              className="chat-ghost-button"
               title="Send Later, at a Time"
               aria-label="Send Later"
               onClick={() => {
@@ -702,7 +1149,7 @@ function Composer({
                 box.current?.focus();
               }}
             >
-              <Scheduled size={15} />
+              <Scheduled size={16} />
             </button>
           )}
           {(state?.started || usage) && (
@@ -712,17 +1159,31 @@ function Composer({
               usage={usage}
             />
           )}
-          {/* One round button at the end, as on the phone: Stop while a turn
-              runs and nothing is written, Send otherwise -- a message
-              written during a turn is queued, so it is still sent. */}
-          {working && later === null && !text.trim() && !files.length ? (
+          {asking ? (
+            // T3 Code's answer buttons in place of send: back a question, and
+            // on to the next or send them all.
+            <span className="chat-answer">
+              {flow.step > 0 && (
+                <button className="chat-answer-back" onClick={() => setText(flow.back(text))}>
+                  Previous
+                </button>
+              )}
+              <button
+                className="chat-answer-go"
+                disabled={!flow.ready(text)}
+                onClick={() => setText(flow.next(text))}
+              >
+                {flow.last ? (flow.questions.length > 1 ? "Submit Answers" : "Submit Answer") : "Next Question"}
+              </button>
+            </span>
+          ) : working && later === null && !text.trim() && !files.length ? (
             <button
               className="chat-round chat-stop"
               title="Stop This Turn (Esc)"
               aria-label="Stop"
               onClick={() => onCommand({ op: "interrupt" })}
             >
-              <Stop size={10} fill="currentColor" />
+              <span className="chat-stop-square" />
             </button>
           ) : (
             <button
@@ -732,24 +1193,173 @@ function Composer({
                   ? "Schedule (Enter)"
                   : what.kind === "shell"
                     ? "Run It in the Sandbox (Enter)"
-                    : "Send (Enter)"
+                    : steers && steerHeld
+                      ? `Stop the Turn and Send Now (${STEER_KEYS})`
+                      : steers
+                        ? `Send After This Turn (Enter), or Stop It and Send Now (${STEER_KEYS})`
+                        : "Send (Enter)"
               }
-              aria-label={later !== null ? "Schedule" : what.kind === "shell" ? "Run" : "Send"}
+              aria-label={
+                later !== null
+                  ? "Schedule"
+                  : what.kind === "shell"
+                    ? "Run"
+                    : steers
+                      ? steerHeld
+                        ? "Stop and send now"
+                        : "Send after this turn"
+                      : "Send"
+              }
               disabled={!sendable}
-              onClick={send}
+              onClick={(e) => send(steers && (steerHeld || steering(e)))}
             >
               {later !== null ? (
-                <Scheduled size={15} />
+                <Scheduled size={14} />
               ) : what.kind === "shell" ? (
-                <Shell size={15} />
+                <Shell size={14} />
+              ) : steers && steerHeld ? (
+                <SendSteer size={14} strokeWidth={1.8} />
+              ) : steers ? (
+                <SendQueued size={14} strokeWidth={1.8} />
               ) : (
-                <Send size={16} strokeWidth={2.25} />
+                <Send size={14} strokeWidth={1.8} />
               )}
             </button>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+/// How often a scheduled message is said: once, or on a rule from its first
+/// time. See `repeats.ts`.
+function AgainControl({
+  value,
+  day,
+  onChange,
+}: {
+  value: "once" | "daily" | "weekdays" | "weekly" | "hourly";
+  /// The first time's weekday, which a weekly one keeps.
+  day: string | null;
+  onChange: (value: "once" | "daily" | "weekdays" | "weekly" | "hourly") => void;
+}) {
+  const menu = useButtonMenu();
+  const choices = [
+    { value: "once", label: "Once" },
+    { value: "daily", label: "Every day" },
+    { value: "weekdays", label: "Every weekday" },
+    { value: "weekly", label: day ? `Every ${day}` : "Every week" },
+    { value: "hourly", label: "Every hour" },
+  ] as const;
+  return (
+    <button
+      className="chat-later-again"
+      aria-haspopup="menu"
+      title="How Often to Say It"
+      onClick={menu(() =>
+        choices.map((c) => ({ label: c.label, checked: c.value === value, run: () => onChange(c.value) })),
+      )}
+    >
+      <Recurring aria-hidden />
+      {choices.find((c) => c.value === value)?.label}
+    </button>
+  );
+}
+
+/// The permission mode, as T3 Code's composer draws it: its glyph and its
+/// name, borderless until pointed at, and a menu of the four with what each
+/// asks before.
+function ModeControl({ mode, onChange }: { mode: string; onChange: (mode: string) => void }) {
+  const menu = useButtonMenu();
+  const current = MODES.find((m) => m.value === mode) ?? MODES[0];
+  const Icon = MODE_ICONS[current.value] ?? ModeAuto;
+  return (
+    <button
+      className="chat-control"
+      title={`Permission mode: ${current.label}. ${current.hint}`}
+      aria-label={`Permission mode: ${current.label}`}
+      aria-haspopup="menu"
+      onClick={menu(
+        () =>
+          MODES.map((m) => ({
+            label: m.label,
+            hint: m.hint,
+            checked: m.value === mode,
+            run: () => onChange(m.value),
+          })),
+        { up: true },
+      )}
+    >
+      <Icon size={15} />
+      <span>{current.label}</span>
+    </button>
+  );
+}
+
+/// The model and its reasoning effort as one control, the way T3 Code says
+/// it: "Opus 5.5 High", the effort in the quieter grey. One menu holds both,
+/// the models over the efforts the one in use takes.
+function ModelControl({
+  agent,
+  models,
+  model,
+  efforts,
+  effort,
+  onModel,
+  onEffort,
+}: {
+  /// Whose models: its mark goes before the name, as T3 Code puts the
+  /// provider's.
+  agent: string;
+  models: ChatModel[];
+  model: string | null;
+  efforts: string[];
+  effort: string | null;
+  onModel: (model: string) => void;
+  onEffort: (effort: string | null) => void;
+}) {
+  const menu = useButtonMenu();
+  // Claude Code reports a full id and offers aliases to switch to, so the
+  // control names the one running and the menu holds the choices, each with
+  // the model it stands for.
+  const chosen = model ?? models[0].value;
+  const current = models.find((m) => m.value === chosen || m.resolved === chosen);
+  // An alias is named as its entry names it ("opus" is "Opus 5.5"); a full id,
+  // as `modelName` reads it.
+  const name =
+    current && (!model || model === current.value) ? current.display_name : modelName(model ?? chosen);
+  return (
+    <button
+      className="chat-control"
+      title={`Model: ${name}${effort ? `, ${effortName(effort)} effort` : ""}`}
+      aria-label="Model and effort"
+      aria-haspopup="menu"
+      onClick={menu(
+        () => [
+          { heading: "Model" },
+          ...models.map((m) => ({
+            label: m.display_name,
+            hint: m.description.split(" · ")[0],
+            checked: m === current,
+            run: () => onModel(m.value),
+          })),
+          ...(efforts.length
+            ? [
+                "separator" as const,
+                { heading: "Effort" },
+                { label: "Default", hint: "The model's own", checked: !effort, run: () => onEffort(null) },
+                ...efforts.map((e) => ({ label: effortName(e), checked: e === effort, run: () => onEffort(e) })),
+              ]
+            : []),
+        ],
+        { up: true },
+      )}
+    >
+      <AgentMark agent={agent} title={false} className="chat-control-mark" />
+      <span className="chat-control-name">{name}</span>
+      {effort && <span className="chat-control-quiet">{effortName(effort)}</span>}
+    </button>
   );
 }
 
@@ -780,9 +1390,9 @@ function useWaiting(server: string, name: string, onError: (message: string | nu
     };
   }, [server, take]);
   const schedule = useCallback(
-    async (text: string, at: number) => {
+    async (text: string, at: number, repeat: Repeat | null) => {
       try {
-        take(await api.queueMessage(server, name, text, at));
+        take(await api.queueMessage(server, name, text, at, repeat));
         onError(null);
       } catch (e) {
         onError(messageOf(e));
@@ -804,20 +1414,47 @@ function useWaiting(server: string, name: string, onError: (message: string | nu
 
 /// The messages waiting to be said, above the box they were written in: each
 /// with when, and a way to take it back.
-function Waiting({ messages, onRemove }: { messages: QueuedMessage[]; onRemove: (m: QueuedMessage) => void }) {
+function Waiting({
+  messages,
+  onRemove,
+  onEdit,
+}: {
+  messages: QueuedMessage[];
+  onRemove: (m: QueuedMessage) => void;
+  /// Take it off the queue and back into the box, to change before sending.
+  onEdit: (m: QueuedMessage) => void;
+}) {
   if (!messages.length) return null;
+  // T3 Code's queued messages: each a dashed bubble where yours go, not yet
+  // solid because not yet said, and under it when it will be and the way to
+  // take it back.
   return (
     <ul className="chat-waiting" aria-label="Waiting to be said">
       {messages.map((m) => (
         <li key={m.id}>
-          {m.at !== null ? <Scheduled /> : <Queued />}
-          <span className="when">{m.at !== null ? startsAt(m.at) : "after this turn"}</span>
-          <span className="text" title={m.text}>
+          <p className="chat-waiting-text" title={m.text}>
             {m.text}
-          </span>
-          <button className="quiet-icon" title="Don't Say It" aria-label="Remove" onClick={() => onRemove(m)}>
-            <Close />
-          </button>
+          </p>
+          <div className="chat-waiting-meta">
+            {m.repeat ? <Recurring /> : m.at !== null ? <Scheduled /> : <Queued />}
+            <span
+              title={m.repeat && m.runs ? `Said ${m.runs} ${m.runs === 1 ? "time" : "times"} so far` : undefined}
+            >
+              {m.repeat && m.at !== null
+                ? `${describeRepeat(m.repeat)}; next ${startsAt(m.at)}`
+                : m.at !== null
+                  ? `Said ${startsAt(m.at)}`
+                  : "Said after this turn"}
+            </span>
+            <button className="chat-waiting-remove" title="Back into the Box, to Change" onClick={() => onEdit(m)}>
+              <Edit aria-hidden />
+              Edit
+            </button>
+            <button className="chat-waiting-remove" title="Don't Say It" onClick={() => onRemove(m)}>
+              <Close aria-hidden />
+              Remove
+            </button>
+          </div>
         </li>
       ))}
     </ul>
@@ -828,6 +1465,9 @@ export function ChatPane({
   server,
   name,
   conv,
+  agent,
+  nested = false,
+  onBranch,
   usage,
   pull,
   onPull,
@@ -837,6 +1477,14 @@ export function ChatPane({
   server: string;
   name: string;
   conv: string;
+  /// Which agent the session runs, for its mark beside the model.
+  agent: string;
+  /// A side chat's own pane, which has no side chat or edits of its own.
+  nested?: boolean;
+  /// Start a conversation from just before an earlier message of this one
+  /// (`at`, or from nothing when there is nothing before it) and say `text`
+  /// there: "Edit from here".
+  onBranch?: (from: string | null, at: string | null, text: string) => void;
   /// The session's, from its poll: what the account's limits are.
   usage: Usage | null;
   /// The open pull request the worktree is on, if the inbox knows it.
@@ -864,6 +1512,8 @@ export function ChatPane({
     () => (path) => api.file(server, name, path).then((f) => f.image ?? undefined),
     [server, name],
   );
+  // The working copy's paths, for the composer's `@`.
+  const findFiles = useCallback((query: string) => api.findFiles(server, name, query), [server, name]);
   // A file a tool call or a reply names, out of this session's sandbox.
   const fetchFile = useCallback((path: string) => void download(server, name, path), [server, name]);
 
@@ -941,7 +1591,7 @@ export function ChatPane({
         })
         .catch((e) => {
           if (!live) return;
-          dispatch({ type: "down", reason: String(e) });
+          dispatch({ type: "down", reason: messageOf(e) });
           retry = setTimeout(connect, wait);
           wait = Math.min(wait * 2, 30_000);
         });
@@ -962,6 +1612,64 @@ export function ChatPane({
   const [files, setFiles] = useState<Attached[]>([]);
   const [refused, setRefused] = useState<string | null>(null);
   const { waiting, schedule, unqueue } = useWaiting(server, name, setRefused);
+  // A queued message taken back into the box to be changed.
+  const [loaded, setLoaded] = useState<{ text: string; nonce: number; replace?: boolean } | null>(null);
+
+  // A side chat's question or an edited message's words, said as soon as the
+  // conversation is open (see `sayFirst`).
+  useEffect(() => {
+    const words = firstWords.get(key);
+    if (!words || !view.state) return;
+    firstWords.delete(key);
+    command({ op: "send", text: words });
+    // Once, when the conversation first says where it is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, view.state]);
+
+  // T3 Code's side chat: `/btw` asks in a conversation forked from this one,
+  // beside it, and closing it ends it.
+  const [side, setSide] = useState<string | null>(null);
+  const openSide = useCallback(
+    (question: string) => {
+      api.newChat(server, name, conv, null).then(
+        ({ opened }) => {
+          if (!opened) return;
+          sayFirst(server, name, opened, question);
+          setFollowing(null);
+          setSide(opened);
+        },
+        (e) => setRefused(messageOf(e)),
+      );
+    },
+    [server, name, conv],
+  );
+  const closeSide = () => {
+    if (side) {
+      api.closeChat(server, name, side).catch(() => {});
+      forgetChat(server, name, side);
+    }
+    setSide(null);
+  };
+
+  // "Edit from here": the message's words back in the box, and sending them
+  // forks this conversation from just before it.
+  const [branchFrom, setBranchFrom] = useState<number | null>(null);
+  const editPrompt = useMemo(
+    () =>
+      onBranch && !nested
+        ? (key: string, text: string) => {
+            setBranchFrom(Number(key));
+            setLoaded({ text, nonce: Date.now(), replace: true });
+          }
+        : null,
+    [onBranch, nested],
+  );
+  const branch = (text: string) => {
+    if (branchFrom === null || !onBranch) return;
+    const at = assistantBefore(view.entries, branchFrom);
+    onBranch(at ? conv : null, at, text);
+    setBranchFrom(null);
+  };
   const [dropping, setDropping] = useState(false);
   const takesFiles = view.state?.files ?? false;
   const attach = (picked: File[]) => {
@@ -978,14 +1686,14 @@ export function ChatPane({
     setRefused(null);
     Promise.all(picked.map(read)).then(
       (read) => setFiles((had) => [...had, ...read]),
-      (e) => setRefused(String(e)),
+      (e) => setRefused(messageOf(e)),
     );
   };
   // Only a drag carrying files is one to take: a tab being dragged past is not.
   const carriesFiles = (e: React.DragEvent) => e.dataTransfer.types.includes("Files");
 
   const receiptsOn = view.state?.receipts ?? false;
-  const { items: built, queued, agents } = useMemo(
+  const { items: built, queued, agents, commands } = useMemo(
     () => (view.caughtUp ? build(view.entries) : build([])),
     [view.caughtUp, view.entries],
   );
@@ -994,6 +1702,17 @@ export function ChatPane({
   const settled = useRef<Item[]>([]);
   const items = useMemo(() => (settled.current = settle(settled.current, group(built, working))), [built, working]);
   const started = useMemo(() => (working ? turnStart(view.entries) : null), [working, view.entries]);
+  const liveFold = items.some((i) => i.kind === "steps" && i.live);
+  // What you said here, for the composer's up arrow: each prompt once, in the
+  // order said, without a repeat of the one just before it.
+  const history = useMemo(() => {
+    const said: string[] = [];
+    for (const { ev } of view.entries) {
+      if (ev.kind !== "prompt" || !ev.text.trim() || said[said.length - 1] === ev.text) continue;
+      said.push(ev.text);
+    }
+    return said;
+  }, [view.entries]);
   const [target, setTarget] = useState<{ seq: number; nonce: number } | null>(null);
   useEffect(() => {
     if (!jump) return;
@@ -1006,12 +1725,16 @@ export function ChatPane({
   }, [items, target]);
   const [following, setFollowing] = useState<string | null>(null);
   const followed = agents.find((a) => a.id === following) ?? null;
+  const followedCommand = commands.find((c) => c.id === following) ?? null;
+  // A background command's output, from its file in the sandbox.
+  const readTail = useCallback((path: string) => api.tailFile(server, name, path), [server, name]);
   const openAgent = useMemo(
     () => (callId: string) => {
       const a = agents.find((x) => x.call?.id === callId);
       if (a) setFollowing(a.id);
+      else if (commands.some((c) => c.id === callId)) setFollowing(callId);
     },
-    [agents],
+    [agents, commands],
   );
 
   // Kept at the bottom while it is at the bottom: a reply being written
@@ -1042,6 +1765,11 @@ export function ChatPane({
   }, []);
 
   const pending = view.state?.pending ?? [];
+  const question = pending.find((ask) => ask.tool === "AskUserQuestion") ?? null;
+  const answerQuestion = useCallback(
+    (decision: ChatDecision) => question && command({ op: "answer", id: question.id, decision }),
+    [question, command],
+  );
   const receipts = !receiptsOn ? "off" : view.state?.activity === "idle" ? "idle" : "working";
   const nothing = items.length === 0 && queued.length === 0 && !view.live;
   // A `!` command running says so in its own card.
@@ -1053,6 +1781,7 @@ export function ChatPane({
       <HeldPictures.Provider value={pictures}>
       <Ticking.Provider value={working}>
       <OpenAgent.Provider value={openAgent}>
+      <EditPrompt.Provider value={editPrompt}>
         <Unpin.Provider value={unpin}>
           <div
             className={`chat${dropping ? " dropping" : ""}`}
@@ -1100,29 +1829,52 @@ export function ChatPane({
                 {/* Under whatever is being written, for the whole turn, so a reply
                     that has paused between two tool calls still says it is not
                     finished. The word only while there is nothing else to look at. */}
-                {view.state?.activity === "running" && pending.length === 0 && !shellRunning && (
-                  <p className="chat-working" role="status" aria-label="working">
-                    <Working size={22} />
-                    {!view.live && "working"}
-                    {started !== null && <Since start={started} />}
+                {/* T3 Code's line for a turn under way: "Working for" and the
+                    clock, quiet, with no spinner. Not while the turn's fold above
+                    is already saying it. */}
+                {view.state?.activity === "running" && pending.length === 0 && !shellRunning && !liveFold && (
+                  <p className="chat-working" role="status">
+                    {started !== null ? (
+                      <>
+                        Working for <Since start={started} />
+                      </>
+                    ) : (
+                      "Working…"
+                    )}
                   </p>
                 )}
-                {pending.map((ask) => (
-                  <AskCard key={ask.id} ask={ask} onAnswer={(decision) => command({ op: "answer", id: ask.id, decision })} />
-                ))}
+                {/* Permission prompts and plans here, where the work is; a
+                    question is asked from the composer (`chat/Questions.tsx`). */}
+                {pending
+                  .filter((ask) => ask.tool !== "AskUserQuestion")
+                  .map((ask) => (
+                    <AskCard key={ask.id} ask={ask} onAnswer={(decision) => command({ op: "answer", id: ask.id, decision })} />
+                  ))}
                 {/* Sent and not yet read: after everything the turn in progress is
                     still doing, since Claude reads them when it is done. */}
                 <Items items={queued} receipts={receipts} />
               </div>
               </Found.Provider>
             </div>
-            <AgentsBar agents={agents} open={following} onOpen={setFollowing} />
+            {/* Your messages waiting to be said end the conversation, where
+                they will be said; the work going on beside it and the pull
+                request sit on the box, apart from them. */}
+            <Waiting
+              messages={waiting}
+              onRemove={unqueue}
+              onEdit={(m) => {
+                unqueue(m);
+                setLoaded({ text: m.text, nonce: Date.now() });
+              }}
+            />
+            <AgentsBar agents={agents} commands={commands} open={following} onOpen={setFollowing} />
             <PullBar pull={pull} onOpen={onPull} />
             {(view.down || view.error || refused) && (
               <p className="error chat-banner">{view.down ?? refused ?? view.error}</p>
             )}
-            <Waiting messages={waiting} onRemove={unqueue} />
             <Composer
+              draftKey={key}
+              history={history}
               state={view.state}
               usage={usage}
               onCommand={command}
@@ -1134,9 +1886,19 @@ export function ChatPane({
                 setRefused(null);
               }}
               onSchedule={schedule}
+              findFiles={findFiles}
+              onSideChat={nested ? undefined : openSide}
+              branching={branchFrom !== null}
+              onBranch={branch}
+              onCancelBranch={() => setBranchFrom(null)}
+              load={loaded}
+              question={question}
+              onAnswer={answerQuestion}
+              agent={agent}
             />
           </div>
         </Unpin.Provider>
+      </EditPrompt.Provider>
       </OpenAgent.Provider>
       {followed && (
         <Downloader.Provider value={fetchFile}>
@@ -1144,6 +1906,24 @@ export function ChatPane({
           <AgentPanel agent={followed} progress={view.tasks.get(followed.id)} onClose={() => setFollowing(null)} />
         </Pictures.Provider>
         </Downloader.Provider>
+      )}
+      {followedCommand && (
+        <CommandPanel command={followedCommand} readTail={readTail} onClose={() => setFollowing(null)} />
+      )}
+      {side && !followed && !followedCommand && (
+        <aside className="chat-agent-panel chat-side-panel" aria-label="Side chat">
+          <header>
+            <SideGlyph aria-hidden />
+            <h3>Side chat</h3>
+            <button className="chat-agent-close" title="Close, and End the Side Chat" onClick={closeSide}>
+              <Close aria-label="Close" />
+            </button>
+          </header>
+          <p className="chat-agent-facts">With this conversation's context, which goes on untouched</p>
+          <div className="chat-side-body">
+            <ChatPane server={server} name={name} conv={side} agent={agent} usage={usage} pull={null} onPull={onPull} nested />
+          </div>
+        </aside>
       )}
       </Ticking.Provider>
       </HeldPictures.Provider>

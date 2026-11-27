@@ -8,7 +8,7 @@
 // stops the agent, and another started from `+`. A worktree with nothing open
 // says so, and offers the same.
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useButtonMenu } from "./ContextMenu";
 import { Empty } from "./Empty";
@@ -18,8 +18,11 @@ import { FileDiffPane } from "./panes/FileDiff";
 import type { Against } from "./gen/Against";
 import type { PullRequest as Pull } from "./gen/PullRequest";
 import type { Usage } from "./gen/Usage";
-import { Agent, Chat, Close, Plus, Shell } from "./icons";
+import { Agent, Chat, Close, DrawerToggle, Plus, PreviewHere, Shell } from "./icons";
+import { PreviewPane } from "./panes/Preview";
 import { TerminalPane } from "./panes/Terminal";
+import { AgentMark } from "./agents";
+import { keysOf, pressed } from "./keys";
 
 export type Tab =
   /// A terminal in the sandbox. `tmux` names which session, and `null` is the
@@ -33,7 +36,10 @@ export type Tab =
   /// One file's diff, side by side. `against` is part of the key: the staged
   /// and unstaged diffs of one file are two different questions, and opening
   /// one should not replace the other.
-  | { kind: "filediff"; path: string; against: Against };
+  | { kind: "filediff"; path: string; against: Against }
+  /// A port in the sandbox, its page drawn in the tab. `url` is this
+  /// machine's end of the port's preview.
+  | { kind: "preview"; port: number; url: string };
 
 export function keyOf(tab: Tab): string {
   switch (tab.kind) {
@@ -45,6 +51,8 @@ export function keyOf(tab: Tab): string {
       return `file:${tab.path}`;
     case "filediff":
       return `filediff:${tab.against}:${tab.path}`;
+    case "preview":
+      return `preview:${tab.port}`;
   }
 }
 
@@ -57,12 +65,32 @@ export function labelOf(tab: Tab): string {
       return tab.path.split("/").pop() ?? tab.path;
     case "filediff":
       return `${tab.path.split("/").pop() ?? tab.path} ~`;
+    case "preview":
+      return `localhost:${tab.port}`;
   }
 }
+
+/// Dispatched on the window to open or shut the drawer, from the palette.
+export const TOGGLE_DRAWER = "hura:toggle-drawer";
+
+/// A shell beside the agent: drawn in the drawer under the conversation, as
+/// T3 Code's terminals are, rather than as a tab over it.
+const isShell = (tab: Tab) => tab.kind === "terminal" && tab.tmux !== null;
+
+/// The drawer's height, kept between runs: T3 Code's 280 to start, and never
+/// less than 180 or more than three quarters of the window.
+const DRAWER_KEY = "hura.drawerHeight";
+const drawerLimits = () => ({ min: 180, max: Math.max(180, Math.round(window.innerHeight * 0.75)) });
+const clampHeight = (h: number) => {
+  const { min, max } = drawerLimits();
+  return Math.min(max, Math.max(min, Math.round(h)));
+};
 
 export function Tabs({
   server,
   name,
+  agent,
+  onBranch,
   tabs,
   active,
   onActivate,
@@ -84,6 +112,10 @@ export function Tabs({
 }: {
   server: string;
   name: string;
+  /// Which agent the worktree runs (`Session.agent`), for its mark.
+  agent: string;
+  /// "Edit from here" in a conversation: see `ChatPane`.
+  onBranch: (from: string | null, at: string | null, text: string) => void;
   tabs: Tab[];
   active: string;
   /// Why the session failed, when its sandbox is still there to look into.
@@ -146,19 +178,97 @@ export function Tabs({
   const several = choices.length > 1;
   const add = several ? menu(() => choices) : onNewShell;
 
+  // The tabs over the conversation, and the shells in the drawer under it.
+  const mains = tabs.filter((t) => !isShell(t));
+  const shells = tabs.filter(isShell);
+  // `active` is one key for the worktree; a shell made active (a new one, say)
+  // is shown in the drawer, and the tab over the conversation stays as it was.
+  const lastMain = useRef<string | null>(null);
+  const isMain = (key: string | null) => key !== null && mains.some((t) => keyOf(t) === key);
+  if (isMain(active)) lastMain.current = active;
+  const mainActive = isMain(active)
+    ? active
+    : isMain(lastMain.current)
+      ? lastMain.current
+      : mains[0]
+        ? keyOf(mains[0])
+        : null;
+
+  // Whether the drawer is open, and which shell it shows, per worktree.
+  const [drawers, setDrawers] = useState<Record<string, { open: boolean; shell: string | null }>>({});
+  const drawer = drawers[name] ?? { open: false, shell: null };
+  const setDrawer = useCallback(
+    (change: Partial<{ open: boolean; shell: string | null }>) =>
+      setDrawers((all) => ({ ...all, [name]: { ...(all[name] ?? { open: false, shell: null }), ...change } })),
+    [name],
+  );
+  useEffect(() => {
+    if (shells.some((t) => keyOf(t) === active)) setDrawer({ open: true, shell: active });
+    // Only when the active key changes: a shell opened is a shell to show.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+  const shown = shells.find((t) => keyOf(t) === drawer.shell) ?? shells[0] ?? null;
+  const shownKey = shown ? keyOf(shown) : null;
+  const drawerShown = drawer.open && shells.length > 0;
+  // Open with a shell in it: the first one opened if there are none yet.
+  const toggleDrawer = useCallback(() => {
+    if (drawerShown) setDrawer({ open: false });
+    else if (shells.length) setDrawer({ open: true });
+    else onNewShell();
+  }, [drawerShown, shells.length, setDrawer, onNewShell]);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (pressed(e, "terminal")) {
+        e.preventDefault();
+        toggleDrawer();
+      }
+    };
+    window.addEventListener("keydown", key);
+    window.addEventListener(TOGGLE_DRAWER, toggleDrawer);
+    return () => {
+      window.removeEventListener("keydown", key);
+      window.removeEventListener(TOGGLE_DRAWER, toggleDrawer);
+    };
+  }, [toggleDrawer]);
+
+  const [height, setHeight] = useState(() => clampHeight(Number(localStorage.getItem(DRAWER_KEY)) || 280));
+  const grip = (e: React.PointerEvent<HTMLDivElement>) => {
+    const from = e.clientY;
+    const start = height;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    let now = start;
+    const move = (m: PointerEvent) => {
+      now = clampHeight(start + from - m.clientY);
+      setHeight(now);
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      try {
+        localStorage.setItem(DRAWER_KEY, String(now));
+      } catch {
+        // The window works; it just will not remember.
+      }
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+  };
+
   return (
     <section className="editor">
       <nav className="tabs">
-        {tabs.map((tab) => {
+        {mains.map((tab) => {
           const key = keyOf(tab);
-          const agent = tab.kind === "terminal" && tab.tmux === null;
+          const agent_ = tab.kind === "terminal" && tab.tmux === null;
           const shell = tab.kind === "terminal" && tab.tmux !== null ? tab.tmux : null;
           const conv = tab.kind === "chat" ? tab.conv : null;
-          const file = tab.kind === "file" || tab.kind === "filediff" ? keyOf(tab) : null;
+          // A preview closes as a file does: it is this window's alone.
+          const file = tab.kind === "file" || tab.kind === "filediff" || tab.kind === "preview" ? keyOf(tab) : null;
           /// Middle click closes exactly what the cross closes, and nothing
           /// else. The agent and a conversation are asked about first, by the
           /// caller, so a stray middle click costs a dialog and not the work.
-          const close = agent
+          const close = agent_
             ? onCloseAgent
             : shell
               ? () => onCloseShell(shell)
@@ -170,7 +280,7 @@ export function Tabs({
           return (
             <span
               key={key}
-              className={`tab${key === active ? " on" : ""}${dragging === key ? " dragging" : ""}${
+              className={`tab${key === mainActive ? " on" : ""}${dragging === key ? " dragging" : ""}${
                 over === key && dragging !== key ? " over" : ""
               }`}
               draggable
@@ -211,10 +321,18 @@ export function Tabs({
                   one that matters here -- and the label is most of the tab, so
                   it is where a drag will actually be started from. The event
                   bubbles to the handler above either way. */}
-              <button draggable onClick={() => onActivate(key)} title={file ?? undefined}>
+              <button
+                draggable
+                onClick={() => onActivate(key)}
+                title={tab.kind === "preview" ? tab.url : (file ?? undefined)}
+              >
+                {/* A conversation, or the agent's own terminal, wears its
+                    agent's mark. */}
+                {(conv !== null || agent_) && <AgentMark agent={agent} title={false} className="tab-mark" />}
+                {tab.kind === "preview" && <PreviewHere aria-hidden className="tab-mark" />}
                 {labelOf(tab)}
               </button>
-              {agent && (
+              {agent_ && (
                 <button className="close" title="Stop the agent, and close its terminal" onClick={onCloseAgent}>
                   <Close aria-label="Close" />
                 </button>
@@ -259,12 +377,21 @@ export function Tabs({
         >
           <Plus aria-label={several ? "New Tab" : "New Shell"} />
         </button>
+        <button
+          className={`add tabs-drawer${drawerShown ? " on" : ""}`}
+          title={`${drawerShown ? "Hide" : "Show"} the Terminal${keysOf("terminal").label ? ` (${keysOf("terminal").label})` : ""}`}
+          aria-label="Terminal"
+          aria-pressed={drawerShown}
+          onClick={toggleDrawer}
+        >
+          <DrawerToggle />
+        </button>
       </nav>
       {failure && <p className="error tabs-failure">{failure}</p>}
 
       {/* Everything closed: the agent and the shells. The sandbox is still
           there, and so is the way back into it. */}
-      {listed && tabs.length === 0 && (
+      {listed && mains.length === 0 && (
         <Empty size="page" icon={onNewChat ? Chat : Agent} note="Nothing running here">
           <div className="tabs-empty">
             {(onNewChat ?? onNewAgent) && (
@@ -281,7 +408,7 @@ export function Tabs({
         </Empty>
       )}
 
-      {tabs.map((tab) => {
+      {mains.map((tab) => {
         const key = keyOf(tab);
         // Rendered and hidden rather than unmounted: a terminal that is
         // unmounted closes its channel and detaches, so switching to the diff
@@ -289,7 +416,7 @@ export function Tabs({
         // actually needs this, but treating every tab the same means the next
         // kind added cannot get it wrong.
         return (
-          <div key={key} className="tab-body" hidden={key !== active}>
+          <div key={key} className="tab-body" hidden={key !== mainActive}>
             {tab.kind === "terminal" && (
               <TerminalPane
                 key={`${name}:${tab.tmux ?? "agent"}`}
@@ -304,6 +431,8 @@ export function Tabs({
                 server={server}
                 name={name}
                 conv={tab.conv}
+                agent={agent}
+                onBranch={onBranch}
                 usage={usage}
                 pull={pull}
                 onPull={onPull}
@@ -323,9 +452,76 @@ export function Tabs({
             {tab.kind === "file" && (
               <FilePane key={`${name}:${tab.path}`} server={server} name={name} path={tab.path} />
             )}
+            {tab.kind === "preview" && <PreviewPane key={`${name}:${tab.url}`} url={tab.url} port={tab.port} />}
           </div>
         );
       })}
+      {/* The drawer, T3 Code's: the shells under the conversation, a strip of
+          them across its top, and a grip on its edge to make it taller.
+          Hidden rather than unmounted when shut, for the reason the tabs are:
+          a terminal unmounted is a terminal detached from tmux. */}
+      <div className="drawer" hidden={!drawerShown} style={{ height }}>
+        <div
+          className="drawer-grip"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Terminal height"
+          onPointerDown={grip}
+          onDoubleClick={() => {
+            setHeight(280);
+            localStorage.removeItem(DRAWER_KEY);
+          }}
+        />
+        <nav className="drawer-tabs" aria-label="Shells">
+          {shells.map((tab) => {
+            const key = keyOf(tab);
+            const tmux = tab.kind === "terminal" ? tab.tmux : null;
+            return (
+              <span key={key} className={`drawer-tab${key === shownKey ? " on" : ""}`}>
+                <button onClick={() => setDrawer({ shell: key })}>
+                  <Shell aria-hidden />
+                  {labelOf(tab)}
+                </button>
+                {tmux && (
+                  <button
+                    className="close"
+                    title="Close this shell, and whatever is running in it"
+                    onClick={() => onCloseShell(tmux)}
+                  >
+                    <Close aria-label="Close" />
+                  </button>
+                )}
+              </span>
+            );
+          })}
+          <button className="drawer-add" title="Another Shell" aria-label="New Shell" onClick={onNewShell}>
+            <Plus />
+          </button>
+          <button
+            className="drawer-add drawer-hide"
+            title={`Hide the Terminal${keysOf("terminal").label ? ` (${keysOf("terminal").label})` : ""}`}
+            aria-label="Hide the terminal"
+            onClick={() => setDrawer({ open: false })}
+          >
+            <Close />
+          </button>
+        </nav>
+        {shells.map((tab) => {
+          const key = keyOf(tab);
+          return (
+            <div key={key} className="tab-body" hidden={key !== shownKey}>
+              {tab.kind === "terminal" && (
+                <TerminalPane
+                  key={`${name}:${tab.tmux ?? "agent"}`}
+                  server={server}
+                  name={name}
+                  tmux={tab.tmux}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }

@@ -1650,7 +1650,15 @@ pub fn terminals(backend: &dyn Backend, session: &Session) -> Result<Terminals, 
 /// It is the same sandbox under the same policy. A shell is not a way around
 /// the isolation -- it is a second prompt inside it, which is the point: you
 /// can run the tests while the agent is still working.
-pub fn new_shell(backend: &dyn Backend, session: &Session) -> Result<String, String> {
+///
+/// With `run`, that is typed into it once it is up, as if at its prompt: a
+/// project's script (a dev server, the tests) in a terminal of its own, which
+/// stays open at the prompt when it ends.
+pub fn new_shell(
+    backend: &dyn Backend,
+    session: &Session,
+    run: Option<&str>,
+) -> Result<String, String> {
     let prefix = backend.shell_prefix(session);
     let taken = terminals(backend, session)?.shells;
     let name = (1..)
@@ -1658,7 +1666,7 @@ pub fn new_shell(backend: &dyn Backend, session: &Session) -> Result<String, Str
         .find(|candidate| !taken.contains(candidate))
         .ok_or("no free shell name")?;
 
-    let script = new_shell_script(backend, session, &name);
+    let script = new_shell_script(backend, session, &name, run);
     let out = backend
         .exec(session, &["sh", "-c", &script])
         .map_err(|e| e.to_string())?;
@@ -1672,15 +1680,31 @@ pub fn new_shell(backend: &dyn Backend, session: &Session) -> Result<String, Str
 ///
 /// A shell can be what starts the tmux server, when no agent did, so this
 /// exec's environment is every pane's. See [`seed::LOOPBACK_NO_PROXY`].
-fn new_shell_script(backend: &dyn Backend, session: &Session, name: &str) -> String {
-    format!(
+fn new_shell_script(
+    backend: &dyn Backend,
+    session: &Session,
+    name: &str,
+    run: Option<&str>,
+) -> String {
+    let mut script = format!(
         "{no_proxy}\n{bin} new-session -d -s {name} -c {repo}{shell}",
         no_proxy = seed::LOOPBACK_NO_PROXY,
         bin = backend.tmux_new(),
         name = seed::sh_quote(name),
         repo = seed::sh_quote(&backend.paths(session).repo),
         shell = backend.tmux_shell(),
-    )
+    );
+    // Typed as the agent's start is (`seed::launch_agent_script`), and only
+    // when there is something to type: a blank line would be a stray prompt.
+    if let Some(run) = run.map(str::trim).filter(|r| !r.is_empty()) {
+        script.push_str(&format!(
+            "\n{bin} send-keys -t {exact}: {run} Enter",
+            bin = backend.tmux(),
+            exact = seed::sh_quote(&format!("={name}")),
+            run = seed::sh_quote(run),
+        ));
+    }
+    script
 }
 
 /// Close one, killing whatever is running in it -- the agent's own included,
@@ -2207,7 +2231,7 @@ mod tests {
     #[test]
     fn a_new_shell_is_not_proxied_to_its_own_loopback() {
         let s = session();
-        let script = new_shell_script(&crate::backend::testing::sandboxed(), &s, "shell-1");
+        let script = new_shell_script(&crate::backend::testing::sandboxed(), &s, "shell-1", None);
         let no_proxy = script
             .find(seed::LOOPBACK_NO_PROXY)
             .unwrap_or_else(|| panic!("no proxy exception for [::1]: {script}"));
@@ -2227,11 +2251,36 @@ mod tests {
             .with_scope(true);
         let mut s = session();
         s.backend = session::Kind::Worktree;
-        let script = new_shell_script(&wt, &s, "hura-x-shell-1");
+        let script = new_shell_script(&wt, &s, "hura-x-shell-1", None);
         assert!(
             script.contains("systemd-run --user --scope --quiet --collect tmux -u new-session"),
             "{script}"
         );
+    }
+
+    /// A project's script is typed into its shell once the shell is up, quoted
+    /// whole, and nothing is typed without one.
+    #[test]
+    fn a_script_is_typed_into_its_new_shell() {
+        let s = session();
+        let backend = crate::backend::testing::sandboxed();
+        let script = new_shell_script(
+            &backend,
+            &s,
+            "shell-2",
+            Some("npm run dev -- --port '5173'"),
+        );
+        let typed = script
+            .find(r#"send-keys -t '=shell-2': 'npm run dev -- --port '\''5173'\''' Enter"#)
+            .unwrap_or_else(|| panic!("not typed: {script}"));
+        assert!(
+            script.find("new-session -d -s 'shell-2'") < Some(typed),
+            "{script}"
+        );
+        for blank in [None, Some(""), Some("  ")] {
+            let script = new_shell_script(&backend, &s, "shell-2", blank);
+            assert!(!script.contains("send-keys"), "{script}");
+        }
     }
 
     /// The capture is kept, because the pane that shows the agent is drawn from

@@ -6,8 +6,10 @@ import type { McpOp } from "./McpOp";
 import type { NewComment } from "./NewComment";
 import type { NewProject } from "./NewProject";
 import type { NewSession } from "./NewSession";
+import type { ProjectDefaults } from "./ProjectDefaults";
 import type { PullRemark } from "./PullRemark";
 import type { PushRoute } from "./PushRoute";
+import type { Repeat } from "./Repeat";
 import type { Route } from "./Route";
 import type { Settings } from "./Settings";
 import type { SkillUpload } from "./SkillUpload";
@@ -18,12 +20,30 @@ import type { SkillUpload } from "./SkillUpload";
  * Tagged by `op` rather than positionally, so a message stays readable in a log
  * and an unknown variant is a name rather than an index.
  */
-export type Request = { "op": "ls" } | { "op": "poll", name: string, } | { "op": "diff", name: string, } | { "op": "policy", name: string, } | { "op": "events", name: string, } | { "op": "allow", name: string, endpoint: string, everywhere: boolean, } | { "op": "allow-paths", name: string, endpoint: string, routes: Array<Route>, everywhere: boolean, } | { "op": "block", name: string, endpoint: string, everywhere: boolean, } | { "op": "watch", name: string, endpoint: string, } | { "op": "unlist", name: string, endpoint: string, } | { "op": "remove-rule", name: string, id: string, } | { "op": "projects" } | { "op": "new-project" } & NewProject | { "op": "forget-project", name: string, } | { "op": "reorder-projects", names: Array<string>, } | { "op": "repos" } | { "op": "inspect", path: string, 
+export type Request = { "op": "ls" } | { "op": "poll", name: string, } | { "op": "diff", name: string, } | { "op": "policy", name: string, } | { "op": "events", name: string, } | { "op": "allow", name: string, endpoint: string, everywhere: boolean, } | { "op": "allow-paths", name: string, endpoint: string, routes: Array<Route>, everywhere: boolean, } | { "op": "block", name: string, endpoint: string, everywhere: boolean, } | { "op": "watch", name: string, endpoint: string, } | { "op": "unlist", name: string, endpoint: string, } | { "op": "remove-rule", name: string, id: string, } | { "op": "projects" } | { "op": "new-project" } & NewProject | { "op": "forget-project", name: string, } | { "op": "reorder-projects", names: Array<string>, } | { "op": "set-project-defaults", name: string, defaults: ProjectDefaults, } | { "op": "repos" } | { "op": "inspect", path: string, 
 /**
  * The branch to measure against; `None` means the checkout's own.
  */
-branch: string | null, } | { "op": "new-options" } | { "op": "git-status", name: string, } | { "op": "git-diff", name: string, path: string, against: Against, } | { "op": "git", name: string, action: GitOp, } | { "op": "files", name: string, path: string, } | { "op": "file", name: string, path: string, } | { "op": "download", name: string, path: string, } | { "op": "shells", name: string, } | { "op": "new-shell", name: string, } | { "op": "kill-shell", name: string, tmux: string, } | { "op": "new-agent", name: string, } | { "op": "chats", name: string, } | { "op": "new-chat", name: string, } | { "op": "close-chat", name: string, conv: string, } | { "op": "ports", name: string, } | { "op": "stop-forward", name: string, port: number, } | { "op": "kill-port", name: string, port: number, } | { "op": "kill-process", name: string, pid: number, } | { "op": "comments", name: string, } | { "op": "comment", name: string, comment: NewComment, } | { "op": "uncomment", name: string, id: number, } | { "op": "send-comments", name: string, } | { "op": "send-pull-comments", name: string, 
+branch: string | null, } | { "op": "new-options" } | { "op": "git-status", name: string, } | { "op": "git-diff", name: string, path: string, against: Against, } | { "op": "git", name: string, action: GitOp, } | { "op": "files", name: string, path: string, } | { "op": "find-files", name: string, query: string, limit: number, } | { "op": "tail-file", name: string, path: string, bytes: number, } | { "op": "file", name: string, path: string, } | { "op": "download", name: string, path: string, } | { "op": "shells", name: string, } | { "op": "new-shell", name: string, 
+/**
+ * Typed into it once it is up: a project's script.
+ */
+run: string | null, } | { "op": "kill-shell", name: string, tmux: string, } | { "op": "new-agent", name: string, } | { "op": "chats", name: string, } | { "op": "new-chat", name: string, 
+/**
+ * Start from this conversation's context: a side chat, or with `at`
+ * an earlier message edited.
+ */
+fork: string | null, 
+/**
+ * Only up to this assistant message of `fork`.
+ */
+at: string | null, } | { "op": "close-chat", name: string, conv: string, } | { "op": "ports", name: string, } | { "op": "stop-forward", name: string, port: number, } | { "op": "kill-port", name: string, port: number, } | { "op": "kill-process", name: string, pid: number, } | { "op": "comments", name: string, } | { "op": "comment", name: string, comment: NewComment, } | { "op": "uncomment", name: string, id: number, } | { "op": "send-comments", name: string, } | { "op": "send-pull-comments", name: string, 
 /**
  * The pull request's own name, `#58` or `!26056`, for the message.
  */
-key: string, remarks: Array<PullRemark>, } | { "op": "answer", name: string, id: string, decision: ChatDecision, } | { "op": "create" } & NewSession | { "op": "create-from-pull" } & NewSession | { "op": "queue" } | { "op": "enqueue", new: NewSession, at: number | null, } | { "op": "unqueue", id: number, } | { "op": "start-queued", id: number, } | { "op": "queue-message", name: string, text: string, at: number | null, } | { "op": "destroy", name: string, } | { "op": "retitle", name: string, title: string, } | { "op": "reorder-sessions", names: Array<string>, } | { "op": "integrations" } | { "op": "mcp", name: string, action: McpOp, } | { "op": "secret", name: string, value: string | null, } | { "op": "upload-skills", skills: Array<SkillUpload>, } | { "op": "forget-skill", name: string, } | { "op": "settings" } | { "op": "set-settings" } & Settings | { "op": "push-configure" } & PushRoute | { "op": "push-status" } | { "op": "push-remove" } | { "op": "push-test" };
+key: string, remarks: Array<PullRemark>, } | { "op": "answer", name: string, id: string, decision: ChatDecision, } | { "op": "create" } & NewSession | { "op": "create-from-pull" } & NewSession | { "op": "queue" } | { "op": "enqueue", new: NewSession, at: number | null, repeat?: Repeat | null, } | { "op": "unqueue", id: number, } | { "op": "start-queued", id: number, } | { "op": "queue-message", name: string, text: string, at: number | null, 
+/**
+ * Said again and again: see `hura_core::queue`. Offered, as a
+ * repeating worktree is, only by a server whose queue says its clock.
+ */
+repeat?: Repeat | null, } | { "op": "destroy", name: string, } | { "op": "retitle", name: string, title: string, } | { "op": "reorder-sessions", names: Array<string>, } | { "op": "integrations" } | { "op": "mcp", name: string, action: McpOp, } | { "op": "secret", name: string, value: string | null, } | { "op": "upload-skills", skills: Array<SkillUpload>, } | { "op": "forget-skill", name: string, } | { "op": "settings" } | { "op": "set-settings" } & Settings | { "op": "push-configure" } & PushRoute | { "op": "push-status" } | { "op": "push-remove" } | { "op": "push-test" };

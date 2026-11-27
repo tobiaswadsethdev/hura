@@ -16,7 +16,7 @@
 // 2. Otherwise the open sidebars narrow, each in proportion to how far it is
 //    above its narrowest, until the middle has that.
 // 3. When even at their narrowest they leave it less, whichever of the dock
-//    and the tickets sidebar was opened less recently folds to its rail.
+//    and the tickets sidebar was opened less recently folds away.
 // 4. The other one is never folded for room. A sidebar somebody has just
 //    opened stays open, and in a window too narrow for even that, the middle
 //    has what is left.
@@ -35,11 +35,10 @@ import { LIMITS } from "./prefs";
 /// was; and still a chat's composer with its controls on one line.
 export const MIDDLE_MIN = 320;
 
-/// A folded sidebar: the rail of glyphs `.dock-rail` and `.inbox-rail` draw.
-/// Borders are inside every width here (`box-sizing: border-box`), and the
-/// handles between the panes take none, so these numbers add up to the
-/// window's.
-export const RAIL = 40;
+// A folded panel takes no room at all: the toggles that bring it back are in
+// the headers, as T3 Code's are, rather than on a rail of its own. Borders are
+// inside every width here (`box-sizing: border-box`), and the handles between
+// the panes take none, so these numbers add up to the window's.
 
 /// The dock and the tickets sidebar: the two that fold.
 export type Folding = "dock" | "inbox";
@@ -47,10 +46,11 @@ export type Folding = "dock" | "inbox";
 export type Wanted = {
   /// The window's width, which is `main`'s.
   room: number;
-  /// Whether the workspace is showing. While a screen has its place, the tree
-  /// and the dock are hidden and take no room.
+  /// Whether the workspace is showing. While a screen has its place, the dock
+  /// is hidden and takes no room; the sidebar stays.
   workspace: boolean;
-  tree: number;
+  /// `null` while the sidebar is collapsed.
+  tree: number | null;
   /// `null` when there is no dock to draw: no worktree ready to look at.
   dock: { open: boolean; width: number } | null;
   inbox: { open: boolean; width: number };
@@ -59,7 +59,8 @@ export type Wanted = {
 };
 
 export type Fitted = {
-  tree: number;
+  /// `null` while the sidebar is collapsed.
+  tree: number | null;
   /// How wide the dock is drawn, or `null` when it is folded or not there.
   dock: number | null;
   /// How wide the tickets sidebar is drawn, or `null` when it is folded.
@@ -94,19 +95,17 @@ export function fit(wanted: Wanted): Fitted {
   const lay = (dockOpen: boolean, inboxOpen: boolean, folded: Folding | null): Fitted => {
     // In the order they are drawn, though only the sum matters.
     const panes: (Pane & { key: "tree" | Folding })[] = [];
-    if (workspace) panes.push({ key: "tree", width: wanted.tree, ...LIMITS.treeWidth });
+    if (wanted.tree !== null) panes.push({ key: "tree", width: wanted.tree, ...LIMITS.treeWidth });
     if (dock && dockOpen) panes.push({ key: "dock", width: dock.width, ...LIMITS.dockWidth });
     if (inboxOpen) panes.push({ key: "inbox", width: wanted.inbox.width, ...LIMITS.inboxWidth });
-    const rails = (dock && !dockOpen ? RAIL : 0) + (inboxOpen ? 0 : RAIL);
-    const widths = narrow(panes, room - rails - MIDDLE_MIN);
+    const widths = narrow(panes, room - MIDDLE_MIN);
     const drawn = (key: "tree" | Folding) => {
       const at = panes.findIndex((p) => p.key === key);
       return at < 0 ? null : widths[at];
     };
-    const used = widths.reduce((sum, w) => sum + w, 0) + rails;
+    const used = widths.reduce((sum, w) => sum + w, 0);
     return {
-      // Hidden behind a screen, the tree keeps the width it will come back at.
-      tree: drawn("tree") ?? wanted.tree,
+      tree: drawn("tree"),
       dock: drawn("dock"),
       inbox: drawn("inbox"),
       folded,

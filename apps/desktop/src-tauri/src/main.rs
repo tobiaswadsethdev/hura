@@ -45,7 +45,7 @@ use hura_core::cloud::{Account as CloudAccount, Device as CloudDevice, Status as
 use hura_core::comments::{Comment, NewComment};
 use hura_core::endpoints::Route;
 use hura_core::events::FeedEvent;
-use hura_core::files::{Dir, FileText};
+use hura_core::files::{Dir, FileText, FoundPaths, TailText};
 use hura_core::git::{Against, FileDiff, Status as GitStatus};
 use hura_core::integrations::View as IntegrationsView;
 use hura_core::ops::{NewOptions, NewSession, Picked, Poll};
@@ -476,6 +476,33 @@ fn files(server: String, name: String, path: String) -> Result<Dir, Failed> {
     expect_reply!(reply, Reply::Files(dir) => dir, "a directory")
 }
 
+/// Paths in a worktree's working copy that match what is typed after `@` in
+/// the composer.
+#[tauri::command(async)]
+fn find_files(server: String, name: String, query: String) -> Result<FoundPaths, Failed> {
+    let reply = remote(&server)?
+        .call(Request::FindFiles {
+            name,
+            query,
+            limit: 50,
+        })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Found(found) => found, "paths")
+}
+
+/// The end of a file in a worktree's sandbox: a background command's output.
+#[tauri::command(async)]
+fn tail_file(server: String, name: String, path: String) -> Result<TailText, Failed> {
+    let reply = remote(&server)?
+        .call(Request::TailFile {
+            name,
+            path,
+            bytes: 64 * 1024,
+        })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Tail(tail) => tail, "the end of a file")
+}
+
 #[tauri::command(async)]
 fn file(server: String, name: String, path: String) -> Result<FileText, Failed> {
     let reply = remote(&server)?
@@ -560,10 +587,10 @@ fn shells(server: String, name: String) -> Result<Shells, Failed> {
 }
 
 #[tauri::command(async)]
-fn new_shell(server: String, name: String) -> Result<Shells, Failed> {
+fn new_shell(server: String, name: String, run: Option<String>) -> Result<Shells, Failed> {
     shells_of(
         remote(&server)?
-            .call(Request::NewShell { name })
+            .call(Request::NewShell { name, run })
             .map_err(to_message)?,
     )
 }
@@ -609,10 +636,15 @@ fn chats(server: String, name: String) -> Result<Chats, Failed> {
 }
 
 #[tauri::command(async)]
-fn new_chat(server: String, name: String) -> Result<Chats, Failed> {
+fn new_chat(
+    server: String,
+    name: String,
+    fork: Option<String>,
+    at: Option<String>,
+) -> Result<Chats, Failed> {
     chats_of(
         remote(&server)?
-            .call(Request::NewChat { name })
+            .call(Request::NewChat { name, fork, at })
             .map_err(to_message)?,
     )
 }
@@ -768,6 +800,19 @@ fn reorder_projects(server: String, names: Vec<String>) -> Result<Vec<Project>, 
     expect_reply!(reply, Reply::Projects { projects } => projects, "a project list")
 }
 
+/// What a project's new worktrees start with.
+#[tauri::command(async)]
+fn set_project_defaults(
+    server: String,
+    name: String,
+    defaults: hura_core::projects::ProjectDefaults,
+) -> Result<Vec<Project>, Failed> {
+    let reply = remote(&server)?
+        .call(Request::SetProjectDefaults { name, defaults })
+        .map_err(to_message)?;
+    expect_reply!(reply, Reply::Projects { projects } => projects, "a project list")
+}
+
 /// The repositories the *server* can see, for the picker.
 ///
 /// The server's and not this machine's: a checkout is only a way of naming a
@@ -831,14 +876,20 @@ fn queue(server: String) -> Result<Queue, Failed> {
 }
 
 /// Start a session later: at `at`, in seconds since the epoch, or once the
-/// queue has room when `at` is null.
+/// queue has room when `at` is null; and with `repeat`, again and again.
 #[tauri::command(async)]
-fn enqueue(server: String, session: NewSession, at: Option<u64>) -> Result<Queue, Failed> {
+fn enqueue(
+    server: String,
+    session: NewSession,
+    at: Option<u64>,
+    repeat: Option<hura_core::queue::Repeat>,
+) -> Result<Queue, Failed> {
     queue_call(
         &server,
         Request::Enqueue {
             new: Box::new(session),
             at,
+            repeat,
         },
     )
 }
@@ -854,15 +905,24 @@ fn start_queued(server: String, id: u64) -> Result<Queue, Failed> {
 }
 
 /// Say something to a session's agent once it has finished its turn, and not
-/// before `at` when there is one.
+/// before `at` when there is one; with `repeat`, again and again.
 #[tauri::command(async)]
 fn queue_message(
     server: String,
     name: String,
     text: String,
     at: Option<u64>,
+    repeat: Option<hura_core::queue::Repeat>,
 ) -> Result<Queue, Failed> {
-    queue_call(&server, Request::QueueMessage { name, text, at })
+    queue_call(
+        &server,
+        Request::QueueMessage {
+            name,
+            text,
+            at,
+            repeat,
+        },
+    )
 }
 
 fn queue_call(server: &str, request: Request) -> Result<Queue, Failed> {
@@ -1934,6 +1994,8 @@ fn main() {
             git,
             git_diff,
             files,
+            find_files,
+            tail_file,
             file,
             download,
             shells,
@@ -1956,6 +2018,7 @@ fn main() {
             new_project,
             forget_project,
             reorder_projects,
+            set_project_defaults,
             repos,
             inspect,
             new_options,

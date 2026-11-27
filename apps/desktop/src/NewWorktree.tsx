@@ -1,10 +1,8 @@
-// Starting a worktree: what this one is for.
-//
-// The second of the two questions the create flow used to ask on one screen.
-// The repository is already answered -- it is the project this is being started
-// in -- so what is left is the part that differs between one worktree and the
-// next, which is a handful of fields with defaults good enough to submit on
-// sight.
+// Starting a worktree: what this one is for, as T3 Code starts a thread. A
+// draft in the workspace rather than a dialog: the project asked in the
+// headline, the task in a composer, and sending it the start. What differs
+// between one worktree and the next is a handful of choices with defaults good
+// enough to send on sight, in the composer's controls and the strip under it.
 //
 // Nothing here decides anything `hura new` decides differently. The name is
 // derived by the server when this leaves it blank, the policy list and the
@@ -12,15 +10,16 @@
 // MCP servers are shown rather than offered, because they are one decision made
 // in the config file.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, messageOf } from "./api";
+import { type MenuItem, useButtonMenu } from "./ContextMenu";
 import { Waiting } from "./Empty";
 import {
   Agent,
   Branch,
   Busy,
-  Close,
+  Disclosure,
   Edit,
   Heads,
   Integrations,
@@ -28,9 +27,12 @@ import {
   Publish,
   PullRequest as PullMark,
   Queued,
+  Recurring,
   Sandbox,
   Scheduled,
   Secret,
+  Send,
+  Servers as ServerGlyph,
   Skill,
   Start,
   Toolchain,
@@ -49,26 +51,45 @@ import type { Task } from "./gen/Task";
 import { pullName } from "./inboxNotify";
 import type { PullStart } from "./Pull";
 import { Pill } from "./Pill";
-import { Select } from "./Select";
+import { CADENCES, type Cadence, otherClock, repeatOf } from "./repeats";
 
-export function NewWorktreeDialog({
+/// A new worktree, as T3 Code starts a thread: no dialog, but the workspace
+/// itself, empty, with what to build asked over a composer, and sending it
+/// the start. Where it runs and the rest sit in a strip at the composer's
+/// foot; the rarer choices are under More.
+export function NewWorktreeDraft({
   server,
+  servers,
+  onServer,
+  projects,
   project,
+  onProject,
   from,
   fromPull,
   onClose,
   onCreated,
   onQueued,
+  canRepeat,
 }: {
   server: string;
+  /// Every paired server, by name, and taking the draft to another: T3 Code's
+  /// machine picker on the strip, offered when there is more than one.
+  servers: string[];
+  onServer: (server: string) => void;
+  /// Every project, for the headline's picker.
+  projects: Project[];
   project: Project;
-  // The ticket this is being started from, when it came from the tickets screen. What it
-  // fills in -- the task, the name, the branch -- is the server's answer,
-  // derived in `hura_core::tracker`, so the terminal and the window would agree
-  // if the terminal had a tickets screen.
+  onProject: (project: Project) => void;
+  /// Whether the server can start one again and again: one whose queue says
+  /// its clock (`utc_offset`). See `repeats.ts`.
+  canRepeat: boolean;
+  // The ticket this is being started from, when it came from the tickets
+  // screen. What it fills in (the task, the name, the branch) is the
+  // server's answer, derived in `hura_core::tracker`.
   from?: Task | null;
   /// Or the pull request, and whether it is to be worked on or reviewed.
   fromPull?: { pull: PullRequest; mode: PullStart } | null;
+  /// Leave the draft: Escape in an empty box.
   onClose: () => void;
   onCreated: (name: string) => void;
   /// Started later instead: the queue as the server now has it.
@@ -88,30 +109,27 @@ export function NewWorktreeDialog({
     };
   }, [server]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div className="scrim" onMouseDown={onClose}>
-      <div className="dialog new" onMouseDown={(e) => e.stopPropagation()}>
-        {/* The form from the first frame, with the server's half filled in when
-            it comes: a spinner in its place was a dialog that changed size the
-            moment the options arrived. */}
-        <Form
-          server={server}
-          project={project}
-          from={from ?? null}
-          fromPull={fromPull ?? null}
-          options={options}
-          loadError={error}
-          onClose={onClose}
-          onCreated={onCreated}
-          onQueued={onQueued}
-        />
-      </div>
+    <div className="draft">
+      {/* Keyed by the project, so another one is a fresh draft with its own
+          checkout's answers rather than the last one's. */}
+      <Form
+        key={project.name}
+        server={server}
+        servers={servers}
+        onServer={onServer}
+        projects={projects}
+        project={project}
+        onProject={onProject}
+        from={from ?? null}
+        fromPull={fromPull ?? null}
+        options={options}
+        loadError={error}
+        onClose={onClose}
+        onCreated={onCreated}
+        onQueued={onQueued}
+        canRepeat={canRepeat}
+      />
     </div>
   );
 }
@@ -119,6 +137,10 @@ export function NewWorktreeDialog({
 /// What kind of worktree.
 function Form({
   server,
+  servers,
+  onServer,
+  projects,
+  onProject,
   project,
   from,
   fromPull,
@@ -127,9 +149,15 @@ function Form({
   onClose,
   onCreated,
   onQueued,
+  canRepeat,
 }: {
   server: string;
+  servers: string[];
+  onServer: (server: string) => void;
+  projects: Project[];
+  onProject: (project: Project) => void;
   project: Project;
+  canRepeat: boolean;
   from: Task | null;
   fromPull: { pull: PullRequest; mode: PullStart } | null;
   /// Null until the server has answered; the server's choices wait for it.
@@ -175,6 +203,10 @@ function Form({
   // as an instant.
   const [when, setWhen] = useState<When>("now");
   const [at, setAt] = useState(() => localInput(Date.now() + 60 * 60 * 1000));
+  // Or again and again: how often, and at what time of day on this machine's
+  // clock.
+  const [cadence, setCadence] = useState<Cadence>("weekdays");
+  const [time, setTime] = useState("09:00");
   const [error, setError] = useState<string | null>(null);
   // The skills on *this* machine, pushed to the server on submit. Read on the
   // Rust side of the bridge: `~/.claude/skills` is here, and a webview cannot
@@ -184,10 +216,17 @@ function Form({
   // base and the credentials -- and may come back before or after them.
   const [picked, setPicked] = useState<Picked | null>(null);
 
+  // The project's own defaults over the server's: see Settings, Projects.
+  const own = project.defaults ?? {};
+
   useEffect(() => {
     if (!options) return;
-    setPolicy(options.default_policy);
-    setAgentInterface(options.default_interface);
+    setPolicy(own.policy ?? options.default_policy);
+    setAgentInterface(own.interface ?? options.default_interface);
+    if (own.worktree != null && options.worktrees) setWorktree(own.worktree);
+    // The project's are read once, with the server's: it is keyed by the
+    // project, so another one is another form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options]);
 
   // The base and the credentials, from whichever of the two answers says the
@@ -198,10 +237,13 @@ function Form({
   useEffect(() => {
     if (!options) return;
     if (!fromPull) {
-      if (picked && !picked.facts.base_on_remote) setBase("");
+      if (own.base) setBase(own.base);
+      else if (picked && !picked.facts.base_on_remote) setBase("");
       else setBase(picked?.branch || options.default_base || "");
     }
-    setProviders(picked && picked.providers.length > 0 ? picked.providers : options.default_providers);
+    setProviders(
+      own.providers ?? (picked && picked.providers.length > 0 ? picked.providers : options.default_providers),
+    );
   }, [options, picked, fromPull]);
 
   useEffect(() => {
@@ -225,7 +267,7 @@ function Form({
       .then((picked: Picked) => {
         if (!live) return;
         setFacts(picked.facts);
-        setToolchains(picked.facts.toolchains);
+        setToolchains(own.toolchains ?? picked.facts.toolchains);
         // The base and the credentials are settled above, with the options.
         setPicked(picked);
       })
@@ -283,6 +325,9 @@ function Form({
       };
       if (when === "now") {
         onCreated(await api.create(server, session));
+      } else if (when === "repeat") {
+        if (cadence !== "hourly" && !/^\d{2}:\d{2}$/.test(time)) throw new Error("Pick a time of day for it");
+        onQueued(await api.enqueue(server, session, null, repeatOf(cadence, time)));
       } else {
         const instant = when === "at" ? epochOf(at) : null;
         if (when === "at" && instant === null) throw new Error("Pick a time to start it at");
@@ -298,251 +343,241 @@ function Form({
   // list, because to the agent they are one list.
   const skills = [...new Set([...(options?.skills ?? []), ...mine])];
 
+  const [more, setMore] = useState(false);
+  const box = useRef<HTMLTextAreaElement>(null);
+  const ready = !busy && options !== null;
+  const WhenIcon = WHEN_ICONS[when];
+  const whens: { value: When; label: string; hint: string }[] = [
+    { value: "now", label: "Now", hint: "As soon as it is made" },
+    { value: "queue", label: "When one is free", hint: "Once fewer are running than the server's limit" },
+    { value: "at", label: "At a time", hint: "Kept by the server, through a restart" },
+    ...(canRepeat
+      ? [{ value: "repeat" as When, label: "On a schedule", hint: "A new worktree each time it comes round" }]
+      : []),
+  ];
+  const sendTitle =
+    when === "now"
+      ? "Start It (Enter)"
+      : when === "queue"
+        ? "Queue It (Enter)"
+        : when === "at"
+          ? "Schedule It (Enter)"
+          : "Schedule It to Repeat (Enter)";
+
   return (
-    <div
-      className="new-session"
-      onKeyDown={(e) => {
-        // The textarea owns Enter, so the shortcut has to be a chord.
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !busy && options) {
-          e.preventDefault();
-          void submit();
-        }
-      }}
-    >
-      <header className="dialog-head">
-        <h2>
-          <Start className="head-mark" />
-          New Session <span className="in">in</span> {project.name}
-        </h2>
-        <button className="quiet-icon" title="Close" onClick={onClose}>
-          <Close aria-label="Close" />
-        </button>
-      </header>
-      <p className="origin" title="Cloned from">
-        {project.repo}
-      </p>
+    <div className="draft-stage">
+      <h1 className="draft-headline">
+        <span>What should we build in</span>
+        <ProjectPicker project={project} projects={projects} onProject={onProject} locked={fromPull !== null} />
+        <span className="draft-q">?</span>
+      </h1>
 
       {fromPull && (
-        <p className="from-ticket">
+        <p className="draft-origin">
           <PullMark />
           <a href={fromPull.pull.url} target="_blank" rel="noreferrer">
             {pullName(fromPull.pull)}
           </a>
-          <span className="hint">on</span>
+          <span>on</span>
           <code>{fromPull.pull.branch}</code>
-          <span className="hint">
+          <span>
             {fromPull.mode === "review"
               ? "to review it: the agent is asked not to push"
               : "to work on it: its pushes update the pull request"}
           </span>
         </p>
       )}
-
       {from && (
-        <p className="from-ticket">
+        <p className="draft-origin">
           <Tracker />
           <a href={from.url} target="_blank" rel="noreferrer">
             {from.key}
           </a>
-          <span className="hint">→</span>
+          <span>on</span>
           <code>{from.branch}</code>
         </p>
       )}
 
-      <textarea
-        className="task"
-        autoFocus
-        rows={4}
-        value={task}
-        // Said, because nothing else on the form does: this is the agent's first
-        // prompt, sent the moment the clone finishes, and blank starts it idle.
-        placeholder={`What should the agent do? It starts on this as soon as the ${worktree ? "worktree" : "sandbox"} is ready. Leave blank to start it idle.`}
-        onChange={(e) => setTask(e.target.value)}
-      />
-
-      <div className="chips">
-        <label className="chip-field" title="Name (made from the task when blank)">
-          <Edit />
-          <input
-            value={name}
-            placeholder="auto name"
-            spellCheck={false}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
-        <label
-          className="chip-field"
-          title={
-            fromPull
-              ? "The branch the pull request merges into"
-              : "Base branch (the remote's default when blank)"
-          }
-        >
-          <Branch />
-          <input
-            value={base}
-            placeholder="default branch"
-            spellCheck={false}
-            readOnly={fromPull !== null}
-            onChange={(e) => setBase(e.target.value)}
-          />
-        </label>
-        <label className="chip-field" title="When it starts">
-          {when === "now" ? <Start /> : when === "queue" ? <Queued /> : <Scheduled />}
-          <Select
-            value={when}
-            onChange={(v) => setWhen(v as When)}
-            aria-label="When"
-            options={[
-              { value: "now", label: "Now" },
-              { value: "queue", label: "When one is free", hint: "Once fewer are running than the server's limit" },
-              { value: "at", label: "At a time", hint: "Kept by the server, through a restart" },
-            ]}
-          />
-        </label>
-        <label className="chip-field" title="How you talk to the agent">
-          <Agent />
-          <Select
-            value={agentInterface}
-            onChange={(v) => setAgentInterface(v as Interface)}
-            aria-label="Agent"
-            disabled={!options}
-            options={[
-              { value: "chat", label: "Chat", hint: "Drawn by this window" },
-              { value: "terminal", label: "Terminal", hint: "Claude Code's own, in tmux" },
-            ]}
-          />
-        </label>
-        {/* Always the six chips, so the form is one shape whatever is chosen
-            and whatever the server allows. A server that does not offer
-            worktrees shows the sandbox as the only answer, and a worktree
-            shows that it has no policy, rather than either chip going. */}
-        <label
-          className="chip-field"
-          title={options && !options.worktrees ? "Where the agent runs: this server's config allows only sandboxes" : "Where the agent runs"}
-        >
-          {worktree ? <Unsandboxed /> : <Sandbox />}
-          <Select
-            value={worktree ? "worktree" : "sandbox"}
-            onChange={(v) => setWorktree(v === "worktree")}
-            aria-label="Where"
-            disabled={!options?.worktrees}
-            options={[
-              { value: "sandbox", label: "Sandbox", hint: "Its own VM, under a policy" },
-              { value: "worktree", label: "Worktree", hint: "On the server, as you" },
-            ]}
-          />
-        </label>
-        <label
-          className="chip-field"
-          title={worktree ? "No network policy: a worktree runs on the server as you" : "Network policy"}
-        >
-          <Policy />
-          <Select
-            value={policy}
-            onChange={setPolicy}
-            aria-label="Policy"
-            disabled={!options || worktree}
-            shown={worktree ? "No policy" : options ? undefined : "Policy"}
-            options={(options?.policies ?? []).map((p) => ({ value: p.spec, label: p.spec, hint: p.summary }))}
-          />
-        </label>
-      </div>
-
-      {/* One fixed box for whatever goes under the chips -- the pills, the
-          worktree's warning, the wait for the server -- so none of them moves
-          the footer. Rows past its height scroll inside it. */}
-      <div className="new-details">
-      {!options && <Waiting />}
-
-      {/* Said where the choice is made, because nothing afterwards stops it:
-          the agent is a process of the server user's, with their files, their
-          credentials and the whole network. */}
-      {options && worktree && (
-        <p className="unsandboxed-note">
-          <Unsandboxed />
-          A git worktree of {project.path} on the server. The agent runs there as the server's
-          user, with its files, credentials and network, and no policy. Its skills and MCP servers
-          are that user's own.
-        </p>
-      )}
-
-      {options && !worktree && (
-      <div className="pick-rows">
-        <PickRow icon={Toolchain} label="Toolchains">
-          {options.toolchains.map((t) => (
-            <Pill
-              key={t.name}
-              on={toolchains.includes(t.name)}
-              title={t.summary}
-              onClick={() => toggle(toolchains, setToolchains, t.name)}
+      <div className="chat-composer draft-composer">
+        <div className="chat-box" onMouseDown={(e) => e.target === e.currentTarget && box.current?.focus()}>
+          <div className="chat-field">
+            <textarea
+              ref={box}
+              autoFocus
+              rows={2}
+              value={task}
+              // Said, because nothing else here does: this is the agent's
+              // first prompt, sent the moment the clone finishes.
+              placeholder={`Describe the task. It starts on it once the ${worktree ? "worktree" : "sandbox"} is ready; sent empty, the agent waits.`}
+              onChange={(e) => setTask(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (ready) void submit();
+                } else if (e.key === "Escape" && !task.trim()) {
+                  e.preventDefault();
+                  onClose();
+                }
+              }}
+            />
+          </div>
+          <div className="chat-controls">
+            <MenuControl
+              icon={Agent}
+              label={agentInterface === "terminal" ? "Terminal" : "Chat"}
+              title="How you talk to the agent"
+              disabled={!options}
+              items={() =>
+                [
+                  { value: "chat", label: "Chat", hint: "Drawn by this window" },
+                  { value: "terminal", label: "Terminal", hint: "Claude Code's own, in tmux" },
+                ].map((o) => ({
+                  label: o.label,
+                  hint: o.hint,
+                  checked: o.value === agentInterface,
+                  run: () => setAgentInterface(o.value as Interface),
+                }))
+              }
+            />
+            <MenuControl
+              icon={WhenIcon}
+              label={whens.find((w) => w.value === when)?.label ?? "Now"}
+              title="When it starts"
+              items={() =>
+                whens.map((w) => ({ label: w.label, hint: w.hint, checked: w.value === when, run: () => setWhen(w.value) }))
+              }
+            />
+            {when === "at" && (
+              <input
+                className="draft-time"
+                type="datetime-local"
+                title="Starts at, on this machine's clock"
+                value={at}
+                onChange={(e) => setAt(e.target.value)}
+              />
+            )}
+            {when === "repeat" && (
+              <>
+                <MenuControl
+                  icon={Recurring}
+                  label={CADENCES.find((c) => c.value === cadence)?.label ?? ""}
+                  title="How often a new one starts"
+                  items={() =>
+                    CADENCES.map((c) => ({ label: c.label, checked: c.value === cadence, run: () => setCadence(c.value) }))
+                  }
+                />
+                {cadence !== "hourly" && (
+                  <input
+                    className="draft-time"
+                    type="time"
+                    title={
+                      otherClock()
+                        ? "On this machine's clock; the server keeps another, and is told the same moment on its own"
+                        : "At this time of day"
+                    }
+                    value={time}
+                    onChange={(e) => setTime(e.target.value)}
+                  />
+                )}
+              </>
+            )}
+            <span className="flex-1" />
+            <button
+              className="chat-round chat-send"
+              title={sendTitle}
+              aria-label={sendTitle}
+              disabled={!ready}
+              onClick={() => void submit()}
             >
-              {t.name}
-            </Pill>
-          ))}
-        </PickRow>
-
-        <PickRow icon={Secret} label="Credentials">
-          {options.providers.map((p) => (
-            <Pill
-              key={p.name}
-              on={providers.includes(p.name)}
-              title={p.kind}
-              onClick={() => toggle(providers, setProviders, p.name)}
+              {busy ? <Busy className="turning" size={14} /> : when === "now" ? <Send size={14} strokeWidth={1.8} /> : <WhenIcon size={14} />}
+            </button>
+          </div>
+          {/* T3 Code's strip at the composer's foot: where the work happens. */}
+          <div className="draft-strip">
+            {servers.length > 1 && (
+              <>
+                <MenuControl
+                  small
+                  icon={ServerGlyph}
+                  label={server}
+                  title="The server it starts on"
+                  items={() => servers.map((s) => ({ label: s, checked: s === server, run: () => onServer(s) }))}
+                />
+                <span className="draft-sep" aria-hidden />
+              </>
+            )}
+            <MenuControl
+              small
+              icon={worktree ? Unsandboxed : Sandbox}
+              label={worktree ? "Worktree" : "Sandbox"}
+              title={
+                options && !options.worktrees
+                  ? "Where the agent runs: this server's config allows only sandboxes"
+                  : "Where the agent runs"
+              }
+              disabled={!options?.worktrees}
+              items={() => [
+                { label: "Sandbox", hint: "Its own VM, under a policy", checked: !worktree, run: () => setWorktree(false) },
+                { label: "Worktree", hint: "On the server, as you", checked: worktree, run: () => setWorktree(true) },
+              ]}
+            />
+            <span className="draft-sep" aria-hidden />
+            <label
+              className="draft-field"
+              title={fromPull ? "The branch the pull request merges into" : "Base branch (the remote's default when blank)"}
             >
-              {p.name}
-            </Pill>
-          ))}
-          {options.providers_error && (
-            <span className="error" title={options.providers_error}>
-              Could not list credentials
-            </span>
-          )}
-          {options.providers.length === 0 && !options.providers_error && (
-            <span className="hint">None configured</span>
-          )}
-        </PickRow>
-
-        {/* Named, not offered: skills and MCP servers are one decision about
-            what your agents can reach, made in the server's config file.
-            Shown so a session's tools are not a surprise. */}
-        <PickRow icon={Skill} label="Skills, set in the server's config">
-          {skills.length === 0 && <span className="hint">none</span>}
-          {skills.map((s) => (
-            <span
-              key={s}
-              className="pill fixed"
-              title={mine.includes(s) ? "Pushed from this machine first" : undefined}
+              <Branch />
+              <input
+                value={base}
+                // As wide as what it says, as T3 Code's branch picker is.
+                style={{ width: `${Math.max(base.length, base ? 1 : "Default branch".length) + 1}ch` }}
+                placeholder="Default branch"
+                spellCheck={false}
+                readOnly={fromPull !== null}
+                onChange={(e) => setBase(e.target.value)}
+              />
+            </label>
+            <span className="draft-sep" aria-hidden />
+            <MenuControl
+              small
+              icon={Policy}
+              label={worktree ? "No policy" : policy || "Policy"}
+              title={worktree ? "No network policy: a worktree runs on the server as you" : "Network policy"}
+              disabled={!options || worktree}
+              items={() =>
+                (options?.policies ?? []).map((p) => ({
+                  label: p.spec,
+                  hint: p.summary,
+                  checked: p.spec === policy,
+                  run: () => setPolicy(p.spec),
+                }))
+              }
+            />
+            <span className="draft-sep" aria-hidden />
+            <label className="draft-field" title="Name (made from the task when blank)">
+              <Edit />
+              <input
+                value={name}
+                style={{ width: `${Math.max(name.length, name ? 1 : "Name from the task".length) + 1}ch` }}
+                placeholder="Name from the task"
+                spellCheck={false}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <span className="flex-1" />
+            <button
+              className="draft-chip"
+              aria-expanded={more}
+              title="Toolchains, credentials, skills and MCP servers"
+              onClick={() => setMore(!more)}
             >
-              {s}
-              {mine.includes(s) && <Publish className="local" />}
-            </span>
-          ))}
-        </PickRow>
-
-        {/* The cost of an MCP server, said where a session is about to be
-            given one: everything that server can do is now something this
-            agent can do with the server's credentials. */}
-        <PickRow
-          icon={Integrations}
-          label="MCP servers, which act with the server's credentials"
-        >
-          {options.mcp.length === 0 && <span className="hint">none</span>}
-          {options.mcp.map((m) => (
-            <span key={m} className="pill fixed">
-              {m}
-            </span>
-          ))}
-        </PickRow>
-      </div>
-      )}
-      </div>
-
-      <footer className="new-session-foot">
-        {/* A line, in the footer's spare room: an error inserted above it
-            pushed the footer down, so it says itself here, cut short if need
-            be and whole in the tooltip. What it replaces is only a warning. */}
-        <span className="foot-status">
+              More
+              <Disclosure className={more ? "rotate-180" : undefined} />
+            </button>
+          </div>
+        </div>
+        <p className="draft-status">
           {(error ?? loadError) ? (
             <span className="error" title={error ?? loadError ?? undefined}>
               {error ?? loadError}
@@ -550,29 +585,158 @@ function Form({
           ) : (
             facts && <Drift facts={facts} />
           )}
-        </span>
-        {/* Beside the button it is the time for, in room the footer already
-            has. As a chip among the others it added a row to the form, and
-            moved everything under it, every time the choice changed. */}
-        {when === "at" && (
-          <label className="chip-field start-at" title="Starts at, on this machine's clock">
-            <Scheduled />
-            <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />
-          </label>
-        )}
-        <span className="keys" title="Start with the keyboard">
-          ctrl ↵
-        </span>
-        <button className="go" disabled={busy || !options} onClick={() => void submit()}>
-          {busy ? <Busy className="turning" /> : when === "now" ? <Start /> : when === "queue" ? <Queued /> : <Scheduled />}
-          {busy ? (when === "now" ? "Starting…" : "Adding…") : when === "now" ? "Start" : when === "queue" ? "Queue" : "Schedule"}
-        </button>
-      </footer>
+        </p>
+      </div>
+
+      {/* Said where the choice is made, because nothing afterwards stops it:
+          the agent is a process of the server user's, with their files, their
+          credentials and the whole network. */}
+      {options && worktree && (
+        <div className="draft-note">
+          <p className="unsandboxed-note">
+            <Unsandboxed />
+            A git worktree of {project.path} on the server. The agent runs there as the server's user, with its
+            files, credentials and network, and no policy. Its skills and MCP servers are that user's own.
+          </p>
+        </div>
+      )}
+
+      {more && options && !worktree && (
+        <div className="draft-more pick-rows">
+          <PickRow icon={Toolchain} label="Toolchains">
+            {options.toolchains.map((t) => (
+              <Pill
+                key={t.name}
+                on={toolchains.includes(t.name)}
+                title={t.summary}
+                onClick={() => toggle(toolchains, setToolchains, t.name)}
+              >
+                {t.name}
+              </Pill>
+            ))}
+          </PickRow>
+
+          <PickRow icon={Secret} label="Credentials">
+            {options.providers.map((p) => (
+              <Pill
+                key={p.name}
+                on={providers.includes(p.name)}
+                title={p.kind}
+                onClick={() => toggle(providers, setProviders, p.name)}
+              >
+                {p.name}
+              </Pill>
+            ))}
+            {options.providers_error && (
+              <span className="error" title={options.providers_error}>
+                Could not list credentials
+              </span>
+            )}
+            {options.providers.length === 0 && !options.providers_error && <span className="hint">None configured</span>}
+          </PickRow>
+
+          {/* Named, not offered: skills and MCP servers are one decision about
+              what your agents can reach, made in the server's config file. */}
+          <PickRow icon={Skill} label="Skills, set in the server's config">
+            {skills.length === 0 && <span className="hint">none</span>}
+            {skills.map((s) => (
+              <span key={s} className="pill held" title={mine.includes(s) ? "Pushed from this machine first" : undefined}>
+                {s}
+                {mine.includes(s) && <Publish className="local" />}
+              </span>
+            ))}
+          </PickRow>
+
+          {/* The cost of an MCP server, said where a worktree is about to be
+              given one: everything that server can do is now something this
+              agent can do with the server's credentials. */}
+          <PickRow icon={Integrations} label="MCP servers, which act with the server's credentials">
+            {options.mcp.length === 0 && <span className="hint">none</span>}
+            {options.mcp.map((m) => (
+              <span key={m} className="pill held">
+                {m}
+              </span>
+            ))}
+          </PickRow>
+        </div>
+      )}
+      {more && !options && <Waiting />}
     </div>
   );
 }
 
-type When = "now" | "queue" | "at";
+/// The project in the headline, and the menu of the others: T3 Code's.
+function ProjectPicker({
+  project,
+  projects,
+  onProject,
+  locked,
+}: {
+  project: Project;
+  projects: Project[];
+  onProject: (project: Project) => void;
+  /// A pull request's draft is its repository's.
+  locked: boolean;
+}) {
+  const menu = useButtonMenu();
+  const choosable = !locked && projects.length > 1;
+  return (
+    <button
+      className="draft-project"
+      disabled={!choosable}
+      title={locked ? "The pull request's repository" : choosable ? "Another Project" : undefined}
+      aria-haspopup={choosable ? "menu" : undefined}
+      onClick={menu(() =>
+        projects.map((p) => ({ label: p.name, checked: p.name === project.name, run: () => onProject(p) })),
+      )}
+    >
+      {project.name}
+      {choosable && <Disclosure aria-hidden />}
+    </button>
+  );
+}
+
+/// A choice as the composer's controls draw one: its icon and what is
+/// chosen, opening a menu of the rest. `small` is the strip's size.
+function MenuControl({
+  icon: Icon,
+  label,
+  title,
+  disabled,
+  items,
+  small = false,
+}: {
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  label: string;
+  title: string;
+  disabled?: boolean;
+  items: () => MenuItem[];
+  small?: boolean;
+}) {
+  const menu = useButtonMenu();
+  return (
+    <button
+      className={small ? "draft-chip" : "chat-control"}
+      title={title}
+      aria-haspopup="menu"
+      disabled={disabled}
+      onClick={menu(items)}
+    >
+      <Icon size={small ? 13 : 15} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+type When = "now" | "queue" | "at" | "repeat";
+
+/// The mark for when it starts, on the chooser and on the button.
+const WHEN_ICONS: Record<When, React.ComponentType<{ size?: number; className?: string }>> = {
+  now: Start,
+  queue: Queued,
+  at: Scheduled,
+  repeat: Recurring,
+};
 
 /// A time as a `datetime-local` input holds it: this machine's clock, to the
 /// minute.

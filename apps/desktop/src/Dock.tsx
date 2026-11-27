@@ -14,39 +14,32 @@
 
 import { useState } from "react";
 
+import { cn } from "./lib/cn";
+
 import { FileTree } from "./FileTree";
 import type { Against } from "./gen/Against";
 import type { Session } from "./gen/Session";
 import type { Usage } from "./gen/Usage";
 import { GitView } from "./GitView";
-import { Branch, Events, Files, Fold, Policy, Ports, Record, Unfold } from "./icons";
+import { Branch, Events, Files, Policy, Ports, Record } from "./icons";
 import { Facts } from "./panes/Facts";
 import { PolicyPane } from "./panes/Policy";
 import { EventsPane } from "./panes/Events";
 import { PortsPane } from "./panes/Ports";
 import type { Listening } from "./gen/Listening";
 
-/// The five panes, in the order the strip shows them.
+/// The panel's tabs, in the order the strip shows them, each its glyph and
+/// its name as T3 Code's right panel has them.
 ///
-/// A list of objects rather than a list of strings, because the strip no longer
-/// renders the string. The label is still here and still doing two jobs -- the
-/// tooltip and the accessible name -- it just is not drawn: five words across a
-/// sidebar that may be 280 pixels wide were five words competing with the
-/// filenames underneath them, and this is a strip you press once and then read
-/// past for an hour.
-///
-/// The glyphs are the panes' subjects and not five variations on a document:
-/// a tree, a branch, a pulse, a shield, an `i`. Two of them matter more than
-/// the others and are worth naming -- `Policy` is a shield because that is what
-/// the rules are, and `Events` is a pulse because the feed is the *evidence*
-/// that the shield is doing anything. Those two panes are the reason this
-/// product exists rather than an ADE built on git worktrees, and a pane nobody
-/// can find is a pane nobody reads.
+/// The sandbox is one tab and not two: what it let through and refused
+/// (Activity, the feed) and the rules it decided by (Rules, the policy) are
+/// one subject, the reason this product exists rather than an ADE built on git
+/// worktrees, and one place to look for it is easier to find than two. A
+/// shield, because that is what the rules are.
 const VIEWS = [
   { key: "files", label: "Files", icon: Files },
   { key: "git", label: "Git", icon: Branch },
-  { key: "events", label: "Events", icon: Events },
-  { key: "policy", label: "Policy", icon: Policy },
+  { key: "sandbox", label: "Sandbox", icon: Policy },
   { key: "ports", label: "Ports", icon: Ports },
   { key: "facts", label: "Facts", icon: Record },
 ] as const;
@@ -54,13 +47,11 @@ type View = (typeof VIEWS)[number]["key"];
 
 /// What a worktree on the server has nothing to show for: no proxy decides
 /// its requests, no policy holds it, and its ports are the server's own.
-const SANDBOX_ONLY: readonly View[] = ["events", "policy", "ports"];
+const SANDBOX_ONLY: readonly View[] = ["sandbox", "ports"];
 
 export function Dock({
   width,
   open,
-  keys,
-  onFold,
   server,
   session,
   usage,
@@ -68,6 +59,7 @@ export function Dock({
   refreshMs,
   onOpenFile,
   onOpenDiff,
+  onPreview,
 }: {
   /// How wide, in pixels. From the window's own preferences and written by the
   /// handle on this sidebar's left edge -- see `prefs.ts` and `Split.tsx`.
@@ -75,10 +67,6 @@ export function Dock({
   /// Open, or folded to a rail of the panes' glyphs -- the way the tickets
   /// sidebar folds, and for the same reason: the middle wants the width back.
   open: boolean;
-  /// The shortcut that folds it, for the tooltips.
-  keys: { label: string; aria: string };
-  /// Fold it if it is open, open it if it is folded.
-  onFold: () => void;
   server: string;
   session: Session;
   /// What this session has spent, from the status channel. `null` until its
@@ -90,78 +78,55 @@ export function Dock({
   refreshMs: number;
   onOpenFile: (path: string) => void;
   onOpenDiff: (path: string, against: Against) => void;
+  /// A port's page in a tab of the window: see `panes/Preview.tsx`.
+  onPreview: (port: number, url: string) => void;
 }) {
   // Files first: it is the one you reach for without having decided anything
   // yet.
   const [chosen, setView] = useState<View>("files");
+  // Within the sandbox tab: what it did, or what it decides by.
+  const [sandboxView, setSandboxView] = useState<"activity" | "rules">("activity");
   const sandboxed = session.backend !== "worktree";
   const views = VIEWS.filter(({ key }) => sandboxed || !SANDBOX_ONLY.includes(key));
   // A pane picked on a sandbox, then a worktree selected: back to the files.
   const view: View = views.some(({ key }) => key === chosen) ? chosen : "files";
 
-  // Folded: the way back, and a glyph per pane that opens straight onto it.
-  // Rendered from here rather than by `App` so the pane picked before folding
-  // is still the one showing after.
-  if (!open) {
-    return (
-      <aside className="dock-rail" aria-label="What is true about this worktree, folded">
-        <button
-          className="quiet-icon"
-          title={`Open This Sidebar (${keys.label})`}
-          aria-keyshortcuts={keys.aria}
-          onClick={onFold}
-        >
-          <Unfold aria-label="Open" />
-        </button>
-        {views.map(({ key, label, icon: Mark }) => (
-          <button
-            key={key}
-            className="dock-rail-pane"
-            title={label}
-            aria-label={label}
-            onClick={() => {
-              setView(key);
-              onFold();
-            }}
-          >
-            <Mark />
-            {key === "ports" && listening.length > 0 && (
-              <span className="tab-count">{listening.length}</span>
-            )}
-          </button>
-        ))}
-      </aside>
-    );
-  }
+  // Folded, nothing: the toggle that brings it back is in the header over the
+  // conversation (`shell/WorkspaceHeader.tsx`). Still mounted, so the pane
+  // picked before folding is the one showing after.
+  if (!open) return null;
 
   return (
     <aside className="dock" style={{ width }}>
-      <nav className="dock-tabs" aria-label="What is true about this worktree">
+      {/* T3 Code's right panel strip: 52 pixels, level with the header beside
+          it, a tab per pane with its glyph and its name, the one showing
+          lifted by a fill. */}
+      <nav
+        data-tw
+        data-tauri-drag-region
+        className="flex h-[52px] shrink-0 items-center gap-1 overflow-x-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        aria-label="What is true about this worktree"
+      >
         {views.map(({ key, label, icon: Mark }) => (
           <button
             key={key}
-            className={key === view ? "on" : ""}
-            // Which of five is showing, not a control held down -- the same
-            // distinction the header's destinations make.
+            className={cn(
+              "inline-flex h-6 max-w-36 shrink-0 cursor-pointer items-center gap-1.5 rounded-md pr-2 pl-1.5 text-xs",
+              key === view
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+            )}
+            // Which one is showing, not a control held down.
             aria-current={key === view ? "page" : undefined}
-            title={label}
-            aria-label={label}
             onClick={() => setView(key)}
           >
-            <Mark />
+            <Mark className="size-3 shrink-0" />
+            <span className="truncate">{label}</span>
             {key === "ports" && listening.length > 0 && (
-              <span className="tab-count">{listening.length}</span>
+              <span className="text-muted-foreground tabular-nums">{listening.length}</span>
             )}
           </button>
         ))}
-        <button
-          className="quiet-icon dock-fold"
-          title={`Fold This Sidebar (${keys.label})`}
-          aria-keyshortcuts={keys.aria}
-          onClick={onFold}
-        >
-          <Fold aria-label="Fold" />
-        </button>
       </nav>
       <div className="dock-body">
         {/* Keyed on the worktree so switching tears each down rather than
@@ -180,11 +145,43 @@ export function Dock({
           />
         )}
         {view === "facts" && <Facts session={session} usage={usage} />}
-        {view === "policy" && <PolicyPane server={server} name={session.name} />}
-        {view === "ports" && (
-          <PortsPane key={session.name} server={server} name={session.name} listening={listening} />
+        {view === "sandbox" && (
+          <div data-tw className="mb-3 inline-flex rounded-lg bg-input/40 p-0.5" role="tablist" aria-label="Sandbox">
+            {(
+              [
+                ["activity", "Activity", Events],
+                ["rules", "Rules", Policy],
+              ] as const
+            ).map(([key, label, Mark]) => (
+              <button
+                key={key}
+                role="tab"
+                aria-selected={sandboxView === key}
+                className={cn(
+                  "inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-xs",
+                  sandboxView === key
+                    ? "bg-background text-foreground shadow-xs/10 dark:bg-input/72"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                onClick={() => setSandboxView(key)}
+              >
+                <Mark className="size-3" />
+                {label}
+              </button>
+            ))}
+          </div>
         )}
-        {view === "events" && (
+        {view === "sandbox" && sandboxView === "rules" && <PolicyPane server={server} name={session.name} />}
+        {view === "ports" && (
+          <PortsPane
+            key={session.name}
+            server={server}
+            name={session.name}
+            listening={listening}
+            onPreview={onPreview}
+          />
+        )}
+        {view === "sandbox" && sandboxView === "activity" && (
           <EventsPane
             key={session.name}
             server={server}

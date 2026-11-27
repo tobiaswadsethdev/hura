@@ -1,5 +1,14 @@
 // A screen: one of the window's destinations, filling the middle instead of
-// floating over it.
+// floating over it. Search still is one. The integrations, the servers, the
+// account and About are pages of the settings card now, T3 Code's (see
+// `settings/SettingsModal.tsx`), and inside it a screen drops its header for
+// the card's.
+//
+// That card is a modal, which these once were and were wrong as. Most of what
+// that cost (below) the card answers: it is nearly the size of the window, it
+// lists its pages down its side, and its header says which one you are on.
+// What it still costs is the workspace behind it, blurred while you read
+// about it.
 //
 // The tickets, the integrations, the servers and the settings were four modal
 // dialogs, and being modal was wrong for all four in the same way. A dialog is
@@ -24,11 +33,14 @@
 //     another opening over the top, and nothing in the window said where you
 //     were. The header's icons now do: the one you are on is lit.
 //
-// The create forms stayed dialogs, and that is not an oversight either --
-// `NewProject` and `NewWorktree` are questions with a submit button, asked from
-// somewhere and answered back to it.
+// `NewProject` stayed a dialog: a question with a submit button, asked from
+// somewhere and answered back to it. A new worktree is neither now: it is a
+// draft in the workspace, as T3 Code's new thread is (`NewWorktree.tsx`).
+
+import { useContext } from "react";
 
 import { Close } from "./icons";
+import { InSettings, SettingsActions } from "./settings/SettingsModal";
 
 export function Screen({
   icon: Mark,
@@ -54,6 +66,19 @@ export function Screen({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  // Inside the settings, the card's header says where you are and closes it,
+  // so the page is only its body, and what this screen does goes into that
+  // header. See `settings/SettingsModal.tsx`.
+  if (useContext(InSettings)) {
+    return (
+      <section className="screen in-settings" data-legacy>
+        {actions && <SettingsActions>{actions}</SettingsActions>}
+        <div className="screen-body">
+          <div className={`screen-inner${narrow ? " narrow" : ""}`}>{children}</div>
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="screen">
       {/* The title survives the cull, and it is the one label in the window
