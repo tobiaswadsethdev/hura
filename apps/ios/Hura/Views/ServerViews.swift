@@ -371,7 +371,7 @@ struct SessionRow: View {
                 } else if let prompt = report?.state == "waiting" ? (report?.prompt ?? report?.detail) : nil {
                     Text(prompt)
                         .font(.caption)
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(Color.attention)
                         .lineLimit(2)
                 } else if !session.workBranch.isEmpty {
                     Text(session.workBranch)

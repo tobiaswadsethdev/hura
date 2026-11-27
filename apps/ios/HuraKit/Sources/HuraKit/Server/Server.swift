@@ -231,8 +231,8 @@ public final class Server: Identifiable {
     }
 
     /// Starts a session later: at `at`, or once the queue has room.
-    public func enqueue(_ session: NewSession, at: Date?) async throws {
-        queue = try await client.enqueue(session, at: at)
+    public func enqueue(_ session: NewSession, at: Date?, repeat rule: Repeat? = nil) async throws {
+        queue = try await client.enqueue(session, at: at, repeat: rule)
     }
 
     public func unqueue(_ id: Int64) async throws {
@@ -245,8 +245,8 @@ public final class Server: Identifiable {
 
     /// Says something to a session's agent once its turn is over, and not
     /// before `at`.
-    public func queueMessage(_ name: String, text: String, at: Date?) async throws {
-        queue = try await client.queueMessage(name, text: text, at: at)
+    public func queueMessage(_ name: String, text: String, at: Date?, repeat rule: Repeat? = nil) async throws {
+        queue = try await client.queueMessage(name, text: text, at: at, repeat: rule)
     }
 
     /// Sessions that belong to no project this server knows.
@@ -263,6 +263,11 @@ public final class Server: Identifiable {
 
     public func forgetProject(_ name: String) async throws {
         projects = try await client.forgetProject(name)
+    }
+
+    /// Sets what a project's new worktrees start with.
+    public func setProjectDefaults(_ name: String, _ defaults: ProjectDefaults) async throws {
+        projects = try await client.setProjectDefaults(name, defaults)
     }
 
     /// Puts the projects in this order. Shown at once rather than after the

@@ -455,3 +455,29 @@ struct CommentsReply: Decodable {
 struct EventsReply: Decodable {
     var events: [PolicyEvent]
 }
+
+/// Paths in a working copy that match what is typed after `@` in the
+/// composer (`hura_core::files::FoundPaths`).
+public struct FoundPaths: Decodable, Equatable, Sendable {
+    /// Relative to the repository root, the best match first. A directory
+    /// ends in `/`.
+    public var paths: [String]
+    /// More matched than were sent.
+    public var truncated: Bool
+
+    public init(paths: [String], truncated: Bool = false) {
+        self.paths = paths
+        self.truncated = truncated
+    }
+}
+
+/// The end of a file in the sandbox, for following a background command's
+/// output as it is written (`hura_core::files::TailText`).
+public struct TailText: Decodable, Equatable, Sendable {
+    public var path: String
+    /// How big the whole file is.
+    public var bytes: Int
+    public var text: String
+    /// There is more before `text`.
+    public var cut: Bool
+}

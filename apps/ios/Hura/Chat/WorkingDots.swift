@@ -88,11 +88,3 @@ struct WorkingDots: View {
         return (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f, a.2 + (b.2 - a.2) * f)
     }
 }
-
-extension Color {
-    /// The desktop's `--working`: the system's yellow in dark mode, and in
-    /// light a deeper amber, since yellow on white can hardly be read.
-    static let working = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark ? .systemYellow : UIColor(red: 0.78, green: 0.54, blue: 0.0, alpha: 1)
-    })
-}
