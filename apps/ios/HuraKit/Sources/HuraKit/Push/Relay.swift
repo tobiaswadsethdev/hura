@@ -127,10 +127,27 @@ public struct RelayClient: Sendable {
     }
 
     /// `PUT /v1/devices/{id}/activity-token`: the push-to-start token, which
-    /// lets the relay start a session's Live Activity.
-    public func setActivityStartToken(_ token: String, device: PushDevice) async throws {
+    /// lets the relay start a Live Activity. With `style` `agents`, it starts
+    /// one for every session rather than one each.
+    public func setActivityStartToken(_ token: String, style: String? = nil, device: PushDevice) async throws {
+        var body = ["token": token]
+        if let style { body["style"] = style }
         let _: Empty = try await request("PUT", "/v1/devices/\(device.deviceID)/activity-token",
+                                         secret: device.deviceSecret, body: body)
+    }
+
+    /// `PUT /v1/devices/{id}/agents-activity`: the update token of the one
+    /// activity showing every session.
+    public func setAgentsActivityToken(_ token: String, device: PushDevice) async throws {
+        let _: Empty = try await request("PUT", "/v1/devices/\(device.deviceID)/agents-activity",
                                          secret: device.deviceSecret, body: ["token": token])
+    }
+
+    /// `DELETE /v1/devices/{id}/agents-activity`: it has ended or been
+    /// dismissed. With its token, only while that is still the device's.
+    public func deleteAgentsActivityToken(_ token: String?, device: PushDevice) async throws {
+        let _: Empty = try await request("DELETE", "/v1/devices/\(device.deviceID)/agents-activity",
+                                         secret: device.deviceSecret, body: token.map { ["token": $0] })
     }
 
     /// `PUT /v1/servers/{link}/activities/{session}`: the update token of the

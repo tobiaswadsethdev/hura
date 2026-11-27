@@ -79,7 +79,8 @@ public final class PushManager {
         try store.save(d)
         device = d
         if let activityStartToken {
-            try? await relay.setActivityStartToken(SessionActivity.hex(activityStartToken), device: d)
+            try? await relay.setActivityStartToken(SessionActivity.hex(activityStartToken), style: Self.activityStyle,
+                                                   device: d)
         }
         return true
     }
@@ -206,12 +207,29 @@ public final class PushManager {
     /// device registered anew, which the relay knows nothing about.
     @ObservationIgnored private var activityStartToken: Data?
 
-    /// ActivityKit handed out a push-to-start token. Best effort, and sent
-    /// again on the next launch, which hands it out again.
+    /// What this app asks the relay to start: one activity for every
+    /// session, T3 Code's (`AgentsActivityAttributes`).
+    static let activityStyle = "agents"
+
+    /// ActivityKit handed out a push-to-start token for the one activity.
+    /// Best effort, and sent again on the next launch, which hands it out
+    /// again.
     public func activityStartTokenChanged(_ token: Data) async {
         activityStartToken = token
         guard let relay, let device else { return }
-        try? await relay.setActivityStartToken(SessionActivity.hex(token), device: device)
+        try? await relay.setActivityStartToken(SessionActivity.hex(token), style: Self.activityStyle, device: device)
+    }
+
+    /// The one activity has a token the relay can update it with.
+    public func agentsActivityTokenChanged(_ token: Data) async {
+        guard let relay, let device else { return }
+        try? await relay.setAgentsActivityToken(SessionActivity.hex(token), device: device)
+    }
+
+    /// The one activity has ended or been dismissed.
+    public func agentsActivityEnded(_ token: Data?) async {
+        guard let relay, let device else { return }
+        try? await relay.deleteAgentsActivityToken(token.map(SessionActivity.hex), device: device)
     }
 
     /// The activity showing `session` has a token the relay can update it with.

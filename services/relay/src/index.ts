@@ -3,12 +3,14 @@
 import { DEAD_ACTIVITY_TOKEN_REASONS, DEAD_TOKEN_REASONS, sendApns, type Environment } from "./apns";
 import {
   activityPayload,
+  agentsPayload,
   apnsPayload,
   BACKGROUND,
   KINDS,
   PHASES,
   STARTING,
   type ActivityEvent,
+  type AgentRow,
   type Kind,
   type Notification,
   type Phase,
@@ -65,6 +67,8 @@ interface DeviceRow {
   disabled_at: number | null;
   /** The push-to-start token for Live Activities, when the app gave one. */
   activity_token: string | null;
+  /** `agents` for one activity showing every session; null for one each. */
+  activity_style: string | null;
 }
 
 interface LinkRow {
@@ -86,6 +90,8 @@ const routes: Array<[string, RegExp, Handler]> = [
   ["POST", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})\/test$/, testDevice],
   ["PUT", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})\/activity-token$/, setStartToken],
   ["DELETE", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})\/activity-token$/, deleteStartToken],
+  ["PUT", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})\/agents-activity$/, setAgentsToken],
+  ["DELETE", /^\/v1\/devices\/(?<device>d_[a-z2-7]{16})\/agents-activity$/, deleteAgentsToken],
   ["POST", /^\/v1\/servers$/, createLink],
   ["GET", /^\/v1\/servers$/, listLinks],
   ["PATCH", /^\/v1\/servers\/(?<link>l_[a-z2-7]{16})$/, renameLink],
@@ -118,8 +124,13 @@ export default {
       env.DB.prepare("DELETE FROM events WHERE created_at < ?").bind(now - DAY_MS),
       env.DB.prepare("DELETE FROM registrations WHERE at < ?").bind(now - 3600 * 1000),
       env.DB.prepare("DELETE FROM activities WHERE updated_at < ?").bind(now - ACTIVITY_MS),
+      env.DB.prepare("DELETE FROM agent_activities WHERE updated_at < ?").bind(now - ACTIVITY_MS),
+      // A row no event has touched in a day is a session hurad stopped
+      // telling about: its server went away mid-turn.
+      env.DB.prepare("DELETE FROM agent_rows WHERE updated_at < ?").bind(now - DAY_MS),
     ]);
     await endFinished(env, now);
+    await settleAgents(env, now);
   },
 } satisfies ExportedHandler<RelayEnv>;
 
@@ -129,7 +140,7 @@ async function authDevice(req: Request, env: RelayEnv, pathId?: string): Promise
   const secret = bearer(req);
   if (!secret?.startsWith("hud_")) throw unauthorized();
   const row = await env.DB.prepare(
-    "SELECT id, apns_token, environment, disabled_at, activity_token FROM devices WHERE secret_hash = ?",
+    "SELECT id, apns_token, environment, disabled_at, activity_token, activity_style FROM devices WHERE secret_hash = ?",
   )
     .bind(await sha256hex(secret))
     .first<DeviceRow>();
@@ -143,7 +154,7 @@ async function authLink(req: Request, env: RelayEnv): Promise<LinkRow & { device
   if (!token?.startsWith("hup_")) throw unauthorized();
   const row = await env.DB.prepare(
     `SELECT l.id, l.device_id, l.server_id, l.label, l.created_at, l.last_event_at,
-            d.apns_token, d.environment, d.disabled_at, d.activity_token
+            d.apns_token, d.environment, d.disabled_at, d.activity_token, d.activity_style
        FROM links l JOIN devices d ON d.id = l.device_id
       WHERE l.token_hash = ?`,
   )
@@ -158,6 +169,7 @@ async function authLink(req: Request, env: RelayEnv): Promise<LinkRow & { device
       environment: row.environment,
       disabled_at: row.disabled_at,
       activity_token: row.activity_token,
+      activity_style: row.activity_style,
     },
   };
 }
@@ -242,11 +254,19 @@ async function testDevice(req: Request, env: RelayEnv, p: Record<string, string>
   return json(200, { sent: r.status === 200, apns_status: r.status, apns_id: r.apnsId ?? null, apns_reason: r.reason ?? null });
 }
 
-/** The device's push-to-start token, which starts a Live Activity. */
+/**
+ * The device's push-to-start token, which starts a Live Activity, and with
+ * `style: "agents"` that it shows one activity for every session. An app from
+ * before that sends no style, and gets one per session.
+ */
 async function setStartToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
   const dev = await authDevice(req, env, p.device);
-  const token = activityToken(await readJSON(req));
-  await env.DB.prepare("UPDATE devices SET activity_token = ? WHERE id = ?").bind(token, dev.id).run();
+  const body = await readJSON(req);
+  const token = activityToken(body);
+  const style = str(body, "style", { max: 20, re: /^agents$/, optional: true }) ?? null;
+  await env.DB.prepare("UPDATE devices SET activity_token = ?, activity_style = ? WHERE id = ?")
+    .bind(token, style, dev.id)
+    .run();
   return json(204, null);
 }
 
@@ -465,6 +485,7 @@ async function postEvent(req: Request, env: RelayEnv): Promise<Response> {
       encrypted !== undefined
         ? { session: session!, phase: phase!, at, since, askId, encrypted }
         : { session: session!, phase: phase!, at, since, askId, title, subtitle, body: text };
+    if (link.device.activity_style === "agents") return sendAgents(env, link, a, eventId, now);
     return sendActivity(env, link, a, eventId, now);
   }
 
@@ -625,6 +646,197 @@ async function endFinished(env: RelayEnv, now: number): Promise<void> {
       "liveactivity",
     );
     log("activity done", { link: link.id, apns_status: r.status, apns_reason: r.reason });
+  }
+}
+
+// --- one activity for every session --------------------------------------
+
+/**
+ * The update token of a device's one activity. One a push started has been
+ * waiting for it, perhaps through events that changed what it should show:
+ * what it shows now goes to it at once.
+ */
+async function setAgentsToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
+  const dev = await authDevice(req, env, p.device);
+  const token = activityToken(await readJSON(req));
+  const was = await env.DB.prepare("SELECT token FROM agent_activities WHERE device_id = ?")
+    .bind(dev.id)
+    .first<{ token: string }>();
+  const now = Date.now();
+  await env.DB.prepare(
+    `INSERT INTO agent_activities (device_id, token, updated_at, started_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (device_id) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at`,
+  )
+    .bind(dev.id, token, now, now)
+    .run();
+  if (was?.token === STARTING_TOKEN) {
+    // Best effort: the phone has done its part, and the next event will
+    // update the activity anyway.
+    const out = await pushAgents(env, dev, now, false);
+    log("agents caught up", { device: dev.id, outcome: out.outcome, event: out.event });
+  }
+  return json(204, null);
+}
+
+/**
+ * The device's activity has ended or been dismissed on the phone. With its
+ * token, only when that is still the device's.
+ */
+async function deleteAgentsToken(req: Request, env: RelayEnv, p: Record<string, string>): Promise<Response> {
+  const dev = await authDevice(req, env, p.device);
+  if (await req.clone().text()) {
+    const token = activityToken(await readJSON(req));
+    await env.DB.prepare("DELETE FROM agent_activities WHERE device_id = ? AND token = ?").bind(dev.id, token).run();
+  } else {
+    await env.DB.prepare("DELETE FROM agent_activities WHERE device_id = ?").bind(dev.id).run();
+  }
+  return json(204, null);
+}
+
+/** Every session's row a device's activity shows, with the server each is from. */
+async function agentRows(env: RelayEnv, deviceId: string): Promise<AgentRow[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT r.state, l.server_id FROM agent_rows r JOIN links l ON l.id = r.link_id WHERE r.device_id = ?`,
+  )
+    .bind(deviceId)
+    .all<{ state: string; server_id: string }>();
+  return results.map((r) => ({ ...(JSON.parse(r.state) as SessionActivity), serverId: r.server_id }));
+}
+
+type AgentsOutcome = {
+  outcome: "sent" | "starting" | "none" | "failed";
+  event?: ActivityEvent;
+  r?: { status: number; reason?: string };
+};
+
+/**
+ * Sends a device's rows to its one activity: an update where it has one, the
+ * end when no session is left to show, and a start, when `mayStart`, if a
+ * session is working or waiting and nothing shows yet.
+ */
+async function pushAgents(env: RelayEnv, device: DeviceRow, now: number, mayStart: boolean): Promise<AgentsOutcome> {
+  const rows = await agentRows(env, device.id);
+  const send = (token: string, event: ActivityEvent) =>
+    sendApns(
+      env,
+      { token, environment: device.environment },
+      agentsPayload(rows, event, now),
+      ACTIVITY_EXPIRY_SECONDS,
+      "liveactivity",
+    );
+  const forget = () => env.DB.prepare("DELETE FROM agent_activities WHERE device_id = ?").bind(device.id).run();
+  let act = await env.DB.prepare("SELECT token, updated_at, started_at FROM agent_activities WHERE device_id = ?")
+    .bind(device.id)
+    .first<{ token: string; updated_at: number; started_at: number }>();
+  if (act?.token === STARTING_TOKEN) {
+    // Started, and the phone hasn't said where its updates go yet: the rows
+    // are kept, and go to it when it does.
+    if (now - act.updated_at < STARTING_MS) return { outcome: "starting" };
+    await forget();
+    act = null;
+  }
+  const live = rows.some((r) => STARTING.has(r.phase));
+  if (act && mayStart && live && now - act.started_at > RENEW_MS) {
+    // ActivityKit ends an activity after eight hours: a new one before then.
+    const r = await send(act.token, "end");
+    log("agents renewed", { device: device.id, apns_status: r.status, apns_reason: r.reason });
+    await forget();
+    act = null;
+  }
+  if (act) {
+    const event: ActivityEvent = rows.length === 0 ? "end" : "update";
+    const r = await send(act.token, event);
+    if (r.status === 200) {
+      if (event === "end") await forget();
+      else await env.DB.prepare("UPDATE agent_activities SET updated_at = ? WHERE device_id = ?").bind(now, device.id).run();
+      return { outcome: "sent", event };
+    }
+    if (!r.reason || !DEAD_ACTIVITY_TOKEN_REASONS.has(r.reason)) return { outcome: "failed", r };
+    // Ended or dismissed on the phone: started again below if it would be.
+    await forget();
+    log("agents token gone", { device: device.id, apns_reason: r.reason });
+  }
+  if (!mayStart || !live || !device.activity_token) return { outcome: "none" };
+  const r = await send(device.activity_token, "start");
+  if (r.status === 200) {
+    await env.DB.prepare(
+      `INSERT INTO agent_activities (device_id, token, updated_at, started_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (device_id) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at,
+                                             started_at = excluded.started_at`,
+    )
+      .bind(device.id, STARTING_TOKEN, now, now)
+      .run();
+    return { outcome: "sent", event: "start" };
+  }
+  if (r.reason && DEAD_ACTIVITY_TOKEN_REASONS.has(r.reason)) {
+    await env.DB.prepare("UPDATE devices SET activity_token = NULL WHERE id = ?").bind(device.id).run();
+    log("activity start token gone", { device: device.id, apns_reason: r.reason });
+    return { outcome: "none" };
+  }
+  return { outcome: "failed", r };
+}
+
+/**
+ * A session's event, for a device that shows one activity for all of them:
+ * the session's row is set, or taken out when the session is gone, and the
+ * activity is sent every row.
+ */
+async function sendAgents(
+  env: RelayEnv,
+  link: LinkRow & { device: DeviceRow },
+  a: SessionActivity,
+  eventId: string,
+  now: number,
+): Promise<Response> {
+  if (a.phase === "ended") {
+    await env.DB.prepare("DELETE FROM agent_rows WHERE device_id = ? AND link_id = ? AND session = ?")
+      .bind(link.device.id, link.id, a.session)
+      .run();
+  } else {
+    // An event older than the one the row has is a retry a newer one
+    // overtook, and leaves it be.
+    await env.DB.prepare(
+      `INSERT INTO agent_rows (device_id, link_id, session, state, at, done, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (device_id, link_id, session) DO UPDATE SET state = excluded.state, at = excluded.at,
+                                                               done = excluded.done, updated_at = excluded.updated_at
+       WHERE excluded.at >= agent_rows.at`,
+    )
+      .bind(link.device.id, link.id, a.session, JSON.stringify(a), a.at, STARTING.has(a.phase) ? 0 : 1, now)
+      .run();
+  }
+  const out = await pushAgents(env, link.device, now, STARTING.has(a.phase));
+  if (out.outcome === "failed") {
+    // Not delivered: forget the event ID so hurad's retry goes through.
+    await env.DB.prepare("DELETE FROM events WHERE link_id = ? AND event_id = ?").bind(link.id, eventId).run();
+    const r = out.r!;
+    throw new HttpError(502, "apns_error", `APNs answered ${r.status || "nothing"}${r.reason ? ` (${r.reason})` : ""}`);
+  }
+  if (out.outcome === "starting") return json(200, { sent: false, reason: "activity_starting" });
+  if (out.outcome === "none") return json(200, { sent: false, reason: "no_activity" });
+  log("agents", { link: link.id, phase: a.phase, event: out.event });
+  await env.DB.prepare("UPDATE links SET last_event_at = ? WHERE id = ?").bind(now, link.id).run();
+  return json(200, { sent: true, activity: out.event });
+}
+
+/**
+ * Takes away the rows whose turn finished half an hour ago with no other
+ * since, and tells each device's activity, which ends when none are left.
+ */
+async function settleAgents(env: RelayEnv, now: number): Promise<void> {
+  const { results } = await env.DB.prepare(
+    "DELETE FROM agent_rows WHERE done = 1 AND updated_at < ? RETURNING device_id",
+  )
+    .bind(now - DONE_LINGER_MS)
+    .all<{ device_id: string }>();
+  for (const id of new Set(results.map((r) => r.device_id))) {
+    const dev = await env.DB.prepare(
+      "SELECT id, apns_token, environment, disabled_at, activity_token, activity_style FROM devices WHERE id = ?",
+    )
+      .bind(id)
+      .first<DeviceRow>();
+    if (!dev || dev.disabled_at !== null) continue;
+    const out = await pushAgents(env, dev, now, false);
+    log("agents settled", { device: id, outcome: out.outcome, event: out.event });
   }
 }
 
