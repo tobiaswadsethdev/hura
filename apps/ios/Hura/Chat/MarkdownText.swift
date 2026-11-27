@@ -172,7 +172,8 @@ struct CodeBlock: View {
                 .padding(10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.sunken, in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Color.line, lineWidth: 1))
     }
 }
 
