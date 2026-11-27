@@ -11,44 +11,29 @@ struct ToolCard: View {
     @State private var expanded: Bool?
     @State private var showAll = false
     @Environment(\.download) private var download
+    @Environment(\.backgroundCommands) private var backgroundCommands
 
     private var label: ToolLabel { .of(call, cwd: cwd) }
     private var isOpen: Bool { expanded ?? opensItself }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.snappy) { expanded = !isOpen }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(glyph: label.icon)
-                        .frame(width: 18)
-                        .foregroundStyle(failedHard ? Color.bad : Color.dim)
-                    Text(label.verb)
-                        .foregroundStyle(failedHard ? Color.bad : Color.ink)
-                    Text(label.subject)
-                        .foregroundStyle(Color.dim)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color.dimmer)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    Spacer(minLength: 4)
-                    status
-                }
-                .font(.subheadline)
-                .contentShape(Rectangle())
-                .padding(.vertical, 5)
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                if let download {
-                    ForEach(files, id: \.self) { f in
-                        Button("Download \((f as NSString).lastPathComponent)", systemImage: "square.and.arrow.down") {
-                            download(f)
-                        }
+            HStack(spacing: 8) {
+                header
+                // Beside the line rather than in it: a button inside the
+                // line's own would open the call instead.
+                if let command, let backgroundCommands {
+                    Button { backgroundCommands.open(command) } label: {
+                        Text("Output")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color.ink)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.surface2, in: Capsule())
+                            .contentShape(Capsule())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Output of \(command.title)")
                 }
             }
             if isOpen {
@@ -60,6 +45,71 @@ struct ToolCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    /// The call's line, which opens and closes it.
+    private var header: some View {
+        Button {
+            withAnimation(.snappy) { expanded = !isOpen }
+        } label: {
+            HStack(spacing: 8) {
+                Image(glyph: label.icon)
+                    .frame(width: 18)
+                    .foregroundStyle(failedHard ? Color.bad : Color.dim)
+                Text(label.verb)
+                    .foregroundStyle(failedHard ? Color.bad : Color.ink)
+                Text(label.subject)
+                    .foregroundStyle(Color.dim)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.dimmer)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                Spacer(minLength: 4)
+                if inBackground { backgroundStatus } else { status }
+            }
+            .font(.subheadline)
+            .contentShape(Rectangle())
+            .padding(.vertical, 5)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if let download {
+                ForEach(files, id: \.self) { f in
+                    Button("Download \((f as NSString).lastPathComponent)", systemImage: "square.and.arrow.down") {
+                        download(f)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A Bash call left running in the background. Its result comes back at
+    /// once and says only that it started; the command goes on, and how it is
+    /// doing is the task's to say, as on the desktop (`chat/Items.tsx`).
+    private var inBackground: Bool {
+        call.name == "Bash" && call.input["run_in_background"]?.bool == true
+    }
+
+    /// The command the call started, where its output can be read.
+    private var command: BackgroundCommand? {
+        inBackground ? backgroundCommands?.started(by: call.id) : nil
+    }
+
+    private var backgroundStatus: some View {
+        HStack(spacing: 5) {
+            if let command {
+                WorkStatus(status: command.status)
+            } else if failedHard {
+                Image(glyph: .failing).foregroundStyle(Color.bad)
+            }
+            Text("background")
+                .font(.caption)
+                .foregroundStyle(Color.dimmer)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("In the background, \(command.map { $0.running ? "running" : $0.status } ?? (failedHard ? "failed" : "started"))")
     }
 
     /// The files the call names, by absolute path: what it wrote, and what its

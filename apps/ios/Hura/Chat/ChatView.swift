@@ -198,6 +198,9 @@ struct ChatView: View {
                         .environment(\.foundRow, found)
                         .environment(\.turnStarted, started)
                         .environment(\.editPrompt, onBranch == nil ? nil : EditPrompt { seq, text in edit(from: seq, text) })
+                        .environment(\.backgroundCommands, tailFile == nil ? nil : BackgroundCommands(all: commands) {
+                            followingCommand = Following(id: $0.id)
+                        })
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)

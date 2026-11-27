@@ -310,6 +310,25 @@ extension EnvironmentValues {
     /// Edit a message you sent, by its entry's seq: "Edit from Here". Unset
     /// where a conversation cannot fork, such as a side chat.
     @Entry var editPrompt: EditPrompt?
+    /// The commands the agent left running in the background, so the Bash
+    /// call that started one can say how it is doing and open its output.
+    /// Unset where the sandbox's files can't be read.
+    @Entry var backgroundCommands: BackgroundCommands?
+}
+
+/// The background commands, as the environment holds them, and the way to
+/// open one's output. Equal when the commands are: the closure is a new one
+/// each time the conversation is drawn, while what it does is the same.
+struct BackgroundCommands: Equatable {
+    let all: [BackgroundCommand]
+    let open: (BackgroundCommand) -> Void
+
+    /// The command a Bash call started, by the call's id.
+    func started(by call: String) -> BackgroundCommand? {
+        all.first { $0.id == call }
+    }
+
+    static func == (a: BackgroundCommands, b: BackgroundCommands) -> Bool { a.all == b.all }
 }
 
 /// "Edit from Here", as the environment holds it. Always equal to another:
