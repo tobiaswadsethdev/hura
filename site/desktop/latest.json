@@ -1,10 +1,10 @@
 {
-  "version": "0.60.0",
-  "pub_date": "2026-11-26T22:50:16Z",
+  "version": "0.61.0",
+  "pub_date": "2026-11-27T09:28:44Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUb0RBL2d2cDFMWG9VYXBFMFk5em55ZnE2NmtnUEdmcHNBTjRuUDhNVmUwYW5WdU5wYWRDckVqU1UxME0vaXVtZVRaa21rNTVBNzJSbDI1V3ZFM29rN3B4S1hycGk2S3c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NzMzNDE2CWZpbGU6aHVyYV8wLjYwLjBfeDY0LXNldHVwLmV4ZQpOaW54UkZaTUN0NkdXY2k3eDNxNWQyTFlZSlRFdmFmT1hxei9idXNQcWVXalJIa3I2YnRuRzl2Z04xSmQvcWRnZVpqeHplYnpqSWljTVBNNUpMLytBUT09Cg==",
-      "url": "https://github.com/tobiaswadsethdev/hura/releases/download/desktop-v0.60.0/hura-desktop-v0.60.0-x86_64-pc-windows-msvc-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUb0RBL2d2cDFMWGtCMEhmQU9MQ2FyVUc0ZE9YTFhwOW9BMHR2a3QvaGhJRXBIZlhBdDBYeHFpQkFSOThCNTF0eGZLRjZKU3hoQ2Y0TU9jQnJkYU9IM2ZLQTJsL0VJNVF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NzcxNzI0CWZpbGU6aHVyYV8wLjYxLjBfeDY0LXNldHVwLmV4ZQoyTCtxWG5XaDBHZ0JsTHNxN0M0a2M5ZlBTNURKYWh5UmY5eGJNOFRIQjYyRXEvNW9VWXRsdFVMZ3p4VDJoYXgyaFdWVUFtWnV1OVZSdnFRcXZWcEpBQT09Cg==",
+      "url": "https://github.com/tobiaswadsethdev/hura/releases/download/desktop-v0.61.0/hura-desktop-v0.61.0-x86_64-pc-windows-msvc-setup.exe"
     }
   }
 }
