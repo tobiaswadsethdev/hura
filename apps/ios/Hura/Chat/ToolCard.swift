@@ -50,7 +50,8 @@ struct ToolCard: View {
     /// The call's line, which opens and closes it.
     private var header: some View {
         Button {
-            withAnimation(.snappy) { expanded = !isOpen }
+            // At once: see `Steady`.
+            Steady.toggle { expanded = !isOpen }
         } label: {
             HStack(spacing: 8) {
                 Image(glyph: label.icon)
@@ -72,6 +73,7 @@ struct ToolCard: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Color.dimmer)
                     .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .animation(.snappy, value: isOpen)
                 Spacer(minLength: 4)
                 if inBackground { backgroundStatus } else { status }
             }
@@ -281,7 +283,8 @@ struct ShellCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.snappy) { open.toggle() }
+                // At once: see `Steady`.
+                Steady.toggle { open.toggle() }
             } label: {
                 HStack(spacing: 8) {
                     Image(glyph: .agentTerminal)
@@ -299,6 +302,7 @@ struct ShellCard: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color.dimmer)
                         .rotationEffect(.degrees(open ? 90 : 0))
+                        .animation(.snappy, value: open)
                 }
                 .font(.subheadline)
                 .contentShape(Rectangle())

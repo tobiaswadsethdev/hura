@@ -204,7 +204,8 @@ struct StepsRow: View {
         let failed = calls.filter { $0.failed && !$0.stopped }.count
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(.snappy) { open = !shown }
+                // At once: see `Steady`. Only the chevron turns.
+                Steady.toggle { open = !shown }
             } label: {
                 HStack(spacing: 4) {
                     head
@@ -213,6 +214,7 @@ struct StepsRow: View {
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
                         .rotationEffect(.degrees(shown ? 90 : 0))
+                        .animation(.snappy, value: shown)
                     if failed > 0 {
                         Text("\(failed) failed").font(.caption).foregroundStyle(Color.bad).padding(.leading, 4)
                     }
@@ -423,7 +425,8 @@ struct PromptBubble: View {
                 .background(alignment: .top) { measures }
             if long {
                 Button(all ? "Show less" : "Show more") {
-                    withAnimation(.snappy) { all.toggle() }
+                    // At once: see `Steady`.
+                    Steady.toggle { all.toggle() }
                 }
                 .buttonStyle(.plain)
                 .font(.footnote.weight(.semibold))
@@ -494,7 +497,8 @@ struct ThinkingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.snappy) { open.toggle() }
+                // At once: see `Steady`.
+                Steady.toggle { open.toggle() }
             } label: {
                 // The whole width of the row and some height around the words
                 // take the tap: the caption alone was hard to hit.
@@ -506,6 +510,7 @@ struct ThinkingView: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color.dimmer)
                         .rotationEffect(.degrees(open ? 90 : 0))
+                        .animation(.snappy, value: open)
                     Spacer(minLength: 0)
                 }
                 .font(.subheadline)
@@ -551,5 +556,19 @@ struct ReceiptLine: View {
         // One grey whatever the state: the ticks say which. A time that
         // brightened on being read made a queued message's look dimmed.
         .foregroundStyle(Color.dimmer)
+    }
+}
+
+/// Opening or closing a row of the conversation at once. The list animates a
+/// row's change of height by itself, even with no animation asked for, and
+/// while it did, the row's first line was drawn where the row would grow to
+/// and slid back up over what had opened under it: a work log's "Worked for"
+/// jumped each time it was tapped. A transaction with animations disabled is
+/// the one the list's own update respects.
+enum Steady {
+    static func toggle(_ change: () -> Void) {
+        var quiet = Transaction()
+        quiet.disablesAnimations = true
+        withTransaction(quiet, change)
     }
 }
