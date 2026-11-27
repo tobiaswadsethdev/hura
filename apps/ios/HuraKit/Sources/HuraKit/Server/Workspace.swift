@@ -5,7 +5,7 @@ import Foundation
 // `hura-core`, whose TypeScript twins are in `apps/desktop/src/gen`.
 
 /// A repository someone is working on, which worktrees are grouped under.
-public struct Project: Codable, Equatable, Identifiable, Sendable {
+public struct Project: Codable, Equatable, Hashable, Identifiable, Sendable {
     /// Unique, and what a session records to say where it belongs.
     public var name: String
     /// Clone URL. Every worktree in the project starts from this.

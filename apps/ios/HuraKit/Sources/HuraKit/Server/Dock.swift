@@ -408,6 +408,8 @@ public struct PolicyEvent: Decodable, Equatable, Hashable, Sendable {
 /// What a session has done, from its agent's status line.
 public struct Usage: Decodable, Equatable, Sendable {
     public var model: String?
+    /// What the session has cost in dollars, as its agent reckons it.
+    public var costUSD: Double?
     public var durationMS: Int64?
     public var linesAdded: Int64?
     public var linesRemoved: Int64?
@@ -431,6 +433,7 @@ public struct Usage: Decodable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case model, windows
+        case costUSD = "cost_usd"
         case durationMS = "duration_ms"
         case linesAdded = "lines_added"
         case linesRemoved = "lines_removed"

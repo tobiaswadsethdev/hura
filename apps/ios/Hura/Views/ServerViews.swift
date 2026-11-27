@@ -73,6 +73,9 @@ struct ServerView: View {
     @State private var renaming: Session?
     @State private var newTitle = ""
     @State private var forgetting: Project?
+    /// A project whose new worktrees' defaults are being set.
+    @State private var defaulting: Project?
+    @State private var showingUsage = false
     @State private var screen: ServerScreen?
     @State private var openPull: PullRequestSummary?
     @State private var error: String?
@@ -206,6 +209,7 @@ struct ServerView: View {
             }
         }
         .navigationDestination(item: $openPull) { LinkedPullView(pull: $0) }
+        .modifier(projectScreens)
         .sheet(isPresented: $addingProject) {
             NewProjectView(server: server)
         }
@@ -236,6 +240,15 @@ struct ServerView: View {
         }
     }
 
+    /// A project's defaults and the server's usage, pushed over the list. A
+    /// modifier of their own: on the list's chain they were more than the
+    /// compiler could type in time.
+    private var projectScreens: ProjectScreens {
+        ProjectScreens(server: server, defaulting: $defaulting, showingUsage: $showingUsage) { name in
+            model.pendingRoute = [.server(server.id), .session(serverID: server.id, name: name)]
+        }
+    }
+
     /// Adding things, and the server's own screens. Away while the list is
     /// being put in order, when the one thing to do is say it is done.
     @ToolbarContentBuilder
@@ -261,6 +274,7 @@ struct ServerView: View {
             Menu {
                 Button("Integrations", glyph: .integrations) { screen = .integrations }
                 Button("Settings", glyph: .settings) { screen = .settings }
+                Button("Usage", glyph: .events) { showingUsage = true }
                 Button("About", glyph: .info) { screen = .about }
                 Divider()
                 Button("Reorder", systemImage: "arrow.up.arrow.down") {
@@ -337,6 +351,7 @@ struct ServerView: View {
                           canCreate: server.state == .online,
                           toggle: { fold(project.name) },
                           create: { creatingIn = project },
+                          defaults: { defaulting = project },
                           forget: { forgetting = project })
                 .canvasRow(.folder)
             if open {
@@ -601,6 +616,7 @@ private struct ProjectHeader: View {
     let canCreate: Bool
     let toggle: () -> Void
     let create: () -> Void
+    let defaults: () -> Void
     let forget: () -> Void
 
     var body: some View {
@@ -639,6 +655,8 @@ private struct ProjectHeader: View {
                 // Where it clones from, which the folder row has no room for.
                 Section(project.repo) {
                     Button("New Worktree", systemImage: "plus", action: create)
+                        .disabled(!canCreate)
+                    Button("Defaults for New Worktrees", glyph: .settings, action: defaults)
                         .disabled(!canCreate)
                     Button("Forget Project", glyph: .forgetProject, role: .destructive, action: forget)
                 }
@@ -872,5 +890,18 @@ func agentStatus(_ session: Session, _ report: AgentReport?) -> String {
     case "waiting": "needs_input"
     case "running": "working"
     case let other: other
+    }
+}
+
+private struct ProjectScreens: ViewModifier {
+    let server: Server
+    @Binding var defaulting: Project?
+    @Binding var showingUsage: Bool
+    let open: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .navigationDestination(item: $defaulting) { ProjectDefaultsView(server: server, project: $0) }
+            .navigationDestination(isPresented: $showingUsage) { UsageView(server: server, onOpen: open) }
     }
 }
