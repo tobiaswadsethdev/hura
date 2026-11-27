@@ -736,13 +736,19 @@ pub struct Created {
 /// rules every session starts with, and the seeder's first step is
 /// [`Backend::fetch_script`].
 ///
-/// The sandbox image is deliberately *not* built here. `image::build` streams
-/// docker's output to the terminal, which would tear a TUI apart; both front
-/// ends call [`crate::image::ensure_session`] before this. See the doc comment
-/// on [`crate::image::ensure`].
+/// The sandbox image is deliberately *not* built by this module. `image::build`
+/// streams docker's output to the terminal, which would tear a TUI apart, so
+/// the caller does it, with [`crate::image::ensure_session`], in `prepare`.
+/// That runs once the record is written and before the runtime is asked for
+/// anything, so the session is listed, `creating`, for however long the build
+/// takes; an error from it fails the session as any later step would. The
+/// command line, which shows the build in its terminal and would rather not
+/// leave a record to remove when it fails, builds before calling this instead
+/// and hands in nothing to do. See the doc comment on [`crate::image::ensure`].
 pub fn create(
     backends: &Backends,
     draft: &Draft,
+    prepare: &mut dyn FnMut() -> Result<(), String>,
     progress: &mut dyn FnMut(Step),
 ) -> Result<Created, String> {
     let mut warnings = Vec::new();
@@ -813,6 +819,16 @@ pub fn create(
     // [`crate::store::reconcile`] knows not to read the missing sandbox behind
     // a young `creating` record as a dead one.
     save(s.clone(), &mut warnings);
+
+    // What the caller makes ready on this machine first: the image, and the
+    // managed MCP containers. After the record, because the first time a set of
+    // toolchains is used this is the longest step of the lot (a minute to add a
+    // pinned .NET SDK, and more to load the result into the runtime), and a
+    // session missing from the list for all of it looked like a request that
+    // had been lost.
+    if let Err(e) = prepare() {
+        return Err(fail(s, e, &mut warnings));
+    }
 
     progress(Step::Place);
     // Each failure is recorded, reason and all, before being returned. A
@@ -988,9 +1004,9 @@ fn fail(mut s: Session, why: String, warnings: &mut Vec<String>) -> String {
 /// Record a create that stopped before [`create`] wrote anything, so the
 /// session it was meant to be still says why.
 ///
-/// For what a caller does ahead of [`create`], which on `hurad` is building
-/// the image on the create's own thread, and for the refusals [`create`]
-/// makes before its first write. A window that asked for the session has
+/// For the refusals [`create`] makes before its first write. (The image
+/// build used to be one of these, done ahead of it on `hurad`; it is now its
+/// `prepare`, after the record.) A window that asked for the session has
 /// selected its name and is waiting for it to appear. With no record it never
 /// does, the window moves on after a few seconds, and the reason is on the
 /// server's terminal.

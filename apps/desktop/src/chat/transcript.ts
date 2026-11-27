@@ -72,8 +72,9 @@ export type Item =
   | { kind: "thinking"; key: string; text: string }
   | { kind: "tool"; key: string; call: ToolCall }
   | { kind: "note"; key: string; text: string; tone: "dim" | "bad" }
-  /// `ms` is how long the turn took by Claude Code's own count.
-  | { kind: "turn"; key: string; ok: boolean; text: string; at: number; ms: number | null }
+  /// `ms` is how long the turn took by Claude Code's own count. `stopped` when
+  /// it ended because you stopped it.
+  | { kind: "turn"; key: string; ok: boolean; stopped: boolean; text: string; at: number; ms: number | null }
   | { kind: "divider"; key: string; text: string }
   /// The first thing said on a day, so a time is never read as the wrong one.
   | { kind: "day"; key: string; at: number }
@@ -82,8 +83,9 @@ export type Item =
   /// `from` is when the turn began (its prompt taken in, or sent), epoch
   /// milliseconds, for "Working for" while it runs; `took` how long it took by
   /// Claude Code's own count once it has ended, for "Worked for". Either is
-  /// null when the transcript does not say.
-  | { kind: "steps"; key: string; items: Item[]; live: boolean; from: number | null; took: number | null };
+  /// null when the transcript does not say. `stopped` when the turn ended
+  /// because you stopped it, which its line then says.
+  | { kind: "steps"; key: string; items: Item[]; live: boolean; from: number | null; took: number | null; stopped: boolean };
 
 /// The same calendar day, where this window is.
 function sameDay(a: number, b: number): boolean {
@@ -447,13 +449,13 @@ export function build(entries: ChatEntry[]): Built {
         const facts = seconds(r.duration_ms);
         const ms = typeof r.duration_ms === "number" ? r.duration_ms : null;
         if (r.subtype === "success" && !r.is_error) {
-          items.push({ kind: "turn", key, ok: true, text: facts, at, ms });
+          items.push({ kind: "turn", key, ok: true, stopped: false, text: facts, at, ms });
         } else if (r.subtype === "error_during_execution") {
           // What an interrupt ends with. Stopping a turn is not a failure of it.
-          items.push({ kind: "turn", key, ok: true, text: ["stopped", facts].filter(Boolean).join(" · "), at, ms });
+          items.push({ kind: "turn", key, ok: true, stopped: true, text: ["stopped", facts].filter(Boolean).join(" · "), at, ms });
         } else {
           const why = r.subtype.replace(/^error_/, "").replaceAll("_", " ");
-          items.push({ kind: "turn", key, ok: false, text: [why, facts].filter(Boolean).join(" · "), at, ms });
+          items.push({ kind: "turn", key, ok: false, stopped: false, text: [why, facts].filter(Boolean).join(" · "), at, ms });
         }
         break;
       }
@@ -680,7 +682,8 @@ export function group(items: Item[], working: boolean): Item[] {
     while (end > 0 && run[end - 1].kind === "text") end--;
     const steps = run.slice(0, end);
     const took = next?.kind === "turn" ? next.ms : null;
-    if (steps.length > 1) out.push({ kind: "steps", key: `${steps[0].key}.steps`, items: steps, live: false, from, took });
+    const stopped = next?.kind === "turn" && next.stopped;
+    if (steps.length > 1) out.push({ kind: "steps", key: `${steps[0].key}.steps`, items: steps, live: false, from, took, stopped });
     else out.push(...steps);
     out.push(...run.slice(end));
     run = [];

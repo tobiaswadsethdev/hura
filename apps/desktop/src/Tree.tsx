@@ -723,10 +723,19 @@ function ShelfRow({
       >
         {s.project ? <ProjectMonogram name={s.project} className="opacity-50 grayscale" /> : <Branch className="size-4 shrink-0" />}
         <span className="min-w-0 flex-1 truncate">{s.title ?? s.name}</span>
-        <span className="shrink-0 text-xs tabular-nums group-hover/shelf:invisible">{note}</span>
+        <span className="shrink-0 text-xs tabular-nums group-hover/shelf:hidden">{note}</span>
+        {/* The button below, unseen and in its place while it is shown, so a
+            long title is cut short before it rather than under it. */}
+        <span aria-hidden className={cn(SHELF_UNDO, "invisible hidden group-hover/shelf:inline-flex")}>
+          <Undo className="size-3.5" />
+          {undo}
+        </span>
       </button>
       <button
-        className="absolute top-1/2 right-1.5 hidden -translate-y-1/2 cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-sidebar-muted-foreground group-hover/shelf:inline-flex hover:text-sidebar-foreground"
+        className={cn(
+          SHELF_UNDO,
+          "absolute top-1/2 right-1.5 hidden -translate-y-1/2 cursor-pointer rounded-md text-sidebar-muted-foreground group-hover/shelf:inline-flex hover:text-sidebar-foreground",
+        )}
         onClick={onUndo}
       >
         <Undo className="size-3.5" />
@@ -735,6 +744,10 @@ function ShelfRow({
     </li>
   );
 }
+
+/// What sizes a shelf row's way off the shelf, shared by the button and the
+/// room kept for it.
+const SHELF_UNDO = "shrink-0 items-center gap-1 px-1.5 py-0.5 text-xs";
 
 /// Where a dragged row or project would land: a line across the top or the
 /// bottom of the one under the pointer (`data-drop`, set by `useSortable`).
@@ -968,18 +981,23 @@ function Worktree({
               </>
             )}
             {status ? (
-              <span className={cn("ml-auto inline-flex shrink-0 items-center gap-1 text-xs font-medium group-hover/row:invisible", status.className)}>
+              <span className={cn("ml-auto inline-flex shrink-0 items-center gap-1 text-xs font-medium", WHILE_CONTROLS_HIDDEN, status.className)}>
                 <status.icon aria-hidden className="size-4 shrink-0" />
                 {status.label}
               </span>
             ) : (
               <span
-                className="ml-auto shrink-0 text-xs text-sidebar-secondary-label tabular-nums group-hover/row:invisible"
+                className={cn("ml-auto shrink-0 text-xs text-sidebar-secondary-label tabular-nums", WHILE_CONTROLS_HIDDEN)}
                 title="How long this worktree has existed"
               >
                 {age(s.created_at)}
               </span>
             )}
+            {/* The room the controls below are drawn over, in place of the
+                state while they are shown, as T3 Code's status slot widens
+                to its controls: a long branch is cut short before them rather
+                than running on underneath. */}
+            <span aria-hidden className={cn("ml-auto hidden w-19 shrink-0", WHILE_CONTROLS_SHOWN)} />
           </span>
           {/* The title, which is what the session is called; the slug it is
               keyed by is in the tooltip and the menu, for the moments it is
@@ -1041,9 +1059,10 @@ function Worktree({
         </button>
       )}
       {/* T3 Code's controls on a card, shown where its state is while it is
-          pointed at: put it off, pin it, or settle it as done for now. */}
+          pointed at, or while the snooze menu is open from them: put it off,
+          pin it, or settle it as done for now. Centred on the first line. */}
       {!renaming && (
-        <span className="absolute top-2.5 right-2 hidden items-center gap-0.5 group-hover/row:flex">
+        <span className="absolute top-2 right-2 hidden items-center gap-0.5 group-hover/row:flex group-has-[[aria-expanded=true]]/row:flex">
           <button className={TRIAGE_BUTTON} title="Snooze" aria-label="Snooze" onClick={buttonMenu(snoozes)}>
             <Snooze />
           </button>
@@ -1069,8 +1088,14 @@ function Worktree({
   );
 }
 
+/// A card's first line while its controls are shown, and while they are not:
+/// when the row is pointed at, or a menu is open from one of them. The
+/// controls are 76 pixels, three of `TRIAGE_BUTTON` and the gaps between.
+const WHILE_CONTROLS_SHOWN = "group-hover/row:block group-has-[[aria-expanded=true]]/row:block";
+const WHILE_CONTROLS_HIDDEN = "group-hover/row:hidden group-has-[[aria-expanded=true]]/row:hidden";
+
 const TRIAGE_BUTTON =
-  "inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground [&_svg]:size-3.5";
+  "inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground aria-expanded:bg-sidebar-row-hover aria-expanded:text-sidebar-foreground [&_svg]:size-3.5";
 
 /// That something is waiting to be said to a session, and when the first of
 /// it will be: after the turn when any is waiting only for that, or else at

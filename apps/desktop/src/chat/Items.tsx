@@ -29,6 +29,8 @@ import {
   Edit,
   Ports,
   Read,
+  Said,
+  Thought,
   ToolEdit,
   ToolOther,
   ToolRead,
@@ -56,10 +58,22 @@ export function relative(path: unknown): string {
 const str = (v: unknown): string => (typeof v === "string" ? v : v === undefined ? "" : JSON.stringify(v));
 
 /// A tool call in a few words: what kind of thing, and what it was done to.
-export function describe(name: string, input: Record<string, unknown>): { verb: string; subject: string } {
+/// What a tool call did, as its row says it: a verb, then what it did it to.
+/// `title` is the row's tooltip, when that is not the subject again.
+export function describe(
+  name: string,
+  input: Record<string, unknown>,
+): { verb: string; subject: string; title?: string } {
   switch (name) {
-    case "Bash":
-      return { verb: "Run", subject: str(input.description) || str(input.command) };
+    case "Bash": {
+      // Claude Code's description of a command is a sentence with its own
+      // verb ("Run the search tests"), so it is the whole label, and "Run"
+      // before it said it twice. The command is the tooltip, and the body.
+      const description = str(input.description);
+      return description
+        ? { verb: description, subject: "", title: str(input.command) }
+        : { verb: "Run", subject: str(input.command) };
+    }
     case "Read":
       return { verb: "Read", subject: relative(input.file_path) };
     case "Edit":
@@ -137,12 +151,16 @@ export function diffLines(before: string, after: string): Line[] {
 export function Diff({ lines }: { lines: Line[] }) {
   return (
     <pre className="chat-diff">
-      {lines.map((l, i) => (
-        <div key={i} className={l.sign === "+" ? "add" : l.sign === "-" ? "del" : undefined}>
-          <span className="sign">{l.sign}</span>
-          {l.text || " "}
-        </div>
-      ))}
+      {/* As wide as the widest line, so every line's colour runs as far as
+          the box scrolls and not only as far as it is wide. */}
+      <div className="chat-diff-lines">
+        {lines.map((l, i) => (
+          <div key={i} className={l.sign === "+" ? "add" : l.sign === "-" ? "del" : undefined}>
+            <span className="sign">{l.sign}</span>
+            {l.text || " "}
+          </div>
+        ))}
+      </div>
     </pre>
   );
 }
@@ -375,7 +393,7 @@ export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
   const files = fetch && call.result && !call.result.isError ? filesOf(call) : [];
   const [open, setOpen] = useState<boolean | null>(null);
   const shown = open ?? opensItself(call);
-  const { verb, subject } = describe(call.name, call.input);
+  const { verb, subject, title } = describe(call.name, call.input);
   const state =
     call.answer && !call.answer.allow
       ? "declined"
@@ -402,11 +420,9 @@ export const ToolCard = memo(function ToolCard({ call }: { call: ToolCall }) {
         {/* One group, so the two faces share a baseline: centring them as
             separate boxes sets the sans verb and the mono subject at
             different heights, because their metrics differ. */}
-        <span className="what">
+        <span className="what" title={title ?? (subject || undefined)}>
           <span className="verb">{verb}</span>
-          <span className="subject" title={subject}>
-            {subject}
-          </span>
+          {subject && <span className="subject">{subject}</span>}
         </span>
         <span className="mark" aria-label={state}>
           {state === "running" && (
@@ -557,9 +573,11 @@ export function summarize(items: Item[]): string {
   return said.charAt(0).toUpperCase() + said.slice(1);
 }
 
-/// A turn's steps, as one row. Open while the turn runs, so the work can be
-/// watched, and shut when it ends, leaving the answer under it; either way
-/// until it is clicked, after which it stays as it was put.
+/// A turn's steps, as one row, shut until it is clicked, after which it stays
+/// as it was put. While the turn runs, what it is doing now is under it, as
+/// T3 Code's live row: the step under way, and what the agent thought or said
+/// on the way to it. A long turn used to be open on every step it took, a
+/// wall of rows that then snapped shut when it ended.
 const StepsCard = memo(function StepsCard({ item }: { item: Extract<Item, { kind: "steps" }> }) {
   const [open, setOpen] = useState<boolean | null>(null);
   const found = useContext(Found);
@@ -568,7 +586,7 @@ const StepsCard = memo(function StepsCard({ item }: { item: Extract<Item, { kind
   useEffect(() => {
     if (holds) setOpen(true);
   }, [holds, found?.nonce]);
-  const shown = open ?? item.live;
+  const shown = open ?? false;
   const calls = item.items.flatMap((i) => (i.kind === "tool" ? [i.call] : []));
   const running = calls.some((c) => c.result === null && !(c.answer && !c.answer.allow));
   const failed = calls.filter((c) => c.result?.isError && !c.result.stopped).length;
@@ -578,12 +596,16 @@ const StepsCard = memo(function StepsCard({ item }: { item: Extract<Item, { kind
   const ticking = useContext(Ticking) && item.live;
   const now = useNow(ticking);
   const said = summarize(item.items);
+  // T3 Code's words for a turn you stopped, so the fold says it as well as
+  // the line at the turn's end.
   const label =
     item.live && item.from !== null
       ? `Working for ${since(now - item.from)}`
       : !item.live && item.took !== null
-        ? `Worked for ${since(item.took)}`
-        : said;
+        ? `${item.stopped ? "You stopped after" : "Worked for"} ${since(item.took)}`
+        : item.stopped
+          ? "You stopped it"
+          : said;
   return (
     <div className={`chat-steps${running ? " running" : ""}${shown ? " open" : ""}`}>
       <button className="chat-steps-head" aria-expanded={shown} title={said} onClick={() => setOpen(!shown)}>
@@ -593,6 +615,7 @@ const StepsCard = memo(function StepsCard({ item }: { item: Extract<Item, { kind
           {failed > 0 && <span className="failed">{failed} failed</span>}
         </span>
       </button>
+      {item.live && !shown && <Latest items={item.items} />}
       <Fold open={shown}>
         <div className="chat-steps-body">
           <Items items={item.items} />
@@ -601,6 +624,49 @@ const StepsCard = memo(function StepsCard({ item }: { item: Extract<Item, { kind
     </div>
   );
 });
+
+type Words = Extract<Item, { kind: "thinking" | "text" }>;
+const isWords = (item: Item | undefined): item is Words => item?.kind === "thinking" || item?.kind === "text";
+
+/// What a turn under way is doing, under its folded steps: the step it is on,
+/// as its own row, and what the agent thought or said just before it, cut to
+/// four lines. Only the thought, while that is the latest thing.
+function Latest({ items }: { items: Item[] }) {
+  const last = items.at(-1);
+  const before = items.at(-2);
+  const words = isWords(last) ? last : isWords(before) ? before : null;
+  const step = last && !isWords(last) ? last : null;
+  const text = words ? plain(words.text) : "";
+  if (!text && !step) return null;
+  const Mark = words?.kind === "text" ? Said : Thought;
+  return (
+    <div className="chat-steps-latest">
+      {text && (
+        <p className="chat-steps-said">
+          <span className="tool-icon" aria-hidden>
+            <Mark />
+          </span>
+          <span className="words">{text}</span>
+        </p>
+      )}
+      {/* Keyed by the step, so the next one is a card of its own rather than
+          this one's open or shut state handed on. */}
+      {step && <ItemView key={step.key} item={step} />}
+    </div>
+  );
+}
+
+/// Markdown as one run of plain words, for a preview a few lines long: its
+/// fences, headings, quotes, list marks, bold and code ticks taken off, and
+/// its lines run together. Underscores are left, since they are in names.
+function plain(text: string): string {
+  return text
+    .replace(/```[^\n]*\n?/g, "")
+    .replace(/^\s*(#{1,6}\s+|>\s?|[-*+]\s+|\d+\.\s+)/gm, "")
+    .replace(/\*\*|`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /// Lets go of the bottom of the conversation, which it otherwise keeps to
 /// while it is there. Unset where nothing is kept to the bottom.

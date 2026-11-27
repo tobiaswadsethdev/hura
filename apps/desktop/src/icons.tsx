@@ -150,6 +150,8 @@ import {
   TextSelect,
   MoveUp as MoveUpGlyph,
   MoveDown as MoveDownGlyph,
+  Ellipsis,
+  Brain,
 } from "lucide-react";
 
 import type { State } from "./gen/State";
@@ -227,6 +229,13 @@ export const Integrations = Plug;
 export const Servers = ServerGlyph;
 export const Settings = SettingsGlyph;
 export const Account = CircleUserRound;
+/// What did not fit, behind a button: the sidebar foot's overflow.
+export const More = Ellipsis;
+/// What the agent thought, where a turn under way shows its latest: T3 Code's
+/// glyph for reasoning.
+export const Thought = Brain;
+/// What the agent said on the way, beside it.
+export const Said = MessageSquare;
 /// Versions, updates and links. Opened from the wordmark rather than the
 /// strip, but headed by this glyph like every other screen.
 export const About = BadgeInfo;

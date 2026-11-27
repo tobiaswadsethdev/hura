@@ -3707,6 +3707,9 @@ button.chat-file .lucide { flex: none; color: var(--dim); }
    puts the words at two heights. */
 .chat-tool-head .what { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
 .chat-tool-head .verb { flex: none; }
+/* A label that is all verb, as a command's own description is: cut short
+   like a subject rather than pushing the mark off the row. */
+.chat-tool-head .verb:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-tool-head .subject {
   flex: 1;
   min-width: 0;
@@ -3755,7 +3758,8 @@ button.chat-file .lucide { flex: none; color: var(--dim); }
 .chat-output { color: var(--dim); }
 .chat-output.bad { color: var(--bad); }
 .chat-diff { padding: 4px 0; }
-.chat-diff > div { padding: 0 8px; min-width: max-content; }
+.chat-diff-lines { width: max-content; min-width: 100%; }
+.chat-diff-lines > div { padding: 0 8px; }
 .chat-diff .sign { display: inline-block; width: 14px; color: var(--dimmer); user-select: none; }
 .chat-diff .add { background: rgb(52 211 153 / 0.1); }
 .chat-diff .add .sign { color: var(--ok); }
@@ -3828,6 +3832,29 @@ button.chat-file .lucide { flex: none; color: var(--dim); }
   flex-direction: column;
   gap: 2px;
   margin: 6px 0 0;
+}
+/* A turn under way, under its folded steps: the step it is on, and what the
+   agent thought or said before it, as a row of the work log in the same
+   grey, cut at four lines as T3 Code's live thought is. */
+.chat-steps-latest { display: flex; flex-direction: column; gap: 2px; margin: 6px 0 0; }
+.chat-steps-said {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 0 2px;
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.625;
+}
+.chat-steps-said .tool-icon { height: 1.625em; }
+.chat-steps-said .words {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .chat-note { margin: 0; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
