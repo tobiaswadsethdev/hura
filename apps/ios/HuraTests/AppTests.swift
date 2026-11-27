@@ -329,6 +329,9 @@ struct MarkdownImageTests {
     if case let .steps(_, steps, _) = ChatItem.group(items, working: false).last {
         #expect(ChatItem.summary(steps) == "Read 2 files")
     }
+    // "Worked for" is the turn's own count, from its end past the answer;
+    // the turn still going has none yet.
+    #expect(ChatRows.took(ChatItem.group(items, working: false)) == ["2.steps": 1000])
 }
 
 /// A search result is found where it is drawn: the row itself, the folded

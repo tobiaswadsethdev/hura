@@ -20,10 +20,10 @@ struct ContextRing: View {
     var body: some View {
         Button { open = true } label: {
             ZStack {
-                Circle().stroke(Color.secondary.opacity(0.35), lineWidth: 2)
+                Circle().stroke(Color.lineStrong, lineWidth: 2)
                 Circle()
                     .trim(from: 0, to: pct / 100)
-                    .stroke(fullness(pct, plain: .secondary), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .stroke(fullness(pct, plain: Color.dim), style: StrokeStyle(lineWidth: 2, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut(duration: 0.3), value: pct)
             }
@@ -42,7 +42,7 @@ struct ContextRing: View {
 
 /// Yellow from 70, red from 90: the desktop's steps.
 private func fullness(_ pct: Double, plain: Color) -> Color {
-    pct >= 90 ? .red : pct >= 70 ? Color.working : plain
+    pct >= 90 ? Color.bad : pct >= 70 ? Color.warn : plain
 }
 
 private struct UsageCard: View {
