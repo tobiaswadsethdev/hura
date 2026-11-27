@@ -58,6 +58,8 @@ struct ToolCard: View {
                     .foregroundStyle(failedHard ? Color.bad : Color.dim)
                 Text(label.verb)
                     .foregroundStyle(failedHard ? Color.bad : Color.ink)
+                    // One word, never shortened: the subject gives way instead.
+                    .fixedSize()
                 Text(label.subject)
                     .foregroundStyle(Color.dim)
                     .lineLimit(1)

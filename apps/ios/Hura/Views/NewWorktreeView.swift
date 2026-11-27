@@ -391,6 +391,9 @@ struct NewWorktreeView: View {
                         if options.mcp.isEmpty { Hint("none") }
                     }
                 }
+                // The whole width, as the composer above it is: sized to its
+                // pills, it stopped short of the right edge.
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
                 .card()
             }

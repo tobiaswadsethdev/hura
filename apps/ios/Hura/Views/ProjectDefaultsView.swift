@@ -33,6 +33,8 @@ struct ProjectDefaultsView: View {
             }
         }
         .scrollContentBackground(.hidden)
+        // T3 Code's switches are the accent, not the system's green.
+        .tint(.accentColor)
         .background(Color.canvas.ignoresSafeArea())
         .navigationTitle(project.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -65,7 +67,8 @@ struct ProjectDefaultsView: View {
                     Text("Sandbox").tag(Bool?.some(false))
                     Text("Worktree").tag(Bool?.some(true))
                 } label: {
-                    Label("Runs in", glyph: defaults.worktree == true ? .unsandboxed : .policy)
+                    defaults.worktree == true ? Label("Runs in", glyph: .unsandboxed)
+                        : Label("Runs in", systemImage: "shippingbox")
                 }
             }
             Picker(selection: $defaults.policy) {
