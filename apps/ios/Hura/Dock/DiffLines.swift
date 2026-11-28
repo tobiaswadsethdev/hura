@@ -5,12 +5,18 @@ import SwiftUI
 /// or not, the runs of unchanged ones folded, and the part of each edited
 /// line that changed.
 struct DiffModel {
+    /// Where Settings keeps whether lines that differ only in their spaces
+    /// and tabs are left out of a diff. On unless turned off, as on the
+    /// desktop (`diffHideWhitespace`).
+    static let hideWhitespaceKey = "diff.hideWhitespace"
+
     let all: [UnifiedDiff.Line]
     let pieces: [UnifiedDiff.Piece]
     let spans: [String: Range<Int>]
 
-    init(original: String, modified: String) {
-        all = UnifiedDiff.lines(original: original, modified: modified)
+    /// `hideWhitespace` is Settings' Hide Whitespace Changes.
+    init(original: String, modified: String, hideWhitespace: Bool) {
+        all = UnifiedDiff.lines(original: original, modified: modified, hideWhitespace: hideWhitespace)
         pieces = UnifiedDiff.pieces(all)
         spans = UnifiedDiff.changedSpans(all)
     }

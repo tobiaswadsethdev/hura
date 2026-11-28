@@ -282,6 +282,7 @@ struct FileDiffView: View {
     /// Counts loads, so each one starts with nothing unfolded.
     @State private var loads = 0
     @AppStorage("diff.wrap") private var wrap = false
+    @AppStorage(DiffModel.hideWhitespaceKey) private var hideWhitespace = true
     @FocusState private var typing: Bool
 
     init(server: Server, name: String, path: String, against: Against) {
@@ -368,6 +369,13 @@ struct FileDiffView: View {
             .presentationDetents([.medium])
         }
         .task(id: against) { await load() }
+        // The same two sides, compared again: there is nothing to fetch.
+        .onChange(of: hideWhitespace) {
+            guard let diff else { return }
+            model = DiffModel(original: diff.original, modified: diff.modified, hideWhitespace: hideWhitespace)
+            loads += 1
+            jump = nil
+        }
         .failure($failed)
     }
 
@@ -404,7 +412,7 @@ struct FileDiffView: View {
         do {
             async let c = server.api.comments(name)
             let d = try await server.api.gitDiff(name, path: path, against: against)
-            model = DiffModel(original: d.original, modified: d.modified)
+            model = DiffModel(original: d.original, modified: d.modified, hideWhitespace: hideWhitespace)
             loads += 1
             jump = nil
             diff = d

@@ -45,6 +45,7 @@ enum Appearance: String, CaseIterable, Identifiable {
 struct AppSettingsView: View {
     @AppStorage(Appearance.key) private var appearance: Appearance = .system
     @AppStorage(TerminalLook.darkKey) private var terminalsDark = false
+    @AppStorage(DiffModel.hideWhitespaceKey) private var hideWhitespace = true
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -65,6 +66,13 @@ struct AppSettingsView: View {
                     Toggle("Keep Terminals Dark", isOn: $terminalsDark)
                 } footer: {
                     Text("For programs drawn for a dark terminal, when the app is light. Pinch a terminal to change the size of its text.")
+                }
+                Section {
+                    Toggle("Hide Whitespace Changes", isOn: $hideWhitespace)
+                } header: {
+                    Text("Diffs")
+                } footer: {
+                    Text("Lines that differ only in the spaces and tabs at their start or end are shown as unchanged.")
                 }
             }
             .navigationTitle("Settings")
