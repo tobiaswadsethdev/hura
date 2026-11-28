@@ -28,10 +28,15 @@ public enum UnifiedDiff {
         }
     }
 
-    public static func lines(original: String, modified: String) -> [Line] {
+    /// `hideWhitespace` leaves out lines that differ only in the spaces and
+    /// tabs at their start or end, a reindent most often, as the desktop's
+    /// Monaco does with `ignoreTrimWhitespace`. Such a line is drawn as
+    /// unchanged, in its new form.
+    public static func lines(original: String, modified: String, hideWhitespace: Bool = false) -> [Line] {
         let a = split(original)
         let b = split(modified)
-        let diff = b.difference(from: a)
+        // Compared as they are, or as their trimmed forms; drawn as they are.
+        let diff = hideWhitespace ? b.map(trimmed).difference(from: a.map(trimmed)) : b.difference(from: a)
         var removed = Set<Int>()
         var inserted = Set<Int>()
         for change in diff {
@@ -120,6 +125,12 @@ public enum UnifiedDiff {
         while end < a.count - start, end < b.count - start, a[a.count - 1 - end] == b[b.count - 1 - end] { end += 1 }
         guard start + end > 0 else { return nil }
         return (start..<(a.count - end), start..<(b.count - end))
+    }
+
+    private static func trimmed(_ line: String) -> String {
+        let start = line.firstIndex { $0 != " " && $0 != "\t" } ?? line.endIndex
+        let end = line.lastIndex { $0 != " " && $0 != "\t" }.map(line.index(after:)) ?? start
+        return String(line[start..<end])
     }
 
     /// Lines without their endings, whichever they are: a file checked in

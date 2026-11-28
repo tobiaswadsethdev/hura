@@ -225,7 +225,7 @@ struct MarkdownImageTests {
     ].compactMap { ChatTranscript.entry(try! JSONDecoder().decode(JSONValue.self, from: Data($0.utf8))) }
     let items = ChatItem.fold(raw).items
     #expect(items == [.text(id: "1.0", text: "Done.", at: Date(timeIntervalSince1970: 1_790_000_001)),
-                      .turnEnd(id: "2.0", ms: 4200, at: Date(timeIntervalSince1970: 1_790_000_002))])
+                      .turnEnd(id: "2.0", ms: 4200, at: Date(timeIntervalSince1970: 1_790_000_002), stopped: false)])
 }
 
 /// A `!` command is one card: running until its end arrives, then with what it
@@ -312,7 +312,7 @@ struct MarkdownImageTests {
     let items: [ChatItem] = [
         .prompt(id: "1", prompt: prompt), .thinking(id: "2", text: "hm"), tool("3", "Read"),
         .text(id: "4", text: "on my way", at: nil), tool("5", "Bash"), tool("6", "Edit"),
-        .text(id: "7", text: "done", at: nil), .turnEnd(id: "8", ms: 1000, at: nil),
+        .text(id: "7", text: "done", at: nil), .turnEnd(id: "8", ms: 1000, at: nil, stopped: false),
         .prompt(id: "9", prompt: prompt), tool("10", "Read"), .text(id: "11", text: "one step", at: nil),
         .prompt(id: "12", prompt: prompt), tool("13", "Read"), tool("14", "Read"),
     ]
@@ -331,7 +331,7 @@ struct MarkdownImageTests {
     }
     // "Worked for" is the turn's own count, from its end past the answer;
     // the turn still going has none yet.
-    #expect(ChatRows.took(ChatItem.group(items, working: false)) == ["2.steps": 1000])
+    #expect(ChatRows.took(ChatItem.group(items, working: false)) == ["2.steps": ChatRows.Took(ms: 1000)])
 }
 
 /// A search result is found where it is drawn: the row itself, the folded
@@ -349,4 +349,41 @@ struct MarkdownImageTests {
     #expect(ChatItem.locate(items, seq: 3) == ChatItem.Located(id: "3.1", steps: "2.0.steps"))
     #expect(ChatItem.locate(items, seq: 6) == ChatItem.Located(id: "4.0", steps: nil))
     #expect(ChatItem.locate([], seq: 1) == nil)
+}
+
+/// A command's description is a sentence with its own verb, so it is the
+/// whole label; without one, the command is what is run.
+@Test func aCommandIsLabelledByItsDescription() {
+    func bash(_ input: [String: JSONValue]) -> ToolLabel {
+        .of(ToolCall(id: "1", name: "Bash", input: .object(input), inputTruncated: false, result: nil), cwd: "/r")
+    }
+    let described = bash(["command": .string("npm test"), "description": .string("Run the search tests")])
+    #expect(described.verb == "Run the search tests")
+    #expect(described.subject == "")
+    let bare = bash(["command": .string("npm test")])
+    #expect(bare.verb == "Run")
+    #expect(bare.subject == "npm test")
+}
+
+/// A turn you stopped says so on its work log: by how Claude Code ended it,
+/// or by its note that you interrupted it when no call was cut short. The
+/// turn after it, left to finish, worked as usual.
+@Test func aTurnYouStoppedSaysYouStoppedIt() {
+    let raw = [
+        #"{"seq":1,"at":0,"ev":{"kind":"sdk","msg":{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"thinking","thinking":"hm"},{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}}}"#,
+        #"{"seq":2,"at":0,"ev":{"kind":"sdk","msg":{"type":"result","subtype":"error_during_execution","duration_ms":97000}}}"#,
+        #"{"seq":3,"at":0,"ev":{"kind":"prompt","text":"go on"}}"#,
+        #"{"seq":4,"at":0,"ev":{"kind":"sdk","msg":{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"Let me"}]}}}}"#,
+        #"{"seq":5,"at":0,"ev":{"kind":"sdk","msg":{"type":"user","parent_tool_use_id":null,"message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}}}"#,
+        #"{"seq":6,"at":0,"ev":{"kind":"sdk","msg":{"type":"result","subtype":"success","duration_ms":3000}}}"#,
+        #"{"seq":7,"at":0,"ev":{"kind":"prompt","text":"again"}}"#,
+        #"{"seq":8,"at":0,"ev":{"kind":"sdk","msg":{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"thinking","thinking":"hm"},{"type":"tool_use","id":"t2","name":"Read","input":{}}]}}}}"#,
+        #"{"seq":9,"at":0,"ev":{"kind":"sdk","msg":{"type":"result","subtype":"success","duration_ms":1000}}}"#,
+    ].compactMap { ChatTranscript.entry(try! JSONDecoder().decode(JSONValue.self, from: Data($0.utf8))) }
+    let items = ChatItem.group(ChatItem.fold(raw).items, working: false)
+    #expect(ChatRows.took(items) == [
+        "1.0.steps": ChatRows.Took(ms: 97000, stopped: true),
+        "4.0.steps": ChatRows.Took(ms: 3000, stopped: true),
+        "8.0.steps": ChatRows.Took(ms: 1000, stopped: false),
+    ])
 }

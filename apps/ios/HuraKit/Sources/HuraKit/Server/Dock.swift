@@ -484,3 +484,41 @@ public struct TailText: Decodable, Equatable, Sendable {
     /// There is more before `text`.
     public var cut: Bool
 }
+
+/// A port's page at an address Safari can open (`SharePreview` on the
+/// server; see "Shared previews" in docs/server.md): a listener of the
+/// server's own, behind a token the first request swaps for a cookie.
+public struct SharedPreview: Decodable, Equatable, Sendable {
+    public var port: Int
+    public var token: String
+
+    public init(port: Int, token: String) {
+        self.port = port
+        self.token = token
+    }
+
+    /// The link, on `host`: the address this phone reaches the server by,
+    /// which is where the server listens for the share too. An IPv6 address
+    /// goes in brackets.
+    public func url(host: String) -> URL? {
+        let host = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        return URL(string: "https://\(host):\(port)/?hura_preview=\(token)")
+    }
+}
+
+extension ServerClient {
+    /// A port's page shared by the server, for Safari: the same share for the
+    /// same port while it lasts. A server too old to share one answers
+    /// `unsupported` (`ServerError.isUnsupported`).
+    public func sharePreview(_ name: String, port: Int, host: String) async throws -> SharedPreview {
+        struct Body: Encodable { var name: String; var port: Int; var host: String }
+        return try await call("share-preview", Body(name: name, port: port, host: host), as: SharedPreview.self)
+    }
+}
+
+extension Error {
+    /// The server doesn't know the request: it is older than the client.
+    public var isUnsupported: Bool {
+        if case let .failed(kind, _)? = self as? ServerError { kind == "unsupported" } else { false }
+    }
+}

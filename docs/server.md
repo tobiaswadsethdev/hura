@@ -188,6 +188,39 @@ moved or a token that was revoked shows up:
               machine should dial. `hurad remotes --forget work` drops it
 ```
 
+## Shared previews
+
+A client's preview of a port in a sandbox is normally its own: the desktop
+and the phone each listen on their own loopback and tunnel what arrives there
+over the paired connection ([desktop.md](desktop.md#previews)). That needs the
+client running, and iOS stops an app's listeners soon after it leaves the
+screen, so a page the phone handed to Safari stopped answering.
+
+So the phone asks for a **shared** preview instead (`SharePreview` on `/rpc`).
+The server gives the port a listener of its own, on the address `hurad serve`
+listens on and at a port it picks, and answers with that port and a token.
+The phone opens `https://<server>:<port>/?hura_preview=<token>` in Safari:
+
+- **The token becomes a cookie.** The first request swaps it for a `Secure`,
+  `HttpOnly` cookie and sends the browser on without it; a request with
+  neither is refused. Tokens are 32 random bytes, made for the share.
+- **It is this server's certificate,** the self-signed one the clients pin.
+  Safari can't pin, so it warns once per preview and has to be told to go
+  on. That was chosen over plain HTTP, which would put the page and the token
+  on the network in the clear.
+- **The page sees localhost.** Requests reach the service with `Host` (and
+  `Origin`) saying `localhost:<port>`, which dev servers such as Vite insist
+  on, and a redirect back to `http://localhost:<port>/...` arrives as a path.
+  Websockets pass through, so a dev server's reload works.
+- **It ends when unused.** After 30 minutes with no request it is stopped;
+  asking again makes a new one, with a new token. Stopping the port's forward
+  or the process behind it stops its shares too.
+
+A share is reachable wherever the server's address is, so `--bind` decides who
+can reach the listener, as it does for `/rpc`; the token decides who gets in.
+An older server doesn't know the request, and the phone falls back to its own
+preview in the in-app browser.
+
 ## Queued and scheduled sessions
 
 A session can start later instead of now: at a time, or once fewer than

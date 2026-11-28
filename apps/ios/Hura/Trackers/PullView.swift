@@ -543,6 +543,7 @@ private struct PullFileDiffView: View {
     @State private var model: DiffModel?
     @State private var error: String?
     @State private var jump: String?
+    @AppStorage(DiffModel.hideWhitespaceKey) private var hideWhitespace = true
 
     var body: some View {
         Loaded(value: diff, error: error) { diff in
@@ -560,6 +561,8 @@ private struct PullFileDiffView: View {
                         .padding(6)
                         .background(.bar)
                     DiffLines(model: model, jump: $jump)
+                        // Compared again, its folds are in other places.
+                        .id(hideWhitespace)
                 }
             }
         }
@@ -582,11 +585,17 @@ private struct PullFileDiffView: View {
         .task {
             do {
                 let d = try await TrackerCore.pullFile(tracker, files: files, file: file)
-                model = DiffModel(original: d.original, modified: d.modified)
+                model = DiffModel(original: d.original, modified: d.modified, hideWhitespace: hideWhitespace)
                 diff = d
             } catch {
                 self.error = error.userMessage
             }
+        }
+        // The same two sides, compared again: there is nothing to fetch.
+        .onChange(of: hideWhitespace) {
+            guard let diff else { return }
+            model = DiffModel(original: diff.original, modified: diff.modified, hideWhitespace: hideWhitespace)
+            jump = nil
         }
     }
 }

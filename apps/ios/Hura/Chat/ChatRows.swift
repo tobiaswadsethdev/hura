@@ -85,22 +85,31 @@ struct ChatRows: View {
         return Set(items[start...].map(\.id))
     }
 
-    /// How long each turn's work took, by the steps row it is folded into:
-    /// Claude Code's own count, from the end of the turn, which comes after
-    /// the answer the steps led to. As `took` in the desktop's `group`.
-    static func took(_ items: [ChatItem]) -> [String: Int64] {
-        var out: [String: Int64] = [:]
+    /// How a turn's work ended: how long it took, and whether you stopped it.
+    struct Took: Equatable {
+        var ms: Int64
+        var stopped = false
+    }
+
+    /// How each turn's work ended, by the steps row it is folded into: Claude
+    /// Code's own count, from the end of the turn, which comes after the
+    /// answer the steps led to, and whether the turn was stopped. As `took`
+    /// and `stopped` in the desktop's `group`.
+    static func took(_ items: [ChatItem]) -> [String: Took] {
+        var out: [String: Took] = [:]
         for (i, item) in items.enumerated() {
             guard case let .steps(id, _, _) = item else { continue }
             var next = i + 1
             while next < items.count, case .text = items[next] { next += 1 }
-            if next < items.count, case let .turnEnd(_, ms, _) = items[next] { out[id] = ms }
+            if next < items.count, case let .turnEnd(_, ms, _, stopped) = items[next] {
+                out[id] = Took(ms: ms, stopped: stopped)
+            }
         }
         return out
     }
 
     @ViewBuilder
-    private func row(_ item: ChatItem, working: Bool, took: Int64?) -> some View {
+    private func row(_ item: ChatItem, working: Bool, took: Took?) -> some View {
         switch item {
         case let .prompt(id, prompt):
             HStack {
@@ -136,10 +145,11 @@ struct ChatRows: View {
             ShellCard(run: run)
         case let .day(_, date):
             Rule(text: ChatFormat.day(date))
-        case let .turnEnd(_, ms, at):
+        case let .turnEnd(_, ms, at, stopped):
             // When the turn ended and what it took, small at the end of it:
-            // its work, folded, already says "Worked for".
-            Text([at.map { $0.formatted(date: .omitted, time: .shortened) }, ChatFormat.duration(ms)]
+            // its work, folded, already says "Worked for". A turn you stopped
+            // says so, as the desktop's line does.
+            Text([at.map { $0.formatted(date: .omitted, time: .shortened) }, stopped ? "stopped" : nil, ChatFormat.duration(ms)]
                 .compactMap { $0 }.joined(separator: " · "))
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(Color.dimmer)
@@ -187,8 +197,8 @@ extension ChatItem {
 struct StepsRow: View {
     let items: [ChatItem]
     let live: Bool
-    /// How long the turn took, once it has ended.
-    var took: Int64?
+    /// How long the turn took, and whether you stopped it, once it has ended.
+    var took: ChatRows.Took?
     let cwd: String
     let working: Bool
     @State private var open: Bool?
@@ -204,7 +214,8 @@ struct StepsRow: View {
         let failed = calls.filter { $0.failed && !$0.stopped }.count
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(.snappy) { open = !shown }
+                // At once: see `Steady`. Only the chevron turns.
+                Steady.toggle { open = !shown }
             } label: {
                 HStack(spacing: 4) {
                     head
@@ -213,6 +224,7 @@ struct StepsRow: View {
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
                         .rotationEffect(.degrees(shown ? 90 : 0))
+                        .animation(.snappy, value: shown)
                     if failed > 0 {
                         Text("\(failed) failed").font(.caption).foregroundStyle(Color.bad).padding(.leading, 4)
                     }
@@ -252,7 +264,9 @@ struct StepsRow: View {
                 Text("Working for \(ChatFormat.duration(Int64(max(0, context.date.timeIntervalSince(started)) * 1000)))")
             }
         } else if !live, let took {
-            Text("Worked for \(ChatFormat.duration(took))")
+            // T3 Code's words for a turn you stopped, so the fold says it as
+            // well as the line at the turn's end.
+            Text("\(took.stopped ? "You stopped after" : "Worked for") \(ChatFormat.duration(took.ms))")
         } else {
             Text(ChatItem.summary(items))
         }
@@ -423,7 +437,8 @@ struct PromptBubble: View {
                 .background(alignment: .top) { measures }
             if long {
                 Button(all ? "Show less" : "Show more") {
-                    withAnimation(.snappy) { all.toggle() }
+                    // At once: see `Steady`.
+                    Steady.toggle { all.toggle() }
                 }
                 .buttonStyle(.plain)
                 .font(.footnote.weight(.semibold))
@@ -494,7 +509,8 @@ struct ThinkingView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.snappy) { open.toggle() }
+                // At once: see `Steady`.
+                Steady.toggle { open.toggle() }
             } label: {
                 // The whole width of the row and some height around the words
                 // take the tap: the caption alone was hard to hit.
@@ -506,6 +522,7 @@ struct ThinkingView: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color.dimmer)
                         .rotationEffect(.degrees(open ? 90 : 0))
+                        .animation(.snappy, value: open)
                     Spacer(minLength: 0)
                 }
                 .font(.subheadline)
@@ -551,5 +568,19 @@ struct ReceiptLine: View {
         // One grey whatever the state: the ticks say which. A time that
         // brightened on being read made a queued message's look dimmed.
         .foregroundStyle(Color.dimmer)
+    }
+}
+
+/// Opening or closing a row of the conversation at once. The list animates a
+/// row's change of height by itself, even with no animation asked for, and
+/// while it did, the row's first line was drawn where the row would grow to
+/// and slid back up over what had opened under it: a work log's "Worked for"
+/// jumped each time it was tapped. A transaction with animations disabled is
+/// the one the list's own update respects.
+enum Steady {
+    static func toggle(_ change: () -> Void) {
+        var quiet = Transaction()
+        quiet.disablesAnimations = true
+        withTransaction(quiet, change)
     }
 }

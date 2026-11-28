@@ -21,14 +21,21 @@ enum WorkOrigin: Hashable {
 }
 
 struct NewWorktreeView: View {
-    let server: Server
-    let project: Project
+    /// The server it was opened from, and the project there.
+    private let opened: Server
+    private let project: Project
     var origin: WorkOrigin?
-    /// Opens the new worktree once it exists.
-    var onCreated: (String) -> Void = { _ in }
+    /// Opens the new worktree once it exists, on the server it was started
+    /// on, which the draft's server chip may have moved from `opened`.
+    private let created: (Server, String) -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppModel.self) private var model
 
-    /// Another of the server's projects, picked in the headline.
+    /// Another paired server, picked in the strip, as the desktop's draft
+    /// moves to one.
+    @State private var moved: Server?
+    /// Another of the server's projects, picked in the headline, or the one
+    /// the draft went to on another server.
     @State private var picked: Project?
     @State private var options: NewOptions?
     @State private var facts: Facts?
@@ -57,6 +64,24 @@ struct NewWorktreeView: View {
 
     /// Now, once the server's queue has room, at a time, or on a schedule.
     enum When: Hashable { case now, queue, at, `repeat` }
+
+    /// Given only the name, as it always was. A caller that opens the name on
+    /// the server it passed in goes to the wrong one once the draft has moved
+    /// to another, so the app's own callers take the server as well.
+    init(server: Server, project: Project, origin: WorkOrigin? = nil, onCreated: @escaping (String) -> Void = { _ in }) {
+        self.init(server: server, project: project, origin: origin) { _, name in onCreated(name) }
+    }
+
+    /// `onCreated` is given the server the worktree was started on, and its name.
+    init(server: Server, project: Project, origin: WorkOrigin? = nil, onCreated: @escaping (Server, String) -> Void) {
+        opened = server
+        self.project = project
+        self.origin = origin
+        created = onCreated
+    }
+
+    /// The server it starts on.
+    private var server: Server { moved ?? opened }
 
     private var current: Project { picked ?? project }
 
@@ -88,9 +113,10 @@ struct NewWorktreeView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .interactiveDismissDisabled(busy || !task.isEmpty)
-            // Again for each project picked: the checkout says the base and
-            // the toolchains, and the project its own defaults.
-            .task(id: current.name) { await load() }
+            // Again for each project picked, and each server: the checkout
+            // says the base and the toolchains, and the project its own
+            // defaults.
+            .task(id: "\(server.id)/\(current.name)") { await load() }
         }
     }
 
@@ -252,6 +278,8 @@ struct NewWorktreeView: View {
     private var strip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
+                if model.servers.count > 1 { serverChip }
+
                 Menu {
                     Choice(title: "Sandbox", note: "Its own VM, under a policy", on: !worktree) { worktree = false }
                     Choice(title: "Worktree", note: "On the server, as its user", on: worktree) { worktree = true }
@@ -297,6 +325,42 @@ struct NewWorktreeView: View {
             .padding(.horizontal, 2)
         }
         .scrollClipDisabled()
+    }
+
+    /// The server it starts on, offering the others, as the desktop's strip
+    /// does when more than one is paired.
+    private var serverChip: some View {
+        Menu {
+            ForEach(model.servers) { s in
+                Choice(title: s.record.name, note: serverNote(s), on: s.id == server.id) { move(to: s) }
+                    .disabled(s.state != .online || project(on: s) == nil)
+            }
+        } label: {
+            Chip(glyph: .server, text: server.record.name)
+        }
+        .disabled(busy)
+        .accessibilityLabel("Starts on: \(server.record.name)")
+    }
+
+    /// Why another server can't take the draft, said under its name.
+    private func serverNote(_ s: Server) -> String? {
+        if s.state != .online { return s.state.label }
+        if project(on: s) == nil { return isPull ? "No project clones this repository" : "No projects" }
+        return nil
+    }
+
+    private func project(on s: Server) -> Project? {
+        DraftMove.project(like: current, in: s.projects, sameRepo: isPull)
+    }
+
+    private func move(to s: Server) {
+        guard s.id != server.id, s.state == .online, let there = project(on: s) else { return }
+        // That server's answers, not this one's: its options and the checkout
+        // are fetched again for the project there.
+        options = nil
+        facts = nil
+        moved = s.id == opened.id ? nil : s
+        picked = there
     }
 
     /// The error, or what stays behind on the server's checkout, or what a
@@ -530,24 +594,25 @@ struct NewWorktreeView: View {
                                  toolchains: options.toolchains.map(\.name).filter(toolchains.contains),
                                  interface: agentInterface, ticket: ticketOrigin, pull: pullOrigin,
                                  worktree: worktree)
+        let target = server
         Task {
             defer { busy = false }
             do {
                 switch when {
                 case .now:
-                    let created = try await server.create(session)
+                    let name = try await target.create(session)
                     dismiss()
-                    onCreated(created)
+                    created(target, name)
                 case .queue:
-                    try await server.enqueue(session, at: nil)
+                    try await target.enqueue(session, at: nil)
                     dismiss()
                 case .at:
-                    try await server.enqueue(session, at: at)
+                    try await target.enqueue(session, at: at)
                     dismiss()
                 case .repeat:
                     // No first time: the server's is the rule's next, on its
                     // own clock, as the desktop sends it.
-                    try await server.enqueue(session, at: nil, repeat: rule)
+                    try await target.enqueue(session, at: nil, repeat: rule)
                     dismiss()
                 }
             } catch {
@@ -795,6 +860,20 @@ private struct WrapRows: Layout {
 /// What a new worktree in a project opens with: the project's own defaults
 /// over what the checkout says, over the server's config, as the desktop's
 /// draft settles them.
+/// Where a draft goes when it is taken to another server. Outside the view,
+/// as `DraftDefaults` is: a view is the main actor's, and a test calling this
+/// on a static of the view waited for the main actor and never finished.
+enum DraftMove {
+    /// The project a draft goes to on another server: the one cloning the
+    /// same repository, or else the first, as the desktop picks it.
+    /// `sameRepo` for a pull request's draft, which is its repository's, so
+    /// only that repository's will do.
+    static func project(like current: Project, in projects: [Project], sameRepo: Bool) -> Project? {
+        if let same = projects.first(where: { $0.repo == current.repo }) { return same }
+        return sameRepo ? nil : projects.first
+    }
+}
+
 struct DraftDefaults: Equatable {
     var interface: String
     var worktree: Bool

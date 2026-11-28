@@ -3,9 +3,12 @@ import SafariServices
 import SwiftUI
 
 /// What the sandbox listens on, who holds each port, and previews: a port
-/// opened on this phone's loopback and reached over the paired connection,
-/// shown in Safari's in-app browser. Also the sandbox's processes, which can
-/// be stopped. The desktop's ports pane.
+/// the server shares at an address of its own, opened in Safari ("Shared
+/// previews" in docs/server.md). Safari keeps it with hura behind it, which a
+/// preview on this phone's own loopback could not: iOS stops an app's
+/// listeners soon after it leaves the screen. That one is still here, in the
+/// in-app browser, for a server too old to share and from a row's menu. Also
+/// the sandbox's processes, which can be stopped. The desktop's ports pane.
 struct PortsPane: View {
     let server: Server
     let name: String
@@ -18,6 +21,7 @@ struct PortsPane: View {
     @State private var typed = ""
     @State private var killing: Row?
     @State private var killingProcess: PortProcess?
+    @Environment(\.openURL) private var openURL
 
     struct Row: Identifiable {
         var port: Int
@@ -53,7 +57,7 @@ struct PortsPane: View {
             } header: {
                 Text("Ports")
             } footer: {
-                Text("A preview opens the port on this phone at the same number when it can, reached over the paired connection and never on a network.")
+                Text("A preview opens in Safari, at an address the server shares for it behind a private link. Safari warns about the server's certificate the first time: it is the one this phone pairs with. Hold a port to open it in hura instead.")
             }
             Section {
                 HStack {
@@ -160,6 +164,7 @@ struct PortsPane: View {
             }
         }
         .contextMenu {
+            Button("Open in hura", systemImage: "safari") { openHere(row.port, host: row.host) }
             if let p = row.preview {
                 Button("Copy Address", systemImage: "doc.on.doc") { UIPasteboard.general.string = p.url.absoluteString }
             }
@@ -176,16 +181,43 @@ struct PortsPane: View {
         }
     }
 
+    /// In Safari, shared by the server; in hura's own browser for a server
+    /// too old to share.
     private func open(_ port: Int, host: String) {
         busy = port
         Task {
             defer { busy = nil }
             do {
-                let p = try await server.previews.open(session: name, port: port, host: host)
-                browsing = p.url
+                let share = try await server.api.sharePreview(name, port: port, host: host)
+                if let url = share.url(host: server.record.host) {
+                    openURL(url)
+                    return
+                }
+            } catch let e where e.isUnsupported {
+                // Falls through to this phone's own preview.
             } catch {
                 failed = error.userMessage
+                return
             }
+            await here(port, host: host)
+        }
+    }
+
+    /// On this phone's loopback, in the in-app browser, while hura is in front.
+    private func openHere(_ port: Int, host: String) {
+        busy = port
+        Task {
+            defer { busy = nil }
+            await here(port, host: host)
+        }
+    }
+
+    private func here(_ port: Int, host: String) async {
+        do {
+            let p = try await server.previews.open(session: name, port: port, host: host)
+            browsing = p.url
+        } catch {
+            failed = error.userMessage
         }
     }
 

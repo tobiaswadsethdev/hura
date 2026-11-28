@@ -2,6 +2,7 @@
 import type { Against } from "./Against";
 import type { ChatDecision } from "./ChatDecision";
 import type { GitOp } from "./GitOp";
+import type { Loopback } from "./Loopback";
 import type { McpOp } from "./McpOp";
 import type { NewComment } from "./NewComment";
 import type { NewProject } from "./NewProject";
@@ -37,7 +38,7 @@ fork: string | null,
 /**
  * Only up to this assistant message of `fork`.
  */
-at: string | null, } | { "op": "close-chat", name: string, conv: string, } | { "op": "ports", name: string, } | { "op": "stop-forward", name: string, port: number, } | { "op": "kill-port", name: string, port: number, } | { "op": "kill-process", name: string, pid: number, } | { "op": "comments", name: string, } | { "op": "comment", name: string, comment: NewComment, } | { "op": "uncomment", name: string, id: number, } | { "op": "send-comments", name: string, } | { "op": "send-pull-comments", name: string, 
+at: string | null, } | { "op": "close-chat", name: string, conv: string, } | { "op": "ports", name: string, } | { "op": "stop-forward", name: string, port: number, } | { "op": "kill-port", name: string, port: number, } | { "op": "share-preview", name: string, port: number, host: Loopback, } | { "op": "kill-process", name: string, pid: number, } | { "op": "comments", name: string, } | { "op": "comment", name: string, comment: NewComment, } | { "op": "uncomment", name: string, id: number, } | { "op": "send-comments", name: string, } | { "op": "send-pull-comments", name: string, 
 /**
  * The pull request's own name, `#58` or `!26056`, for the message.
  */

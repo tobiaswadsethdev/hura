@@ -292,6 +292,16 @@ pub enum Request {
     /// Stop the process listening on a port inside the sandbox, and the
     /// forward to it. Answers with the ports.
     KillPort { name: String, port: u16 },
+    /// A port's page at an address any browser can open, rather than through
+    /// a client's own loopback: an HTTPS listener of its own on this server,
+    /// behind a token, for a phone to hand the page to Safari. Answers with
+    /// [`Reply::Shared`]: the same one for the same port while it lasts.
+    SharePreview {
+        name: String,
+        port: u16,
+        #[serde(default)]
+        host: hura_core::ports::Loopback,
+    },
     /// Stop one process in the sandbox, by pid -- for a dev server whose
     /// port cannot be traced to it. Answers with the ports.
     KillProcess { name: String, pid: u32 },
@@ -556,6 +566,7 @@ impl Request {
             | Request::Ports { name }
             | Request::StopForward { name, .. }
             | Request::KillPort { name, .. }
+            | Request::SharePreview { name, .. }
             | Request::KillProcess { name, .. }
             | Request::Comments { name }
             | Request::Comment { name, .. }
@@ -648,6 +659,7 @@ pub enum Reply {
         opened: Option<String>,
     },
     Ports(hura_core::ports::PortsView),
+    Shared(SharedPreview),
     Files(Dir),
     Found(FoundPaths),
     Tail(TailText),
@@ -712,6 +724,17 @@ impl From<Poll> for Reply {
     fn from(p: Poll) -> Self {
         Reply::Poll(p)
     }
+}
+
+/// Where a shared preview is: a port on this server, at the address the
+/// client reached it by, and the token that opens it. The link is
+/// `https://<that address>:<port>/?hura_preview=<token>`; the server swaps the
+/// token for a cookie on the first request, and refuses one with neither.
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedPreview {
+    pub port: u16,
+    pub token: String,
 }
 
 /// What the server sends back when it did not work.
@@ -893,6 +916,14 @@ mod tests {
                     port: 5173,
                 },
                 "kill-port",
+            ),
+            (
+                Request::SharePreview {
+                    name: "a".into(),
+                    port: 5173,
+                    host: hura_core::ports::Loopback::V4,
+                },
+                "share-preview",
             ),
             (
                 Request::KillProcess {

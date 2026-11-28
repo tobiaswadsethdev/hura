@@ -56,7 +56,8 @@ enum ChatItem: Identifiable, Equatable {
     case text(id: String, text: String, at: Date?)
     case thinking(id: String, text: String)
     case tool(id: String, call: ToolCall)
-    case turnEnd(id: String, ms: Int64, at: Date?)
+    /// `stopped` when it ended because you stopped it.
+    case turnEnd(id: String, ms: Int64, at: Date?, stopped: Bool)
     case divider(id: String, reason: String)
     case notice(id: String, text: String, isError: Bool)
     /// The steps of a turn on the way to its answer, folded into one row: see
@@ -66,7 +67,7 @@ enum ChatItem: Identifiable, Equatable {
     var id: String {
         switch self {
         case let .prompt(id, _), let .shell(id, _), let .day(id, _), let .text(id, _, _), let .thinking(id, _),
-             let .tool(id, _), let .turnEnd(id, _, _), let .divider(id, _), let .notice(id, _, _), let .steps(id, _, _):
+             let .tool(id, _), let .turnEnd(id, _, _, _), let .divider(id, _), let .notice(id, _, _), let .steps(id, _, _):
             id
         }
     }
@@ -234,6 +235,11 @@ enum ChatItem: Identifiable, Equatable {
         var day: Date?
         var held: [(uuid: String, id: String, prompt: Prompt)] = []
         let entries = entries.filter { $0.parent == thread }
+        // Claude Code's note that you interrupted the turn under way, which
+        // comes with no tool call cut short when it was thinking or writing.
+        // The turn's end says it was stopped as well; the note is the word
+        // for it should the end not.
+        var interrupted = false
         /// The first thing on a day goes under a line naming the day.
         func newDay(_ id: String, at: Date?) {
             guard let at else { return }
@@ -287,11 +293,16 @@ enum ChatItem: Identifiable, Equatable {
                     }
                 }
             case TranscriptEntry.Kind.turnEnd:
-                if let ms = e.durationMS { items.append(.turnEnd(id: id(0), ms: ms, at: e.at)) }
+                if let ms = e.durationMS {
+                    items.append(.turnEnd(id: id(0), ms: ms, at: e.at, stopped: e.stopped == true || interrupted))
+                }
+                interrupted = false
             case TranscriptEntry.Kind.divider:
                 items.append(.divider(id: id(0), reason: e.reason ?? ""))
             case TranscriptEntry.Kind.notice:
-                items.append(.notice(id: id(0), text: blocks.compactMap(\.text).joined(separator: "\n"), isError: e.level == "error"))
+                let text = blocks.compactMap(\.text).joined(separator: "\n")
+                if ChatTranscript.interrupted(text) { interrupted = true }
+                items.append(.notice(id: id(0), text: text, isError: e.level == "error"))
             default:
                 // tool_result is folded into its call; unknown kinds are skipped.
                 continue
@@ -312,7 +323,14 @@ struct ToolLabel: Equatable {
         let path = input["file_path"]?.string ?? input["path"]?.string ?? input["notebook_path"]?.string
         let shown = path.map { relative($0, to: cwd) } ?? ""
         switch call.name {
-        case "Bash": return ToolLabel(icon: .agentTerminal, verb: "Run", subject: input["description"]?.string ?? input["command"]?.string ?? "")
+        case "Bash":
+            // Claude Code's description of a command is a sentence with its
+            // own verb ("Run the search tests"), so it is the whole label, and
+            // "Run" before it said it twice. As the desktop's `describe`.
+            if let description = input["description"]?.string, !description.isEmpty {
+                return ToolLabel(icon: .agentTerminal, verb: description, subject: "")
+            }
+            return ToolLabel(icon: .agentTerminal, verb: "Run", subject: input["command"]?.string ?? "")
         case "Read": return ToolLabel(icon: .fileText, verb: "Read", subject: shown)
         case "Edit", "MultiEdit": return ToolLabel(icon: .edit, verb: "Edit", subject: shown)
         case "Write": return ToolLabel(icon: .fileNew, verb: "Write", subject: shown)

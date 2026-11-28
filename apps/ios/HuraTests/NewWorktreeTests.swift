@@ -127,3 +127,15 @@ private func checkout(branch: String? = "feature", onRemote: Bool = true, toolch
     #expect(UsageWords.resetsIn(1_000_000 + 3 * 3600, now: now) == "in 3h")
     #expect(UsageWords.dollars(1.5) == "$1.50")
 }
+
+/// A draft taken to another server goes to the project there that clones the
+/// same repository, or the first; a pull request's only to its repository's.
+@Test func aDraftMovedToAnotherServerFindsTheSameRepository() {
+    let here = Project(name: "web", repo: "git@github.com:acme/web.git", path: "/src/web")
+    let there = [Project(name: "api", repo: "git@github.com:acme/api.git", path: "/w/api"),
+                 Project(name: "site", repo: "git@github.com:acme/web.git", path: "/w/site")]
+    #expect(DraftMove.project(like: here, in: there, sameRepo: false)?.name == "site")
+    #expect(DraftMove.project(like: here, in: [there[0]], sameRepo: false)?.name == "api")
+    #expect(DraftMove.project(like: here, in: [there[0]], sameRepo: true) == nil)
+    #expect(DraftMove.project(like: here, in: [], sameRepo: false) == nil)
+}

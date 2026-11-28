@@ -259,6 +259,16 @@ conversations = {
         {"kind": "read", "uuid": "u1"},
         say("m1", "Done: the flag is read once per request in `routes/checkout.ts`, and both flows have a test."),
         done(840, 2.35),
+        # A turn you stopped: the call refused as Claude Code records an
+        # interrupt, and the turn ended with `error_during_execution`.
+        prompt("Now migrate every checkout test to the new flow.", "u2"),
+        {"kind": "read", "uuid": "u2"},
+        tool("t9", "Bash", command="npm test -- checkout", description="Run every checkout test"),
+        result("t9", "The user doesn't want to proceed with this tool use. The tool use was rejected.", error=True),
+        {"kind": "sdk", "msg": {"type": "user", "parent_tool_use_id": None,
+                                "message": {"content": [{"type": "text", "text": "[Request interrupted by user]"}]}}},
+        {"kind": "sdk", "msg": {"type": "result", "subtype": "error_during_execution", "is_error": True,
+                                "duration_ms": 97000, "total_cost_usd": 0.4}},
     ],
 }
 
@@ -475,9 +485,11 @@ PACKAGE_OLD = """{
     "docs:build": "vitepress build"
   }
 }"""
+# The first script only re-indented: a change that is only whitespace, which
+# the phone's Settings can hide.
 PACKAGE_NEW = """{
   "scripts": {
-    "docs:dev": "vitepress dev",
+      "docs:dev": "vitepress dev",
     "docs:build": "tsx scripts/build-search-index.ts && vitepress build"
   }
 }"""
@@ -547,6 +559,11 @@ def answer(req):
         return {"reply": "integrations", "mcp": [], "secrets": [], "skills": [], "configured_skills": []}
     if op in ("create", "create-from-pull"):
         name = req.get("name") or "-".join(req.get("task", "").lower().split()[:3]) or "new-worktree"
+        # Listed from now on, so the client opening it finds it.
+        project = req.get("project") or projects[0]["name"]
+        if not any(x["name"] == name for x in sessions):
+            sessions.append(session(name, project, "hura/" + name, "creating", 0.01, req.get("task", "")))
+        print("created", name, "on", PORT, flush=True)
         return {"reply": "created", "name": name}
     if op == "enqueue":
         new, repeat = req["new"], req.get("repeat")
@@ -593,6 +610,8 @@ def answer(req):
     if op == "file": return {"reply": "file", **file(req["path"])}
     if op == "comments": return {"reply": "comments", "comments": []}
     if op == "ports": return {"reply": "ports", **ports}
+    # A shared preview: the stand-in below, two ports up, behind one token.
+    if op == "share-preview": return {"reply": "shared", "port": PORT + 3, "token": "fake-share"}
     if op == "diff": return {"reply": "diff", "body": ""}
     if op == "settings":
         return {"reply": "settings", "path": "/home/tobias/.config/hura/config.toml", "present": True,
@@ -865,4 +884,28 @@ A Debug build of the iPhone app installed in a booted simulator:
         -HuraName devbox -HuraCloud http://127.0.0.1:{CLOUD} -HuraNoLock YES
 
 and `-HuraOpen server`, `inbox`, `account` or a session's name to go straight to a screen.""", flush=True)
+# What a shared preview's link reaches (`share.rs` in hurad): its token for a
+# cookie, then a page saying it got through, over the same certificate.
+class Shared(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if "hura_preview=fake-share" in self.path:
+            self.send_response(303)
+            self.send_header("Location", self.path.split("?")[0])
+            self.send_header("Set-Cookie", "hura_preview_%d=fake-share; Path=/; Secure; HttpOnly" % (PORT + 3))
+            self.end_headers()
+            return
+        ok = "hura_preview_%d=fake-share" % (PORT + 3) in (self.headers.get("Cookie") or "")
+        body = ("<!doctype html><meta name=viewport content='width=device-width'><body style='font:17px -apple-system;margin:3em 1.5em'>"
+                + ("<h1>Docs search</h1><p>A shared preview of port 5173, through the fake server.</p>" if ok
+                   else "<h1>This preview opens from its link</h1>")).encode()
+        self.send_response(200 if ok else 403)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a): pass
+shared = ThreadingHTTPServer(("127.0.0.1", PORT + 3), Shared)
+shared.socket = ctx.wrap_socket(shared.socket, server_side=True)
+threading.Thread(target=shared.serve_forever, daemon=True).start()
+
 srv.serve_forever()
