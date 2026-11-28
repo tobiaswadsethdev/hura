@@ -259,6 +259,16 @@ conversations = {
         {"kind": "read", "uuid": "u1"},
         say("m1", "Done: the flag is read once per request in `routes/checkout.ts`, and both flows have a test."),
         done(840, 2.35),
+        # A turn you stopped: the call refused as Claude Code records an
+        # interrupt, and the turn ended with `error_during_execution`.
+        prompt("Now migrate every checkout test to the new flow.", "u2"),
+        {"kind": "read", "uuid": "u2"},
+        tool("t9", "Bash", command="npm test -- checkout", description="Run every checkout test"),
+        result("t9", "The user doesn't want to proceed with this tool use. The tool use was rejected.", error=True),
+        {"kind": "sdk", "msg": {"type": "user", "parent_tool_use_id": None,
+                                "message": {"content": [{"type": "text", "text": "[Request interrupted by user]"}]}}},
+        {"kind": "sdk", "msg": {"type": "result", "subtype": "error_during_execution", "is_error": True,
+                                "duration_ms": 97000, "total_cost_usd": 0.4}},
     ],
 }
 
@@ -475,9 +485,11 @@ PACKAGE_OLD = """{
     "docs:build": "vitepress build"
   }
 }"""
+# The first script only re-indented: a change that is only whitespace, which
+# the phone's Settings can hide.
 PACKAGE_NEW = """{
   "scripts": {
-    "docs:dev": "vitepress dev",
+      "docs:dev": "vitepress dev",
     "docs:build": "tsx scripts/build-search-index.ts && vitepress build"
   }
 }"""
@@ -547,6 +559,11 @@ def answer(req):
         return {"reply": "integrations", "mcp": [], "secrets": [], "skills": [], "configured_skills": []}
     if op in ("create", "create-from-pull"):
         name = req.get("name") or "-".join(req.get("task", "").lower().split()[:3]) or "new-worktree"
+        # Listed from now on, so the client opening it finds it.
+        project = req.get("project") or projects[0]["name"]
+        if not any(x["name"] == name for x in sessions):
+            sessions.append(session(name, project, "hura/" + name, "creating", 0.01, req.get("task", "")))
+        print("created", name, "on", PORT, flush=True)
         return {"reply": "created", "name": name}
     if op == "enqueue":
         new, repeat = req["new"], req.get("repeat")
