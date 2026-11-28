@@ -350,16 +350,7 @@ struct NewWorktreeView: View {
     }
 
     private func project(on s: Server) -> Project? {
-        Self.project(like: current, in: s.projects, sameRepo: isPull)
-    }
-
-    /// The project a draft goes to on another server: the one cloning the
-    /// same repository, or else the first, as the desktop picks it.
-    /// `sameRepo` for a pull request's draft, which is its repository's, so
-    /// only that repository's will do.
-    static func project(like current: Project, in projects: [Project], sameRepo: Bool) -> Project? {
-        if let same = projects.first(where: { $0.repo == current.repo }) { return same }
-        return sameRepo ? nil : projects.first
+        DraftMove.project(like: current, in: s.projects, sameRepo: isPull)
     }
 
     private func move(to s: Server) {
@@ -869,6 +860,20 @@ private struct WrapRows: Layout {
 /// What a new worktree in a project opens with: the project's own defaults
 /// over what the checkout says, over the server's config, as the desktop's
 /// draft settles them.
+/// Where a draft goes when it is taken to another server. Outside the view,
+/// as `DraftDefaults` is: a view is the main actor's, and a test calling this
+/// on a static of the view waited for the main actor and never finished.
+enum DraftMove {
+    /// The project a draft goes to on another server: the one cloning the
+    /// same repository, or else the first, as the desktop picks it.
+    /// `sameRepo` for a pull request's draft, which is its repository's, so
+    /// only that repository's will do.
+    static func project(like current: Project, in projects: [Project], sameRepo: Bool) -> Project? {
+        if let same = projects.first(where: { $0.repo == current.repo }) { return same }
+        return sameRepo ? nil : projects.first
+    }
+}
+
 struct DraftDefaults: Equatable {
     var interface: String
     var worktree: Bool

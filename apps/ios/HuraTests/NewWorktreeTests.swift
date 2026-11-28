@@ -134,8 +134,8 @@ private func checkout(branch: String? = "feature", onRemote: Bool = true, toolch
     let here = Project(name: "web", repo: "git@github.com:acme/web.git", path: "/src/web")
     let there = [Project(name: "api", repo: "git@github.com:acme/api.git", path: "/w/api"),
                  Project(name: "site", repo: "git@github.com:acme/web.git", path: "/w/site")]
-    #expect(NewWorktreeView.project(like: here, in: there, sameRepo: false)?.name == "site")
-    #expect(NewWorktreeView.project(like: here, in: [there[0]], sameRepo: false)?.name == "api")
-    #expect(NewWorktreeView.project(like: here, in: [there[0]], sameRepo: true) == nil)
-    #expect(NewWorktreeView.project(like: here, in: [], sameRepo: false) == nil)
+    #expect(DraftMove.project(like: here, in: there, sameRepo: false)?.name == "site")
+    #expect(DraftMove.project(like: here, in: [there[0]], sameRepo: false)?.name == "api")
+    #expect(DraftMove.project(like: here, in: [there[0]], sameRepo: true) == nil)
+    #expect(DraftMove.project(like: here, in: [], sameRepo: false) == nil)
 }
