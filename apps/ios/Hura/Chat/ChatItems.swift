@@ -312,7 +312,14 @@ struct ToolLabel: Equatable {
         let path = input["file_path"]?.string ?? input["path"]?.string ?? input["notebook_path"]?.string
         let shown = path.map { relative($0, to: cwd) } ?? ""
         switch call.name {
-        case "Bash": return ToolLabel(icon: .agentTerminal, verb: "Run", subject: input["description"]?.string ?? input["command"]?.string ?? "")
+        case "Bash":
+            // Claude Code's description of a command is a sentence with its
+            // own verb ("Run the search tests"), so it is the whole label, and
+            // "Run" before it said it twice. As the desktop's `describe`.
+            if let description = input["description"]?.string, !description.isEmpty {
+                return ToolLabel(icon: .agentTerminal, verb: description, subject: "")
+            }
+            return ToolLabel(icon: .agentTerminal, verb: "Run", subject: input["command"]?.string ?? "")
         case "Read": return ToolLabel(icon: .fileText, verb: "Read", subject: shown)
         case "Edit", "MultiEdit": return ToolLabel(icon: .edit, verb: "Edit", subject: shown)
         case "Write": return ToolLabel(icon: .fileNew, verb: "Write", subject: shown)

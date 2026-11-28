@@ -350,3 +350,17 @@ struct MarkdownImageTests {
     #expect(ChatItem.locate(items, seq: 6) == ChatItem.Located(id: "4.0", steps: nil))
     #expect(ChatItem.locate([], seq: 1) == nil)
 }
+
+/// A command's description is a sentence with its own verb, so it is the
+/// whole label; without one, the command is what is run.
+@Test func aCommandIsLabelledByItsDescription() {
+    func bash(_ input: [String: JSONValue]) -> ToolLabel {
+        .of(ToolCall(id: "1", name: "Bash", input: .object(input), inputTruncated: false, result: nil), cwd: "/r")
+    }
+    let described = bash(["command": .string("npm test"), "description": .string("Run the search tests")])
+    #expect(described.verb == "Run the search tests")
+    #expect(described.subject == "")
+    let bare = bash(["command": .string("npm test")])
+    #expect(bare.verb == "Run")
+    #expect(bare.subject == "npm test")
+}
