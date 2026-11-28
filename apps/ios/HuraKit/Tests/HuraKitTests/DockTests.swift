@@ -75,6 +75,18 @@ struct UnifiedDiffTests {
         #expect(lines.map(\.new) == [1, nil, 2, 3, 4])
     }
 
+    /// Hiding whitespace changes leaves a reindented line unchanged, in its
+    /// new form, and a change inside a line still a change.
+    @Test func hidesLinesThatOnlyMovedTheirSpaces() {
+        let original = "if x {\nrun()\n}\nkeep  \n"
+        let modified = "if x {\n    run()\n}\n\tkeep\ndone\n"
+        #expect(UnifiedDiff.lines(original: original, modified: modified).filter { $0.kind != .same }.count == 5)
+        let hidden = UnifiedDiff.lines(original: original, modified: modified, hideWhitespace: true)
+        #expect(hidden.map(\.kind) == [.same, .same, .same, .same, .added])
+        #expect(hidden[1].text == "    run()")
+        #expect(UnifiedDiff.lines(original: "a b\n", modified: "a  b\n", hideWhitespace: true).map(\.kind) == [.removed, .added])
+    }
+
     /// A file checked in with \n and checked out with \r\n differs only
     /// where it was edited, and no line keeps a \r.
     @Test func ignoresLineEndings() {

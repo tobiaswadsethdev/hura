@@ -313,7 +313,11 @@ public enum ChatTranscript {
             return mainThread ? note(seq, text) : nil
         case "result":
             guard case let .number(ms)? = m["duration_ms"] else { return nil }
-            return TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.turnEnd, durationMS: Int64(ms))
+            var end = TranscriptEntry(seq: seq, kind: TranscriptEntry.Kind.turnEnd, durationMS: Int64(ms))
+            // What an interrupt ends with, as the desktop reads it: stopping a
+            // turn is not a failure of it, and its work log says you stopped it.
+            if m["subtype"]?.string == "error_during_execution" { end.stopped = true }
+            return end
         case "system":
             switch m["subtype"]?.string {
             case "compact_boundary":
@@ -378,6 +382,13 @@ public enum ChatTranscript {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return nil }
         return notice(seq, t.count > 400 ? String(t.prefix(400)) + "…" : t)
+    }
+
+    /// Whether a note or a tool's answer is Claude Code saying you stopped
+    /// it: a call you refused, or the turn interrupted. As `INTERRUPTED` in
+    /// the desktop's `transcript.ts`.
+    public static func interrupted(_ text: String) -> Bool {
+        text.hasPrefix("The user doesn't want to proceed with this tool use") || text.hasPrefix("[Request interrupted")
     }
 
     /// The reply as it is being written: the text of a `stream_event`'s

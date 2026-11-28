@@ -332,9 +332,9 @@ struct StartWorkView: View {
                 }
             }
             .sheet(item: $chosen) { c in
-                NewWorktreeView(server: c.server, project: c.project, origin: origin) { name in
+                NewWorktreeView(server: c.server, project: c.project, origin: origin) { on, name in
                     dismiss()
-                    model.pendingRoute = [.server(c.server.id), .session(serverID: c.server.id, name: name)]
+                    model.pendingRoute = [.server(on.id), .session(serverID: on.id, name: name)]
                 }
             }
             .navigationTitle("Start Where?")

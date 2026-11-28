@@ -57,18 +57,30 @@ struct ToolCard: View {
                 Image(glyph: label.icon)
                     .frame(width: 18)
                     .foregroundStyle(failedHard ? Color.bad : Color.dim)
-                Text(label.verb)
-                    .foregroundStyle(failedHard ? Color.bad : Color.ink)
-                    // One word, never shortened: the subject gives way instead.
-                    .fixedSize()
-                Text(label.subject)
-                    .foregroundStyle(Color.dim)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .layoutPriority(1)
-                    // Running, its label shines rather than a spinner turning
-                    // beside it, as T3 Code's does.
-                    .shine(call.result == nil && working)
+                if label.subject.isEmpty {
+                    // A label that is all verb, a command's description most
+                    // often, can be a long sentence: it gives way itself, so
+                    // the status at the end of the line stays on screen.
+                    Text(label.verb)
+                        .foregroundStyle(failedHard ? Color.bad : Color.ink)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(1)
+                        .shine(call.result == nil && working)
+                } else {
+                    Text(label.verb)
+                        .foregroundStyle(failedHard ? Color.bad : Color.ink)
+                        // One word, never shortened: the subject gives way instead.
+                        .fixedSize()
+                    Text(label.subject)
+                        .foregroundStyle(Color.dim)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(1)
+                        // Running, its label shines rather than a spinner turning
+                        // beside it, as T3 Code's does.
+                        .shine(call.result == nil && working)
+                }
                 Image(systemName: "chevron.right")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Color.dimmer)

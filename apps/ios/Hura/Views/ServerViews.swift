@@ -224,8 +224,10 @@ struct ServerView: View {
             NewProjectView(server: server)
         }
         .sheet(item: $creatingIn) { project in
-            NewWorktreeView(server: server, project: project) { name in
-                model.pendingRoute = [.server(server.id), .session(serverID: server.id, name: name)]
+            // To the server it was started on, which the draft may have moved
+            // to from this one.
+            NewWorktreeView(server: server, project: project) { on, name in
+                model.pendingRoute = [.server(on.id), .session(serverID: on.id, name: name)]
             }
         }
         .confirmationDialog("Forget \(forgetting?.name ?? "")?", isPresented: .constant(forgetting != nil),

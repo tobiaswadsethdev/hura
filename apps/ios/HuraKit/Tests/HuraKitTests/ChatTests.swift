@@ -21,6 +21,19 @@ struct ChatTranscriptTests {
         #expect(entries[2].blocks?.first?.text == "1 failing")
         #expect(entries[2].blocks?.first?.isError == true)
         #expect(entries[3].durationMS == 4200)
+        #expect(entries[3].stopped != true)
+    }
+
+    /// An interrupt ends a turn with an error that is not a failure: the turn
+    /// is marked stopped, and Claude Code's note saying so is known for one.
+    @Test func aTurnYouStoppedSaysSo() {
+        let end = json(#"{"seq":4,"at":0,"ev":{"kind":"sdk","msg":{"type":"result","subtype":"error_during_execution","duration_ms":97000}}}"#)
+        #expect(ChatTranscript.entry(end)?.stopped == true)
+        #expect(ChatTranscript.entry(end)?.durationMS == 97000)
+        #expect(ChatTranscript.interrupted("[Request interrupted by user]"))
+        #expect(ChatTranscript.interrupted("[Request interrupted by user for tool use]"))
+        #expect(ChatTranscript.interrupted("The user doesn't want to proceed with this tool use. The tool use was rejected"))
+        #expect(!ChatTranscript.interrupted("Exit code 1"))
     }
 
     @Test func aToolSearchResultNamesTheToolsItLoaded() {
