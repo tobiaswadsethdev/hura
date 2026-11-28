@@ -162,3 +162,18 @@ struct FetchedTests {
         #expect(again != url)
     }
 }
+
+struct SharedPreviewTests {
+    @Test func readsAShareAndMakesItsLink() throws {
+        let raw = #"{"reply":"shared","port":62278,"token":"40d9"}"#
+        let share = try JSONDecoder().decode(SharedPreview.self, from: Data(raw.utf8))
+        #expect(share == SharedPreview(port: 62278, token: "40d9"))
+        #expect(share.url(host: "box.lan")?.absoluteString == "https://box.lan:62278/?hura_preview=40d9")
+        #expect(share.url(host: "fd7a::1")?.absoluteString == "https://[fd7a::1]:62278/?hura_preview=40d9")
+    }
+
+    @Test func anOlderServerSaysItCannot() {
+        #expect(ServerError.failed(kind: "unsupported", message: "share-preview").isUnsupported)
+        #expect(!ServerError.failed(kind: "failed", message: "no").isUnsupported)
+    }
+}
