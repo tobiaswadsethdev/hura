@@ -158,6 +158,7 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
         Request::Ports { name } => with_session(&name, |s| ports(backends.for_session(s), s)),
         Request::StopForward { name, port } => with_session(&name, |s| {
             crate::forward::stop_now(&s.sandbox, port);
+            crate::share::stop(&s.sandbox, port);
             ports(backends.for_session(s), s)
         }),
         // The forward goes too: it would only ever answer with a refusal now.
@@ -165,7 +166,16 @@ pub fn dispatch(backends: &Backends, request: Request) -> Outcome {
             let backend = backends.for_session(s);
             ops::kill_port(backend, s, port).map_err(Failure::failed)?;
             crate::forward::stop_now(&s.sandbox, port);
+            crate::share::stop(&s.sandbox, port);
             ports(backend, s)
+        }),
+        // Started on the runtime this blocking call came from: a share is a
+        // listener that goes on serving after the answer.
+        Request::SharePreview { name, port, host } => with_session(&name, |s| {
+            tokio::runtime::Handle::current()
+                .block_on(crate::share::share(s, port, host))
+                .map(Reply::Shared)
+                .map_err(Failure::failed)
         }),
         Request::KillProcess { name, pid } => with_session(&name, |s| {
             let backend = backends.for_session(s);

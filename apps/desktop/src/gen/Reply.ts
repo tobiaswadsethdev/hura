@@ -17,6 +17,7 @@ import type { PushView } from "./PushView";
 import type { QueueView } from "./QueueView";
 import type { Session } from "./Session";
 import type { SettingsView } from "./SettingsView";
+import type { SharedPreview } from "./SharedPreview";
 import type { Status } from "./Status";
 import type { TailText } from "./TailText";
 import type { View } from "./View";
@@ -40,4 +41,4 @@ agent: boolean, } | { "reply": "chats", chats: Array<string>,
 /**
  * The conversation just opened, when that is what was asked for.
  */
-opened: string | null, } | { "reply": "ports" } & PortsView | { "reply": "files" } & Dir | { "reply": "found" } & FoundPaths | { "reply": "tail" } & TailText | { "reply": "file" } & FileText | { "reply": "download" } & Fetched | { "reply": "git", said: string, status: Status, } | { "reply": "git-diff" } & FileDiff | { "reply": "told", message: string, } | { "reply": "projects", projects: Array<Project>, } | { "reply": "repos" } & Listing | { "reply": "inspect" } & Picked | { "reply": "new-options" } & NewOptions | { "reply": "created", name: string, } | { "reply": "integrations" } & Integrations | { "reply": "settings" } & SettingsView | { "reply": "push" } & PushView | { "reply": "queue" } & QueueView;
+opened: string | null, } | { "reply": "ports" } & PortsView | { "reply": "shared" } & SharedPreview | { "reply": "files" } & Dir | { "reply": "found" } & FoundPaths | { "reply": "tail" } & TailText | { "reply": "file" } & FileText | { "reply": "download" } & Fetched | { "reply": "git", said: string, status: Status, } | { "reply": "git-diff" } & FileDiff | { "reply": "told", message: string, } | { "reply": "projects", projects: Array<Project>, } | { "reply": "repos" } & Listing | { "reply": "inspect" } & Picked | { "reply": "new-options" } & NewOptions | { "reply": "created", name: string, } | { "reply": "integrations" } & Integrations | { "reply": "settings" } & SettingsView | { "reply": "push" } & PushView | { "reply": "queue" } & QueueView;

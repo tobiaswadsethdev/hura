@@ -24,6 +24,7 @@ mod relay;
 mod rpc;
 mod schedule;
 mod serve;
+mod share;
 mod stream;
 mod tls;
 mod when;
@@ -1730,6 +1731,8 @@ fn serve(opts: Serve) -> Fallible {
 
     let addr: SocketAddr = format!("{}:{}", opts.bind, opts.port).parse()?;
     println!("{}", serve::describe(addr));
+    // Shared previews listen where this does, with the same certificate.
+    share::listen_on(addr.ip(), &identity.cert_pem, &identity.key_pem);
     println!("certificate {}", identity.fingerprint);
 
     // Once, at startup rather than per request: repairing a record left mid
